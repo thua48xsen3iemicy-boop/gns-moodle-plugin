@@ -14,7 +14,8 @@ WorkingDirectory=/srv/gns3-ro/slot
 EnvironmentFile=/etc/lab-slot/slot.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/srv/gns3-ro/slot/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8080 --workers 1
+ExecStartPre=/srv/gns3-ro/slot/venv/bin/python /srv/gns3-ro/slot/release.py check
+ExecStart=/srv/gns3-ro/slot/venv/bin/python /srv/gns3-ro/slot/run.py
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
