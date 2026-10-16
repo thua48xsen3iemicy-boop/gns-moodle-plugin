@@ -1,0 +1,871 @@
+<title>Вьюер топологии GNS3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen tool — toolbar on top, pannable lab canvas, read-only info panel on the right (bottom sheet on phones) */
+:root{
+  --bg:#E8ECEF; --canvas:#F4F6F8; --panel:#FFFFFF; --fg:#16212B; --muted:#57656F;
+  --line:#CAD2D9; --grid:#C9D2DA; --wire:#566878; --accent:#1F6FC5; --accent-ink:#FFFFFF;
+  --ico:#2C4A63; --ico-glyph:#F4F6F8; --chip:#E4EAEF;
+  --ok:#1E8E4F; --warn:#AD7F08; --bad:#C8423A;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1418; --canvas:#121A20; --panel:#172129; --fg:#E2E8ED; --muted:#94A3AF;
+    --line:#2A3742; --grid:#24313B; --wire:#8094A4; --accent:#5AA8F2; --accent-ink:#0E1418;
+    --ico:#8AAFCC; --ico-glyph:#121A20; --chip:#21303A;
+    --ok:#3CC47A; --warn:#E0B13A; --bad:#EE6B62; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1418; --canvas:#121A20; --panel:#172129; --fg:#E2E8ED; --muted:#94A3AF;
+  --line:#2A3742; --grid:#24313B; --wire:#8094A4; --accent:#5AA8F2; --accent-ink:#0E1418;
+  --ico:#8AAFCC; --ico-glyph:#121A20; --chip:#21303A;
+  --ok:#3CC47A; --warn:#E0B13A; --bad:#EE6B62; color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none !important}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden}
+.app{height:100%;display:flex;flex-direction:column}
+
+/* toolbar */
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-bottom:1px solid var(--line)}
+.ttl{min-width:0}
+.ttl h1{margin:0;font:600 19px/1.2 var(--display);letter-spacing:.005em;text-wrap:balance}
+.meta{margin:2px 0 0;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.src{font:500 11px var(--mono);padding:1px 6px;border-radius:4px;background:var(--chip);color:var(--muted)}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ro{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border:1px dashed var(--line);padding:5px 8px;border-radius:5px}
+.btn{font:500 13px/1 var(--body);height:32px;padding:0 12px;border:1px solid var(--line);background:var(--canvas);color:var(--fg);border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--wire)}
+.btn:focus-visible,.rowbtn:focus-visible,.ifs tr:focus-visible,.endcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.zoomgrp{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:6px;background:var(--canvas)}
+.zoomgrp .btn{border:0;background:transparent;width:32px;padding:0;justify-content:center;font-size:17px}
+.zoomgrp output{font:500 12px var(--mono);min-width:44px;text-align:center;color:var(--muted);font-variant-numeric:tabular-nums}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* stage */
+.stage{flex:1;min-height:0;display:flex;position:relative}
+.wrap{position:relative;flex:1;min-width:0;background:var(--canvas)}
+#svg{display:block;width:100%;height:100%;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+#svg.dragging{cursor:grabbing}
+#svg:focus{outline:none}
+.dots{fill:var(--grid)}
+.hint{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:12px;margin:0;max-width:calc(100% - 24px);
+  font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--canvas) 86%,transparent);padding:4px 8px;border-radius:5px;pointer-events:none}
+.toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);max-width:min(460px,calc(100% - 32px));
+  background:var(--panel);border:1px solid var(--bad);color:var(--fg);padding:10px 14px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgb(0 0 0 / .12)}
+.drop{position:absolute;inset:10px;border:2px dashed var(--accent);border-radius:12px;display:grid;place-items:center;
+  font:600 16px var(--display);color:var(--accent);background:color-mix(in srgb,var(--canvas) 80%,transparent);pointer-events:none}
+
+/* scene */
+.halo{fill:transparent;stroke:transparent;stroke-width:2;pointer-events:all}
+.node{cursor:pointer}
+.node:hover .halo{stroke:var(--line)}
+.node.sel .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 10%,transparent)}
+.node:focus{outline:none}
+.node:focus-visible .halo{stroke:var(--accent);stroke-dasharray:4 3}
+.if{fill:var(--ico)}
+.ig{fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.igf{fill:var(--ico-glyph)}
+.nname{font:600 13px var(--display);fill:var(--fg);paint-order:stroke;stroke:var(--canvas);stroke-width:4px;stroke-linejoin:round}
+.led{stroke:var(--canvas);stroke-width:2.5}
+.led-started{fill:var(--ok)} .led-stopped{fill:var(--bad)} .led-suspended{fill:var(--warn)}
+.link{cursor:pointer}
+.wire{stroke:var(--wire);stroke-width:2;fill:none;stroke-linecap:round}
+.hit{stroke:transparent;stroke-width:16;fill:none;pointer-events:stroke}
+.link:hover .wire{stroke:var(--fg)}
+.link.susp .wire{stroke-dasharray:6 5;opacity:.65}
+.link.sel .wire{stroke:var(--accent);stroke-width:3.2}
+.plabel rect{fill:var(--canvas);stroke:var(--line)}
+.plabel text{font:500 10.5px var(--mono);fill:var(--muted)}
+.plabel.on text{fill:var(--fg)}
+.plabel.on rect{stroke:var(--accent)}
+.fpill rect{fill:var(--chip);stroke:var(--warn)}
+.fpill text{font:500 10px var(--mono);fill:var(--fg)}
+.gpill rect{fill:var(--panel);stroke:var(--accent)}
+.gpill text{font:500 10.5px var(--mono);fill:var(--accent)}
+.gs{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.dimmable{transition:opacity .15s}
+.has-sel .dimmable:not(.on){opacity:.22}
+
+/* panel */
+.panel{width:344px;flex:none;background:var(--panel);border-left:1px solid var(--line);overflow:auto;
+  padding-block:18px;padding-left:18px;padding-right:max(18px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+.handle{display:none}
+.ph{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.eyebrow{margin:0 0 3px;font:500 11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.panel h2{margin:0;font:600 24px/1.15 var(--display);text-wrap:balance;word-break:break-word}
+.panel h3{margin:4px 0 0;font:600 14px var(--display);display:flex;gap:8px;align-items:center}
+.count{font:500 11px var(--mono);background:var(--chip);color:var(--muted);padding:1px 6px;border-radius:4px}
+.x{border:0;background:var(--chip);color:var(--fg);width:30px;height:30px;border-radius:6px;font-size:18px;line-height:1;cursor:pointer;flex:none}
+.st{display:inline-flex;align-items:center;gap:7px;font-size:13px;margin:0}
+.st::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.st-started::before{background:var(--ok)} .st-stopped::before{background:var(--bad)} .st-suspended::before{background:var(--warn)}
+.st-none{color:var(--muted)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;margin:0;font-size:13.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.mono{font-family:var(--mono);font-size:12.5px}
+.tblwrap{overflow-x:auto}
+.ifs{width:100%;border-collapse:collapse;font-size:13px}
+.ifs th{text-align:left;font:500 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line)}
+.ifs td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.ifs tr[data-goto-link]{cursor:pointer}
+.ifs tr[data-goto-link]:hover td{background:var(--chip)}
+.peer{color:var(--muted)}
+.ends{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.endcard{display:flex;flex-direction:column;gap:2px;text-align:left;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--canvas);color:var(--fg);cursor:pointer;font:inherit;min-width:0}
+.endcard:hover{border-color:var(--wire)}
+.endcard b{font:600 15px var(--display);overflow-wrap:anywhere}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);height:38px;justify-content:center;width:100%}
+.note{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--chip);padding:10px 12px;border-radius:7px}
+.note code{font-family:var(--mono);font-size:11.5px;color:var(--fg);overflow-wrap:anywhere}
+.idline{margin:0;font:400 11px var(--mono);color:var(--muted);overflow-wrap:anywhere}
+.lead{margin:0;font-size:13.5px;line-height:1.55;color:var(--muted)}
+.list{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.rowbtn{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center;width:100%;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:var(--fg);font:inherit;font-size:13.5px;text-align:left;cursor:pointer}
+.rowbtn:hover{background:var(--chip)}
+.rowbtn small{color:var(--muted);font-size:12px}
+.sdot{width:9px;height:9px;border-radius:50%;background:var(--line)}
+.sdot.started,.sdot.running{background:var(--ok)} .sdot.stopped{background:var(--bad)} .sdot.suspended,.sdot.paused{background:var(--warn)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.wirekey{display:inline-block;width:22px;border-top:2px solid var(--wire)}
+.wirekey.d{border-top-style:dashed}
+
+@media (max-width:760px){
+  .panel{position:absolute;left:0;right:0;bottom:0;width:auto;max-height:58%;border-left:0;border-top:1px solid var(--line);
+    border-radius:14px 14px 0 0;box-shadow:0 -10px 28px rgb(0 0 0 / .14);padding-top:0;
+    padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+    padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));
+    transform:translateY(calc(100% - 50px));transition:transform .22s ease}
+  .panel.open{transform:none}
+  .handle{display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:1;margin:0 -2px;min-height:50px;
+    border:0;background:var(--panel);color:var(--fg);font:600 14px var(--display);cursor:pointer;padding:0 2px;touch-action:none}
+  .handle::before{content:"";position:absolute;left:50%;top:6px;width:36px;height:4px;margin-left:-18px;border-radius:2px;background:var(--line)}
+  .panel.dragging{transition:none}
+  .handle::after{content:"";width:9px;height:9px;border-right:2px solid var(--muted);border-top:2px solid var(--muted);transform:rotate(-45deg);margin-right:6px;transition:transform .2s}
+  .panel.open .handle::after{transform:rotate(135deg)}
+  .hint{bottom:62px}
+  .ends{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion: reduce){
+  .panel,.dimmable,.handle::after{transition:none}
+}
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="ttl">
+      <h1 id="projName">Топология</h1>
+      <p class="meta" id="meta"></p>
+    </div>
+    <div class="tools">
+      <span class="ro" title="Вьюер ничего не меняет в лабе">Только просмотр</span>
+      <button class="btn" id="btnFit" type="button" title="Вписать всю схему (клавиша 0)">Вписать</button>
+      <div class="zoomgrp" role="group" aria-label="Масштаб">
+        <button class="btn" id="btnOut" type="button" aria-label="Уменьшить">−</button>
+        <output id="zoomPct" aria-live="off">100%</output>
+        <button class="btn" id="btnIn" type="button" aria-label="Увеличить">+</button>
+      </div>
+      <button class="btn" id="btnStatus" type="button" aria-pressed="false" title="Показать то, что шлюз получает из запущенной лабы: статусы нод и гостей Proxmox (здесь — демо-данные)">Живые данные</button>
+      <label class="btn" for="fileInput">Открыть .gns3</label>
+      <input class="vh" type="file" id="fileInput" accept=".gns3,.json,application/json">
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="wrap" id="wrap">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="Схема топологии">
+        <defs>
+          <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle class="dots" cx="1.2" cy="1.2" r="1.2"/>
+          </pattern>
+          <symbol id="ico-router" viewBox="0 0 48 48">
+            <circle class="if" cx="24" cy="24" r="20"/>
+            <path class="ig" d="M14 14l7 7M21 15.5V21h-5.5M34 34l-7-7M27 32.5V27h5.5M27 21l7-7M28.5 14H34v5.5M21 27l-7 7M14 28.5V34h5.5"/>
+          </symbol>
+          <symbol id="ico-switch" viewBox="0 0 48 48">
+            <rect class="if" x="3" y="12" width="42" height="24" rx="5"/>
+            <path class="ig" d="M10 20h22M28 16.5l4 3.5-4 3.5M38 28H16M20 24.5L16 28l4 3.5"/>
+          </symbol>
+          <symbol id="ico-pc" viewBox="0 0 48 48">
+            <rect class="if" x="6" y="6" width="36" height="26" rx="3"/>
+            <rect class="igf" x="10" y="10" width="28" height="18" rx="1.5" opacity=".35"/>
+            <path class="if" d="M20 32h8v6h-8z"/>
+            <rect class="if" x="13" y="38" width="22" height="4" rx="2"/>
+          </symbol>
+          <symbol id="ico-server" viewBox="0 0 48 48">
+            <rect class="if" x="11" y="4" width="26" height="40" rx="3.5"/>
+            <path class="ig" d="M16 13h16M16 19h16M16 25h16"/>
+            <circle class="igf" cx="31" cy="36" r="2.2"/>
+          </symbol>
+          <symbol id="ico-cloud" viewBox="0 0 48 48">
+            <path class="if" d="M13 37h22a8.5 8.5 0 0 0 1.2-16.9A11.5 11.5 0 0 0 14 17.6 9.7 9.7 0 0 0 13 37z"/>
+          </symbol>
+          <symbol id="ico-firewall" viewBox="0 0 48 48">
+            <rect class="if" x="5" y="9" width="38" height="30" rx="2.5"/>
+            <path class="ig" d="M5 19h38M5 29h38M18 9v10M30 9v10M12 19v10M24 19v10M36 19v10M18 29v10M30 29v10"/>
+          </symbol>
+          <symbol id="ico-hypervisor" viewBox="0 0 48 48">
+            <rect class="if" x="4" y="7" width="40" height="34" rx="4"/>
+            <rect class="igf" x="9" y="12" width="13" height="10" rx="1.5"/>
+            <rect class="igf" x="26" y="12" width="13" height="10" rx="1.5"/>
+            <rect class="igf" x="9" y="26" width="13" height="10" rx="1.5"/>
+            <rect x="26" y="26" width="13" height="10" rx="1.5" class="ig"/>
+          </symbol>
+        </defs>
+        <rect id="bgGrid" width="100%" height="100%" fill="url(#dots)"/>
+        <g id="vp">
+          <g id="lyrDraw"></g>
+          <g id="lyrLinks"></g>
+          <g id="lyrNodes"></g>
+          <g id="lyrLabels"></g>
+        </g>
+      </svg>
+      <p class="hint" id="hint">Тяните — сдвиг · щипок или колесо — масштаб · двойной тап — ближе · тап по объекту — сведения</p>
+      <div class="toast" id="toast" role="status" hidden></div>
+      <div class="drop" id="drop" hidden>Отпустите файл .gns3</div>
+    </div>
+
+    <aside class="panel" id="panel" aria-label="Сведения">
+      <button class="handle" id="handle" type="button" aria-expanded="false" aria-controls="panelBody"><span id="handleText">Состав лабы</span></button>
+      <div id="panelBody" style="display:flex;flex-direction:column;gap:14px"></div>
+    </aside>
+  </main>
+</div>
+
+<script>
+(function(){
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+
+/* ---------- пример .gns3 (как его сохраняет GNS3) ---------- */
+const N = (id, name, type, symbol, x, y, props, ct, port) => ({
+  node_id: id, name, node_type: type, symbol, x, y, z: 1, width: 66, height: 45,
+  console_type: ct, console: port, compute_id: "local",
+  label: { text: name, x: null, y: null, rotation: 0 }, properties: props
+});
+const E = (node_id, adapter_number, port_number, text) => ({ node_id, adapter_number, port_number, label: { text } });
+const L = (id, a, b, extra) => Object.assign({ link_id: id, nodes: [a, b], filters: {}, suspend: false, link_type: "ethernet" }, extra || {});
+const RECT = (id, x, y, w, h, c) => ({ drawing_id: id, x, y, z: 0, rotation: 0,
+  svg: `<svg height="${h}" width="${w}"><rect fill="${c}" fill-opacity="0.07" height="${h}" width="${w}" rx="14" stroke="${c}" stroke-opacity="0.55" stroke-width="1.5" stroke-dasharray="6,4"/></svg>` });
+const TEXT = (id, x, y, c, t) => ({ drawing_id: id, x, y, z: 2, rotation: 0,
+  svg: `<svg height="20" width="260"><text fill="${c}" font-family="IBM Plex Sans Condensed" font-size="13" font-weight="bold">${t}</text></svg>` });
+
+const VIOS = "vios-adventerprisek9-m.spa.159-3.m8.qcow2";
+const id = n => "6b1f3c2e-4a7d-4e5b-9c10-" + String(n).padStart(12, "0");
+const SAMPLE = {
+  name: "Лаба 4 · OSPF multi-area", project_id: "5d1c0b3e-8f2a-4c71-9a55-2f6b8e0d4a11",
+  revision: 9, type: "topology", version: "3.0.6", scene_width: 2000, scene_height: 1000,
+  topology: {
+    computes: [],
+    nodes: [
+      N(id(1), "NAT1", "nat", ":/symbols/classic/nat.svg", -93, -380, {}, "none", null),
+      N(id(2), "R1", "qemu", ":/symbols/classic/router.svg", -93, -250, { hda_disk_image: VIOS, ram: 512, cpus: 1, adapters: 4, adapter_type: "e1000" }, "telnet", 5000),
+      N(id(3), "R2", "qemu", ":/symbols/classic/router.svg", -303, -110, { hda_disk_image: VIOS, ram: 512, cpus: 1, adapters: 4, adapter_type: "e1000" }, "telnet", 5002),
+      N(id(4), "R3", "qemu", ":/symbols/classic/router.svg", 117, -110, { hda_disk_image: VIOS, ram: 512, cpus: 1, adapters: 4, adapter_type: "e1000" }, "telnet", 5004),
+      N(id(5), "SW1", "iou", ":/symbols/classic/multilayer_switch.svg", -303, 60, { path: "i86bi_LinuxL2-AdvEnterpriseK9-M_152_May_2018.bin", ram: 256, ethernet_adapters: 1, serial_adapters: 0 }, "telnet", 5006),
+      N(id(6), "SW2", "ethernet_switch", ":/symbols/classic/ethernet_switch.svg", 117, 60, { ports_mapping: [
+        { name: "Ethernet0", port_number: 0, type: "dot1q", vlan: 1 },
+        { name: "Ethernet1", port_number: 1, type: "access", vlan: 20 },
+        { name: "Ethernet2", port_number: 2, type: "access", vlan: 20 },
+        { name: "Ethernet3", port_number: 3, type: "dot1q", vlan: 1 } ] }, "none", null),
+      N(id(7), "PC1", "vpcs", ":/symbols/classic/vpcs_guest.svg", -413, 210, {}, "telnet", 5008),
+      N(id(8), "PC2", "vpcs", ":/symbols/classic/vpcs_guest.svg", -193, 210, {}, "telnet", 5009),
+      N(id(9), "SRV1", "qemu", ":/symbols/classic/qemu_guest.svg", 37, 210, { hda_disk_image: "debian12.qcow2", ram: 2048, cpus: 2, adapters: 2, adapter_type: "virtio-net-pci" }, "telnet", 5010),
+      N(id(10), "PC3", "vpcs", ":/symbols/classic/vpcs_guest.svg", 237, 210, {}, "telnet", 5012),
+      N(id(11), "PVE1", "qemu", ":/symbols/classic/server.svg", 317, 60, { hda_disk_image: "pve-9.1-base.qcow2", ram: 8192, cpus: 4, adapters: 2, adapter_type: "virtio-net-pci", options: "-cpu host" }, "vnc", 5914)
+    ],
+    links: [
+      L("l-01", E(id(2), 0, 0, "Gi0/0"), E(id(1), 0, 0, "nat0")),
+      L("l-02", E(id(2), 1, 0, "Gi0/1"), E(id(3), 0, 0, "Gi0/0")),
+      L("l-03", E(id(2), 2, 0, "Gi0/2"), E(id(4), 0, 0, "Gi0/0")),
+      L("l-04", E(id(3), 1, 0, "Gi0/1"), E(id(4), 1, 0, "Gi0/1"), { filters: { delay: [30, 5] } }),
+      L("l-05", E(id(3), 2, 0, "Gi0/2"), E(id(5), 0, 0, "e0/0")),
+      L("l-06", E(id(5), 0, 1, "e0/1"), E(id(7), 0, 0, "e0")),
+      L("l-07", E(id(5), 0, 2, "e0/2"), E(id(8), 0, 0, "e0")),
+      L("l-08", E(id(4), 2, 0, "Gi0/2"), E(id(6), 0, 0, "Ethernet0")),
+      L("l-09", E(id(6), 0, 1, "Ethernet1"), E(id(9), 0, 0, "Ethernet0")),
+      L("l-10", E(id(6), 0, 2, "Ethernet2"), E(id(10), 0, 0, "e0"), { suspend: true }),
+      L("l-11", E(id(6), 0, 3, "Ethernet3"), E(id(11), 0, 0, "Ethernet0"))
+    ],
+    drawings: [
+      RECT("d-1", -380, -300, 640, 285, "#3B7DD8"), TEXT("d-2", -366, -292, "#3B7DD8", "Area 0 · backbone"),
+      RECT("d-3", -460, 30, 400, 270, "#2E9A62"), TEXT("d-4", -446, 38, "#2E9A62", "Area 1 · VLAN 10"),
+      RECT("d-5", -20, 30, 480, 270, "#C08A1E"), TEXT("d-6", -6, 38, "#C08A1E", "Area 2 · DMZ, VLAN 20")
+    ]
+  }
+};
+const SAMPLE_STATUS = { [id(1)]: "started", [id(2)]: "started", [id(3)]: "started", [id(4)]: "started", [id(5)]: "started",
+  [id(6)]: "started", [id(7)]: "started", [id(8)]: "stopped", [id(9)]: "suspended", [id(10)]: "started", [id(11)]: "started" };
+/* что шлюз получил бы от гостевого агента PVE1: guest-exec → pvesh get /cluster/resources --type vm */
+const GiB = 1024 ** 3, MiB = 1024 ** 2;
+const SAMPLE_GUESTS = { [id(11)]: {
+  source: "pvesh get /cluster/resources --type vm",
+  note: "Шлюз опрашивает его через guest-exec, сеть до лабы не нужна.",
+  items: [
+    { vmid: 100, name: "web01", type: "qemu", status: "running", mem: 1.1 * GiB, maxmem: 2 * GiB },
+    { vmid: 101, name: "db01", type: "qemu", status: "running", mem: 3.4 * GiB, maxmem: 4 * GiB },
+    { vmid: 102, name: "win-client", type: "qemu", status: "stopped", mem: 0, maxmem: 4 * GiB },
+    { vmid: 200, name: "dns", type: "lxc", status: "running", mem: 120 * MiB, maxmem: 512 * MiB },
+    { vmid: 201, name: "proxy", type: "lxc", status: "paused", mem: 210 * MiB, maxmem: 1 * GiB }
+  ] } };
+
+/* ---------- справочники ---------- */
+const TYPE_NAME = { qemu: "QEMU VM", iou: "IOU", dynamips: "Dynamips", vpcs: "VPCS", docker: "Docker",
+  ethernet_switch: "Встроенный свитч", ethernet_hub: "Хаб", cloud: "Cloud", nat: "NAT",
+  virtualbox: "VirtualBox", vmware: "VMware", frame_relay_switch: "Frame Relay", atm_switch: "ATM-свитч", traceng: "TraceNG" };
+const GSTATUS = { running: "работает", stopped: "остановлена", paused: "пауза" };
+const fmtMem = b => !b ? "—" : b >= GiB ? (b / GiB).toFixed(1).replace(".", ",") + " ГБ" : Math.round(b / MiB) + " МБ";
+const CAT_NAME = { hypervisor: ["Гипервизор", "Гипервизоры"], router: ["Маршрутизатор", "Маршрутизаторы"], switch: ["Коммутатор", "Коммутаторы"], pc: ["Хост", "Хосты"],
+  server: ["Сервер / VM", "Серверы и VM"], cloud: ["Внешняя сеть", "Внешние сети"], firewall: ["Межсетевой экран", "Межсетевые экраны"] };
+const STATUS_NAME = { started: "Запущено", stopped: "Остановлено", suspended: "Приостановлено" };
+const CONSOLE_NAME = { telnet: "Терминал (telnet → xterm.js)", vnc: "Экран (VNC → noVNC)", spice: "Экран (SPICE)", http: "Веб-интерфейс", https: "Веб-интерфейс", none: "нет" };
+
+const typeName = t => TYPE_NAME[t] || t || "неизвестно";
+const plural = (n, f) => { const a = n % 10, b = n % 100; return f[(a === 1 && b !== 11) ? 0 : (a >= 2 && a <= 4 && (b < 10 || b >= 20)) ? 1 : 2]; };
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sel$ = s => document.getElementById(s);
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function cat(n){
+  const s = (n.symbol || "").toLowerCase(), t = n.type;
+  const img = String((n.props && (n.props.hda_disk_image || n.props.path || n.props.image)) || "");
+  if (/proxmox|\bpve/i.test(s + " " + img)) return "hypervisor";
+  if (t === "cloud" || t === "nat" || /cloud|nat\b|nat\./.test(s)) return "cloud";
+  if (/firewall|asa/.test(s)) return "firewall";
+  if (t === "ethernet_switch" || t === "ethernet_hub" || t === "frame_relay_switch" || t === "atm_switch" || /switch|hub/.test(s)) return "switch";
+  if (/router/.test(s)) return "router";
+  if (t === "vpcs" || /vpcs|computer|\bpc|laptop|workstation/.test(s)) return "pc";
+  return "server";
+}
+function portName(node, adapter, port){
+  const pm = node.props && node.props.ports_mapping;
+  if (Array.isArray(pm)) { const p = pm.find(x => x.port_number === port); if (p && p.name) return p.name; }
+  if (node.type === "ethernet_switch" || node.type === "ethernet_hub") return "Ethernet" + port;
+  return adapter + "/" + port;
+}
+function fmtFilters(f){
+  const out = [];
+  if (!f) return out;
+  if (f.delay && f.delay.length) out.push({ k: "Задержка", v: f.delay[0] + " мс" + (f.delay[1] ? " ± " + f.delay[1] : ""), s: f.delay[0] + (f.delay[1] ? "±" + f.delay[1] : "") + " мс" });
+  if (f.packet_loss && f.packet_loss.length) out.push({ k: "Потери", v: f.packet_loss[0] + " %", s: "loss " + f.packet_loss[0] + "%" });
+  if (f.corrupt && f.corrupt.length) out.push({ k: "Порча пакетов", v: f.corrupt[0] + " %", s: "corrupt " + f.corrupt[0] + "%" });
+  if (f.frequency_drop && f.frequency_drop.length) out.push({ k: "Дроп", v: "каждый " + f.frequency_drop[0] + "-й пакет", s: "drop 1/" + f.frequency_drop[0] });
+  if (f.bpf && f.bpf.length) out.push({ k: "BPF-фильтр", v: String(f.bpf[0]), s: "bpf" });
+  return out;
+}
+const natSort = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
+
+/* ---------- состояние ---------- */
+const svg = sel$("svg"), vp = sel$("vp"), wrap = sel$("wrap"), panel = sel$("panel"), body = sel$("panelBody");
+const lyr = { draw: sel$("lyrDraw"), links: sel$("lyrLinks"), nodes: sel$("lyrNodes"), labels: sel$("lyrLabels") };
+const view = { k: 1, tx: 0, ty: 0 };
+const st = { model: null, sel: null, statusOn: false, demoStatus: null, sourceLabel: "пример" };
+const mobile = () => window.matchMedia("(max-width: 760px)").matches;
+
+/* ---------- модель ---------- */
+function buildModel(doc){
+  const t = doc.topology || {};
+  const nodes = new Map();
+  for (const n of (t.nodes || [])) {
+    if (!n || !n.node_id) continue;
+    const w = +n.width || 60, h = +n.height || 45, x = +n.x || 0, y = +n.y || 0;
+    nodes.set(n.node_id, { id: n.node_id, name: n.name || "без имени", type: n.node_type || "", symbol: n.symbol || "",
+      x, y, w, h, cx: x + w / 2, cy: y + h / 2, props: n.properties || {},
+      consoleType: n.console_type || (n.properties && n.properties.console_type) || null,
+      console: n.console != null ? n.console : null, status: n.status || null });
+  }
+  const links = [];
+  for (const l of (t.links || [])) {
+    const ends = (l.nodes || []).slice(0, 2).map(e => ({ nodeId: e.node_id, adapter: e.adapter_number, port: e.port_number, text: e.label && e.label.text ? String(e.label.text) : null }));
+    if (ends.length < 2 || !nodes.has(ends[0].nodeId) || !nodes.has(ends[1].nodeId)) continue;
+    ends.forEach(e => { if (!e.text) e.text = portName(nodes.get(e.nodeId), e.adapter, e.port); });
+    links.push({ id: l.link_id || ("link-" + links.length), a: ends[0], b: ends[1], filters: l.filters || {}, suspend: !!l.suspend, type: l.link_type || "ethernet" });
+  }
+  return { name: doc.name || "Проект без имени", version: doc.version || "", nodes, links, drawings: Array.isArray(t.drawings) ? t.drawings : [] };
+}
+const nodeStatus = n => st.statusOn ? (n.status || (st.demoStatus && st.demoStatus[n.id]) || null) : null;
+const guestsOf = n => (st.statusOn && st.guests && st.guests[n.id]) || null;
+
+/* ---------- рисунки из .gns3 (санитайзинг: только безопасная SVG-геометрия и текст) ---------- */
+const OK_TAGS = new Set(["svg", "g", "rect", "ellipse", "circle", "line", "polyline", "polygon", "path", "text", "tspan"]);
+function sanitize(node){
+  for (const ch of Array.from(node.children)) {
+    if (!OK_TAGS.has(ch.localName)) { ch.remove(); continue; }
+    for (const a of Array.from(ch.attributes)) {
+      const n = a.name.toLowerCase(), v = a.value;
+      if (n.startsWith("on") || n === "href" || n.endsWith(":href") || /javascript:/i.test(v) || (n === "style" && /url\s*\(/i.test(v))) ch.removeAttribute(a.name);
+    }
+    if (ch.localName === "text" && !ch.hasAttribute("y")) ch.setAttribute("y", (parseFloat(ch.getAttribute("font-size")) || 12) * 0.95);
+    sanitize(ch);
+  }
+}
+function drawingNode(d){
+  let s = String(d.svg || "");
+  if (!/^\s*<svg[\s>]/i.test(s)) return null;
+  if (!/xmlns=/.test(s)) s = s.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  const doc = new DOMParser().parseFromString(s, "image/svg+xml");
+  const root = doc.documentElement;
+  if (!root || root.localName !== "svg" || doc.getElementsByTagName("parsererror").length) return null;
+  const imp = document.importNode(root, true);
+  for (const a of Array.from(imp.attributes)) if (a.name.toLowerCase().startsWith("on")) imp.removeAttribute(a.name);
+  sanitize(imp);
+  imp.setAttribute("overflow", "visible");
+  imp.setAttribute("pointer-events", "none");
+  return { node: imp, w: parseFloat(root.getAttribute("width")) || 0, h: parseFloat(root.getAttribute("height")) || 0 };
+}
+
+/* ---------- отрисовка сцены ---------- */
+let bounds = null;
+function renderScene(){
+  const m = st.model;
+  for (const k in lyr) lyr[k].textContent = "";
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  const grow = (x0, y0, x1, y1) => { bx0 = Math.min(bx0, x0); by0 = Math.min(by0, y0); bx1 = Math.max(bx1, x1); by1 = Math.max(by1, y1); };
+
+  [...m.drawings].sort((a, b) => (a.z || 0) - (b.z || 0)).forEach(d => {
+    const r = drawingNode(d); if (!r) return;
+    const x = +d.x || 0, y = +d.y || 0;
+    const g = el("g", { transform: `translate(${x} ${y})` + (d.rotation ? ` rotate(${+d.rotation})` : "") }, lyr.draw);
+    g.appendChild(r.node);
+    if (r.w && r.h) grow(x, y, x + r.w, y + r.h);
+  });
+
+  const groups = {};
+  m.links.forEach(l => { const key = [l.a.nodeId, l.b.nodeId].sort().join("|"); (groups[key] = groups[key] || []).push(l); });
+  Object.values(groups).forEach(list => list.forEach((l, i) => {
+    const A = m.nodes.get(l.a.nodeId), B = m.nodes.get(l.b.nodeId);
+    let dx = B.cx - A.cx, dy = B.cy - A.cy; const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+    const off = (i - (list.length - 1) / 2) * 16, nx = -dy * off, ny = dx * off;
+    const ax = A.cx + nx, ay = A.cy + ny, bx = B.cx + nx, by = B.cy + ny;
+    const g = el("g", { class: "link dimmable" + (l.suspend ? " susp" : ""), "data-link": l.id }, lyr.links);
+    el("line", { class: "hit", x1: ax, y1: ay, x2: bx, y2: by }, g);
+    el("line", { class: "wire", x1: ax, y1: ay, x2: bx, y2: by }, g);
+    const fl = fmtFilters(l.filters);
+    if (fl.length) pill(lyr.labels, (ax + bx) / 2, (ay + by) / 2, fl.map(f => f.s).join(" · "), "fpill dimmable", l.id);
+    const d = Math.min(46, len * 0.32);
+    pill(lyr.labels, ax + dx * d, ay + dy * d, l.a.text, "plabel dimmable", l.id);
+    pill(lyr.labels, bx - dx * d, by - dy * d, l.b.text, "plabel dimmable", l.id);
+  }));
+
+  m.nodes.forEach(n => {
+    const status = nodeStatus(n);
+    const g = el("g", { class: "node dimmable", "data-node": n.id, tabindex: "0", role: "button",
+      "aria-label": `${n.name}, ${typeName(n.type)}${status ? ", " + STATUS_NAME[status] : ""}` }, lyr.nodes);
+    el("rect", { class: "halo", x: n.cx - 31, y: n.cy - 31, width: 62, height: 62, rx: 12 }, g);
+    el("use", { href: "#ico-" + cat(n), x: n.cx - 22, y: n.cy - 22, width: 44, height: 44 }, g);
+    const t = el("text", { class: "nname", x: n.cx, y: n.cy + 42, "text-anchor": "middle" }, g);
+    t.textContent = n.name;
+    if (status) el("circle", { class: "led led-" + status, cx: n.cx + 21, cy: n.cy - 20, r: 5.5 }, g);
+    const gs = guestsOf(n);
+    if (gs) {
+      const vm = gs.items.filter(x => x.type === "qemu").length, ct = gs.items.filter(x => x.type === "lxc").length;
+      pill(g, n.cx, n.cy + 61, `${vm} VM · ${ct} CT`, "gpill", null);
+    }
+    grow(n.cx - 40, n.cy - 36, n.cx + 40, n.cy + (gs ? 72 : 50));
+  });
+  bounds = isFinite(bx0) ? { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 } : { x: -200, y: -150, w: 400, h: 300 };
+  applySel();
+}
+function pill(parent, x, y, text, cls, linkId){
+  const g = el("g", { class: cls, "data-link": linkId }, parent);
+  const r = el("rect", { rx: 4 }, g);
+  const t = el("text", { x, y, "text-anchor": "middle", "dominant-baseline": "central" }, g);
+  t.textContent = text;
+  let w = 0, h = 14;
+  try { const b = t.getBBox(); w = b.width; h = b.height; } catch (e) { w = text.length * 6.4; }
+  r.setAttribute("x", x - w / 2 - 5); r.setAttribute("y", y - h / 2 - 2);
+  r.setAttribute("width", w + 10); r.setAttribute("height", h + 4);
+}
+
+/* ---------- вид: сдвиг и масштаб ---------- */
+const KMIN = 0.15, KMAX = 4;
+function applyView(){
+  vp.setAttribute("transform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
+  sel$("dots").setAttribute("patternTransform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
+  sel$("zoomPct").textContent = Math.round(view.k * 100) + "%";
+}
+function zoomAt(px, py, f){
+  stopInertia();
+  const k = Math.min(KMAX, Math.max(KMIN, view.k * f));
+  const sx = (px - view.tx) / view.k, sy = (py - view.ty) / view.k;
+  view.k = k; view.tx = px - k * sx; view.ty = py - k * sy;
+  applyView();
+}
+function fit(){
+  stopInertia();
+  const r = wrap.getBoundingClientRect();
+  const padX = 48, padTop = 40, padBot = mobile() ? 100 : 56;
+  const k = Math.min(2, Math.max(KMIN, Math.min((r.width - 2 * padX) / bounds.w, (r.height - padTop - padBot) / bounds.h)));
+  view.k = k;
+  view.tx = r.width / 2 - k * (bounds.x + bounds.w / 2);
+  view.ty = padTop + (r.height - padTop - padBot) / 2 - k * (bounds.y + bounds.h / 2);
+  applyView();
+}
+function center(){ const r = wrap.getBoundingClientRect(); return [r.width / 2, r.height / 2]; }
+
+/* жесты: один палец/мышь — сдвиг, два пальца — щипок, короткое касание — выбор */
+const ptrs = new Map(); let gest = null, pinch = null, lastTap = null;
+
+/* инерция: после быстрого свайпа схема ещё немного едет и плавно тормозит */
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let raf = 0;
+function stopInertia(){ if (raf) cancelAnimationFrame(raf); raf = 0; }
+function fling(samples){
+  if (reduceMotion.matches || samples.length < 2) return;
+  const now = performance.now(), last = samples[samples.length - 1];
+  if (now - last.t > 60) return;                       // палец остановился перед отпусканием
+  const first = samples.find(p => last.t - p.t <= 90) || samples[0];
+  const dt = last.t - first.t; if (dt <= 0) return;
+  let vx = (last.x - first.x) / dt, vy = (last.y - first.y) / dt;   // px/мс
+  if (Math.hypot(vx, vy) < 0.3) return;
+  let prev = now;
+  const step = t => {
+    const d = Math.min(32, t - prev); prev = t;
+    view.tx += vx * d; view.ty += vy * d;
+    const f = Math.pow(0.994, d); vx *= f; vy *= f;
+    applyView();
+    raf = Math.hypot(vx, vy) > 0.02 ? requestAnimationFrame(step) : 0;
+  };
+  raf = requestAnimationFrame(step);
+}
+function local(e){ const r = svg.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+svg.addEventListener("pointerdown", e => {
+  if (e.button > 0) return;
+  stopInertia();
+  try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const t0 = performance.now();
+  if (ptrs.size === 1) gest = { sx: e.clientX, sy: e.clientY, t: t0, moved: false, pinched: false, samples: [{ t: t0, x: e.clientX, y: e.clientY }] };
+  else { if (gest) { gest.moved = true; gest.pinched = true; } pinch = null; }
+});
+svg.addEventListener("pointermove", e => {
+  const prev = ptrs.get(e.pointerId); if (!prev) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 1 && gest) {
+    if (!gest.moved && Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) > 6) { gest.moved = true; svg.classList.add("dragging"); }
+    if (gest.moved) { view.tx += e.clientX - prev.x; view.ty += e.clientY - prev.y; applyView(); }
+    const now = performance.now();
+    gest.samples.push({ t: now, x: e.clientX, y: e.clientY });
+    while (gest.samples.length > 2 && now - gest.samples[0].t > 120) gest.samples.shift();
+  } else if (ptrs.size === 2) {
+    const [p1, p2] = [...ptrs.values()], r = svg.getBoundingClientRect();
+    const mid = { x: (p1.x + p2.x) / 2 - r.left, y: (p1.y + p2.y) / 2 - r.top }, dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    if (pinch && pinch.dist > 0) { zoomAt(mid.x, mid.y, dist / pinch.dist); view.tx += mid.x - pinch.mid.x; view.ty += mid.y - pinch.mid.y; applyView(); }
+    pinch = { mid, dist };
+  }
+});
+function endPtr(e){
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) pinch = null;
+  if (ptrs.size === 0) {
+    svg.classList.remove("dragging");
+    if (e.type === "pointerup" && gest && !gest.moved && performance.now() - gest.t < 600) tap(e);
+    else if (e.type === "pointerup" && gest && gest.moved && !gest.pinched) fling(gest.samples);
+    gest = null;
+  } else if (gest) gest.moved = true;
+}
+svg.addEventListener("pointerup", endPtr);
+svg.addEventListener("pointercancel", endPtr);
+function tap(e){
+  const t = document.elementFromPoint(e.clientX, e.clientY);
+  const n = t && t.closest && t.closest("[data-node]");
+  const l = !n && t && t.closest && t.closest("[data-link]");
+  if (n) { select({ kind: "node", id: n.getAttribute("data-node") }); lastTap = null; return; }
+  if (l) { select({ kind: "link", id: l.getAttribute("data-link") }); lastTap = null; return; }
+  const now = performance.now();
+  if (lastTap && now - lastTap.t < 330 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 28) {
+    const [x, y] = local(e); zoomAt(x, y, 1.7); lastTap = null;
+  } else { lastTap = { t: now, x: e.clientX, y: e.clientY }; select(null); }
+}
+svg.addEventListener("wheel", e => {
+  e.preventDefault();
+  let d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+  if (e.ctrlKey) d *= 3;
+  const [x, y] = local(e); zoomAt(x, y, Math.exp(-d * 0.0018));
+}, { passive: false });
+
+/* клавиатура */
+document.addEventListener("keydown", e => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+  const tgtNode = e.target && e.target.closest && e.target.closest("[data-node]");
+  if (tgtNode && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select({ kind: "node", id: tgtNode.getAttribute("data-node") }); return; }
+  const [cx, cy] = center();
+  if (e.key === "+" || e.key === "=") zoomAt(cx, cy, 1.25);
+  else if (e.key === "-" || e.key === "_") zoomAt(cx, cy, 0.8);
+  else if (e.key === "0") fit();
+  else if (e.key === "Escape") select(null);
+  else if (document.activeElement === svg && e.key.startsWith("Arrow")) {
+    e.preventDefault();
+    const s = 40; view.tx += e.key === "ArrowLeft" ? s : e.key === "ArrowRight" ? -s : 0; view.ty += e.key === "ArrowUp" ? s : e.key === "ArrowDown" ? -s : 0; applyView();
+  }
+});
+
+/* ---------- выделение ---------- */
+function select(s){
+  st.sel = s;
+  applySel();
+  renderPanel();
+  if (mobile()) setSheet(!!s);
+  if (s && s.kind === "node" && mobile()) {
+    const n = st.model.nodes.get(s.id); const r = wrap.getBoundingClientRect();
+    const sy = view.ty + n.cy * view.k, limit = r.height * 0.36;
+    if (sy > limit) { view.ty -= sy - limit; applyView(); }
+  }
+}
+function applySel(){
+  const s = st.sel, m = st.model;
+  svg.classList.toggle("has-sel", !!s);
+  svg.querySelectorAll(".on,.sel").forEach(e => e.classList.remove("on", "sel"));
+  if (!s) return;
+  const mark = (attr, idv, cls) => svg.querySelectorAll(`[${attr}="${CSS.escape(idv)}"]`).forEach(e => e.classList.add(...cls));
+  if (s.kind === "node") {
+    mark("data-node", s.id, ["on", "sel"]);
+    m.links.forEach(l => {
+      if (l.a.nodeId === s.id || l.b.nodeId === s.id) {
+        mark("data-link", l.id, ["on"]);
+        mark("data-node", l.a.nodeId === s.id ? l.b.nodeId : l.a.nodeId, ["on"]);
+      }
+    });
+  } else {
+    const l = m.links.find(x => x.id === s.id); if (!l) return;
+    mark("data-link", l.id, ["on", "sel"]);
+    mark("data-node", l.a.nodeId, ["on"]); mark("data-node", l.b.nodeId, ["on"]);
+  }
+}
+
+/* ---------- панель сведений ---------- */
+function statusLine(n){
+  const s = nodeStatus(n);
+  if (!s) return `<p class="st st-none">Статус: нет данных — файл .gns3 не хранит состояние нод</p>`;
+  return `<p class="st st-${s}">${STATUS_NAME[s] || esc(s)}</p>`;
+}
+function renderPanel(){
+  const m = st.model, s = st.sel;
+  sel$("handleText").textContent = s ? (s.kind === "node" ? (m.nodes.get(s.id) || {}).name || "Устройство" : "Линк") : `Состав лабы · ${m.nodes.size} ${plural(m.nodes.size, ["устройство", "устройства", "устройств"])}`;
+  if (!s) { body.innerHTML = summaryHTML(); return; }
+  if (s.kind === "node") { const n = m.nodes.get(s.id); body.innerHTML = n ? nodeHTML(n) : ""; return; }
+  const l = m.links.find(x => x.id === s.id); body.innerHTML = l ? linkHTML(l) : "";
+}
+function summaryHTML(){
+  const m = st.model, counts = {};
+  m.nodes.forEach(n => { const c = cat(n); counts[c] = (counts[c] || 0) + 1; });
+  const order = ["router", "switch", "firewall", "hypervisor", "server", "pc", "cloud"];
+  const kv = order.filter(c => counts[c]).map(c => `<dt>${CAT_NAME[c][1]}</dt><dd class="mono">${counts[c]}</dd>`).join("");
+  const nodes = [...m.nodes.values()].sort((a, b) => natSort(a.name, b.name));
+  const rows = nodes.map(n => { const s = nodeStatus(n);
+    return `<li><button class="rowbtn" type="button" data-goto-node="${esc(n.id)}"><span class="sdot ${s || ""}"></span><span>${esc(n.name)}</span><small>${esc(typeName(n.type))}</small></button></li>`; }).join("");
+  const susp = m.links.filter(l => l.suspend).length, filt = m.links.filter(l => fmtFilters(l.filters).length).length;
+  return `
+    <div><p class="eyebrow">Обзор</p><h2>Состав лабы</h2></div>
+    <p class="lead">Нажмите на устройство или линк, чтобы увидеть порты, соседей и параметры. Схема только для просмотра: здесь ничего нельзя сдвинуть или удалить.</p>
+    <dl class="kv">${kv}<dt>Линки</dt><dd class="mono">${m.links.length}${susp ? ` · ${susp} приост.` : ""}${filt ? ` · ${filt} с фильтрами` : ""}</dd></dl>
+    <div class="legend">
+      <span><i class="wirekey"></i>линк</span><span><i class="wirekey d"></i>приостановлен</span>
+      ${st.statusOn ? `<span><i class="sdot started"></i>запущено</span><span><i class="sdot stopped"></i>остановлено</span><span><i class="sdot suspended"></i>пауза</span>` : ""}
+    </div>
+    <h3>Устройства <span class="count">${m.nodes.size}</span></h3>
+    <ul class="list">${rows}</ul>`;
+}
+function nodeHTML(n){
+  const m = st.model, p = n.props || {}, c = cat(n);
+  const kv = [];
+  const image = p.hda_disk_image || p.path || p.image || p.cdrom_image;
+  if (image) kv.push(["Образ", `<span class="mono">${esc(image)}</span>`]);
+  if (p.ram) kv.push(["RAM", `${esc(p.ram)} МБ`]);
+  if (p.cpus) kv.push(["vCPU", esc(p.cpus)]);
+  const ad = p.adapters != null ? p.adapters : p.ethernet_adapters;
+  if (ad != null) kv.push(["Адаптеры", esc(ad) + (p.adapter_type ? ` · <span class="mono">${esc(p.adapter_type)}</span>` : "")]);
+  if (p.options) kv.push(["Опции QEMU", `<span class="mono">${esc(p.options)}</span>`]);
+  if (c === "hypervisor") kv.push(["Вложенная VM", "нужна: <span class=\"mono\">-cpu host</span> и nested KVM на хосте"]);
+  if (n.type === "nat") kv.push(["Назначение", "Выход в сеть хоста через NAT"]);
+  if (n.type === "cloud") kv.push(["Назначение", "Мост на интерфейс хоста"]);
+  kv.push(["Консоль", esc(CONSOLE_NAME[n.consoleType] || n.consoleType || "нет")]);
+
+  const ifs = [];
+  m.links.forEach(l => {
+    const mine = l.a.nodeId === n.id ? l.a : l.b.nodeId === n.id ? l.b : null; if (!mine) return;
+    const other = mine === l.a ? l.b : l.a, peer = m.nodes.get(other.nodeId);
+    ifs.push({ l, port: mine.text, peer: peer ? peer.name : "?", peerPort: other.text });
+  });
+  ifs.sort((a, b) => natSort(a.port, b.port));
+  const ifRows = ifs.map(r => `<tr data-goto-link="${esc(r.l.id)}" tabindex="0"><td class="mono">${esc(r.port)}</td><td>${esc(r.peer)} <span class="mono peer">${esc(r.peerPort)}</span>${r.l.suspend ? ` <span class="count">приост.</span>` : ""}${fmtFilters(r.l.filters).length ? ` <span class="count">фильтр</span>` : ""}</td></tr>`).join("");
+
+  let vlan = "";
+  if (Array.isArray(p.ports_mapping) && p.ports_mapping.length) {
+    vlan = `<h3>Порты и VLAN</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Режим</th><th>VLAN</th></tr></thead><tbody>${
+      p.ports_mapping.map(x => `<tr><td class="mono">${esc(x.name)}</td><td>${x.type === "dot1q" ? "trunk (dot1q)" : x.type === "qinq" ? "QinQ" : "access"}</td><td class="mono">${esc(x.vlan)}${x.type === "dot1q" ? " native" : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+  let guests = "";
+  if (c === "hypervisor") {
+    const gs = guestsOf(n);
+    if (!gs) {
+      guests = `<h3>Гости Proxmox</h3><p class="lead">${st.statusOn ? "Гостевой агент ноды пока не ответил." : "Появятся с живыми данными: шлюз спрашивает гостевой агент ноды, какие VM и контейнеры есть внутри и что из них запущено."}</p>`;
+    } else {
+      const items = [...gs.items].sort((a, b) => a.vmid - b.vmid);
+      const run = items.filter(x => x.status === "running").length;
+      const rows = items.map(x => `<tr><td class="mono">${esc(x.vmid)}</td><td>${esc(x.name)} <span class="peer">${x.type === "lxc" ? "CT" : "VM"}</span></td><td><span class="gs"><i class="sdot ${esc(x.status)}"></i>${esc(GSTATUS[x.status] || x.status)}</span></td><td class="mono">${fmtMem(x.mem)}&#8239;/&#8239;${fmtMem(x.maxmem)}</td></tr>`).join("");
+      guests = `<h3>Гости Proxmox <span class="count">${run} из ${items.length} работают</span></h3>
+        <div class="tblwrap"><table class="ifs"><thead><tr><th>ID</th><th>Имя</th><th>Статус</th><th>RAM</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="note">Источник: гостевой агент ноды, команда <code>${esc(gs.source)}</code>. ${esc(gs.note)}</p>`;
+    }
+  }
+  const hasConsole = n.consoleType && n.consoleType !== "none";
+  const consoleNote = n.consoleType === "vnc"
+    ? `В плагине откроется экран через noVNC: браузер подключится к шлюзу сессии, шлюз — к <code>…/nodes/${esc(n.id)}/console/vnc</code>.`
+    : `В плагине откроется терминал (xterm.js): браузер подключится к шлюзу сессии, шлюз — к <code>…/nodes/${esc(n.id)}/console/ws</code> со своим токеном.`;
+  return `
+    <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div>
+      <button class="x" type="button" data-act="close" aria-label="Закрыть">×</button></div>
+    ${statusLine(n)}
+    <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    <h3>Интерфейсы <span class="count">${ifs.length}</span></h3>
+    ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="lead">Ни один порт не подключён.</p>`}
+    ${vlan}
+    ${guests}
+    ${hasConsole ? `<div><button class="btn primary" type="button" data-act="console">Открыть консоль</button><p class="note" id="consoleNote" hidden>${consoleNote} В этом прототипе шлюза нет, поэтому кнопка только показывает, что произойдёт.</p></div>` : ""}
+    <p class="idline">node_id ${esc(n.id)}</p>`;
+}
+function linkHTML(l){
+  const m = st.model, A = m.nodes.get(l.a.nodeId), B = m.nodes.get(l.b.nodeId);
+  const fl = fmtFilters(l.filters);
+  const card = (N, end) => `<button class="endcard" type="button" data-goto-node="${esc(N.id)}"><b>${esc(N.name)}</b><span class="mono peer">${esc(end.text)}</span></button>`;
+  return `
+    <div class="ph"><div><p class="eyebrow">Линк · ${esc(l.type)}</p><h2>${esc(A.name)} ↔ ${esc(B.name)}</h2></div>
+      <button class="x" type="button" data-act="close" aria-label="Закрыть">×</button></div>
+    <div class="ends">${card(A, l.a)}${card(B, l.b)}</div>
+    <dl class="kv">
+      <dt>Состояние</dt><dd>${l.suspend ? "Приостановлен — кадры не передаются" : "Активен"}</dd>
+      ${fl.length ? fl.map(f => `<dt>${f.k}</dt><dd class="mono">${esc(f.v)}</dd>`).join("") : `<dt>Фильтры</dt><dd>нет</dd>`}
+    </dl>
+    <p class="idline">link_id ${esc(l.id)}</p>`;
+}
+body.addEventListener("click", e => {
+  const t = e.target.closest("[data-goto-node],[data-goto-link],[data-act]"); if (!t) return;
+  if (t.dataset.gotoNode) select({ kind: "node", id: t.dataset.gotoNode });
+  else if (t.dataset.gotoLink) select({ kind: "link", id: t.dataset.gotoLink });
+  else if (t.dataset.act === "close") select(null);
+  else if (t.dataset.act === "console") { const n = sel$("consoleNote"); if (n) n.hidden = false; }
+});
+body.addEventListener("keydown", e => {
+  const t = e.target.closest && e.target.closest("tr[data-goto-link]");
+  if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select({ kind: "link", id: t.dataset.gotoLink }); }
+});
+
+/* нижняя шторка на телефоне */
+function setSheet(open){ panel.classList.toggle("open", open); sel$("handle").setAttribute("aria-expanded", String(open)); }
+/* шторку можно тянуть за заголовок: вниз — закрыть, вверх — открыть; короткий тап — переключить */
+const handle = sel$("handle");
+let sd = null, suppressClick = false;
+handle.addEventListener("pointerdown", e => {
+  if (!mobile()) return;
+  const now = performance.now();
+  sd = { y: e.clientY, open: panel.classList.contains("open"), off: panel.offsetHeight - 50, moved: false, last: e.clientY, lt: now, v: 0, cur: 0 };
+  sd.cur = sd.open ? 0 : sd.off;
+  try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+});
+handle.addEventListener("pointermove", e => {
+  if (!sd) return;
+  const dy = e.clientY - sd.y;
+  if (!sd.moved && Math.abs(dy) > 6) { sd.moved = true; panel.classList.add("dragging"); }
+  if (!sd.moved) return;
+  const now = performance.now();
+  sd.v = (e.clientY - sd.last) / Math.max(1, now - sd.lt); sd.last = e.clientY; sd.lt = now;
+  sd.cur = Math.min(sd.off, Math.max(0, (sd.open ? 0 : sd.off) + dy));
+  panel.style.transform = `translateY(${sd.cur}px)`;
+});
+function endSheet(){
+  if (!sd) return;
+  if (sd.moved) {
+    suppressClick = true;
+    const open = sd.v < -0.4 ? true : sd.v > 0.4 ? false : sd.cur < sd.off / 2;
+    panel.classList.remove("dragging");
+    void panel.offsetHeight;                                   // включить transition с текущей позиции пальца
+    panel.style.transform = `translateY(${open ? 0 : sd.off}px)`;
+    setSheet(open);
+    setTimeout(() => { panel.style.transform = ""; }, 260);
+  }
+  sd = null;
+}
+handle.addEventListener("pointerup", endSheet);
+handle.addEventListener("pointercancel", endSheet);
+handle.addEventListener("click", () => {
+  if (suppressClick) { suppressClick = false; return; }
+  setSheet(!panel.classList.contains("open"));
+});
+
+/* ---------- загрузка ---------- */
+function toast(msg){
+  const t = sel$("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 6000);
+}
+function load(doc, label, demoStatus, guests){
+  if (!doc || typeof doc !== "object" || !doc.topology) throw new Error("В файле нет блока topology — это не файл топологии GNS3.");
+  st.model = buildModel(doc);
+  st.guests = guests || null;
+  st.sourceLabel = label;
+  st.demoStatus = demoStatus || pseudoStatus(st.model);
+  st.sel = null;
+  sel$("projName").textContent = st.model.name;
+  document.title = "Вьюер топологии GNS3";
+  const nN = st.model.nodes.size, nL = st.model.links.length;
+  sel$("meta").innerHTML = `<span>${nN} ${plural(nN, ["устройство", "устройства", "устройств"])} · ${nL} ${plural(nL, ["линк", "линка", "линков"])}</span>` +
+    (st.model.version ? `<span>GNS3 ${esc(st.model.version)}</span>` : "") + `<span class="src">${esc(label)}</span>`;
+  renderScene(); renderPanel(); fit();
+  if (mobile()) setSheet(false);
+}
+function pseudoStatus(m){
+  const out = {}; let i = 0;
+  m.nodes.forEach(n => { out[n.id] = (i++ % 5 === 3) ? "stopped" : "started"; });
+  return out;
+}
+function readFile(file){
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const txt = String(fr.result || "");
+    if (txt.startsWith("PK")) { toast("Это архив .gns3project. Распакуйте его и откройте лежащий внутри файл .gns3."); return; }
+    try { load(JSON.parse(txt), file.name); }
+    catch (err) { toast(err instanceof SyntaxError ? "Файл не читается как JSON. Проверьте, что это .gns3 из папки проекта." : err.message); }
+  };
+  fr.onerror = () => toast("Не удалось прочитать файл.");
+  fr.readAsText(file);
+}
+sel$("fileInput").addEventListener("change", e => { readFile(e.target.files[0]); e.target.value = ""; });
+let dragDepth = 0;
+wrap.addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; sel$("drop").hidden = false; });
+wrap.addEventListener("dragover", e => e.preventDefault());
+wrap.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; sel$("drop").hidden = true; } });
+wrap.addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; sel$("drop").hidden = true; readFile(e.dataTransfer.files[0]); });
+
+/* ---------- кнопки ---------- */
+sel$("btnFit").addEventListener("click", fit);
+sel$("btnIn").addEventListener("click", () => { const [x, y] = center(); zoomAt(x, y, 1.25); });
+sel$("btnOut").addEventListener("click", () => { const [x, y] = center(); zoomAt(x, y, 0.8); });
+sel$("btnStatus").addEventListener("click", e => {
+  st.statusOn = !st.statusOn; e.currentTarget.setAttribute("aria-pressed", String(st.statusOn));
+  const keep = st.sel; renderScene(); st.sel = keep; applySel(); renderPanel();
+});
+let lastW = 0;
+window.addEventListener("resize", () => { const w = wrap.clientWidth; if (Math.abs(w - lastW) > 40) { lastW = w; fit(); } });
+
+load(SAMPLE, "пример", SAMPLE_STATUS, SAMPLE_GUESTS);
+lastW = wrap.clientWidth;
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { const keep = st.sel; renderScene(); st.sel = keep; applySel(); });
+})();
+</script>
