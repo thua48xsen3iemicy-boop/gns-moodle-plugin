@@ -4,7 +4,8 @@ Moodle-плагин для лабораторных работ в GNS3: схем
 
 | Папка | Что там |
 |---|---|
-| `plugin/` | сам плагин (пишется по `docs/SPEC.md`) |
+| `plugin/` | сам плагин `mod_gns3lab` (пишется по `docs/SPEC.md`; установка — `plugin/README.md`) |
+| `devtools/` | `build_zip.sh` — ZIP для установки через интерфейс Moodle, `sync_demo_data.sh` — демо-лаба в плагин |
 | `gateway/` | шлюз консолей: браузер (xterm.js) ⇄ GNS3 `/console/ws` в LXC-слоте |
 | `prototypes/` | рабочие прототипы UI: вьюер `.gns3` и консоль с имитатором IOS (открываются в браузере как есть) |
 | `fixtures/` | пример топологии и демо «живых» данных |
