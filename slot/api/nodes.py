@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api.client import call
+from api.client import call, get_lifecycle
 from api.models import ExecTicket, WipeTicket
 
 router = APIRouter(prefix="/v1/labs/{project_id}/nodes", tags=["nodes"])
@@ -125,7 +125,7 @@ async def enable_serial_getty(request: Request, project_id: UUID, node_id: UUID)
 
 @router.post("/{node_id}/wipe", status_code=202)
 async def wipe(request: Request, project_id: UUID, node_id: UUID, ticket: WipeTicket):
-    return request.app.state.lifecycle.submit(
+    return get_lifecycle(request).submit(
         "wipe",
         str(project_id),
         node_id=str(node_id),

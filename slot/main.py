@@ -1,6 +1,8 @@
 """Lab Slot: a single active lab runtime backed by GNS3 2.2.x."""
 
+import asyncio
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 
 import httpx
@@ -11,11 +13,18 @@ from api.labs import router as labs_router
 from api.lifecycle import Lifecycle
 from api.lifecycle import router as operations_router
 from api.nodes import router as nodes_router
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
+from release import VERSION, verify
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.initialized = False
+    release = verify()
+    if not release["ok"]:
+        raise RuntimeError("RELEASE_INTEGRITY_ERROR: run release.py check")
+    app.state.release_identity = release
     # Fail closed: the Slot API has privileged access to its GNS3 runtime.
     if not os.environ.get("SLOT_API_TOKEN"):
         raise RuntimeError("SLOT_API_TOKEN is required (see slot.env.example)")
@@ -27,15 +36,17 @@ async def lifespan(app: FastAPI):
     ) as client:
         app.state.gns3_http = client
         app.state.lifecycle = Lifecycle(app)
+        app.state.initialized = True
         try:
             yield
         finally:
+            app.state.initialized = False
             await app.state.lifecycle.close()
 
 
 app = FastAPI(
     title="Lab Slot API",
-    version="0.1.0",
+    version=VERSION,
     lifespan=lifespan,
     description="Prototype. GNS3 project lifecycle and a controlled console/QGA gateway.",
 )
@@ -45,3 +56,66 @@ app.include_router(nodes_router, dependencies=[Depends(require_token)])
 app.include_router(console_router)  # WebSockets authenticate in their handler.
 
 app.include_router(operations_router, dependencies=[Depends(require_token)])
+
+
+@app.middleware("http")
+async def initialization_guard(request: Request, call_next):
+    if request.url.path not in ("/healthz", "/v1/readyz") and (
+        not getattr(app.state, "initialized", False)
+        or getattr(app.state, "lifecycle", None) is None
+    ):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "SERVICE_NOT_INITIALIZED",
+                    "message": "Lifecycle is not initialized",
+                }
+            },
+        )
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        try:
+            identity = await asyncio.wait_for(asyncio.to_thread(verify), 3)
+        except (OSError, TimeoutError):
+            identity = None
+        if (
+            not identity
+            or not identity.get("ok")
+            or identity != getattr(app.state, "release_identity", None)
+        ):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": {
+                        "code": "RELEASE_INTEGRITY_ERROR",
+                        "message": "Release changed or is incomplete",
+                    }
+                },
+            )
+    return await call_next(request)
+
+
+@app.exception_handler(sqlite3.Error)
+async def storage_error(request: Request, exc: sqlite3.Error):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "STATE_STORAGE_ERROR",
+                "message": "Persistent state unavailable",
+            }
+        },
+    )
+
+
+@app.exception_handler(OSError)
+async def filesystem_error(request: Request, exc: OSError):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "FILESYSTEM_ERROR",
+                "message": "Service filesystem unavailable",
+            }
+        },
+    )
