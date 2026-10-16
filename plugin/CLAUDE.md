@@ -57,7 +57,9 @@ docs/          SPEC.md и прочая документация
 
 ## Dev-окружение
 
-- Moodle — через `moodle-docker` той же версии; `plugin/` монтируется в `public/mod/gns3lab`.
+- Moodle — через `moodle-docker` той же версии; `plugin/` монтируется в `public/mod/gns3lab` (bind mount, не симлинк:
+  страницы подключают `../../config.php` относительным путём).
+- `grunt amd` запускай из каталога плагина внутри дерева Moodle: ESLint ищет `.eslintrc` Moodle по реальному пути файла.
 - Менеджера пока нет: используй mock из `devtools/mock-manager` (создать по SPEC). Шлюз в dev может смотреть
   на поддельный GNS3 (как в тесте шлюза) или на реальный слот, если владелец даст адрес.
 - Проверки перед коммитом: `moodle-plugin-ci phpcs` (стандарт moodle), `phplint`, `phpdoc`, PHPUnit и Behat плагина,

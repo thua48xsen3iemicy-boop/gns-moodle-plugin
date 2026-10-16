@@ -1,0 +1,63 @@
+{
+  "node_status": {
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000001": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000002": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000003": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000004": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000005": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000006": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000007": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000008": "started",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000009": "suspended",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000010": "stopped",
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000011": "started"
+  },
+  "guests": {
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000011": {
+      "source": "pvesh get /cluster/resources --type vm",
+      "note": "Шлюз опрашивает его через guest-exec, сеть до лабы не нужна.",
+      "items": [
+        {
+          "vmid": 100,
+          "name": "web01",
+          "type": "qemu",
+          "status": "running",
+          "mem": 1181116006.4,
+          "maxmem": 2147483648
+        },
+        {
+          "vmid": 101,
+          "name": "db01",
+          "type": "qemu",
+          "status": "running",
+          "mem": 3650722201.6,
+          "maxmem": 4294967296
+        },
+        {
+          "vmid": 102,
+          "name": "win-client",
+          "type": "qemu",
+          "status": "stopped",
+          "mem": 0,
+          "maxmem": 4294967296
+        },
+        {
+          "vmid": 200,
+          "name": "dns",
+          "type": "lxc",
+          "status": "running",
+          "mem": 125829120,
+          "maxmem": 536870912
+        },
+        {
+          "vmid": 201,
+          "name": "proxy",
+          "type": "lxc",
+          "status": "paused",
+          "mem": 220200960,
+          "maxmem": 1073741824
+        }
+      ]
+    }
+  }
+}

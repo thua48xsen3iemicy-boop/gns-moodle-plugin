@@ -81,7 +81,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 ### 5.1. Таблица `gns3lab`
 
 Стандартные `id, course, name, intro, introformat, timecreated, timemodified` плюс:
-`lab_ref` (char 255), `maxduration` (int, минуты, 0 — по умолчанию менеджера).
+`labref` (char 255; в контракте с менеджером — `lab_ref`; поля БД Moodle пишутся без подчёркиваний), `maxduration` (int, минуты, 0 — по умолчанию менеджера).
 Сессии в БД Moodle не храним — источник правды менеджер (не дублировать состояние).
 
 ### 5.2. Права (`db/access.php`)

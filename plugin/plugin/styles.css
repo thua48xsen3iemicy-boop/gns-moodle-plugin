@@ -1,0 +1,983 @@
+/**
+ * Topology viewer of mod_gns3lab.
+ *
+ * Plugin styles.css is loaded on every Moodle page, so every rule is scoped to .gns3lab-app.
+ * Colours follow the theme through Bootstrap variables; own tokens only where Bootstrap has none.
+ */
+.gns3lab-app {
+    --bg: var(--bs-secondary-bg, #e8ecef);
+    --canvas: var(--bs-tertiary-bg, #f4f6f8);
+    --panel: var(--bs-body-bg, #fff);
+    --fg: var(--bs-body-color, #16212b);
+    --muted: var(--bs-secondary-color, #57656f);
+    --line: var(--bs-border-color, #cad2d9);
+    --grid: #c9d2da;
+    --wire: #566878;
+    --accent: var(--bs-primary, #1f6fc5);
+    --accent-ink: #fff;
+    --ico: #2c4a63;
+    --ico-glyph: #f4f6f8;
+    --chip: var(--bs-secondary-bg, #e4eaef);
+    --ok: var(--bs-success, #1e8e4f);
+    --warn: #ad7f08;
+    --bad: var(--bs-danger, #c8423a);
+    --c1: #2f6fd0;
+    --c2: #1e8e4f;
+    --c3: #b5730a;
+    --c4: #8e44ad;
+    --c5: #b83280;
+    --c6: #0e7c86;
+    --display: var(--bs-body-font-family, system-ui, sans-serif);
+    --body: var(--bs-body-font-family, system-ui, sans-serif);
+    --mono: var(--bs-font-monospace, ui-monospace, monospace);
+    position: relative;
+    overflow: hidden;
+    line-height: 1.4;
+}
+[data-bs-theme="dark"] .gns3lab-app {
+    --grid: #24313b;
+    --wire: #8094a4;
+    --accent-ink: #0e1418;
+    --ico: #8aafcc;
+    --ico-glyph: #121a20;
+    --warn: #e0b13a;
+    --c1: #6aa6f5;
+    --c2: #4cc98a;
+    --c3: #e6b64a;
+    --c4: #c08be0;
+    --c5: #e879b9;
+    --c6: #4ec3cc;
+}
+/* inline on the activity page / full screen page */
+.gns3lab-app.is-inline {
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    height: min(78vh, 860px);
+    min-height: 420px;
+    border: 1px solid var(--line);
+    border-radius: .5rem;
+}
+body.gns3lab-fullscreen {
+    overflow: hidden;
+}
+.gns3lab-app.is-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    height: 100dvh;
+}
+.gns3lab-app .ttl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.gns3lab-app .gbtn.back {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+    font-size: 17px;
+    text-decoration: none;
+}
+.gns3lab-app h2,
+.gns3lab-app h3 {
+    color: var(--fg);
+}
+.gns3lab-app .panelbody {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+/* Layout: one-screen tool — toolbar on top, pannable lab canvas, read-only info panel on the right (bottom sheet on phones) */
+.gns3lab-app {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    display: flex;
+    flex-direction: column;
+}
+/* toolbar */
+.gns3lab-app .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding-block: 10px;
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+}
+.gns3lab-app .ttl {
+    min-width: 0;
+}
+.gns3lab-app .ttl .ttl-h {
+    margin: 0;
+    font: 600 19px/1.2 var(--display);
+    letter-spacing: .005em;
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    text-wrap: balance;
+}
+.gns3lab-app .meta {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: center;
+}
+.gns3lab-app .src {
+    font: 500 11px var(--mono);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--chip);
+    color: var(--muted);
+}
+.gns3lab-app .tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.gns3lab-app .ro {
+    font: 500 10.5px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    padding: 5px 8px;
+    border-radius: 5px;
+}
+.gns3lab-app .gbtn {
+    font: 500 13px/1 var(--body);
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    background: var(--canvas);
+    color: var(--fg);
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.gns3lab-app .gbtn:hover {
+    border-color: var(--wire);
+}
+.gns3lab-app .gbtn:focus-visible,
+.gns3lab-app .rowbtn:focus-visible,
+.gns3lab-app .ifs tr:focus-visible,
+.gns3lab-app .endcard:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.gns3lab-app .gbtn[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+.gns3lab-app .zoomgrp {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+}
+.gns3lab-app .zoomgrp .gbtn {
+    border: 0;
+    background: transparent;
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+    font-size: 17px;
+}
+.gns3lab-app .zoomgrp output {
+    font: 500 12px var(--mono);
+    min-width: 44px;
+    text-align: center;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-app .vh {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+.gns3lab-app .seg {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    overflow: hidden;
+}
+.gns3lab-app .seg button {
+    font: 600 12.5px/1 var(--mono);
+    height: 30px;
+    min-width: 40px;
+    padding: 0 9px;
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+}
+.gns3lab-app .seg button:first-child {
+    border-left: 0;
+}
+.gns3lab-app .seg button[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
+}
+.gns3lab-app .seg button:disabled {
+    color: var(--muted);
+    opacity: .45;
+    cursor: not-allowed;
+}
+.gns3lab-app .seg button:focus-visible,
+.gns3lab-app .sel:focus-visible,
+.gns3lab-app .issue:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.gns3lab-app .sel {
+    font: 500 13px var(--body);
+    height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    padding: 0 6px;
+    max-width: 100%;
+}
+.gns3lab-app .sel:disabled {
+    opacity: .45;
+}
+/* stage */
+.gns3lab-app .stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    position: relative;
+}
+.gns3lab-app .wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    background: var(--canvas);
+}
+.gns3lab-app .gns3lab-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.gns3lab-app .gns3lab-svg.dragging {
+    cursor: grabbing;
+}
+.gns3lab-app .gns3lab-svg:focus {
+    outline: none;
+}
+.gns3lab-app .hint {
+    position: absolute;
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    left: max(12px, env(safe-area-inset-left, 0px));
+    bottom: 12px;
+    margin: 0;
+    max-width: calc(100% - 24px);
+    font-size: 12px;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--canvas) 86%, transparent);
+    padding: 4px 8px;
+    border-radius: 5px;
+    pointer-events: none;
+}
+.gns3lab-app .gtoast {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    max-width: min(460px, calc(100% - 32px));
+    background: var(--panel);
+    border: 1px solid var(--bad);
+    color: var(--fg);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    box-shadow: 0 6px 20px rgb(0 0 0 / .12);
+}
+.gns3lab-app .drop {
+    position: absolute;
+    inset: 10px;
+    border: 2px dashed var(--accent);
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font: 600 16px var(--display);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--canvas) 80%, transparent);
+    pointer-events: none;
+}
+/* scene */
+.gns3lab-app .halo {
+    fill: transparent;
+    stroke: transparent;
+    stroke-width: 2;
+    pointer-events: all;
+}
+.gns3lab-app .node {
+    cursor: pointer;
+}
+.gns3lab-app .node:hover .halo {
+    stroke: var(--line);
+}
+.gns3lab-app .node.sel .halo {
+    stroke: var(--accent);
+    fill: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.gns3lab-app .node:focus {
+    outline: none;
+}
+.gns3lab-app .node:focus-visible .halo {
+    stroke: var(--accent);
+    stroke-dasharray: 4 3;
+}
+.gns3lab-app .nname {
+    font: 600 13px var(--display);
+    fill: var(--fg);
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: 5px;
+    stroke-linejoin: round;
+}
+.gns3lab-app .led {
+    stroke: var(--canvas);
+    stroke-width: 2.5;
+}
+.gns3lab-app .led-started {
+    fill: var(--ok);
+}
+.gns3lab-app .led-stopped {
+    fill: var(--bad);
+}
+.gns3lab-app .led-suspended {
+    fill: var(--warn);
+}
+.gns3lab-app .link {
+    cursor: pointer;
+}
+.gns3lab-app .wire {
+    stroke: var(--wire);
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+}
+.gns3lab-app .hit {
+    stroke: transparent;
+    stroke-width: 16;
+    fill: none;
+    pointer-events: stroke;
+}
+.gns3lab-app .link:hover .wire {
+    stroke: var(--fg);
+}
+.gns3lab-app .link.susp .wire {
+    stroke-dasharray: 6 5;
+    opacity: .65;
+}
+.gns3lab-app .link.sel .wire {
+    stroke: var(--accent);
+    stroke-width: 3.2;
+}
+.gns3lab-app .plabel rect {
+    fill: var(--canvas);
+    stroke: var(--line);
+}
+.gns3lab-app .plabel text {
+    font: 500 10.5px var(--mono);
+    fill: var(--muted);
+}
+.gns3lab-app .plabel.on text {
+    fill: var(--fg);
+}
+.gns3lab-app .plabel.on rect {
+    stroke: var(--accent);
+}
+.gns3lab-app .fpill rect {
+    fill: var(--chip);
+    stroke: var(--warn);
+}
+.gns3lab-app .fpill text {
+    font: 500 10px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-app .gpill rect {
+    fill: var(--panel);
+    stroke: var(--accent);
+}
+.gns3lab-app .gpill text {
+    font: 500 10.5px var(--mono);
+    fill: var(--accent);
+}
+.gns3lab-app .gs {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.gns3lab-app .dimmable {
+    transition: opacity .15s;
+}
+.gns3lab-app .has-sel .dimmable:not(.on) {
+    opacity: .22;
+}
+/* слои L1/L2/L3/маршрутизация */
+.gns3lab-app .wire.ghost {
+    opacity: .2;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+.gns3lab-app .link.down .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 3 5;
+}
+.gns3lab-app .link.dead .wire {
+    stroke-dasharray: 2 6;
+    opacity: .7;
+}
+.gns3lab-app .link .wire.vl {
+    stroke-width: 2.6;
+}
+.gns3lab-app .link.trunk .wire.vl {
+    stroke-width: 2.4;
+}
+.gns3lab-app .link.sel .wire.vl {
+    stroke-width: 3.4;
+}
+.gns3lab-app .plabel.bad rect {
+    stroke: var(--bad);
+}
+.gns3lab-app .plabel.bad text {
+    fill: var(--bad);
+}
+.gns3lab-app .wpill rect {
+    fill: var(--panel);
+    stroke: var(--warn);
+    stroke-width: 1.5;
+}
+.gns3lab-app .wpill text {
+    font: 600 10.5px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-app .bpill rect {
+    fill: var(--panel);
+    stroke: var(--bad);
+    stroke-width: 1.5;
+}
+.gns3lab-app .bpill text {
+    font: 600 10.5px var(--mono);
+    fill: var(--bad);
+}
+.gns3lab-app .vpill rect {
+    fill: var(--panel);
+    stroke: var(--line);
+}
+.gns3lab-app .vpill text {
+    font: 600 10.5px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-app .rpill rect {
+    fill: var(--panel);
+    stroke: var(--line);
+}
+.gns3lab-app .rpill text {
+    font: 500 10px var(--mono);
+    fill: var(--muted);
+}
+.gns3lab-app .node.ghost {
+    opacity: .32;
+}
+.gns3lab-app .subnet {
+    cursor: pointer;
+}
+.gns3lab-app .subnet rect {
+    fill: var(--panel);
+    stroke: var(--accent);
+    stroke-width: 1.6;
+}
+.gns3lab-app .subnet text {
+    font: 600 11px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-app .subnet.warn rect {
+    stroke: var(--warn);
+    stroke-width: 2.2;
+}
+.gns3lab-app .subnet.sel rect {
+    fill: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+.gns3lab-app .edge,
+.gns3lab-app .adj {
+    cursor: pointer;
+}
+.gns3lab-app .edge .wire {
+    stroke: var(--accent);
+    stroke-width: 1.8;
+}
+.gns3lab-app .edge.down .wire {
+    stroke-dasharray: 3 4;
+    opacity: .6;
+}
+.gns3lab-app .edge.dup .wire {
+    stroke: var(--bad);
+}
+.gns3lab-app .adj .wire {
+    stroke-width: 3.5;
+}
+.gns3lab-app .adj.miss .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 7 6;
+    stroke-width: 2.5;
+}
+.gns3lab-app .adj.sel .wire {
+    stroke-width: 5;
+}
+/* panel */
+.gns3lab-app .panel {
+    width: 344px;
+    flex: none;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    overflow: auto;
+    padding-block: 18px;
+    padding-left: 18px;
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    padding-right: max(18px, env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.gns3lab-app .handle {
+    display: none;
+}
+.gns3lab-app .ph {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+.gns3lab-app .eyebrow {
+    margin: 0 0 3px;
+    font: 500 11px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+}
+.gns3lab-app .panel h2 {
+    margin: 0;
+    font: 600 24px/1.15 var(--display);
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    text-wrap: balance;
+    word-break: break-word;
+}
+.gns3lab-app .panel h3 {
+    margin: 4px 0 0;
+    font: 600 14px var(--display);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.gns3lab-app .count {
+    font: 500 11px var(--mono);
+    background: var(--chip);
+    color: var(--muted);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.gns3lab-app .x {
+    border: 0;
+    background: var(--chip);
+    color: var(--fg);
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    flex: none;
+}
+.gns3lab-app .st {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    margin: 0;
+}
+.gns3lab-app .st::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+.gns3lab-app .st-started::before {
+    background: var(--ok);
+}
+.gns3lab-app .st-stopped::before {
+    background: var(--bad);
+}
+.gns3lab-app .st-suspended::before {
+    background: var(--warn);
+}
+.gns3lab-app .st-none {
+    color: var(--muted);
+}
+.gns3lab-app .kv {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 14px;
+    margin: 0;
+    font-size: 13.5px;
+}
+.gns3lab-app .kv dt {
+    color: var(--muted);
+}
+.gns3lab-app .kv dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.gns3lab-app .mono {
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+.gns3lab-app .tblwrap {
+    overflow-x: auto;
+}
+.gns3lab-app .ifs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.gns3lab-app .ifs th {
+    text-align: left;
+    font: 500 11px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+}
+.gns3lab-app .ifs td {
+    padding: 7px 6px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+.gns3lab-app .ifs tr[data-goto-link] {
+    cursor: pointer;
+}
+.gns3lab-app .ifs tr[data-goto-link]:hover td {
+    background: var(--chip);
+}
+.gns3lab-app .peer {
+    color: var(--muted);
+}
+.gns3lab-app .ends {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.gns3lab-app .endcard {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--fg);
+    cursor: pointer;
+    font: inherit;
+    min-width: 0;
+}
+.gns3lab-app .endcard:hover {
+    border-color: var(--wire);
+}
+.gns3lab-app .endcard b {
+    font: 600 15px var(--display);
+    overflow-wrap: anywhere;
+}
+.gns3lab-app .gbtn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    height: 38px;
+    justify-content: center;
+    width: 100%;
+}
+.gns3lab-app .note {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    background: var(--chip);
+    padding: 10px 12px;
+    border-radius: 7px;
+}
+.gns3lab-app .note code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg);
+    overflow-wrap: anywhere;
+}
+.gns3lab-app .idline {
+    margin: 0;
+    font: 400 11px var(--mono);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+.gns3lab-app .glead {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--muted);
+}
+.gns3lab-app .list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-app .rowbtn {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 13.5px;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-app .rowbtn:hover {
+    background: var(--chip);
+}
+.gns3lab-app .rowbtn small {
+    color: var(--muted);
+    font-size: 12px;
+}
+.gns3lab-app .sdot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--line);
+}
+.gns3lab-app .sdot.started,
+.gns3lab-app .sdot.running {
+    background: var(--ok);
+}
+.gns3lab-app .sdot.stopped {
+    background: var(--bad);
+}
+.gns3lab-app .sdot.suspended,
+.gns3lab-app .sdot.paused {
+    background: var(--warn);
+}
+.gns3lab-app .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    font-size: 12.5px;
+    color: var(--muted);
+}
+.gns3lab-app .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.gns3lab-app .wirekey {
+    display: inline-block;
+    width: 22px;
+    border-top: 2px solid var(--wire);
+}
+.gns3lab-app .wirekey.d {
+    border-top-style: dashed;
+}
+.gns3lab-app .wirekey.t {
+    border-top: 6px double var(--c2);
+}
+.gns3lab-app .wirekey.bad {
+    border-top: 2px dashed var(--bad);
+}
+.gns3lab-app .wirekey.acc {
+    border-top: 2px solid var(--accent);
+}
+.gns3lab-app .sw {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--wire);
+}
+.gns3lab-app .issues {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-app .issue {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--warn);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.45;
+    cursor: pointer;
+}
+.gns3lab-app .issue:hover {
+    border-color: var(--wire);
+    border-left-color: var(--warn);
+}
+.gns3lab-app .issue.bad,
+.gns3lab-app .issue.bad:hover {
+    border-left-color: var(--bad);
+}
+.gns3lab-app .issue.info,
+.gns3lab-app .issue.info:hover {
+    border-left-color: var(--accent);
+}
+.gns3lab-app .okline {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ok);
+}
+.gns3lab-app .tag {
+    font: 500 11px var(--mono);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--chip);
+    color: var(--fg);
+    white-space: nowrap;
+}
+.gns3lab-app .tag.bad {
+    color: var(--bad);
+}
+
+@media (max-width: 760px) {
+    .gns3lab-app .panel {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: auto;
+        max-height: 58%;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        border-radius: 14px 14px 0 0;
+        box-shadow: 0 -10px 28px rgb(0 0 0 / .14);
+        padding-top: 0;
+        /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+        padding-left: max(16px, env(safe-area-inset-left, 0px));
+        /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+        padding-right: max(16px, env(safe-area-inset-right, 0px));
+        /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        transform: translateY(calc(100% - 50px));
+        transition: transform .22s ease;
+    }
+    .gns3lab-app .panel.open {
+        transform: none;
+    }
+    .gns3lab-app .handle {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        margin: 0 -2px;
+        min-height: 50px;
+        border: 0;
+        background: var(--panel);
+        color: var(--fg);
+        font: 600 14px var(--display);
+        cursor: pointer;
+        padding: 0 2px;
+        touch-action: none;
+    }
+    .gns3lab-app .handle::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 6px;
+        width: 36px;
+        height: 4px;
+        margin-left: -18px;
+        border-radius: 2px;
+        background: var(--line);
+    }
+    .gns3lab-app .panel.dragging {
+        transition: none;
+    }
+    .gns3lab-app .handle::after {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-right: 2px solid var(--muted);
+        border-top: 2px solid var(--muted);
+        transform: rotate(-45deg);
+        margin-right: 6px;
+        transition: transform .2s;
+    }
+    .gns3lab-app .panel.open .handle::after {
+        transform: rotate(135deg);
+    }
+    .gns3lab-app .hint {
+        bottom: 62px;
+    }
+    .gns3lab-app .ends {
+        grid-template-columns: 1fr;
+    }
+    .gns3lab-app .ro {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-app .panel,
+    .gns3lab-app .dimmable,
+    .gns3lab-app .handle::after {
+        transition: none;
+    }
+}
+
+/* Fonts named in .gns3 drawings are not loaded in Moodle: use the theme font. */
+.gns3lab-app .drawings text {
+    font-family: var(--display);
+}
