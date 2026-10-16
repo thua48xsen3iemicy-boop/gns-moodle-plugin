@@ -1,0 +1,466 @@
+"""Persistent single-slot operation coordinator. Never replays guest commands after a crash."""
+
+import asyncio
+import fcntl
+import hashlib
+import json
+import os
+import sqlite3
+import time
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException, Request
+
+from api.client import call
+from api.models import DeployTicket
+from api.nodes import exec_sync, qga_call
+
+TRANSITIONS = {
+    None: {"DEPLOYING"},
+    "DEPLOYING": {"STARTING", "FAILED"},
+    "STARTING": {"PROVISIONING", "FAILED"},
+    "PROVISIONING": {"PROVISIONING", "READY", "FAILED"},
+    "READY": {"DEPLOYING", "STOPPING", "WIPING", "FAILED"},
+    "STOPPING": {"STOPPED", "FAILED"},
+    "STOPPED": {"DEPLOYING", "STOPPING"},
+    "WIPING": {"READY", "FAILED"},
+    "FAILED": {"DEPLOYING", "STOPPING", "FAILED"},
+}
+
+router = APIRouter(prefix="/v1/operations", tags=["operations"])
+
+
+@router.get("/{operation_id}")
+async def operation(request: Request, operation_id: str):
+    return request.app.state.lifecycle.operation(operation_id)
+
+
+class Lifecycle:
+    def __init__(self, app):
+        self.request = SimpleNamespace(app=app)
+        root = Path(os.getenv("SLOT_STATE_DIR", "/var/lib/lab-slot"))
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.lock = (root / "service.lock").open("a")
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.lock.close()
+            raise
+        self.db = sqlite3.connect(root / "state.sqlite3")
+        self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT, PRIMARY KEY(kind,id))"
+        )
+        self.tasks = set()
+        self.project_locks = {}
+        for op in self.all("operation"):
+            if op["status"] == "RUNNING":
+                op.update(
+                    status="FAILED",
+                    error={
+                        "code": "SERVICE_RESTART",
+                        "message": "Interrupted; inspect GNS3 and explicitly resume",
+                    },
+                )
+                self.save("operation", op["operation_id"], op)
+                lab = self.get("lab", op["project_id"])
+                if lab:
+                    self.update(lab, "FAILED", "interrupted", error=op["error"])
+        for lab in self.all("lab"):
+            if lab["state"] not in ("STOPPED", "FAILED"):
+                self.update(
+                    lab,
+                    "FAILED",
+                    "restart_requires_resume",
+                    error={
+                        "code": "SERVICE_RESTART",
+                        "message": "Explicit resume required to reacquire lock and recheck readiness",
+                    },
+                )
+        self.monitor = asyncio.create_task(self.watch())
+
+    def get(self, kind, ident):
+        row = self.db.execute(
+            "SELECT data FROM records WHERE kind=? AND id=?", (kind, ident)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def all(self, kind):
+        return [
+            json.loads(r[0])
+            for r in self.db.execute("SELECT data FROM records WHERE kind=?", (kind,))
+        ]
+
+    def save(self, kind, ident, obj):
+        obj["updated_at"] = time.time()
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO records VALUES (?,?,?)",
+                (kind, ident, json.dumps(obj)),
+            )
+
+    def update(self, lab, state, stage, **values):
+        if state not in TRANSITIONS.get(lab.get("state"), set()):
+            raise RuntimeError(
+                f"Invalid lifecycle transition: {lab.get('state')} -> {state}"
+            )
+        lab.update(state=state, stage=stage, **values)
+        self.save("lab", lab["project_id"], lab)
+
+    def status(self, pid):
+        lab = self.get("lab", pid)
+        if not lab:
+            raise HTTPException(404, "Unknown managed laboratory")
+        # Do not expose trusted provisioning commands in status.
+        return {k: v for k, v in lab.items() if k != "ticket"}
+
+    def operation(self, oid):
+        op = self.get("operation", oid)
+        if not op:
+            raise HTTPException(404, "Unknown operation")
+        lab = self.get("lab", op["project_id"])
+        if lab and op["status"] == "RUNNING":
+            op.update(
+                stage=lab["stage"],
+                progress=lab.get("progress", 0),
+                nodes=lab.get("nodes", []),
+            )
+        return op
+
+    def submit(self, action, pid=None, ticket=None, node_id=None, key=None):
+        ticket_data = ticket.model_dump(mode="json") if ticket else None
+        fingerprint = hashlib.sha256(
+            json.dumps([action, pid, ticket_data, node_id], sort_keys=True).encode()
+        ).hexdigest()
+        dedup = key or fingerprint
+        for op in self.all("operation"):
+            if op["key"] == dedup:
+                if op["fingerprint"] != fingerprint:
+                    raise HTTPException(
+                        409, "Idempotency-Key reused with different request"
+                    )
+                # Explicit keys persist; implicit retries deduplicate running operations only.
+                if key or op["status"] == "RUNNING":
+                    return op
+        if any(op["status"] == "RUNNING" for op in self.all("operation")):
+            raise HTTPException(409, "Slot operation in progress")
+        pid = pid or str(ticket.project_id or uuid4())
+        lab = self.get("lab", pid)
+        for other in self.all("lab"):
+            if other["project_id"] != pid and other["state"] != "STOPPED":
+                raise HTTPException(
+                    409, "Another laboratory owns this slot; stop it first"
+                )
+        if action != "deploy" and not lab:
+            raise HTTPException(404, "Unknown managed laboratory")
+        if action == "wipe" and lab["state"] != "READY":
+            raise HTTPException(409, "Wipe requires a READY laboratory")
+        if lab and ticket_data:
+            ticket_data["project_id"] = pid
+            if ticket_data != lab["ticket"]:
+                raise HTTPException(409, "Existing project manifest differs")
+        if not lab:
+            ticket_data["project_id"] = pid
+            lab = {
+                "project_id": pid,
+                "ticket": ticket_data,
+                "nodes": [],
+                "progress": 0,
+                "error": None,
+            }
+        # Shared project directory lock coordinates cooperating Slot services on CephFS.
+        if pid not in self.project_locks:
+            root = Path(
+                os.getenv("SLOT_PROJECT_LOCK_DIR", "/opt/gns3/projects/.slot-locks")
+            )
+            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            handle = (root / (pid + ".lock")).open("a")
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                handle.close()
+                raise HTTPException(409, "Project locked by another slot")
+            self.project_locks[pid] = handle
+        previous_state = lab.get("state", "FAILED")
+        lab["generation"] = lab.get("generation", 0) + 1
+        self.update(
+            lab,
+            {
+                "deploy": "DEPLOYING",
+                "resume": "DEPLOYING",
+                "stop": "STOPPING",
+                "wipe": "WIPING",
+            }[action],
+            action,
+            error=None,
+        )
+        op = {
+            "operation_id": str(uuid4()),
+            "project_id": pid,
+            "action": action,
+            "node_id": node_id,
+            "status": "RUNNING",
+            "key": dedup,
+            "fingerprint": fingerprint,
+            "error": None,
+            "previous_state": previous_state,
+        }
+        self.save("operation", op["operation_id"], op)
+        task = asyncio.create_task(self.run(op, lab))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return dict(op)
+
+    async def api(self, method, path, payload=None):
+        return await call(self.request, method, path, payload)
+
+    async def wait_nodes(self, lab, expected):
+        deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
+        while True:
+            nodes = await self.api("GET", f"projects/{lab['project_id']}/nodes")
+            lab["nodes"] = nodes
+            self.save("lab", lab["project_id"], lab)
+            names = {n["name"] for n in nodes}
+            if names != {n["name"] for n in lab["ticket"]["nodes"]}:
+                raise RuntimeError(
+                    "Project node inventory differs from manifest; no automatic repair"
+                )
+            if all(n.get("status") == expected for n in nodes):
+                return nodes
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Devices did not reach {expected}")
+            await asyncio.sleep(1)
+
+    async def validate_topology(self, lab):
+        pid = lab["project_id"]
+        nodes = await self.api("GET", f"projects/{pid}/nodes")
+        specs = {s["name"]: s for s in lab["ticket"]["nodes"]}
+        if len(nodes) != len(specs) or {n["name"] for n in nodes} != set(specs):
+            raise RuntimeError(
+                "Incomplete or foreign project inventory; operator reconciliation required"
+            )
+        if any(n["node_type"] != specs[n["name"]]["kind"] for n in nodes):
+            raise RuntimeError("Device types differ from manifest")
+        names = {n["node_id"]: n["name"] for n in nodes}
+
+        def endpoints(link, actual):
+            if actual:
+                return tuple(
+                    sorted(
+                        (
+                            names.get(e["node_id"], "UNKNOWN"),
+                            e["adapter_number"],
+                            e["port_number"],
+                        )
+                        for e in link["nodes"]
+                    )
+                )
+            return tuple(
+                sorted(
+                    (link[k]["node"], link[k]["adapter"], link[k]["port"])
+                    for k in ("a", "b")
+                )
+            )
+
+        links = await self.api("GET", f"projects/{pid}/links")
+        if sorted(endpoints(l, True) for l in links) != sorted(
+            endpoints(l, False) for l in lab["ticket"]["links"]
+        ):
+            raise RuntimeError(
+                "Project links differ from manifest; refusing automatic rebuild"
+            )
+
+    async def provision(self, lab, node, spec, initial):
+        from api import labs
+
+        deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
+        while True:
+            try:
+                if spec["kind"] == "qemu":
+                    sock = str(labs.QGA_DIR / (node["node_id"] + ".sock"))
+                    await asyncio.to_thread(qga_call, sock, "guest-ping", None, 2)
+                    command = (
+                        "systemctl enable --now serial-getty@ttyS0.service && systemctl is-active --quiet serial-getty@ttyS0.service"
+                        if initial
+                        else "systemctl is-active --quiet serial-getty@ttyS0.service"
+                    )
+                    result = await asyncio.to_thread(exec_sync, sock, command, 20)
+                    if result["exit_code"] != 0:
+                        raise RuntimeError("serial-getty readiness failed")
+                port = node.get("console")
+                if (
+                    node.get("console_type") != "telnet"
+                    or type(port) is not int
+                    or not 1 <= port <= 65535
+                ):
+                    raise RuntimeError("Missing local Telnet console")
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection("127.0.0.1", port), 3
+                )
+                writer.close()
+                await writer.wait_closed()
+                break
+            except (OSError, RuntimeError, ValueError, TimeoutError):
+                if time.monotonic() >= deadline:
+                    raise
+                await asyncio.sleep(1)
+        if initial and spec["kind"] == "iou" and spec.get("provisioning"):
+            from api.cli import run_commands
+
+            await run_commands(port, spec["provisioning"], spec["cli_prompt"])
+            return
+        if initial:
+            for cmd in spec.get("provisioning", []):
+                if spec["kind"] != "qemu":
+                    raise RuntimeError(
+                        "NOT_SUPPORTED: Cisco CLI provisioning requires a verified prompt/command adapter"
+                    )
+                result = await asyncio.to_thread(
+                    exec_sync, sock, cmd["command"], cmd["timeout_seconds"]
+                )
+                if result["exit_code"] != 0:
+                    raise RuntimeError("Mandatory provisioning command failed")
+
+    async def run(self, op, lab):
+        pid = lab["project_id"]
+        try:
+            version = await self.api("GET", "version")
+            if version.get("version") != "2.2.61":
+                raise RuntimeError("This lifecycle requires GNS3 2.2.61")
+            if op["action"] == "wipe":
+                nodes = await self.api("GET", f"projects/{pid}/nodes")
+                if not any(n["node_id"] == op["node_id"] for n in nodes):
+                    raise RuntimeError("Node does not belong to project")
+                op.update(
+                    status="NOT_SUPPORTED",
+                    error={
+                        "code": "NOT_SUPPORTED",
+                        "message": "No verified atomic reset adapter for QEMU overlays / IOL NVRAM; no devices or files modified",
+                    },
+                )
+                self.update(
+                    lab, op["previous_state"], "wipe_not_supported", error=op["error"]
+                )
+                return
+            if op["action"] == "stop":
+                await self.api("POST", f"projects/{pid}/nodes/stop", {})
+                await self.wait_nodes(lab, "stopped")
+                self.update(lab, "STOPPED", "stopped", progress=100)
+                handle = self.project_locks.pop(pid, None)
+                if handle:
+                    handle.close()
+            else:
+                from api.labs import create_project
+
+                # Existing projects are opened, never rebuilt. Interrupted partial creations fail inventory validation.
+                projects = await self.api("GET", "projects")
+                if (
+                    op["action"] == "resume" or lab.get("creation_complete")
+                ) and not any(p["project_id"] == pid for p in projects):
+                    raise RuntimeError(
+                        "Saved project is missing; refusing to recreate student disks"
+                    )
+                for project in projects:
+                    if (
+                        project["project_id"] != pid
+                        and project.get("status") != "closed"
+                    ):
+                        other_nodes = await self.api(
+                            "GET", f"projects/{project['project_id']}/nodes"
+                        )
+                        if any(n.get("status") == "started" for n in other_nodes):
+                            raise RuntimeError(
+                                "Another GNS3 project is running in this slot"
+                            )
+                result = await create_project(
+                    self.request, DeployTicket.model_validate(lab["ticket"])
+                )
+                initial = result["result"] == "created"
+                if initial:
+                    lab["creation_complete"] = True
+                    self.save("lab", pid, lab)
+                if not initial and not lab.get("provisioned"):
+                    raise RuntimeError(
+                        "Provisioning completion is unknown; refusing to skip or replay commands. Operator reconciliation required"
+                    )
+                await self.validate_topology(lab)
+                self.update(lab, "STARTING", "start_devices", progress=20)
+                await self.api("POST", f"projects/{pid}/nodes/start", {})
+                nodes = await self.wait_nodes(lab, "started")
+                self.update(lab, "PROVISIONING", "service_readiness", progress=50)
+                specs = {n["name"]: n for n in lab["ticket"]["nodes"]}
+                for i, node in enumerate(nodes):
+                    self.update(
+                        lab,
+                        "PROVISIONING",
+                        node["name"],
+                        active_node_id=node["node_id"],
+                    )
+                    await self.provision(lab, node, specs[node["name"]], initial)
+                    self.update(
+                        lab,
+                        "PROVISIONING",
+                        node["name"],
+                        progress=50 + int(49 * (i + 1) / len(nodes)),
+                    )
+                await self.wait_nodes(lab, "started")
+                lab["provisioned"] = True
+                self.update(lab, "READY", "ready", progress=100, active_node_id=None)
+            op["status"] = "SUCCEEDED"
+        except Exception as exc:  # noqa: BLE001 - persist failures at the background-task boundary.
+            error = {"code": type(exc).__name__, "message": str(exc)}
+            self.update(lab, "FAILED", "operation_failed", error=error)
+            op.update(status="FAILED", error=error)
+        finally:
+            op.update(
+                stage=lab["stage"],
+                progress=lab.get("progress", 0),
+                nodes=lab.get("nodes", []),
+            )
+            self.save("operation", op["operation_id"], op)
+
+    async def watch(self):
+        while True:
+            await asyncio.sleep(float(os.getenv("SLOT_MONITOR_INTERVAL", "10")))
+            for lab in self.all("lab"):
+                if lab["state"] != "READY":
+                    continue
+                try:
+                    nodes = await self.api("GET", f"projects/{lab['project_id']}/nodes")
+                    if {n["name"] for n in nodes} != {
+                        n["name"] for n in lab["ticket"]["nodes"]
+                    } or any(n.get("status") != "started" for n in nodes):
+                        raise RuntimeError("Required node stopped or missing")
+                    specs = {s["name"]: s for s in lab["ticket"]["nodes"]}
+                    for node in nodes:
+                        await self.provision(lab, node, specs[node["name"]], False)
+                    # A request may have started an operation while checks were awaiting IO.
+                    current = self.get("lab", lab["project_id"])
+                    if current["state"] == "READY" and current.get(
+                        "generation"
+                    ) == lab.get("generation"):
+                        lab["nodes"] = nodes
+                        self.save("lab", lab["project_id"], lab)
+                except Exception as exc:  # noqa: BLE001 - persist failures at the background-task boundary.
+                    current = self.get("lab", lab["project_id"])
+                    if current["state"] == "READY" and current.get(
+                        "generation"
+                    ) == lab.get("generation"):
+                        self.update(
+                            lab,
+                            "FAILED",
+                            "monitor",
+                            error={"code": type(exc).__name__, "message": str(exc)},
+                        )
+
+    async def close(self):
+        self.monitor.cancel()
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(self.monitor, *self.tasks, return_exceptions=True)
+        for handle in self.project_locks.values():
+            handle.close()
+        self.db.close()
+        self.lock.close()

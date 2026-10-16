@@ -1,12 +1,20 @@
 """Initial ticket format. A published lab template will eventually generate this ticket."""
+
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 
+class ProvisionCommand(BaseModel):
+    command: str = Field(min_length=1, max_length=8192)
+    timeout_seconds: int = Field(default=20, ge=1, le=120)
+
+
 class NodeSpec(BaseModel):
-    name: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    name: str = Field(
+        min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    )
     kind: Literal["qemu", "iou", "vpcs"]
     x: int = 0
     y: int = 0
@@ -16,15 +24,32 @@ class NodeSpec(BaseModel):
     adapters: int = Field(default=1, ge=1, le=16)  # QEMU only
     ethernet_adapters: int = Field(default=1, ge=1, le=16)  # IOL: 4 ports per adapter
     disk_interface: Literal["virtio", "ide", "sata", "scsi"] = "virtio"
-    qga: bool = True
+    cli_prompt: str = Field(
+        default=r"(?m)^[^\r\n]+[>#]\s*$", min_length=1, max_length=256
+    )
+    provisioning: list[ProvisionCommand] = Field(default_factory=list)
+    qga: Literal[True] = True
     l1_keepalives: bool = True
     startup_script: str = ""  # VPCS only
 
     @model_validator(mode="after")
     def image_is_safe(self):
+        if self.kind == "iou":
+            import re
+
+            try:
+                pattern = re.compile(self.cli_prompt.encode())
+            except re.error as exc:
+                raise ValueError("Invalid CLI prompt pattern") from exc
+            if pattern.search(b""):
+                raise ValueError("CLI prompt must not match an empty response")
+            if any("\n" in c.command or "\r" in c.command for c in self.provisioning):
+                raise ValueError("IOL commands must be single lines")
         if self.kind in ("qemu", "iou") and not self.image:
             raise ValueError(f"image is required for {self.kind}")
-        if self.image and (self.image in (".", "..") or "/" in self.image or "\\" in self.image):
+        if self.image and (
+            self.image in (".", "..") or "/" in self.image or "\\" in self.image
+        ):
             raise ValueError("image must be a filename, not a path")
         return self
 
@@ -43,7 +68,7 @@ class LinkSpec(BaseModel):
 class DeployTicket(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     project_id: UUID | None = None  # Supply a stable UUID for idempotent resume
-    auto_start: bool = False
+    auto_start: Literal[True] = True
     nodes: list[NodeSpec] = Field(min_length=1, max_length=100)
     links: list[LinkSpec] = Field(default_factory=list)
 
@@ -68,7 +93,9 @@ class DeployTicket(BaseModel):
                 else:
                     valid = ep.adapter == 0 and ep.port == 0
                 if not valid:
-                    raise ValueError(f"Invalid port: {ep.node} adapter={ep.adapter} port={ep.port}")
+                    raise ValueError(
+                        f"Invalid port: {ep.node} adapter={ep.adapter} port={ep.port}"
+                    )
                 port_key = (ep.node, ep.adapter, ep.port)
                 if port_key in used:
                     raise ValueError(f"Port used more than once: {port_key}")
@@ -79,3 +106,13 @@ class DeployTicket(BaseModel):
 class ExecTicket(BaseModel):
     command: str = Field(min_length=1, max_length=8192)
     timeout_seconds: int = Field(default=20, ge=1, le=120)
+
+
+class WipeTicket(BaseModel):
+    confirm: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def explicit_confirmation(self):
+        if self.confirm is not True:
+            raise ValueError("Wipe requires explicit confirm: true")
+        return self
