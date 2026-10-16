@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api.client import call
+from api.client import call, get_lifecycle
 from api.models import DeployTicket, NodeSpec
 
 router = APIRouter(prefix="/v1/labs", tags=["labs"])
@@ -148,25 +148,25 @@ async def topology(request: Request, project_id: UUID):
 
 @router.post("/deploy", status_code=202)
 async def deploy(request: Request, ticket: DeployTicket):
-    return request.app.state.lifecycle.submit(
+    return get_lifecycle(request).submit(
         "deploy", ticket=ticket, key=request.headers.get("Idempotency-Key")
     )
 
 
 @router.get("/{project_id}/status")
 async def lab_status(request: Request, project_id: UUID):
-    return request.app.state.lifecycle.status(str(project_id))
+    return get_lifecycle(request).status(str(project_id))
 
 
 @router.post("/{project_id}/resume", status_code=202)
 async def resume(request: Request, project_id: UUID):
-    return request.app.state.lifecycle.submit(
+    return get_lifecycle(request).submit(
         "resume", str(project_id), key=request.headers.get("Idempotency-Key")
     )
 
 
 @router.post("/{project_id}/stop", status_code=202)
 async def stop(request: Request, project_id: UUID):
-    return request.app.state.lifecycle.submit(
+    return get_lifecycle(request).submit(
         "stop", str(project_id), key=request.headers.get("Idempotency-Key")
     )

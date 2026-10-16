@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api.client import call
+from api.client import call, get_lifecycle
 from api.models import DeployTicket
 from api.nodes import exec_sync, qga_call
 
@@ -24,7 +24,7 @@ TRANSITIONS = {
     "PROVISIONING": {"PROVISIONING", "READY", "FAILED"},
     "READY": {"DEPLOYING", "STOPPING", "WIPING", "FAILED"},
     "STOPPING": {"STOPPED", "FAILED"},
-    "STOPPED": {"DEPLOYING", "STOPPING"},
+    "STOPPED": {"DEPLOYING", "STOPPING", "FAILED"},
     "WIPING": {"READY", "FAILED"},
     "FAILED": {"DEPLOYING", "STOPPING", "FAILED"},
 }
@@ -34,13 +34,14 @@ router = APIRouter(prefix="/v1/operations", tags=["operations"])
 
 @router.get("/{operation_id}")
 async def operation(request: Request, operation_id: str):
-    return request.app.state.lifecycle.operation(operation_id)
+    return get_lifecycle(request).operation(operation_id)
 
 
 class Lifecycle:
     def __init__(self, app):
         self.request = SimpleNamespace(app=app)
         root = Path(os.getenv("SLOT_STATE_DIR", "/var/lib/lab-slot"))
+        self.root = root
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock = (root / "service.lock").open("a")
         try:
@@ -48,38 +49,44 @@ class Lifecycle:
         except OSError:
             self.lock.close()
             raise
-        self.db = sqlite3.connect(root / "state.sqlite3")
-        self.db.execute("PRAGMA synchronous=FULL")
-        self.db.execute(
-            "CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT, PRIMARY KEY(kind,id))"
-        )
-        self.tasks = set()
-        self.project_locks = {}
-        for op in self.all("operation"):
-            if op["status"] == "RUNNING":
-                op.update(
-                    status="FAILED",
-                    error={
-                        "code": "SERVICE_RESTART",
-                        "message": "Interrupted; inspect GNS3 and explicitly resume",
-                    },
-                )
-                self.save("operation", op["operation_id"], op)
-                lab = self.get("lab", op["project_id"])
-                if lab:
-                    self.update(lab, "FAILED", "interrupted", error=op["error"])
-        for lab in self.all("lab"):
-            if lab["state"] not in ("STOPPED", "FAILED"):
-                self.update(
-                    lab,
-                    "FAILED",
-                    "restart_requires_resume",
-                    error={
-                        "code": "SERVICE_RESTART",
-                        "message": "Explicit resume required to reacquire lock and recheck readiness",
-                    },
-                )
-        self.monitor = asyncio.create_task(self.watch())
+        try:
+            self.db = sqlite3.connect(root / "state.sqlite3", timeout=1)
+            self.db.execute("PRAGMA synchronous=FULL")
+            self.db.execute(
+                "CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT, PRIMARY KEY(kind,id))"
+            )
+            self.tasks = set()
+            self.project_locks = {}
+            for op in self.all("operation"):
+                if op["status"] == "RUNNING":
+                    op.update(
+                        status="FAILED",
+                        error={
+                            "code": "SERVICE_RESTART",
+                            "message": "Interrupted; inspect GNS3 and explicitly resume",
+                        },
+                    )
+                    self.save("operation", op["operation_id"], op)
+                    lab = self.get("lab", op["project_id"])
+                    if lab:
+                        self.update(lab, "FAILED", "interrupted", error=op["error"])
+            for lab in self.all("lab"):
+                if lab["state"] not in ("STOPPED", "FAILED"):
+                    self.update(
+                        lab,
+                        "FAILED",
+                        "restart_requires_resume",
+                        error={
+                            "code": "SERVICE_RESTART",
+                            "message": "Explicit resume required to reacquire lock and recheck readiness",
+                        },
+                    )
+            self.monitor = asyncio.create_task(self.watch())
+        except BaseException:
+            if hasattr(self, "db"):
+                self.db.close()
+            self.lock.close()
+            raise
 
     def get(self, kind, ident):
         row = self.db.execute(
@@ -116,18 +123,42 @@ class Lifecycle:
         # Do not expose trusted provisioning commands in status.
         return {k: v for k, v in lab.items() if k != "ticket"}
 
+    @staticmethod
+    def node_summary(nodes):
+        fields = ("node_id", "name", "node_type", "status")
+        return [{k: n[k] for k in fields if k in n} for n in nodes]
+
+    def present(self, op, *, replayed=False, compact=False):
+        lab = self.get("lab", op["project_id"])
+        current = (
+            {
+                "state": lab["state"],
+                "stage": lab.get("stage"),
+                "updated_at": lab.get("updated_at"),
+            }
+            if lab
+            else None
+        )
+        result = {
+            k: op.get(k) for k in ("operation_id", "project_id", "status", "action")
+        }
+        result.update(replayed=replayed, laboratory=current)
+        if not compact:
+            source = lab if lab and op["status"] == "RUNNING" else op
+            result.update(
+                stage=source.get("stage"),
+                progress=source.get("progress", 0),
+                error=op.get("error"),
+                nodes=self.node_summary(source.get("nodes", [])),
+                updated_at=op.get("updated_at"),
+            )
+        return result
+
     def operation(self, oid):
         op = self.get("operation", oid)
         if not op:
             raise HTTPException(404, "Unknown operation")
-        lab = self.get("lab", op["project_id"])
-        if lab and op["status"] == "RUNNING":
-            op.update(
-                stage=lab["stage"],
-                progress=lab.get("progress", 0),
-                nodes=lab.get("nodes", []),
-            )
-        return op
+        return self.present(op)
 
     def submit(self, action, pid=None, ticket=None, node_id=None, key=None):
         ticket_data = ticket.model_dump(mode="json") if ticket else None
@@ -139,13 +170,42 @@ class Lifecycle:
             if op["key"] == dedup:
                 if op["fingerprint"] != fingerprint:
                     raise HTTPException(
-                        409, "Idempotency-Key reused with different request"
+                        409,
+                        {
+                            "code": "IDEMPOTENCY_KEY_CONFLICT",
+                            "message": "Idempotency-Key reused with different request",
+                        },
                     )
                 # Explicit keys persist; implicit retries deduplicate running operations only.
                 if key or op["status"] == "RUNNING":
-                    return op
+                    lab_now = self.get("lab", op["project_id"])
+                    expected = {
+                        "deploy": "READY",
+                        "resume": "READY",
+                        "stop": "STOPPED",
+                    }.get(op["action"])
+                    if (
+                        op["status"] == "SUCCEEDED"
+                        and expected
+                        and (not lab_now or lab_now["state"] != expected)
+                    ):
+                        raise HTTPException(
+                            409,
+                            {
+                                "code": "STALE_IDEMPOTENCY_KEY",
+                                "message": "Historical success no longer satisfies its postcondition; use a new key for an intentional operation",
+                                **self.present(op, replayed=True, compact=True),
+                            },
+                        )
+                    return self.present(op, replayed=True, compact=True)
         if any(op["status"] == "RUNNING" for op in self.all("operation")):
-            raise HTTPException(409, "Slot operation in progress")
+            raise HTTPException(
+                409,
+                {
+                    "code": "OPERATION_IN_PROGRESS",
+                    "message": "Slot operation in progress",
+                },
+            )
         pid = pid or str(ticket.project_id or uuid4())
         lab = self.get("lab", pid)
         for other in self.all("lab"):
@@ -170,8 +230,23 @@ class Lifecycle:
                 "progress": 0,
                 "error": None,
             }
+        next_state = {
+            "deploy": "DEPLOYING",
+            "resume": "DEPLOYING",
+            "stop": "STOPPING",
+            "wipe": "WIPING",
+        }[action]
+        if next_state not in TRANSITIONS.get(lab.get("state"), set()):
+            raise HTTPException(
+                409,
+                {
+                    "code": "INVALID_TRANSITION",
+                    "message": "Current laboratory state does not allow this operation",
+                },
+            )
         # Shared project directory lock coordinates cooperating Slot services on CephFS.
-        if pid not in self.project_locks:
+        newly_locked = pid not in self.project_locks
+        if newly_locked:
             root = Path(
                 os.getenv("SLOT_PROJECT_LOCK_DIR", "/opt/gns3/projects/.slot-locks")
             )
@@ -179,23 +254,15 @@ class Lifecycle:
             handle = (root / (pid + ".lock")).open("a")
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            except OSError as exc:
                 handle.close()
-                raise HTTPException(409, "Project locked by another slot")
+                if isinstance(exc, BlockingIOError):
+                    raise HTTPException(409, "Project locked by another slot") from exc
+                raise
             self.project_locks[pid] = handle
         previous_state = lab.get("state", "FAILED")
         lab["generation"] = lab.get("generation", 0) + 1
-        self.update(
-            lab,
-            {
-                "deploy": "DEPLOYING",
-                "resume": "DEPLOYING",
-                "stop": "STOPPING",
-                "wipe": "WIPING",
-            }[action],
-            action,
-            error=None,
-        )
+        lab.update(state=next_state, stage=action, error=None, updated_at=time.time())
         op = {
             "operation_id": str(uuid4()),
             "project_id": pid,
@@ -207,11 +274,25 @@ class Lifecycle:
             "error": None,
             "previous_state": previous_state,
         }
-        self.save("operation", op["operation_id"], op)
+        op["updated_at"] = time.time()
+        try:
+            with self.db:
+                for kind, ident, data in (
+                    ("lab", pid, lab),
+                    ("operation", op["operation_id"], op),
+                ):
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO records VALUES (?,?,?)",
+                        (kind, ident, json.dumps(data)),
+                    )
+        except BaseException:
+            if newly_locked:
+                self.project_locks.pop(pid).close()
+            raise
         task = asyncio.create_task(self.run(op, lab))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
-        return dict(op)
+        return self.present(op, compact=True)
 
     async def api(self, method, path, payload=None):
         return await call(self.request, method, path, payload)
@@ -417,7 +498,7 @@ class Lifecycle:
             op.update(
                 stage=lab["stage"],
                 progress=lab.get("progress", 0),
-                nodes=lab.get("nodes", []),
+                nodes=self.node_summary(lab.get("nodes", [])),
             )
             self.save("operation", op["operation_id"], op)
 
