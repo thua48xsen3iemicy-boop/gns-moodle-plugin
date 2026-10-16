@@ -1,0 +1,25 @@
+[Unit]
+Description=Lab Slot FastAPI gateway for GNS3
+Documentation=man:systemd.service(5)
+Wants=network-online.target
+Requires=gns3.service
+After=network-online.target gns3.service
+ConditionPathExists=/srv/gns3-ro/slot/main.py
+
+[Service]
+Type=exec
+User=gns3
+Group=gns3
+WorkingDirectory=/srv/gns3-ro/slot
+EnvironmentFile=/etc/lab-slot/slot.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/gns3-ro/slot/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8080 --workers 1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

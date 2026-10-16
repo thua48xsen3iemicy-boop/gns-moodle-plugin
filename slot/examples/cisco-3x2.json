@@ -1,0 +1,26 @@
+{
+  "name": "CISCO-3X2-DEBIAN",
+  "auto_start": false,
+  "nodes": [
+    {"name": "SW1", "kind": "iou", "image": "x86_64_crb_linux_l2-adventerprisek9-ms.bin", "ram_mb": 1024, "x": -280, "y": -100},
+    {"name": "SW2", "kind": "iou", "image": "x86_64_crb_linux_l2-adventerprisek9-ms.bin", "ram_mb": 1024, "x": 0, "y": -160},
+    {"name": "SW3", "kind": "iou", "image": "x86_64_crb_linux_l2-adventerprisek9-ms.bin", "ram_mb": 1024, "x": 280, "y": -100},
+    {"name": "D1", "kind": "qemu", "image": "debian12.qcow2", "ram_mb": 768, "x": -400, "y": 130},
+    {"name": "D2", "kind": "qemu", "image": "debian12.qcow2", "ram_mb": 768, "x": -280, "y": 130},
+    {"name": "D3", "kind": "qemu", "image": "debian12.qcow2", "ram_mb": 768, "x": -80, "y": 130},
+    {"name": "D4", "kind": "qemu", "image": "debian12.qcow2", "ram_mb": 768, "x": 80, "y": 130},
+    {"name": "D5", "kind": "qemu", "image": "debian12.qcow2", "ram_mb": 768, "x": 280, "y": 130},
+    {"name": "D6", "kind": "qemu", "image": "debian12.qcow2", "ram_mb": 768, "x": 400, "y": 130}
+  ],
+  "links": [
+    {"a": {"node": "SW1", "port": 0}, "b": {"node": "SW2", "port": 0}},
+    {"a": {"node": "SW2", "port": 1}, "b": {"node": "SW3", "port": 0}},
+    {"a": {"node": "SW3", "port": 1}, "b": {"node": "SW1", "port": 1}},
+    {"a": {"node": "SW1", "port": 2}, "b": {"node": "D1"}},
+    {"a": {"node": "SW1", "port": 3}, "b": {"node": "D2"}},
+    {"a": {"node": "SW2", "port": 2}, "b": {"node": "D3"}},
+    {"a": {"node": "SW2", "port": 3}, "b": {"node": "D4"}},
+    {"a": {"node": "SW3", "port": 2}, "b": {"node": "D5"}},
+    {"a": {"node": "SW3", "port": 3}, "b": {"node": "D6"}}
+  ]
+}
