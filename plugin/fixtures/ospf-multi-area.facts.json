@@ -1,0 +1,601 @@
+{
+  "schema": "gns3lab.facts/1",
+  "generated_at": "2026-10-16T10:00:30Z",
+  "ttl": 60,
+  "nodes": {
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000001": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "nat0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "192.168.122.1/24"
+          ]
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000002": {
+      "status": "started",
+      "router_id": "1.1.1.1",
+      "interfaces": [
+        {
+          "name": "Gi0/0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "192.168.122.10/24"
+          ]
+        },
+        {
+          "name": "Gi0/1",
+          "kind": "physical",
+          "port": {
+            "adapter": 1,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.12.1/30"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        },
+        {
+          "name": "Gi0/2",
+          "kind": "physical",
+          "port": {
+            "adapter": 2,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.13.1/30"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        },
+        {
+          "name": "Gi0/3",
+          "kind": "physical",
+          "port": {
+            "adapter": 3,
+            "port": 0
+          },
+          "admin": "down",
+          "oper": "down"
+        },
+        {
+          "name": "Lo0",
+          "kind": "loopback",
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "1.1.1.1/32"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        }
+      ],
+      "adjacencies": [
+        {
+          "proto": "ospf",
+          "peer_router_id": "2.2.2.2",
+          "iface": "Gi0/1",
+          "area": "0",
+          "state": "full"
+        },
+        {
+          "proto": "ospf",
+          "peer_router_id": "3.3.3.3",
+          "iface": "Gi0/2",
+          "area": "0",
+          "state": "full"
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000003": {
+      "status": "started",
+      "router_id": "2.2.2.2",
+      "interfaces": [
+        {
+          "name": "Gi0/0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.12.2/30"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        },
+        {
+          "name": "Gi0/1",
+          "kind": "physical",
+          "port": {
+            "adapter": 1,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.23.1/30"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        },
+        {
+          "name": "Gi0/2",
+          "kind": "physical",
+          "port": {
+            "adapter": 2,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up"
+        },
+        {
+          "name": "Gi0/2.10",
+          "kind": "subif",
+          "parent": "Gi0/2",
+          "dot1q": 10,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.1.10.1/24"
+          ],
+          "ospf": {
+            "area": "1",
+            "passive": true
+          }
+        },
+        {
+          "name": "Gi0/2.99",
+          "kind": "subif",
+          "parent": "Gi0/2",
+          "dot1q": 99,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.1.99.1/24"
+          ],
+          "ospf": {
+            "area": "1",
+            "passive": true
+          }
+        },
+        {
+          "name": "Gi0/3",
+          "kind": "physical",
+          "port": {
+            "adapter": 3,
+            "port": 0
+          },
+          "admin": "down",
+          "oper": "down"
+        },
+        {
+          "name": "Lo0",
+          "kind": "loopback",
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "2.2.2.2/32"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        }
+      ],
+      "adjacencies": [
+        {
+          "proto": "ospf",
+          "peer_router_id": "1.1.1.1",
+          "iface": "Gi0/0",
+          "area": "0",
+          "state": "full"
+        },
+        {
+          "proto": "ospf",
+          "peer_router_id": "3.3.3.3",
+          "iface": "Gi0/1",
+          "area": "0",
+          "state": "full"
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000004": {
+      "status": "started",
+      "router_id": "3.3.3.3",
+      "interfaces": [
+        {
+          "name": "Gi0/0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.13.2/30"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        },
+        {
+          "name": "Gi0/1",
+          "kind": "physical",
+          "port": {
+            "adapter": 1,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.23.2/30"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        },
+        {
+          "name": "Gi0/2",
+          "kind": "physical",
+          "port": {
+            "adapter": 2,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up"
+        },
+        {
+          "name": "Gi0/2.20",
+          "kind": "subif",
+          "parent": "Gi0/2",
+          "dot1q": 20,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.2.20.1/24"
+          ],
+          "ospf": {
+            "area": "2",
+            "passive": true
+          }
+        },
+        {
+          "name": "Gi0/2.30",
+          "kind": "subif",
+          "parent": "Gi0/2",
+          "dot1q": 30,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.2.30.1/24"
+          ],
+          "ospf": {
+            "area": "2",
+            "passive": true
+          }
+        },
+        {
+          "name": "Gi0/3",
+          "kind": "physical",
+          "port": {
+            "adapter": 3,
+            "port": 0
+          },
+          "admin": "down",
+          "oper": "down"
+        },
+        {
+          "name": "Lo0",
+          "kind": "loopback",
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "3.3.3.3/32"
+          ],
+          "ospf": {
+            "area": "0"
+          }
+        }
+      ],
+      "adjacencies": [
+        {
+          "proto": "ospf",
+          "peer_router_id": "1.1.1.1",
+          "iface": "Gi0/0",
+          "area": "0",
+          "state": "full"
+        },
+        {
+          "proto": "ospf",
+          "peer_router_id": "2.2.2.2",
+          "iface": "Gi0/1",
+          "area": "0",
+          "state": "full"
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000005": {
+      "status": "started",
+      "vlans": [
+        {
+          "id": 1,
+          "name": "default"
+        },
+        {
+          "id": 10,
+          "name": "USERS"
+        },
+        {
+          "id": 99,
+          "name": "MGMT"
+        }
+      ],
+      "interfaces": [
+        {
+          "name": "e0/0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "trunk",
+            "allowed": [
+              10,
+              99
+            ],
+            "native": 1
+          },
+          "stp": {
+            "state": "forwarding",
+            "role": "designated"
+          }
+        },
+        {
+          "name": "e0/1",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 1
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "access",
+            "vlan": 10
+          },
+          "stp": {
+            "state": "forwarding",
+            "role": "designated"
+          }
+        },
+        {
+          "name": "e0/2",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 2
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "access",
+            "vlan": 10
+          },
+          "stp": {
+            "state": "forwarding",
+            "role": "designated"
+          }
+        },
+        {
+          "name": "e0/3",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 3
+          },
+          "admin": "down",
+          "oper": "down",
+          "switchport": {
+            "mode": "access",
+            "vlan": 1
+          }
+        },
+        {
+          "name": "Vlan99",
+          "kind": "svi",
+          "vlan": 99,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.1.99.2/24"
+          ]
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000006": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "Ethernet0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "trunk",
+            "allowed": "all",
+            "native": 1
+          }
+        },
+        {
+          "name": "Ethernet1",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 1
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "access",
+            "vlan": 20
+          }
+        },
+        {
+          "name": "Ethernet2",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 2
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "access",
+            "vlan": 20
+          }
+        },
+        {
+          "name": "Ethernet3",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 3
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "trunk",
+            "allowed": "all",
+            "native": 1
+          }
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000007": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "e0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.1.10.11/24"
+          ],
+          "gateway": "10.1.10.1"
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000008": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "e0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.1.10.12/24"
+          ],
+          "gateway": "10.1.10.1"
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000009": {
+      "status": "suspended"
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000010": {
+      "status": "stopped",
+      "interfaces": [
+        {
+          "name": "e0",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "down"
+        }
+      ]
+    },
+    "6b1f3c2e-4a7d-4e5b-9c10-000000000011": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "ens18",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up"
+        },
+        {
+          "name": "vmbr0.20",
+          "kind": "subif",
+          "parent": "ens18",
+          "dot1q": 20,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.2.20.5/24"
+          ],
+          "gateway": "10.2.20.1"
+        },
+        {
+          "name": "vmbr0.30",
+          "kind": "subif",
+          "parent": "ens18",
+          "dot1q": 30,
+          "admin": "up",
+          "oper": "up"
+        }
+      ]
+    }
+  }
+}
