@@ -1,0 +1,875 @@
+<title>Консоль лабы</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* xterm.js 5.5.0 base styles */
+.xterm{cursor:text;position:relative;user-select:none;-ms-user-select:none;-webkit-user-select:none;}.xterm.focus,.xterm:focus{outline:none;}.xterm .xterm-helpers{position:absolute;top:0;z-index:5;}.xterm .xterm-helper-textarea{padding:0;border:0;margin:0;position:absolute;opacity:0;left:-9999em;top:0;width:0;height:0;z-index:-5;white-space:nowrap;overflow:hidden;resize:none;}.xterm .composition-view{background:#000;color:#FFF;display:none;position:absolute;white-space:nowrap;z-index:1;}.xterm .composition-view.active{display:block;}.xterm .xterm-viewport{background-color:#000;overflow-y:scroll;cursor:default;position:absolute;right:0;left:0;top:0;bottom:0;}.xterm .xterm-screen{position:relative;}.xterm .xterm-screen canvas{position:absolute;left:0;top:0;}.xterm .xterm-scroll-area{visibility:hidden;}.xterm-char-measure-element{display:inline-block;visibility:hidden;position:absolute;top:0;left:-9999em;line-height:normal;}.xterm.enable-mouse-events{cursor:default;}.xterm.xterm-cursor-pointer,.xterm .xterm-cursor-pointer{cursor:pointer;}.xterm.column-select.focus{cursor:crosshair;}.xterm .xterm-accessibility:not(.debug),.xterm .xterm-message{position:absolute;left:0;top:0;bottom:0;right:0;z-index:10;color:transparent;pointer-events:none;}.xterm .xterm-accessibility-tree:not(.debug) *::selection{color:transparent;}.xterm .xterm-accessibility-tree{user-select:text;white-space:pre;}.xterm .live-region{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;}.xterm-dim{opacity:1 !important;}.xterm-underline-1{text-decoration:underline;}.xterm-underline-2{text-decoration:double underline;}.xterm-underline-3{text-decoration:wavy underline;}.xterm-underline-4{text-decoration:dotted underline;}.xterm-underline-5{text-decoration:dashed underline;}.xterm-overline{text-decoration:overline;}.xterm-overline.xterm-underline-1{text-decoration:overline underline;}.xterm-overline.xterm-underline-2{text-decoration:overline double underline;}.xterm-overline.xterm-underline-3{text-decoration:overline wavy underline;}.xterm-overline.xterm-underline-4{text-decoration:overline dotted underline;}.xterm-overline.xterm-underline-5{text-decoration:overline dashed underline;}.xterm-strikethrough{text-decoration:line-through;}.xterm-screen .xterm-decoration-container .xterm-decoration{z-index:6;position:absolute;}.xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer{z-index:7;}.xterm-decoration-overview-ruler{z-index:8;position:absolute;top:0;right:0;pointer-events:none;}.xterm-decoration-top{z-index:2;position:relative;}
+/* Layout: one-screen console — device tabs on top, dark terminal with a key strip and snippet strip, side panel with live port state (stacks below on phones) */
+:root{
+  --bg:#E8ECEF; --panel:#FFFFFF; --fg:#16212B; --muted:#57656F; --line:#CAD2D9; --chip:#E4EAEF;
+  --accent:#1F6FC5; --accent-ink:#FFFFFF; --ok:#1E8E4F; --warn:#AD7F08; --bad:#C8423A;
+  --t-bg:#0F1720; --t-fg:#D6DEE5; --t-dim:#7D8B97; --t-bar:#15202A; --t-line:#26333F; --t-key:#1F2C38; --t-keyhi:#2C3D4C; --t-accent:#5AA8F2;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1418; --panel:#172129; --fg:#E2E8ED; --muted:#94A3AF; --line:#2A3742; --chip:#21303A;
+    --accent:#5AA8F2; --accent-ink:#0E1418; --ok:#3CC47A; --warn:#E0B13A; --bad:#EE6B62; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1418; --panel:#172129; --fg:#E2E8ED; --muted:#94A3AF; --line:#2A3742; --chip:#21303A;
+  --accent:#5AA8F2; --accent-ink:#0E1418; --ok:#3CC47A; --warn:#E0B13A; --bad:#EE6B62; color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden}
+.app{height:var(--app-h,100%);display:flex;flex-direction:column}
+
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-bottom:1px solid var(--line)}
+.ttl{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
+.ttl h1{margin:0;font:600 19px/1.2 var(--display)}
+.tabs{display:flex;gap:3px;padding:3px;background:var(--chip);border-radius:8px}
+.tab{position:relative;border:0;background:transparent;color:var(--muted);font:600 14px var(--display);padding:6px 16px;border-radius:6px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--panel);color:var(--fg);box-shadow:0 1px 2px rgb(0 0 0 / .14)}
+.tab .dot{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.btn{font:500 13px/1 var(--body);height:32px;padding:0 12px;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:focus-visible,.tab:focus-visible,.k:focus-visible,.port:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sub{margin:0;font-size:12.5px;color:var(--muted)}
+
+.work{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 320px}
+.termcol{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--t-bg)}
+.obsbar{margin:0;padding:7px 12px;font-size:12.5px;color:var(--t-bg);background:var(--t-accent)}
+.termhost{flex:1;min-height:0;position:relative}
+.term{position:absolute;top:10px;right:4px;bottom:6px;left:max(12px,env(safe-area-inset-left,0px))}
+.strip{display:flex;gap:6px;overflow-x:auto;align-items:center;padding-block:7px;
+  padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));
+  background:var(--t-bar);border-top:1px solid var(--t-line);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.strip::-webkit-scrollbar{display:none}
+.strip .lbl{flex:none;font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--t-dim);padding-right:2px}
+.k{flex:none;min-width:44px;height:40px;padding:0 12px;border:1px solid var(--t-line);border-radius:7px;background:var(--t-key);color:var(--t-fg);
+  font:500 14px var(--mono);cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.k:hover{background:var(--t-keyhi)}
+.k:active{transform:translateY(1px)}
+.k[aria-pressed="true"]{background:var(--t-accent);border-color:var(--t-accent);color:var(--t-bg)}
+.k:disabled{opacity:.4;cursor:not-allowed}
+.k.w{font-family:var(--body);font-size:13px}
+.k.snip{height:34px;background:transparent;border-style:dashed;color:var(--t-accent);font-size:12.5px}
+
+.side{background:var(--panel);border-left:1px solid var(--line);overflow:auto;min-height:0;
+  padding-block:16px;padding-left:16px;padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+.side h3,.side summary{margin:0;font:600 15px var(--display);display:flex;align-items:center;gap:8px}
+.side summary{cursor:pointer;list-style:none}
+.side summary::-webkit-details-marker{display:none}
+.side summary::after{content:"";margin-left:auto;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .15s}
+.side details[open] > summary::after{transform:rotate(45deg)}
+.count{font:500 11px var(--mono);background:var(--chip);color:var(--muted);padding:1px 6px;border-radius:4px}
+.ports{display:flex;flex-direction:column;gap:1px;margin-top:8px}
+.port{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:center;width:100%;text-align:left;padding:8px;border:0;border-radius:7px;background:transparent;color:var(--fg);font:inherit;cursor:pointer}
+.port:hover{background:var(--chip)}
+.port.flash{animation:flash 1.6s ease}
+@keyframes flash{0%,45%{background:color-mix(in srgb,var(--accent) 24%,transparent)}100%{background:transparent}}
+.port .nm{font:500 13.5px var(--mono)}
+.port .ip{font:400 12px var(--mono);color:var(--muted);text-align:right}
+.port .peer{grid-column:2/4;font-size:12px;color:var(--muted)}
+.pill{font:500 11px var(--mono);padding:2px 7px;border-radius:10px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.pill.up{color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,transparent)}
+.pill.admin{color:var(--bad);background:color-mix(in srgb,var(--bad) 13%,transparent)}
+.nb{display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:13px}
+.nb div{display:flex;gap:10px;align-items:baseline}
+.nb .mono{font:500 13px var(--mono)}
+.muted{color:var(--muted)}
+.hint{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.code{margin:8px 0 0;font:12px/1.55 var(--mono);background:var(--chip);color:var(--fg);padding:10px 12px;border-radius:7px;overflow-x:auto;white-space:pre}
+.tips{margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.55;display:flex;flex-direction:column;gap:4px}
+.tips code,.hint code{font:12px var(--mono);background:var(--chip);padding:1px 4px;border-radius:3px}
+.toast{position:absolute;right:14px;top:12px;background:var(--t-accent);color:var(--t-bg);font-size:12.5px;padding:6px 10px;border-radius:6px;pointer-events:none}
+
+@media (max-width:760px){
+  .work{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
+  .side{border-left:0;border-top:1px solid var(--line);max-height:38%;padding-block:12px;gap:12px}
+  .sub{display:none}
+}
+@media (prefers-reduced-motion: reduce){
+  .port.flash{animation:none;outline:2px solid var(--accent)}
+  .side summary::after{transition:none}
+}
+</style>
+
+<div class="app" id="app">
+  <header class="bar">
+    <div class="ttl">
+      <h1>Консоль лабы</h1>
+      <div class="tabs" role="tablist" id="tabs" aria-label="Устройства"></div>
+      <p class="sub">Имитатор IOS в браузере — в плагине на его месте будет WebSocket к консоли ноды</p>
+    </div>
+    <button class="btn" id="btnObs" type="button" aria-pressed="false" title="Как видит консоль преподаватель: вывод идёт, ввод отключён">Режим наблюдателя</button>
+  </header>
+
+  <main class="work">
+    <section class="termcol" aria-label="Терминал">
+      <p class="obsbar" id="obsbar" hidden>Только просмотр: ввод отключён. Так консоль студента видит преподаватель.</p>
+      <div class="termhost" id="termhost">
+        <div class="toast" id="toast" hidden></div>
+      </div>
+      <div class="strip" id="keys" aria-label="Клавиши"></div>
+      <div class="strip" id="snips" aria-label="Сниппеты"><span class="lbl">Сниппеты</span></div>
+    </section>
+
+    <aside class="side" aria-label="Состояние устройства">
+      <details id="portsBox" open>
+        <summary><span id="portsTitle">Порты</span><span class="count" id="portsCount"></span></summary>
+        <div class="ports" id="ports"></div>
+        <p class="hint">Нажмите на порт — его имя вставится в командную строку. Имена портов в выводе терминала тоже нажимаются и подсвечивают порт здесь.</p>
+      </details>
+      <section>
+        <h3>Соседи OSPF</h3>
+        <div class="nb" id="ospf"></div>
+      </section>
+      <details id="tryBox" open>
+        <summary>Что попробовать</summary>
+        <ul class="tips">
+          <li>Enter, затем <code>en</code>, Tab — дополнится до <code>enable</code>.</li>
+          <li><code>show ?</code> или <code>sh ip ?</code> — подсказка от «роутера».</li>
+          <li><code>ping 192.168.122.1</code> и кнопка «Прервать» (Ctrl+Shift+6).</li>
+          <li>Сниппет «Поднять Gi0/1» на R1, потом загляните на вкладку R2: там появятся сообщения о линке.</li>
+          <li>Сниппет «OSPF area 0», затем <code>ping 2.2.2.2</code> — через соседа.</li>
+          <li><code>show run</code> — постраничный вывод: пробел, Enter или q.</li>
+        </ul>
+      </details>
+      <details id="howBox">
+        <summary>Как это подключится к GNS3</summary>
+        <pre class="code">const ws = new WebSocket(gatewayUrl);
+term.onData(d =&gt; ws.send(d));
+ws.onmessage = e =&gt; term.write(e.data);</pre>
+        <p class="hint">Вместо имитатора — три строки. Клавиши, сниппеты и подсветка портов работают так же: они просто отправляют байты в сокет.</p>
+      </details>
+    </aside>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+(function(){
+"use strict";
+const $ = id => document.getElementById(id);
+const mobile = () => window.matchMedia("(max-width: 760px)").matches;
+
+/* ---------------- IPv4 ---------------- */
+const isIp = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split(".").every(o => +o <= 255);
+const ip2n = s => s.split(".").reduce((a, o) => ((a * 256) + (+o)), 0) >>> 0;
+const n2ip = n => [24, 16, 8, 0].map(b => (n >>> b) & 255).join(".");
+const validMask = m => { if (!isIp(m)) return false; const inv = (~ip2n(m)) >>> 0; return ((inv & ((inv + 1) >>> 0)) >>> 0) === 0; };
+const plen = m => { let n = ip2n(m), c = 0; while (n) { c += n & 1; n >>>= 1; } return c; };
+const netOf = (ip, m) => (ip2n(ip) & ip2n(m)) >>> 0;
+const covers = (ip, net, wc) => { const w = ~ip2n(wc) >>> 0; return ((ip2n(ip) & w) >>> 0) === ((ip2n(net) & w) >>> 0); };
+const esc = v => String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const shortIf = n => n.replace(/^GigabitEthernet/, "Gi").replace(/^Loopback/, "Lo");
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const p2 = n => String(n).padStart(2, "0");
+function ts(){ const d = new Date(); return `*${MON[d.getMonth()]} ${String(d.getDate()).padStart(2, " ")} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}: `; }
+const age = t => { const s = Math.max(0, Math.floor((Date.now() - t) / 1000)); return `${p2(Math.floor(s / 3600))}:${p2(Math.floor(s / 60) % 60)}:${p2(s % 60)}`; };
+
+/* ---------------- грамматика команд ---------------- */
+const CMDS = { user: [], priv: [], conf: [], if: [], router: [] };
+const EXEC = ["user", "priv"], CONFS = ["conf", "if", "router"];
+function add(modes, pattern, fn){ const toks = pattern.split(" "); modes.forEach(m => CMDS[m].push({ toks, fn })); }
+const isPh = s => s === "A.B.C.D" || s === "IFNAME" || s === "WORD" || s === "LINE" || /^<\d+-\d+>$/.test(s);
+const HELP = {
+  enable: "Turn on privileged commands", disable: "Turn off privileged commands", exit: "Exit from the EXEC",
+  ping: "Send echo messages", show: "Show running system information", terminal: "Set terminal line parameters",
+  length: "Set number of lines on a screen", configure: "Enter configuration mode", version: "System hardware and software status",
+  ip: "IP information", interfaces: "Interface status and configuration", interface: "IP interface status and configuration",
+  brief: "Brief summary of IP status and configuration", route: "IP routing table", ospf: "OSPF information", neighbor: "Neighbor list",
+  "running-config": "Current operating configuration", history: "Display the session command history",
+  write: "Write running configuration to memory, network, or terminal", memory: "Write to NV memory",
+  copy: "Copy from one file to another", "startup-config": "Copy to startup configuration",
+  hostname: "Set system's network name", router: "Enable a routing process", end: "Exit from configure mode",
+  do: "To run exec commands in config mode", no: "Negate a command or set its defaults", address: "Set the IP address of an interface",
+  shutdown: "Shutdown the selected interface", description: "Interface specific description", network: "Enable routing on an IP network",
+  area: "Set the OSPF area ID", "router-id": "router-id for this OSPF process", "passive-interface": "Suppress routing updates on an interface",
+  "domain-lookup": "Enable IP Domain Name System hostname translation"
+};
+const HELP_MODE = {
+  "conf:interface": "Select an interface to configure", "if:interface": "Select an interface to configure",
+  "conf:exit": "Exit from configure mode", "if:exit": "Exit from interface configuration mode", "router:exit": "Exit from routing protocol configuration mode",
+  "conf:ip": "Global IP configuration subcommands", "if:ip": "Interface Internet Protocol config commands",
+  "conf:ospf": "Open Shortest Path First (OSPF)", "priv:terminal": "Set terminal line parameters", "configure:terminal": "Configure from the terminal"
+};
+const PH_HELP = { "A.B.C.D": "Address", WORD: "Text", LINE: "Text", "<1-65535>": "Process ID", "<0-512>": "Number of lines on screen (0 for no pausing)", "<0-4294967295>": "OSPF area ID as a decimal value" };
+const helpFor = (mode, prev, spec) => HELP_MODE[prev + ":" + spec] || HELP_MODE[mode + ":" + spec] || HELP[spec] || PH_HELP[spec] || "";
+
+/* ---------------- устройство ---------------- */
+class Dev {
+  constructor(o){
+    Object.assign(this, { hostname: o.hostname, ospf: o.ospf || null, mode: "user", cur: null, buf: "", pos: 0, hist: [], hi: -1, draft: "",
+      termLen: 24, busy: "return", pending: [], arp: new Set(), lastChange: new Date(), more: null, pingT: 0 });
+    this.ifs = new Map(o.ifs.map(i => [i.name, Object.assign({ ip: null, mask: null, admin: false, desc: "", peer: null, loop: /^Loopback/.test(i.name) }, i)]));
+    this.write = () => {}; this.onLog = () => {};
+  }
+  w(s){ this.write(s); }
+  prompt(){ return this.hostname + { user: ">", priv: "#", conf: "(config)#", if: "(config-if)#", router: "(config-router)#" }[this.mode]; }
+  findIf(tok){
+    const m = /^([a-z]+)\s*(\d+(?:\/\d+)?)$/i.exec(tok || ""); if (!m) return null;
+    const t = m[1].toLowerCase();
+    const type = "gigabitethernet".startsWith(t) ? "GigabitEthernet" : "loopback".startsWith(t) ? "Loopback" : null;
+    return type ? this.ifs.get(type + m[2]) || null : null;
+  }
+
+  /* ввод */
+  input(d){
+    for (let i = 0; i < d.length;) {
+      const c = d[i];
+      if (c === "\x1b") {
+        const m = /^\x1b(?:\[|O)([0-9;]*)([A-Za-z~])/.exec(d.slice(i));
+        if (m) { this.key({ esc: m[2] === "~" ? m[1] + "~" : m[2] }); i += m[0].length; continue; }
+        i++; continue;
+      }
+      if (c === "\n" && d[i - 1] === "\r") { i++; continue; }
+      this.key({ ch: c === "\n" ? "\r" : c }); i++;
+    }
+  }
+  key(k){
+    const ch = k.ch, e = k.esc;
+    if (this.busy === "return") { if (ch === "\r") { this.busy = null; this.mode = "user"; this.w("\r\n" + this.prompt()); this.afterIdle(); } return; }
+    if (this.busy === "more") return this.moreKey(ch);
+    if (this.busy === "ping") { if (ch === "\x1e") this.pingAbort(); return; }
+    if (this.busy === "confirm") {
+      if (ch === "\r") { this.busy = null; this.w("\r\n"); this.finish(this.saveCfg()); }
+      else if (ch === "\x03" || ch === "\x1a") { this.busy = null; this.w("\r\n" + this.prompt()); }
+      return;
+    }
+    if (e === "A" || ch === "\x10") return this.histMove(-1);
+    if (e === "B" || ch === "\x0e") return this.histMove(1);
+    if (e === "D" || ch === "\x02") { if (this.pos > 0) { this.pos--; this.w("\x1b[D"); } return; }
+    if (e === "C" || ch === "\x06") { if (this.pos < this.buf.length) { this.pos++; this.w("\x1b[C"); } return; }
+    if (e === "H" || e === "1~" || ch === "\x01") { this.w("\b".repeat(this.pos)); this.pos = 0; return; }
+    if (e === "F" || e === "4~" || ch === "\x05") { this.w(this.buf.slice(this.pos)); this.pos = this.buf.length; return; }
+    if (e === "3~") return this.del();
+    if (e) return;
+    if (ch === "\r") return this.enter();
+    if (ch === "\x7f" || ch === "\b") return this.bksp();
+    if (ch === "\t") return this.tab();
+    if (ch === "?") return this.help();
+    if (ch === "\x03") return this.ctrlC();
+    if (ch === "\x1a") return this.ctrlZ();
+    if (ch === "\x15") return this.setLine("");
+    if (ch >= " " && ch !== "\x7f") this.ins(ch);
+  }
+  ins(c){ const t = this.buf.slice(this.pos); this.buf = this.buf.slice(0, this.pos) + c + t; this.pos++; this.w(c + t + "\b".repeat(t.length)); }
+  bksp(){ if (!this.pos) return this.w("\x07"); const t = this.buf.slice(this.pos); this.buf = this.buf.slice(0, this.pos - 1) + t; this.pos--; this.w("\b" + t + " " + "\b".repeat(t.length + 1)); }
+  del(){ if (this.pos >= this.buf.length) return; const t = this.buf.slice(this.pos + 1); this.buf = this.buf.slice(0, this.pos) + t; this.w(t + " " + "\b".repeat(t.length + 1)); }
+  setLine(nb){
+    this.w("\b".repeat(this.pos)); const old = this.buf.length; this.w(nb);
+    const extra = old - nb.length; if (extra > 0) this.w(" ".repeat(extra) + "\b".repeat(extra));
+    this.buf = nb; this.pos = nb.length;
+  }
+  histMove(dir){
+    if (!this.hist.length) return this.w("\x07");
+    if (this.hi === -1) { if (dir > 0) return this.w("\x07"); this.draft = this.buf; this.hi = this.hist.length - 1; }
+    else { this.hi += dir; if (this.hi < 0) { this.hi = 0; return this.w("\x07"); } if (this.hi >= this.hist.length) { this.hi = -1; return this.setLine(this.draft); } }
+    this.setLine(this.hist[this.hi]);
+  }
+  ctrlC(){
+    this.buf = ""; this.pos = 0;
+    if (CONFS.includes(this.mode)) { this.mode = "priv"; this.cur = null; this.w("^C\r\n" + this.prompt()); this.configured(); }
+    else this.w("^C\r\n" + this.prompt());
+  }
+  ctrlZ(){
+    if (!CONFS.includes(this.mode)) return;
+    this.buf = ""; this.pos = 0; this.mode = "priv"; this.cur = null; this.w("^Z\r\n" + this.prompt()); this.configured();
+  }
+  configured(){ setTimeout(() => this.log("%SYS-5-CONFIG_I: Configured from console by console"), 450); }
+
+  /* разбор строки */
+  tokenize(line){
+    const out = []; const re = /\S+/g; let m;
+    while ((m = re.exec(line))) out.push({ t: m[0], start: m.index });
+    for (let i = 0; i < out.length - 1; i++) {
+      const lo = out[i].t.toLowerCase();
+      if (/^[a-z]+$/.test(lo) && ("gigabitethernet".startsWith(lo) || "loopback".startsWith(lo)) && /^\d+(\/\d+)?$/.test(out[i + 1].t)) {
+        out[i] = { t: out[i].t + out[i + 1].t, start: out[i].start }; out.splice(i + 1, 1);
+      }
+    }
+    return out;
+  }
+  valid(spec, tok){
+    if (spec === "A.B.C.D") return isIp(tok);
+    if (spec === "IFNAME") return !!this.findIf(tok);
+    if (spec === "WORD" || spec === "LINE") return true;
+    const r = /^<(\d+)-(\d+)>$/.exec(spec);
+    return !!r && /^\d+$/.test(tok) && +tok >= +r[1] && +tok <= +r[2];
+  }
+  walk(mode, toks, strict){
+    let cands = CMDS[mode].map(p => ({ p, args: [] }));
+    for (let i = 0; i < toks.length; i++) {
+      const tok = toks[i].t, lo = tok.toLowerCase(); const next = [], kws = new Set();
+      for (const c of cands) {
+        const T = c.p.toks, spec = T[i];
+        if (spec === undefined) { if (T[T.length - 1] === "LINE") next.push(c); continue; }
+        if (isPh(spec)) { if (this.valid(spec, tok)) next.push({ p: c.p, args: c.args.concat(spec === "LINE" ? [{ line: true, start: toks[i].start }] : [tok]) }); }
+        else if (spec.startsWith(lo)) { next.push(c); kws.add(spec); }
+      }
+      if (!next.length) return strict ? { status: "invalid", at: toks[i].start } : null;
+      if (kws.size > 1 && !kws.has(lo)) {
+        const ph = next.filter(c => c.p.toks[i] === undefined || isPh(c.p.toks[i]));
+        if (!ph.length) { if (strict) return { status: "ambiguous" }; cands = next; continue; }
+        cands = ph; continue;
+      }
+      cands = kws.has(lo) && kws.size > 1 ? next.filter(c => c.p.toks[i] === lo || c.p.toks[i] === undefined || isPh(c.p.toks[i])) : next;
+    }
+    return strict ? { status: "ok", cands } : cands;
+  }
+  exec(line, mode){
+    const toks = this.tokenize(line); if (!toks.length) return [];
+    const r = this.walk(mode, toks, true);
+    if (r.status === "invalid") return [" ".repeat(this.prompt().length + r.at) + "^", "% Invalid input detected at '^' marker.", ""];
+    if (r.status === "ambiguous") return [`% Ambiguous command:  "${line.trim()}"`];
+    const full = r.cands.filter(c => c.p.toks.length === toks.length || (c.p.toks[c.p.toks.length - 1] === "LINE" && toks.length >= c.p.toks.length));
+    if (!full.length) return ["% Incomplete command.", ""];
+    const args = full[0].args.map(a => a && a.line ? line.slice(a.start) : a);
+    return full[0].p.fn.call(this, args, line);
+  }
+  enter(){
+    const line = this.buf; this.w("\r\n"); this.buf = ""; this.pos = 0; this.hi = -1;
+    if (line.trim() && this.hist[this.hist.length - 1] !== line) { this.hist.push(line); if (this.hist.length > 20) this.hist.shift(); }
+    this.finish(this.exec(line, this.mode));
+  }
+  finish(r){ if (r && r.async) return; this.printLines(r || []); }
+  printLines(lines){
+    if (!lines.length) { this.w(this.prompt()); return this.afterIdle(); }
+    if (this.termLen > 0 && lines.length > this.termLen - 1) { this.more = { lines, i: 0 }; this.busy = "more"; return this.morePage(this.termLen - 1); }
+    this.w(lines.join("\r\n") + "\r\n" + this.prompt()); this.afterIdle();
+  }
+  morePage(n){
+    const m = this.more, chunk = m.lines.slice(m.i, m.i + n); m.i += chunk.length;
+    this.w(chunk.join("\r\n") + "\r\n");
+    if (m.i >= m.lines.length) { this.busy = null; this.more = null; this.w(this.prompt()); this.afterIdle(); }
+    else this.w(" --More-- ");
+  }
+  moreKey(ch){
+    this.w("\r          \r");
+    if (ch === " ") this.morePage(this.termLen - 1);
+    else if (ch === "\r") this.morePage(1);
+    else { this.busy = null; this.more = null; this.w(this.prompt()); this.afterIdle(); }
+  }
+  afterIdle(){
+    if (!this.pending.length) return;
+    const msgs = this.pending.splice(0);
+    this.w("\r\n" + msgs.join("\r\n") + "\r\n" + this.prompt() + this.buf);
+  }
+  log(msg){
+    const line = ts() + msg;
+    this.onLog();
+    if (this.busy === "return") { this.w("\r\n" + line); return; }
+    if (this.busy) { this.pending.push(line); return; }
+    this.w("\r\n" + line + "\r\n" + this.prompt() + this.buf + "\b".repeat(this.buf.length - this.pos));
+  }
+
+  /* подсказки: ? и Tab */
+  options(toks, idx, partial){
+    const cands = this.walk(this.mode, toks.slice(0, idx), false);
+    if (!cands) return null;
+    const opts = new Map(); let cr = false;
+    const prev = idx > 0 ? (cands[0] && cands[0].p.toks[idx - 1]) : "";
+    for (const c of cands) {
+      const T = c.p.toks, spec = T[idx];
+      if (spec === undefined) { if (T.length === idx) cr = true; else if (T[T.length - 1] === "LINE") { cr = true; opts.set("LINE", PH_HELP.LINE); } continue; }
+      if (spec === "IFNAME") {
+        if ("gigabitethernet".startsWith(partial)) opts.set("GigabitEthernet", "GigabitEthernet IEEE 802.3z");
+        if ("loopback".startsWith(partial)) opts.set("Loopback", "Loopback interface");
+      } else if (isPh(spec)) { if (!partial) opts.set(spec, helpFor(this.mode, prev, spec)); }
+      else if (spec.startsWith(partial)) opts.set(spec, helpFor(this.mode, prev, spec));
+    }
+    return { opts, cr };
+  }
+  help(){
+    const line = this.buf; this.w("?\r\n");
+    const endsSpace = line === "" || /\s$/.test(line);
+    const toks = this.tokenize(line);
+    const idx = endsSpace ? toks.length : toks.length - 1;
+    const partial = endsSpace ? "" : toks[toks.length - 1].t.toLowerCase();
+    const r = this.options(toks, idx, partial);
+    let out;
+    if (!r || (!r.opts.size && !r.cr)) out = ["% Unrecognized command"];
+    else if (!endsSpace) out = [[...r.opts.keys()].join("  ")];
+    else {
+      const names = [...r.opts.keys()].sort((a, b) => (isPh(a) - isPh(b)) || a.localeCompare(b));
+      const w = Math.max(16, ...names.map(n => n.length + 2));
+      out = names.map(n => "  " + n.padEnd(w) + r.opts.get(n));
+      if (r.cr) out.push("  <cr>");
+    }
+    this.w(out.join("\r\n") + "\r\n\r\n" + this.prompt() + this.buf); this.pos = this.buf.length;
+  }
+  tab(){
+    const line = this.buf;
+    if (this.pos !== line.length || line === "" || /\s$/.test(line)) return this.w("\x07");
+    const toks = this.tokenize(line), last = toks[toks.length - 1], lo = last.t.toLowerCase();
+    const cands = this.walk(this.mode, toks.slice(0, -1), false); if (!cands) return this.w("\x07");
+    const kws = new Set(); let ifn = null, iftype = null;
+    for (const c of cands) {
+      const spec = c.p.toks[toks.length - 1]; if (spec === undefined) continue;
+      if (spec === "IFNAME") {
+        const f = this.findIf(last.t);
+        if (f) ifn = f.name;
+        else if (/^[a-z]+$/.test(lo)) iftype = "gigabitethernet".startsWith(lo) ? "GigabitEthernet" : "loopback".startsWith(lo) ? "Loopback" : null;
+      } else if (!isPh(spec) && spec.startsWith(lo)) kws.add(spec);
+    }
+    let comp = null;
+    if (kws.size === 1 && !ifn && !iftype) comp = [...kws][0] + " ";
+    else if (!kws.size && ifn) comp = ifn + " ";
+    else if (!kws.size && iftype) comp = iftype;
+    if (!comp) return this.w("\x07");
+    this.setLine(line.slice(0, last.start) + comp);
+  }
+
+  /* состояние и вывод show */
+  changed(){ this.lastChange = new Date(); world.update(); }
+  rid(){
+    if (!this.ospf) return "0.0.0.0";
+    if (this.ospf.rid) return this.ospf.rid;
+    const ips = [...this.ifs.values()].filter(i => i.ip && i.admin);
+    const lo = ips.filter(i => i.loop), pool = lo.length ? lo : ips;
+    return pool.length ? n2ip(Math.max(...pool.map(i => ip2n(i.ip)))) : "0.0.0.0";
+  }
+  areaOf(ip){ if (!this.ospf) return null; const n = this.ospf.nets.find(x => covers(ip, x.net, x.wc)); return n ? n.area : null; }
+  showIpIntBr(){
+    const rows = ["Interface                  IP-Address      OK? Method Status                Protocol"];
+    for (const i of this.ifs.values()) {
+      const op = world.oper(this, i);
+      rows.push(i.name.padEnd(27) + (i.ip || "unassigned").padEnd(16) + "YES " + (i.ip ? "manual" : "unset").padEnd(7) +
+        (op === "admin" ? "administratively down" : op).padEnd(22) + (op === "up" ? "up" : "down"));
+    }
+    return rows;
+  }
+  showInt(i){
+    const op = world.oper(this, i);
+    const L = [`${i.name} is ${op === "admin" ? "administratively down" : op}, line protocol is ${op === "up" ? "up" : "down"}`,
+      i.loop ? "  Hardware is Loopback" : `  Hardware is iGbE, address is ${i.mac} (bia ${i.mac})`];
+    if (i.desc) L.push("  Description: " + i.desc);
+    if (i.ip) L.push(`  Internet address is ${i.ip}/${plen(i.mask)}`);
+    L.push(i.loop ? "  MTU 1514 bytes, BW 8000000 Kbit/sec, DLY 5000 usec," : "  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,",
+      "     reliability 255/255, txload 1/255, rxload 1/255",
+      `  Encapsulation ${i.loop ? "LOOPBACK" : "ARPA"}, loopback not set`,
+      "  Last input 00:00:02, output 00:00:01, output hang never",
+      "  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0",
+      "  5 minute input rate 0 bits/sec, 0 packets/sec",
+      "  5 minute output rate 0 bits/sec, 0 packets/sec");
+    return L;
+  }
+  routes(){
+    const out = [];
+    for (const i of this.ifs.values()) {
+      if (!i.ip || world.oper(this, i) !== "up") continue;
+      if (i.loop) { out.push({ n: ip2n(i.ip), s: `C        ${i.ip}/32 is directly connected, ${i.name}` }); continue; }
+      const net = netOf(i.ip, i.mask);
+      out.push({ n: net, s: `C        ${n2ip(net)}/${plen(i.mask)} is directly connected, ${i.name}` });
+      out.push({ n: ip2n(i.ip) + 0.5, s: `L        ${i.ip}/32 is directly connected, ${i.name}` });
+    }
+    const have = new Set(out.map(r => Math.floor(r.n)));
+    for (const nb of world.adj(this)) {
+      for (const pf of world.advertised(nb.peer)) {
+        if (have.has(pf.net)) continue; have.add(pf.net);
+        out.push({ n: pf.net, s: `O        ${n2ip(pf.net)}/${pf.len} [110/2] via ${nb.addr}, ${age(world.adjSince[nb.key] || Date.now())}, ${nb.ifn}` });
+      }
+    }
+    return out.sort((a, b) => a.n - b.n).map(r => r.s);
+  }
+  runCfg(){
+    const d = this.lastChange, B = ["!", `! Last configuration change at ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())} UTC ${MON[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`, "!",
+      "version 15.9", "service timestamps debug datetime msec", "service timestamps log datetime msec", "no service password-encryption", "!",
+      "hostname " + this.hostname, "!", "boot-start-marker", "boot-end-marker", "!", "no aaa new-model", "!", "no ip domain lookup", "ip cef", "no ipv6 cef", "!",
+      "multilink bundle-name authenticated", "!", "redundancy", "!"];
+    for (const i of this.ifs.values()) {
+      B.push("interface " + i.name);
+      if (i.desc) B.push(" description " + i.desc);
+      B.push(i.ip ? ` ip address ${i.ip} ${i.mask}` : " no ip address");
+      if (!i.admin) B.push(" shutdown");
+      if (!i.loop) B.push(" duplex auto", " speed auto", " media-type rj45");
+      B.push("!");
+    }
+    if (this.ospf) {
+      B.push("router ospf " + this.ospf.pid);
+      if (this.ospf.rid) B.push(" router-id " + this.ospf.rid);
+      for (const p of this.ospf.passive) B.push(" passive-interface " + p);
+      for (const n of this.ospf.nets) B.push(` network ${n.net} ${n.wc} area ${n.area}`);
+      B.push("!");
+    }
+    B.push("ip forward-protocol nd", "!", "no ip http server", "no ip http secure-server", "!", "control-plane", "!",
+      "line con 0", " logging synchronous", "line aux 0", "line vty 0 4", " login", " transport input none", "!", "no scheduler allocate", "!", "end", "");
+    return ["Building configuration...", "", `Current configuration : ${B.join("\n").length + 2} bytes`].concat(B);
+  }
+  saveCfg(){ return ["Building configuration...", "[OK]"]; }
+  logout(){
+    this.mode = "user"; this.cur = null; this.busy = "return";
+    this.w(`\r\n${this.hostname} con0 is now available\r\n\r\n\r\n\r\n\r\nPress RETURN to get started.\r\n`);
+    return { async: true };
+  }
+
+  /* ping с прерыванием по Ctrl+Shift+6 */
+  ping(target){
+    const r = world.reach(this, target);
+    this.w(`Type escape sequence to abort.\r\nSending 5, 100-byte ICMP Echos to ${target}, timeout is 2 seconds:\r\n`);
+    this.busy = "ping"; let sent = 0, ok = 0;
+    const step = () => {
+      if (this.busy !== "ping") return;
+      let ch = ".";
+      if (r.ok) { if (!r.local && !this.arp.has(r.nh)) this.arp.add(r.nh); else { ch = "!"; ok++; } }
+      sent++; this.w(ch);
+      if (sent < 5) this.pingT = setTimeout(step, ch === "!" ? 160 : 700);
+      else this.pingDone(sent, ok);
+    };
+    this.pingAbort = () => { clearTimeout(this.pingT); this.pingDone(sent, ok); };
+    this.pingT = setTimeout(step, 350);
+    return { async: true };
+  }
+  pingDone(sent, ok){
+    this.busy = null;
+    let s = sent ? `Success rate is ${Math.round(ok * 100 / sent)} percent (${ok}/${sent})` : "Success rate is 0 percent (0/1)";
+    if (ok) s += ", round-trip min/avg/max = 1/2/4 ms";
+    this.w("\r\n" + s + "\r\n" + this.prompt()); this.afterIdle();
+  }
+}
+
+/* ---------------- команды ---------------- */
+add(EXEC, "ping A.B.C.D", function(a){ return this.ping(a[0]); });
+add(EXEC, "show version", function(){ return [
+  "IOS-подобный имитатор для демо консоли (это не настоящий IOS)",
+  "Образ ноды в лабе: vios-adventerprisek9-m.spa.159-3.m8.qcow2", "",
+  `${this.hostname} uptime is 14 minutes`, `${[...this.ifs.values()].filter(i => !i.loop).length} Gigabit Ethernet interfaces`, "Configuration register is 0x2102"]; });
+add(EXEC, "show ip interface brief", function(){ return this.showIpIntBr(); });
+add(EXEC, "show interfaces IFNAME", function(a){ return this.showInt(this.findIf(a[0])); });
+add(EXEC, "show ip route", function(){ return ["Codes: L - local, C - connected, S - static, O - OSPF, IA - OSPF inter area", "", "Gateway of last resort is not set", ""].concat(this.routes()); });
+add(EXEC, "show ip ospf neighbor", function(){
+  if (!this.ospf) return [];
+  const nbs = world.adj(this); if (!nbs.length) return [];
+  const myRid = ip2n(this.rid());
+  return ["", "Neighbor ID     Pri   State           Dead Time   Address         Interface"].concat(nbs.map(nb =>
+    nb.rid.padEnd(15) + " " + "1".padStart(3) + "   " + (ip2n(nb.rid) > myRid ? "FULL/DR" : "FULL/BDR").padEnd(15) + " " +
+    ("00:00:3" + (9 - Math.floor(Date.now() / 1000) % 10)).padEnd(11) + " " + nb.addr.padEnd(15) + " " + nb.ifn)); });
+add(EXEC, "show history", function(){ return this.hist.slice(-10).map(h => "  " + h); });
+add(EXEC, "terminal length <0-512>", function(a){ this.termLen = +a[0]; return []; });
+add(EXEC, "exit", function(){ return this.logout(); });
+add(["user"], "enable", function(){ this.mode = "priv"; return []; });
+add(["priv"], "enable", function(){ return []; });
+add(["priv"], "disable", function(){ this.mode = "user"; return []; });
+add(["priv"], "configure terminal", function(){ this.mode = "conf"; return ["Enter configuration commands, one per line.  End with CNTL/Z."]; });
+add(["priv"], "show running-config", function(){ return this.runCfg(); });
+add(["priv"], "write memory", function(){ return this.saveCfg(); });
+add(["priv"], "copy running-config startup-config", function(){ this.busy = "confirm"; this.w("Destination filename [startup-config]? "); return { async: true }; });
+add(CONFS, "end", function(){ this.mode = "priv"; this.cur = null; this.configured(); return []; });
+add(CONFS, "do LINE", function(a){ return this.exec(a[0], "priv"); });
+add(["conf"], "exit", function(){ this.mode = "priv"; this.configured(); return []; });
+add(["if", "router"], "exit", function(){ this.mode = "conf"; this.cur = null; return []; });
+add(["conf", "if"], "interface IFNAME", function(a){ this.cur = this.findIf(a[0]); this.mode = "if"; return []; });
+add(["conf"], "hostname WORD", function(a){ this.hostname = a[0]; this.changed(); ui.tabs(); return []; });
+add(["conf"], "no ip domain-lookup", function(){ return []; });
+add(["conf"], "router ospf <1-65535>", function(a){
+  if (this.ospf && this.ospf.pid !== +a[0]) return ["% В этом демо поддерживается один процесс OSPF"];
+  if (!this.ospf) this.ospf = { pid: +a[0], rid: null, nets: [], passive: new Set() };
+  this.mode = "router"; this.changed(); return []; });
+add(["conf"], "no router ospf <1-65535>", function(){ this.ospf = null; this.changed(); return []; });
+add(["if"], "ip address A.B.C.D A.B.C.D", function(a){
+  if (!validMask(a[1])) return [`Bad mask ${a[1]} for address ${a[0]}`];
+  this.cur.ip = a[0]; this.cur.mask = a[1]; this.changed(); return []; });
+add(["if"], "no ip address", function(){ this.cur.ip = null; this.cur.mask = null; this.changed(); return []; });
+add(["if"], "shutdown", function(){ if (this.cur.admin) { this.cur.admin = false; this.changed(); } return []; });
+add(["if"], "no shutdown", function(){ if (!this.cur.admin) { this.cur.admin = true; this.changed(); } return []; });
+add(["if"], "description LINE", function(a){ this.cur.desc = a[0]; this.changed(); return []; });
+add(["if"], "no description", function(){ this.cur.desc = ""; this.changed(); return []; });
+add(["router"], "network A.B.C.D A.B.C.D area <0-4294967295>", function(a){
+  if (!this.ospf.nets.some(n => n.net === a[0] && n.wc === a[1])) this.ospf.nets.push({ net: a[0], wc: a[1], area: a[2] });
+  this.changed(); return []; });
+add(["router"], "no network A.B.C.D A.B.C.D area <0-4294967295>", function(a){
+  this.ospf.nets = this.ospf.nets.filter(n => !(n.net === a[0] && n.wc === a[1])); this.changed(); return []; });
+add(["router"], "router-id A.B.C.D", function(a){ this.ospf.rid = a[0]; this.changed(); return []; });
+add(["router"], "passive-interface IFNAME", function(a){ this.ospf.passive.add(this.findIf(a[0]).name); this.changed(); return []; });
+add(["router"], "no passive-interface IFNAME", function(a){ this.ospf.passive.delete(this.findIf(a[0]).name); this.changed(); return []; });
+
+/* ---------------- «мир»: кабели, состояние портов, OSPF ---------------- */
+const R1 = new Dev({ hostname: "R1", ifs: [
+  { name: "Loopback0", ip: "1.1.1.1", mask: "255.255.255.255", admin: true },
+  { name: "GigabitEthernet0/0", ip: "192.168.122.10", mask: "255.255.255.0", admin: true, desc: "to NAT1", mac: "5254.00a1.0100", peer: { ext: "192.168.122.1", label: "NAT1" } },
+  { name: "GigabitEthernet0/1", mac: "5254.00a1.0101" },
+  { name: "GigabitEthernet0/2", mac: "5254.00a1.0102", peer: { absent: "R3" } },
+  { name: "GigabitEthernet0/3", mac: "5254.00a1.0103" } ] });
+const R2 = new Dev({ hostname: "R2", ifs: [
+  { name: "Loopback0", ip: "2.2.2.2", mask: "255.255.255.255", admin: true },
+  { name: "GigabitEthernet0/0", ip: "10.0.12.2", mask: "255.255.255.252", admin: true, desc: "to R1", mac: "5254.00b2.0100" },
+  { name: "GigabitEthernet0/1", mac: "5254.00b2.0101" },
+  { name: "GigabitEthernet0/2", mac: "5254.00b2.0102" },
+  { name: "GigabitEthernet0/3", mac: "5254.00b2.0103" } ],
+  ospf: { pid: 1, rid: "2.2.2.2", passive: new Set(), nets: [{ net: "10.0.12.0", wc: "0.0.0.3", area: "0" }, { net: "2.2.2.2", wc: "0.0.0.0", area: "0" }] } });
+R1.ifs.get("GigabitEthernet0/1").peer = { dev: R2, ifn: "GigabitEthernet0/0" };
+R2.ifs.get("GigabitEthernet0/0").peer = { dev: R1, ifn: "GigabitEthernet0/1" };
+
+const world = {
+  devs: [R1, R2], lastOper: new Map(), lastAdj: new Map(), adjSince: {},
+  oper(dev, i){
+    if (!i.admin) return "admin";
+    if (i.loop) return "up";
+    const p = i.peer; if (!p) return "down";
+    if (p.ext) return "up";
+    if (p.dev) return p.dev.ifs.get(p.ifn).admin ? "up" : "down";
+    return "down";
+  },
+  advertised(dev){
+    const out = [];
+    if (!dev.ospf) return out;
+    for (const i of dev.ifs.values()) {
+      if (!i.ip || this.oper(dev, i) !== "up" || dev.areaOf(i.ip) == null) continue;
+      out.push(i.loop ? { net: ip2n(i.ip), len: 32 } : { net: netOf(i.ip, i.mask), len: plen(i.mask) });
+    }
+    return out;
+  },
+  adj(dev){
+    const out = []; if (!dev.ospf) return out;
+    for (const i of dev.ifs.values()) {
+      if (i.loop || !i.ip || this.oper(dev, i) !== "up" || !i.peer || !i.peer.dev) continue;
+      const pd = i.peer.dev, pi = pd.ifs.get(i.peer.ifn);
+      if (!pd.ospf || !pi.ip || this.oper(pd, pi) !== "up" || pi.mask !== i.mask || netOf(pi.ip, i.mask) !== netOf(i.ip, i.mask)) continue;
+      const a1 = dev.areaOf(i.ip), a2 = pd.areaOf(pi.ip);
+      if (a1 == null || a1 !== a2 || dev.ospf.passive.has(i.name) || pd.ospf.passive.has(pi.name)) continue;
+      const rid = pd.rid();
+      out.push({ rid, addr: pi.ip, ifn: i.name, peer: pd, key: this.devs.indexOf(dev) + "|" + i.name + "|" + rid });
+    }
+    return out;
+  },
+  reach(dev, t){
+    for (const i of dev.ifs.values()) if (i.ip === t && this.oper(dev, i) === "up") return { ok: true, local: true };
+    for (const i of dev.ifs.values()) {
+      if (i.loop || !i.ip || this.oper(dev, i) !== "up" || netOf(t, i.mask) !== netOf(i.ip, i.mask)) continue;
+      const p = i.peer;
+      if (p && p.ext === t) return { ok: true, nh: t };
+      if (p && p.dev) { const pi = p.dev.ifs.get(p.ifn); if (pi.ip === t && pi.mask === i.mask) return { ok: true, nh: t }; }
+      return { ok: false };
+    }
+    for (const nb of this.adj(dev)) {
+      const owned = [...nb.peer.ifs.values()].some(i => i.ip === t && this.oper(nb.peer, i) === "up" && nb.peer.areaOf(i.ip) != null);
+      if (owned) return { ok: true, nh: nb.addr };
+    }
+    return { ok: false };
+  },
+  update(silent){
+    this.devs.forEach((dev, di) => {
+      for (const i of dev.ifs.values()) {
+        const k = di + "|" + i.name, now = this.oper(dev, i), was = this.lastOper.get(k);
+        this.lastOper.set(k, now);
+        if (silent || was === undefined || was === now || i.loop) continue;
+        if (now === "admin") { setTimeout(() => dev.log(`%LINK-5-CHANGED: Interface ${i.name}, changed state to administratively down`), 250);
+          if (was === "up") setTimeout(() => dev.log(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${i.name}, changed state to down`), 900); }
+        else if (now === "up") { setTimeout(() => dev.log(`%LINK-3-UPDOWN: Interface ${i.name}, changed state to up`), 500);
+          setTimeout(() => dev.log(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${i.name}, changed state to up`), 1500); }
+        else { setTimeout(() => dev.log(`%LINK-3-UPDOWN: Interface ${i.name}, changed state to down`), 300);
+          if (was === "up") setTimeout(() => dev.log(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${i.name}, changed state to down`), 1000); }
+      }
+      const cur = this.adj(dev), keys = new Set(cur.map(n => n.key)), prev = this.lastAdj.get(dev) || new Set();
+      for (const nb of cur) if (!prev.has(nb.key)) {
+        this.adjSince[nb.key] = silent ? Date.now() - 6e5 : Date.now() + 3000;
+        if (!silent) setTimeout(() => { dev.log(`%OSPF-5-ADJCHG: Process ${dev.ospf ? dev.ospf.pid : 1}, Nbr ${nb.rid} on ${nb.ifn} from LOADING to FULL, Loading Done`); ui.side(); }, 3200);
+      }
+      for (const k of prev) if (!keys.has(k)) {
+        const [, ifn, rid] = k.split("|"); delete this.adjSince[k];
+        if (!silent) setTimeout(() => dev.log(`%OSPF-5-ADJCHG: Process ${dev.ospf ? dev.ospf.pid : 1}, Nbr ${rid} on ${ifn} from FULL to DOWN, Neighbor Down: Interface down or detached`), 200);
+      }
+      this.lastAdj.set(dev, keys);
+    });
+    if (typeof ui !== "undefined") { ui.side(); setTimeout(() => ui.side(), 1600); }
+  }
+};
+
+/* ---------------- интерфейс ---------------- */
+const KEYS = [
+  { l: "Tab", s: "\t", a: "Дополнить команду" }, { l: "?", s: "?", a: "Подсказка" }, { l: "Ctrl", ctrl: true, a: "Ctrl для следующей клавиши" },
+  { l: "Esc", s: "\x1b" }, { l: "↑", s: "\x1b[A", a: "Предыдущая команда" }, { l: "↓", s: "\x1b[B", a: "Следующая команда" },
+  { l: "←", s: "\x1b[D", a: "Курсор влево" }, { l: "→", s: "\x1b[C", a: "Курсор вправо" },
+  { l: "^Z", s: "\x1a", a: "Ctrl+Z — выйти из режима конфигурации" }, { l: "^C", s: "\x03", a: "Ctrl+C" },
+  { l: "Прервать", s: "\x1e", w: true, a: "Ctrl+Shift+6 — прервать ping" }, { l: "|", s: "|" }, { l: "␣", s: " ", a: "Пробел — следующая страница --More--" }
+];
+const PRE = "\x15\r\x1aenable\r";   // очистить строку, выйти из конфигурации, войти в enable — работает из любого режима
+const SNIPS = [
+  { l: "show ip int brief", s: PRE + "show ip interface brief\r" },
+  { l: "Поднять Gi0/1", s: PRE + "configure terminal\rinterface GigabitEthernet0/1\rip address 10.0.12.1 255.255.255.252\rno shutdown\rend\r", only: "R1" },
+  { l: "OSPF area 0", s: PRE + "configure terminal\rrouter ospf 1\rrouter-id 1.1.1.1\rnetwork 10.0.12.0 0.0.0.3 area 0\rnetwork 1.1.1.1 0.0.0.0 area 0\rend\r", only: "R1" },
+  { l: "show ip ospf neighbor", s: PRE + "show ip ospf neighbor\r" },
+  { l: "ping 2.2.2.2", s: PRE + "ping 2.2.2.2\r", only: "R1" },
+  { l: "ping 1.1.1.1", s: PRE + "ping 1.1.1.1\r", only: "R2" },
+  { l: "show run", s: PRE + "show running-config\r" }
+];
+
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ui = {
+  active: 0, sessions: [], ctrl: false, observer: false,
+  tabs(){
+    const box = $("tabs"); box.textContent = "";
+    this.sessions.forEach((s, i) => {
+      const b = document.createElement("button");
+      b.className = "tab"; b.type = "button"; b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(i === this.active)); b.textContent = s.dev.hostname;
+      if (s.unread && i !== this.active) { const d = document.createElement("span"); d.className = "dot"; d.title = "Новые сообщения"; b.appendChild(d); }
+      b.addEventListener("click", () => this.show(i));
+      box.appendChild(b);
+    });
+    const only = this.sessions[this.active] && this.sessions[this.active].dev;
+    document.querySelectorAll("[data-only]").forEach(b => { b.hidden = b.dataset.only !== (only === R1 ? "R1" : "R2"); });
+  },
+  show(i){
+    this.active = i;
+    this.sessions.forEach((s, j) => { s.el.hidden = j !== i; });
+    const s = this.sessions[i]; s.unread = false;
+    this.tabs(); this.side();
+    requestAnimationFrame(() => { try { s.fit.fit(); } catch (_) {} if (!mobile()) s.term.focus(); });
+  },
+  cur(){ return this.sessions[this.active]; },
+  send(seq){
+    const s = this.cur(); if (this.observer) return;
+    s.dev.input(seq);
+  },
+  side(){
+    const s = this.cur(); if (!s) return; const dev = s.dev;
+    $("portsTitle").textContent = "Порты " + dev.hostname;
+    const list = $("ports"); list.textContent = "";
+    let up = 0;
+    for (const i of dev.ifs.values()) {
+      const op = world.oper(dev, i); if (op === "up") up++;
+      const b = document.createElement("button"); b.type = "button"; b.className = "port"; b.dataset.port = i.name;
+      const pill = op === "up" ? ["up", "up/up"] : op === "admin" ? ["admin", "admin down"] : ["", "down/down"];
+      const p = i.peer;
+      const peer = i.loop ? "петлевой интерфейс" : !p ? "не подключён" : p.ext ? "→ " + p.label : p.absent ? `→ ${p.absent} (не в демо)` : `→ ${esc(p.dev.hostname)} ${shortIf(p.ifn)}`;
+      b.innerHTML = `<span class="pill ${pill[0]}">${pill[1]}</span><span class="nm">${shortIf(i.name)}</span><span class="ip">${i.ip ? i.ip + "/" + plen(i.mask) : "—"}</span><span class="peer">${peer}${i.desc ? " · " + esc(i.desc) : ""}</span>`;
+      b.setAttribute("aria-label", `${i.name}, ${pill[1]}. Вставить имя в командную строку`);
+      b.addEventListener("pointerdown", e => { s.hadFocus = document.activeElement === s.term.textarea; });
+      b.addEventListener("click", () => { this.send(i.name); if (s.hadFocus || !mobile()) s.term.focus(); });
+      list.appendChild(b);
+    }
+    $("portsCount").textContent = `${up} up`;
+    const nb = $("ospf");
+    if (!dev.ospf) nb.innerHTML = `<span class="muted">OSPF на ${esc(dev.hostname)} не настроен.</span>`;
+    else {
+      const n = world.adj(dev).filter(x => (world.adjSince[x.key] || 0) <= Date.now());
+      nb.innerHTML = n.length ? n.map(x => `<div><span class="pill up">FULL</span><span class="mono">${x.rid}</span><span class="muted">${shortIf(x.ifn)} · ${x.addr}</span></div>`).join("")
+        : `<span class="muted">Процесс ${dev.ospf.pid} запущен, соседей нет.</span>`;
+    }
+  },
+  flash(dev, name){
+    if (dev !== this.cur().dev) return;
+    const full = dev.findIf(name); if (!full) return;
+    if (!$("portsBox").open) $("portsBox").open = true;
+    const el = document.querySelector(`.port[data-port="${full.name}"]`); if (!el) return;
+    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  },
+  toast(msg){ const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(this._t); this._t = setTimeout(() => { t.hidden = true; }, 1400); }
+};
+
+function termTheme(){
+  return { background: cssVar("--t-bg"), foreground: cssVar("--t-fg"), cursor: cssVar("--t-accent"), cursorAccent: cssVar("--t-bg"),
+    selectionBackground: "rgba(90,168,242,.32)", black: "#1B2631", red: "#EE6B62", green: "#3CC47A", yellow: "#E0B13A",
+    blue: "#5AA8F2", magenta: "#C792EA", cyan: "#4FC1C9", white: "#D6DEE5", brightBlack: "#7D8B97", brightRed: "#FF8A80",
+    brightGreen: "#6EE09E", brightYellow: "#F2CC60", brightBlue: "#8CC4FF", brightMagenta: "#DDB3F6", brightCyan: "#7FDDE3", brightWhite: "#FFFFFF" };
+}
+
+function makeSession(dev){
+  const el = document.createElement("div"); el.className = "term"; $("termhost").appendChild(el);
+  const term = new Terminal({ fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: mobile() ? 13 : 14,
+    lineHeight: 1.15, cursorBlink: true, scrollback: 3000, theme: termTheme(), allowProposedApi: false });
+  const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(el);
+  const s = { dev, term, fit, el, unread: false, hadFocus: false };
+  dev.write = d => term.write(d);
+  dev.onLog = () => { if (ui.cur() !== s) { s.unread = true; ui.tabs(); } };
+  term.onData(d => {
+    if (ui.observer) return;
+    if (ui.ctrl && d.length === 1 && /[a-z@\[\\\]^_]/i.test(d)) { d = String.fromCharCode(d.toUpperCase().charCodeAt(0) & 31); setCtrl(false); }
+    dev.input(d);
+  });
+  term.attachCustomKeyEventHandler(e => {
+    if (e.type !== "keydown") return true;
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "c" && term.hasSelection()) {
+      const txt = term.getSelection();
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(() => ui.toast("Скопировано"), () => ui.toast("Браузер не дал скопировать"));
+      return false;
+    }
+    if (e.ctrlKey && e.shiftKey && (e.code === "Digit6" || e.key === "^")) { if (!ui.observer) dev.input("\x1e"); return false; }
+    return true;
+  });
+  term.registerLinkProvider({
+    provideLinks(y, cb){
+      const line = term.buffer.active.getLine(y - 1); if (!line) return cb(undefined);
+      const text = line.translateToString(true), re = /\b(GigabitEthernet\d+\/\d+|Gi\d+\/\d+|Loopback\d+|Lo\d+)\b/g, links = []; let m;
+      while ((m = re.exec(text))) {
+        const name = m[1];
+        links.push({ text: name, range: { start: { x: m.index + 1, y }, end: { x: m.index + name.length, y } },
+          decorations: { underline: true, pointerCursor: true }, activate: () => ui.flash(dev, name) });
+      }
+      cb(links.length ? links : undefined);
+    }
+  });
+  term.write("\x1b[2m# Демо: в браузере работает имитатор IOS. В плагине здесь будет WebSocket к консоли ноды.\x1b[0m\r\n\r\n\r\nPress RETURN to get started.\r\n");
+  return s;
+}
+
+function setCtrl(on){ ui.ctrl = on; const b = document.querySelector('[data-ctrl]'); if (b) b.setAttribute("aria-pressed", String(on)); }
+function buildStrips(){
+  const keys = $("keys"), snips = $("snips");
+  const bind = (b, fn) => {
+    b.addEventListener("pointerdown", e => { const s = ui.cur(); s.hadFocus = document.activeElement === s.term.textarea; e.preventDefault(); });
+    b.addEventListener("click", () => { fn(); const s = ui.cur(); if (s.hadFocus || !mobile()) s.term.focus(); });
+  };
+  KEYS.forEach(k => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "k" + (k.w ? " w" : ""); b.textContent = k.l;
+    if (k.a) { b.title = k.a; b.setAttribute("aria-label", k.a); }
+    if (k.ctrl) { b.dataset.ctrl = "1"; b.setAttribute("aria-pressed", "false"); bind(b, () => setCtrl(!ui.ctrl)); }
+    else bind(b, () => ui.send(k.s));
+    keys.appendChild(b);
+  });
+  SNIPS.forEach(sn => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "k snip"; b.textContent = sn.l;
+    if (sn.only) b.dataset.only = sn.only;
+    b.title = sn.s.replace(PRE, "").replace(/\r/g, " ⏎ ").trim();
+    bind(b, () => ui.send(sn.s));
+    snips.appendChild(b);
+  });
+}
+
+$("btnObs").addEventListener("click", e => {
+  ui.observer = !ui.observer;
+  e.currentTarget.setAttribute("aria-pressed", String(ui.observer));
+  $("obsbar").hidden = !ui.observer;
+  ui.sessions.forEach(s => { s.term.options.disableStdin = ui.observer; s.term.options.cursorBlink = !ui.observer; });
+  document.querySelectorAll("#keys .k, #snips .k").forEach(b => { b.disabled = ui.observer; });
+  requestAnimationFrame(() => { try { ui.cur().fit.fit(); } catch (_) {} });
+});
+
+/* экранная клавиатура на телефоне уменьшает видимую область — подгоняем приложение под неё */
+function fitViewport(){
+  const vv = window.visualViewport;
+  if (vv && vv.height < window.innerHeight - 60) document.documentElement.style.setProperty("--app-h", vv.height + "px");
+  else document.documentElement.style.removeProperty("--app-h");
+  window.scrollTo(0, 0);
+}
+if (window.visualViewport) window.visualViewport.addEventListener("resize", fitViewport);
+
+function start(){
+  if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+    $("termhost").insertAdjacentHTML("beforeend", '<p class="hint" style="padding:16px;color:#D6DEE5">Не загрузилась библиотека xterm.js. Проверьте доступ к cdn.jsdelivr.net и обновите страницу.</p>');
+    return;
+  }
+  world.update(true);
+  ui.sessions = world.devs.map(makeSession);
+  buildStrips();
+  if (mobile()) { $("portsBox").open = false; $("tryBox").open = false; }
+  ui.show(0);
+  new ResizeObserver(() => { try { ui.cur().fit.fit(); } catch (_) {} }).observe($("termhost"));
+  setInterval(() => ui.side(), 4000);
+}
+const fontReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
+fontReady.then(start, start);
+})();
+</script>
