@@ -6,18 +6,33 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from release import VERSION, verify
 
+from api.auth import require_token
 from api.client import call
 
 router = APIRouter(tags=["health"])
 
 
+# Manager negotiation (manager/docs/CONTRACTS.md §4.1); names are registered in its §7.
+FEATURES = ["qemu", "iou", "vpcs", "qga", "iol-cli"]
+
+
 @router.get("/healthz")
 async def healthz():
     return {"status": "ok", "version": VERSION}
+
+
+@router.get("/v1/capabilities", dependencies=[Depends(require_token)])
+async def capabilities():
+    return {
+        "schema": "gns3lab.capabilities/1",
+        "slot_version": VERSION,
+        "deploy_schemas": ["gns3lab.deploy/1"],
+        "features": FEATURES,
+    }
 
 
 def probe_directory(root):

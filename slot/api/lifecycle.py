@@ -208,10 +208,22 @@ class Lifecycle:
             )
         pid = pid or str(ticket.project_id or uuid4())
         lab = self.get("lab", pid)
+        # Ownership is the project lock held by this process. After a restart no lock is held:
+        # labs left FAILED by an earlier run (often another student's mount) do not block the
+        # slot, and run() still refuses to start while another GNS3 project has started nodes.
         for other in self.all("lab"):
-            if other["project_id"] != pid and other["state"] != "STOPPED":
+            if (
+                other["project_id"] != pid
+                and other["state"] != "STOPPED"
+                and other["project_id"] in self.project_locks
+            ):
                 raise HTTPException(
-                    409, "Another laboratory owns this slot; stop it first"
+                    409,
+                    {
+                        "code": "SLOT_OCCUPIED",
+                        "message": "Another laboratory owns this slot; stop it first",
+                        "project_id": other["project_id"],
+                    },
                 )
         if action != "deploy" and not lab:
             raise HTTPException(404, "Unknown managed laboratory")
@@ -257,7 +269,13 @@ class Lifecycle:
             except OSError as exc:
                 handle.close()
                 if isinstance(exc, BlockingIOError):
-                    raise HTTPException(409, "Project locked by another slot") from exc
+                    raise HTTPException(
+                        409,
+                        {
+                            "code": "PROJECT_LOCKED",
+                            "message": "Project locked by another slot",
+                        },
+                    ) from exc
                 raise
             self.project_locks[pid] = handle
         previous_state = lab.get("state", "FAILED")
