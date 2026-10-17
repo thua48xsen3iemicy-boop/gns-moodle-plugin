@@ -19,6 +19,7 @@
 | Конфиг и секреты | `/etc/lab-manager/` (`manager.env`, `sites.json`, `slots.json`, `pve-root-ca.pem`, `node-server-ca.crt`, `manager.crt`, `manager.key`) — не в Git и не на CephFS |
 | PostgreSQL | локально в этом LXC, данные — `/var/lib/postgresql` на rootfs (RBD), не на CephFS |
 | Каталог лаб | `/srv/gns3-ro/labs/<lab_ref>/` (RO CephFS) |
+| Шлюз консолей | в **этом же LXC** (решение владельца): `plugin/gateway/console_gateway.py`, отдельный процесс, один на все слоты (§1.1) |
 
 Обновление кода: остановить сервис → заменить `/srv/gns3-ro/manager` → `admin migrate`, если
 есть новые миграции → запустить сервис.
@@ -33,7 +34,26 @@ pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
 
 Каталоги студентов менеджеру не нужны: монтирует их агент, а создаёт сторона Proxmox (п. 2).
 Нужен сетевой доступ к API Proxmox (8006), к агентам узлов (8443, firewall агента пускает
-только менеджер), к слотам (8080) и к внутреннему API шлюза.
+только менеджер) и к слотам (8080): к REST слота ходит менеджер, к консолям — шлюз.
+
+### 1.1. Шлюз консолей в этом LXC
+
+Браузеры подключают консоли к шлюзу, а не к менеджеру; сам менеджер наружу не открыт (к нему ходит
+только сервер Moodle). Шлюз — отдельный процесс в том же LXC:
+
+```
+браузер ──wss──> nginx :443  /console/  ──ws──> шлюз 127.0.0.1:8080 ──ws──> слот :8080 /v1/console/…
+сервер Moodle ──https──> nginx ──> менеджер 127.0.0.1:8090 ──http──> шлюз 127.0.0.1:8080/internal/tickets
+```
+
+- Шлюз слушает только `127.0.0.1` (`GW_HOST=127.0.0.1`, `GW_PORT=8080`). Наружу nginx публикует
+  **только** `/console/` (с `Upgrade`/`Connection` для WebSocket и `proxy_read_timeout` больше 25 с:
+  шлюз шлёт ping каждые 25 с). `/internal/tickets` наружу не публикуется.
+- Менеджер: `GATEWAY_INTERNAL_URL=http://127.0.0.1:8080`, `GATEWAY_INTERNAL_KEY` = `GW_INTERNAL_KEY`
+  шлюза, `GATEWAY_PUBLIC_URL=wss://<публичное имя>` (без `/` на конце).
+- Шлюз: `GW_SLOTS` — `{"<address из slots.json>": "<console_token>"}` для каждого слота,
+  `GW_ALLOWED_ORIGINS` — origin сайтов Moodle (без него шлюз не стартует).
+- Шлюз один на все слоты: билеты живут в его памяти, и менеджер рассчитан на один шлюз.
 
 ## 2. Сторона Proxmox: агент, слоты, каталоги
 
@@ -242,4 +262,5 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 - реальный PVE: права токена из §5, `/cluster/resources` с узлами, применение `cores`/`memory`;
 - CephFS: владелец каталога студента (uid `gns3` слота), запись в `/opt/gns3/projects` из слота; `.slot-locks` в каталоге студента (DESIGN §5);
 - настоящий Lab Slot и GNS3: длительность deploy, `readyz` после старта LXC, путь кода (DESIGN §11, В1);
-- шлюз консолей с реальными `GW_SLOTS`, systemd unit, preflight в LXC.
+- шлюз консолей в LXC менеджера (§1.1) с реальными `GW_SLOTS`: systemd unit и конфиг nginx — за плагином
+  (`plugin/gateway`), проверка на стенде.
