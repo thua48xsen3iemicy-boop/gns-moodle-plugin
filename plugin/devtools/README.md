@@ -54,9 +54,11 @@ curl -X POST localhost:8090/mock/stale/off
 
 ## Библиотека и редактор лаб
 
-Mock-менеджер объявляет `images` и `lab_definitions` и умеет то, что плагин попросил в MANAGER_REQUESTS §7: каталог
-образов (`GET /api/v1/images`, пять образов: IOU L3/L2, Debian, Debian-сервер, VPCS), проверку лабы
-(`POST /api/v1/labs/validate` — те же проверки и коды замечаний, что в просьбе П11) и запуск сессии по `lab`.
+Mock-менеджер ведёт себя как менеджер 0.5 (CONTRACTS §2.6, ветка `claude/determined-brown-lfgnxy`): объявляет
+`images`, `lab_definitions` и `lab_formats`, отдаёт каталог образов (`GET /api/v1/images`, пять образов: IOU L3/L2,
+Debian, Debian-сервер, VPCS), проверяет лабу (`POST /api/v1/labs/validate` — перенос `manager/lab_manager/labdef.py`:
+те же правила, коды замечаний и размер CT) и запускает сессию по `lab`. Коды сбоев менеджера проверяются через
+`/mock/fail-next`, например `{"code": "NO_SLOTS", "retryable": false}`.
 
 1. Назначьте пользователю роль «Автор лаб» на уровне сайта («Администрирование → Пользователи → Права → Назначить
    системные роли»). У него появится пункт «Библиотека лаб» в главном меню; администратор найдёт библиотеку и в

@@ -126,24 +126,28 @@ class fake_manager {
      * Answers GET /api/v1/info like manager 0.3 (CONTRACTS §2.1).
      *
      * @param array $features features to announce
+     * @param array $extra more fields of the answer
      */
-    public function with_info(array $features = ['consoles', 'observer']): void {
+    public function with_info(array $features = ['consoles', 'observer'], array $extra = []): void {
         $this->on('GET', '/api/v1/info', 200, [
             'schema' => 'gns3lab.info/1',
             'version' => '0.3.0',
             'session_schemas' => ['gns3lab.session/1'],
             'options' => ['max_duration'],
             'features' => $features,
-        ]);
+        ] + $extra);
     }
 
     /**
-     * Answers like a manager that takes labs from Moodle (MANAGER_REQUESTS П10–П13): info, images and validate.
+     * Answers like manager 0.5 that takes labs from Moodle (CONTRACTS §2.6): info, images and validate.
      *
      * @param string $labdef hash that validate returns
      */
     public function with_lab_definitions(string $labdef = 'sha256:aaaa'): void {
-        $this->with_info(['consoles', 'observer', 'images', 'lab_definitions']);
+        $this->with_info(['consoles', 'observer', 'images', 'lab_definitions'], [
+            'lab_formats' => ['gns3lab.lab/1'],
+            'limits' => ['max_nodes' => 30, 'max_memory_mb' => 16384, 'max_cpus' => 8, 'images' => '*'],
+        ]);
         $this->on('GET', '/api/v1/images', 200, ['images' => [self::image()]]);
         $this->on('POST', '/api/v1/labs/validate', 200, [
             'lab_def' => $labdef,

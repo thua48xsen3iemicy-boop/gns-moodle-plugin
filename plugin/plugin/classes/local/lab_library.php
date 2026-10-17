@@ -119,7 +119,7 @@ class lab_library {
         if (isset($data->tags)) {
             core_tag_tag::set_item_tags('mod_gns3lab', self::TAG_ITEMTYPE, $labid, self::context(), $data->tags);
         }
-        self::save_draft($labid, lab_definition::empty(trim($data->name)));
+        self::save_draft($labid, lab_definition::empty(lab_definition::title($data->name)));
         return $labid;
     }
 
@@ -269,7 +269,7 @@ class lab_library {
         global $DB;
 
         $lab = self::get_lab($labid);
-        $def['title'] = $lab->name;
+        $def['title'] = lab_definition::title($lab->name);
         $draft = self::save_draft($lab->id, $def);
         $result = \core\di::get(manager_client::class)->validate_lab($def);
 

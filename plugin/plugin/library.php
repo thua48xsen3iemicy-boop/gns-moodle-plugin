@@ -54,7 +54,7 @@ foreach (lab_library::list_labs($tag) as $lab) {
 $managerwarning = null;
 if (!manager_client::is_configured()) {
     $managerwarning = get_string('librarynomanager', 'gns3lab');
-} else if (!\core\di::get(manager_client::class)->has_feature('lab_definitions')) {
+} else if (!\core\di::get(manager_client::class)->supports_lab_definitions()) {
     $managerwarning = get_string('librarynofeature', 'gns3lab');
 }
 

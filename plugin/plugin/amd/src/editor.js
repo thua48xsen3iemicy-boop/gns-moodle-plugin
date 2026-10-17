@@ -30,7 +30,7 @@ import Notification from 'core/notification';
 
 const NS = "http://www.w3.org/2000/svg";
 const FORMAT = "gns3lab.lab/1";
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
 const W = 60, H = 45;
 const KMIN = 0.2, KMAX = 3;
 const GRID = 10;
@@ -391,7 +391,7 @@ export const init = (prefix) => {
     return `<div class="ph"><div><p class="eyebrow">${esc(img ? img.title : str("ed_unknownimage", n.image))}</p>
       <h2>${esc(n.name)}</h2></div></div>
       <label class="ed-field"><span>${esc(str("ed_name"))}</span>
-        <input type="text" class="form-control form-control-sm" data-field="name" value="${esc(n.name)}" maxlength="64"
+        <input type="text" class="form-control form-control-sm" data-field="name" value="${esc(n.name)}" maxlength="80"
           autocomplete="off" spellcheck="false"></label>
       ${numberField(n, "adapters", str("ed_adapters"))}
       ${numberField(n, "ram_mb", str("ed_ram"))}

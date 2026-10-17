@@ -82,6 +82,20 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json($json, 'Lab');
     }
 
+    public function test_title_and_names_fit_the_lab_manager(): void {
+        $raw = fake_manager::lab();
+        $raw['nodes'][0]['name'] = str_repeat('a', 80);
+        $raw['links'] = [];
+
+        $def = lab_definition::from_json(json_encode($raw), str_repeat('Я', 250));
+
+        $this->assertSame(200, \core_text::strlen($def['title']));
+        $this->assertSame(str_repeat('a', 80), $def['nodes'][0]['name']);
+        $raw['nodes'][0]['name'] = str_repeat('a', 81);
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode($raw), 'Lab');
+    }
+
     public function test_topology_for_the_viewer(): void {
         $def = lab_definition::from_json(json_encode(fake_manager::lab()), 'OSPF');
 

@@ -73,6 +73,9 @@ class start_session extends external_api {
             if ($e->remotecode === 'session_conflict') {
                 self::conflict($e);
             }
+            if ($e->remotecode === 'lab_invalid' && is_array($lab)) {
+                self::rejected($access, $e);
+            }
             throw $e;
         }
         return session_data::export($session);
@@ -102,6 +105,30 @@ class start_session extends external_api {
         }
         $url = new \core\url('/mod/gns3lab/view.php', ['id' => $cm->id]);
         throw new \moodle_exception('sessionconflictat', 'gns3lab', $url->out(false), $cminfo->get_formatted_name());
+    }
+
+    /**
+     * Reports a library lab the lab manager refused (422 with problems): to the log, and to the user as a lab
+     * set up with errors. An image was removed or the site limits were cut after the lab was published.
+     *
+     * @param lab_access $access the activity
+     * @param manager_exception $e lab_invalid from the lab manager
+     */
+    protected static function rejected(lab_access $access, manager_exception $e): void {
+        $problems = array_map(
+            fn($p) => preg_replace('/[^A-Za-z0-9_.\[\]-]/', '', $p['path']) . ': ' . $p['code'],
+            lab_problems::from_exception($e)
+        );
+        $event = \mod_gns3lab\event\lab_rejected::create([
+            'objectid' => $access->instance->id,
+            'context' => $access->context,
+            'other' => [
+                'labversionid' => (int) $access->instance->labversionid,
+                'problems' => \core_text::substr(implode('; ', $problems), 0, 1000),
+            ],
+        ]);
+        $event->trigger();
+        throw new \moodle_exception('labdefrejected', 'gns3lab', '', null, implode('; ', $problems));
     }
 
     /**

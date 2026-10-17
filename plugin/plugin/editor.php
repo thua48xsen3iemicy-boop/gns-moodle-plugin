@@ -49,7 +49,7 @@ if (!manager_client::is_configured()) {
     try {
         $images = $client->get_images();
         $limits = $client->get_info()->limits;
-        $canpublish = $client->has_feature('lab_definitions');
+        $canpublish = $client->supports_lab_definitions();
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
         }
@@ -69,8 +69,9 @@ $keys = [
     'ed_version', 'ed_cannotpublish',
 ];
 $codes = [
-    'required', 'unknown_field', 'bad_name', 'duplicate_name', 'unknown_image', 'image_not_allowed', 'out_of_range',
-    'unknown_node', 'bad_port', 'port_in_use', 'self_link', 'too_many_nodes', 'limit_exceeded', 'too_large',
+    'required', 'unknown_field', 'bad_type', 'bad_format', 'bad_name', 'duplicate_name', 'unknown_image',
+    'image_not_allowed', 'out_of_range', 'unknown_node', 'bad_port', 'port_in_use', 'self_link', 'too_many_nodes',
+    'limit_exceeded', 'too_large',
 ];
 foreach ($keys as $key) {
     $strings[$key] = get_string($key, 'gns3lab');

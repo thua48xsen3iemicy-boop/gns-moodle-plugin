@@ -87,7 +87,7 @@ class manager_client {
      * The answer is cached per manager URL; a failed request is retried sooner than a good answer expires.
      *
      * @return \stdClass known (bool: the manager answered info), options (string[]), features (string[]),
-     *     limits (stdClass|null: per-site limits for lab definitions)
+     *     limits (stdClass|null: per-site limits for lab definitions), lab_formats (string[])
      */
     public function get_info(): \stdClass {
         $cache = \cache::make('mod_gns3lab', 'info');
@@ -96,7 +96,7 @@ class manager_client {
         if ($hit && $hit->until > time()) {
             return $hit->info;
         }
-        $info = (object) ['known' => false, 'options' => [], 'features' => [], 'limits' => null];
+        $info = (object) ['known' => false, 'options' => [], 'features' => [], 'limits' => null, 'lab_formats' => []];
         $ttl = self::INFO_TTL;
         try {
             $data = $this->expect_object($this->request('GET', '/api/v1/info'));
@@ -104,6 +104,7 @@ class manager_client {
             $info->options = self::strings($data->options ?? []);
             $info->features = self::strings($data->features ?? []);
             $info->limits = ($data->limits ?? null) instanceof \stdClass ? $data->limits : null;
+            $info->lab_formats = self::strings($data->lab_formats ?? []);
         } catch (manager_exception $e) {
             if (!$e->is_not_found()) {
                 $ttl = self::INFO_RETRY;
@@ -121,6 +122,16 @@ class manager_client {
      */
     public function has_feature(string $feature): bool {
         return in_array($feature, $this->get_info()->features, true);
+    }
+
+    /**
+     * Whether the manager takes lab definitions in the format of the lab library (CONTRACTS §2.6).
+     *
+     * @return bool
+     */
+    public function supports_lab_definitions(): bool {
+        return $this->has_feature('lab_definitions')
+            && in_array(lab_definition::FORMAT, $this->get_info()->lab_formats ?? [], true);
     }
 
     /**

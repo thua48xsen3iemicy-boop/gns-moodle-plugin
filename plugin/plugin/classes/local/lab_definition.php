@@ -36,8 +36,11 @@ class lab_definition {
     /** Most links: four times the nodes is more than any real lab. */
     public const MAX_LINKS = 400;
 
-    /** Node name pattern of the Lab Slot. */
-    public const NAME_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/';
+    /** Node name pattern of the Lab Slot (NodeSpec.name). */
+    public const NAME_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/';
+
+    /** Longest title the lab manager takes. */
+    public const TITLE_MAX = 200;
 
     /** Node fields besides name, image, x and y; the lab manager uses the image default for a missing one. */
     protected const NUMBERS = ['ram_mb', 'cpus', 'adapters'];
@@ -77,7 +80,7 @@ class lab_definition {
         if (!is_array($links) || !array_is_list($links) || count($links) > self::MAX_LINKS) {
             throw self::invalid('links');
         }
-        $def = self::empty(\core_text::substr(trim($title), 0, 255));
+        $def = self::empty(self::title($title));
         $names = [];
         foreach ($nodes as $i => $node) {
             $name = $node['name'] ?? null;
@@ -113,6 +116,18 @@ class lab_definition {
             $def['links'][] = $ends;
         }
         return $def;
+    }
+
+    /**
+     * The lab title as the lab manager takes it: the lab name, cut to TITLE_MAX characters.
+     *
+     * The title is not part of lab_def, so a renamed lab keeps its hash and the students' work.
+     *
+     * @param string $name lab name
+     * @return string
+     */
+    public static function title(string $name): string {
+        return \core_text::substr(trim($name), 0, self::TITLE_MAX);
     }
 
     /**

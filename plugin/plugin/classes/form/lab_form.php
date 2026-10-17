@@ -38,7 +38,8 @@ class lab_form extends \moodleform {
         $mform->addElement('text', 'name', get_string('labname', 'gns3lab'), ['size' => '64']);
         $mform->setType('name', PARAM_TEXT);
         $mform->addRule('name', null, 'required', null, 'client');
-        $mform->addRule('name', get_string('maximumchars', '', 255), 'maxlength', 255, 'client');
+        $max = \mod_gns3lab\local\lab_definition::TITLE_MAX;
+        $mform->addRule('name', get_string('maximumchars', '', $max), 'maxlength', $max, 'client');
 
         $mform->addElement('editor', 'description_editor', get_string('description'), ['rows' => 6], [
             'maxfiles' => 0,
@@ -64,8 +65,11 @@ class lab_form extends \moodleform {
      */
     public function validation($data, $files): array {
         $errors = parent::validation($data, $files);
-        if (trim($data['name'] ?? '') === '') {
+        $name = trim($data['name'] ?? '');
+        if ($name === '') {
             $errors['name'] = get_string('required');
+        } else if (\core_text::strlen($name) > \mod_gns3lab\local\lab_definition::TITLE_MAX) {
+            $errors['name'] = get_string('maximumchars', '', \mod_gns3lab\local\lab_definition::TITLE_MAX);
         }
         return $errors;
     }

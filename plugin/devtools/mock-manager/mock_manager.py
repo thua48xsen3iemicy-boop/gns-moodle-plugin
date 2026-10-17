@@ -14,8 +14,8 @@
 - билеты консолей выдаёт настоящий шлюз (gateway/console_gateway.py) через /internal/tickets;
   к остановленной ноде — 409 node_not_running (если статусы не устарели).
 
-Лабы из Moodle (раунд 4, MANAGER_REQUESTS §7, предложение — у менеджера ещё нет):
-- GET /api/v1/images — каталог образов IMAGES; info: features "images", "lab_definitions" и limits сайта;
+Лабы из Moodle (CONTRACTS §2.6 менеджера 0.5, ветка claude/determined-brown-lfgnxy):
+- GET /api/v1/images — каталог образов IMAGES; info: features "images", "lab_definitions", lab_formats, limits;
 - POST /api/v1/labs/validate {"lab"} — 200 {lab_def, resources, warnings} или 422 lab_invalid с problems;
 - POST /api/v1/sessions с "lab" вместо "lab_ref": сессия по определению, в ней lab_def и lab_ref null.
 
@@ -38,6 +38,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -98,148 +99,196 @@ SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "lab_ref": 1, "lab": 1, "cours
                   "options": {"max_duration": 1}, "client": {"plugin_version": 1, "moodle_release": 1}}
 
 
-# Каталог образов (П10). У настоящего менеджера ещё и файл образа, cli_prompt, qga и т. п. — плагину их не отдают.
+# Каталог образов (CONTRACTS §2.6 менеджера 0.5): у настоящего менеджера ещё файл образа, cli_prompt, qga и т. п.
+# Имена портов — как у GNS3 2.2.61: iou Ethernet{adapter}/{port}, qemu Ethernet{adapter}, vpcs Ethernet0.
 IMAGES = [
     {"id": "cisco-iou-l3", "title": "Cisco IOU L3 (маршрутизатор)", "kind": "iou", "category": "router",
-     "symbol": ":/symbols/classic/router.svg", "console_type": "telnet",
+     "symbol": ":/symbols/router.svg", "console_type": "telnet",
      "ram_mb": {"default": 1024, "min": 512, "max": 2048}, "cpus": None,
      "adapters": {"default": 2, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}/{port}", "ports_per_adapter": 4},
     {"id": "cisco-iou-l2", "title": "Cisco IOU L2 (коммутатор)", "kind": "iou", "category": "switch",
-     "symbol": ":/symbols/classic/multilayer_switch.svg", "console_type": "telnet",
+     "symbol": ":/symbols/multilayer_switch.svg", "console_type": "telnet",
      "ram_mb": {"default": 1024, "min": 512, "max": 2048}, "cpus": None,
-     "adapters": {"default": 4, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}/{port}", "ports_per_adapter": 4},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}/{port}", "ports_per_adapter": 4},
     {"id": "debian12", "title": "Debian 12", "kind": "qemu", "category": "host",
-     "symbol": ":/symbols/classic/computer.svg", "console_type": "telnet",
+     "symbol": ":/symbols/computer.svg", "console_type": "telnet",
      "ram_mb": {"default": 768, "min": 512, "max": 4096}, "cpus": {"default": 1, "min": 1, "max": 2},
-     "adapters": {"default": 1, "min": 1, "max": 4}, "port_name": "eth{adapter}", "ports_per_adapter": 1},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
     {"id": "debian12-server", "title": "Debian 12 (сервер)", "kind": "qemu", "category": "server",
-     "symbol": ":/symbols/classic/server.svg", "console_type": "telnet",
+     "symbol": ":/symbols/server.svg", "console_type": "telnet",
      "ram_mb": {"default": 2048, "min": 1024, "max": 8192}, "cpus": {"default": 2, "min": 1, "max": 4},
-     "adapters": {"default": 2, "min": 1, "max": 8}, "port_name": "eth{adapter}", "ports_per_adapter": 1},
-    {"id": "vpcs", "title": "VPCS (простой хост)", "kind": "vpcs", "category": "host",
-     "symbol": ":/symbols/classic/vpcs_guest.svg", "console_type": "telnet",
-     "ram_mb": None, "cpus": None, "adapters": None, "port_name": "Ethernet0", "ports_per_adapter": 1},
+     "adapters": {"default": 2, "min": 1, "max": 8}, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
+    {"id": "vpcs", "title": "VPCS", "kind": "vpcs", "category": "host",
+     "symbol": ":/symbols/vpcs_guest.svg", "console_type": "telnet",
+     "ram_mb": None, "cpus": None, "adapters": None, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
 ]
 LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "images": "*"}
 LAB_FORMAT = "gns3lab.lab/1"
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-MAX_LAB_BYTES = 256 * 1024
+# Проверка определения — перенос manager/lab_manager/labdef.py (ветка менеджера claude/determined-brown-lfgnxy):
+# те же правила, коды и пути замечаний, хэш без title, тот же размер CT.
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+MAX_LAB_BYTES, MAX_NODES, MAX_LINKS, COORD = 256 * 1024, 100, 1000, 100_000
+VPCS_MEMORY_MB, OVERHEAD_MB = 32, 1024
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def is_int(value):
+    return type(value) is int
+
+
+def effective(node, image):
+    rng = lambda key, fallback: node.get(key, image[key]["default"]) if image[key] else fallback  # noqa: E731
+    return {"ram_mb": rng("ram_mb", VPCS_MEMORY_MB), "cpus": rng("cpus", 1), "adapters": rng("adapters", 1)}
+
+
+def resources_of(nodes, images):
+    memory = cores_qemu = iou = vpcs = 0
+    for node in nodes:
+        image = images[node["image"]]
+        values = effective(node, image)
+        memory += values["ram_mb"]
+        if image["kind"] == "qemu":
+            cores_qemu += values["cpus"]
+        elif image["kind"] == "iou":
+            iou += 1
+        else:
+            vpcs += 1
+    return {"cores": max(2, cores_qemu + math.ceil(iou / 2) + math.ceil(vpcs / 8)),
+            "memory_mb": math.ceil((memory * 1.1 + OVERHEAD_MB) / 256) * 256}
 
 
 def lab_problems(lab):
-    """Checks a lab definition (П11) like the manager would. Returns (problems, normalised definition)."""
+    """Checks a definition like the manager. Returns (problems, normalised definition with _resources)."""
     problems = []
+    images = {i["id"]: i for i in IMAGES if LIMITS["images"] == "*" or i["id"] in LIMITS["images"]}
 
     def bad(path, code, message=""):
         problems.append({"path": path, "code": code, "message": message})
 
+    def unknown(obj, allowed, path):
+        for key in sorted(set(obj) - allowed):
+            bad(f"{path}.{key}" if path else key, "unknown_field")
+
     if not isinstance(lab, dict):
-        bad("", "required", "object expected")
-        return problems, None
-    if len(json.dumps(lab, ensure_ascii=False).encode()) > MAX_LAB_BYTES:
-        bad("", "too_large", f"> {MAX_LAB_BYTES} bytes")
-        return problems, None
-    for key in lab:
-        if key not in ("format", "title", "nodes", "links"):
-            bad(key, "unknown_field")
+        return [{"path": "", "code": "bad_type", "message": "object expected"}], None
+    if len(canonical(lab).encode()) > MAX_LAB_BYTES:
+        return [{"path": "", "code": "too_large", "message": f"max {MAX_LAB_BYTES} bytes"}], None
+    unknown(lab, {"format", "title", "nodes", "links"}, "")
     if lab.get("format") != LAB_FORMAT:
-        bad("format", "required", LAB_FORMAT)
-    title = lab.get("title")
-    if not isinstance(title, str) or not title.strip() or len(title) > 255:
-        bad("title", "required", "1..255 chars")
+        bad("format", "required" if "format" not in lab else "bad_format", LAB_FORMAT)
+    title = lab.get("title", "")
+    if not isinstance(title, str) or len(title) > 200:
+        bad("title", "bad_type", "string up to 200 characters")
     nodes, links = lab.get("nodes"), lab.get("links", [])
     if not isinstance(nodes, list) or not nodes:
-        bad("nodes", "required", "at least one node")
-        nodes = []
+        bad("nodes", "required" if nodes is None else "bad_type", "non-empty list")
+        return problems, None
     if not isinstance(links, list):
-        bad("links", "required", "list expected")
+        bad("links", "bad_type", "list")
         links = []
-    if len(nodes) > min(100, LIMITS["max_nodes"]):
-        bad("nodes", "too_many_nodes", f"max {LIMITS['max_nodes']}")
-    images = {i["id"]: i for i in IMAGES}
+    max_nodes = min(MAX_NODES, LIMITS["max_nodes"])
+    if len(nodes) > max_nodes:
+        bad("nodes", "too_many_nodes", f"max {max_nodes}")
+    if len(links) > MAX_LINKS:
+        bad("links", "too_large", f"max {MAX_LINKS} links")
     out_nodes, by_name = [], {}
-    for i, n in enumerate(nodes):
+    for i, node in enumerate(nodes[:MAX_NODES]):
         path = f"nodes[{i}]"
-        if not isinstance(n, dict):
-            bad(path, "required", "object expected")
+        if not isinstance(node, dict):
+            bad(path, "bad_type", "object expected")
             continue
-        for key in n:
-            if key not in ("name", "image", "x", "y", "ram_mb", "cpus", "adapters"):
-                bad(f"{path}.{key}", "unknown_field")
-        name = n.get("name")
+        unknown(node, {"name", "image", "x", "y", "ram_mb", "cpus", "adapters"}, path)
+        out, ok = {}, True
+        name = node.get("name")
         if not isinstance(name, str) or not NAME_RE.fullmatch(name):
-            bad(f"{path}.name", "bad_name", NAME_RE.pattern)
+            bad(f"{path}.name", "required" if name is None else "bad_name", NAME_RE.pattern)
+            ok = False
         elif name in by_name:
             bad(f"{path}.name", "duplicate_name", name)
-        image = images.get(n.get("image"))
-        if image is None:
-            bad(f"{path}.image", "unknown_image", str(n.get("image")))
-        elif LIMITS["images"] != "*" and image["id"] not in LIMITS["images"]:
-            bad(f"{path}.image", "image_not_allowed", image["id"])
-        for key in ("x", "y"):
-            if type(n.get(key)) is not int or abs(n[key]) > 100000:
-                bad(f"{path}.{key}", "out_of_range", "integer")
-        node = {"name": name, "image": n.get("image"), "x": n.get("x"), "y": n.get("y")}
-        for key in ("ram_mb", "cpus", "adapters"):
-            rng = image.get(key) if image else None
-            if key in n:
+            ok = False
+        image_id = node.get("image")
+        image = images.get(image_id) if isinstance(image_id, str) else None
+        if image_id is None:
+            bad(f"{path}.image", "required")
+        elif image is None:
+            known = any(i["id"] == image_id for i in IMAGES)
+            bad(f"{path}.image", "image_not_allowed" if known else "unknown_image", str(image_id)[:64])
+        for axis in ("x", "y"):
+            value = node.get(axis, 0)
+            if not is_int(value) or not -COORD <= value <= COORD:
+                bad(f"{path}.{axis}", "out_of_range", f"integer -{COORD}..{COORD}")
+            else:
+                out[axis] = value
+        if image is not None:
+            for key in ("ram_mb", "cpus", "adapters"):
+                if key not in node:
+                    continue
+                rng, value = image[key], node[key]
                 if rng is None:
-                    bad(f"{path}.{key}", "unknown_field", f"{key} is fixed for this image")
-                elif type(n[key]) is not int or not rng["min"] <= n[key] <= rng["max"]:
+                    bad(f"{path}.{key}", "unknown_field", f"{image['id']} has no {key}")
+                elif not is_int(value) or not rng["min"] <= value <= rng["max"]:
                     bad(f"{path}.{key}", "out_of_range", f"{rng['min']}..{rng['max']}")
-            if rng is not None:
-                node[key] = n.get(key, rng["default"])
-        out_nodes.append(node)
-        if isinstance(name, str):
-            by_name.setdefault(name, (node, image))
-    used, out_links = {}, []
-    for i, link in enumerate(links):
+                else:
+                    out[key] = value
+        if ok and image is not None:
+            out = {"name": name, "image": image["id"], **out}
+            by_name[name] = out
+            out_nodes.append(out)
+    out_links, used = [], set()
+    for i, link in enumerate(links[:MAX_LINKS]):
         path = f"links[{i}]"
-        if not isinstance(link, dict) or set(link) != {"a", "b"}:
-            bad(path, "required", "{a, b}")
+        if not isinstance(link, dict):
+            bad(path, "bad_type", "object expected")
             continue
+        unknown(link, {"a", "b"}, path)
         ends = []
         for side in ("a", "b"):
-            e, epath = link[side], f"{path}.{side}"
-            if not isinstance(e, dict) or set(e) != {"node", "adapter", "port"}:
-                bad(epath, "required", "{node, adapter, port}")
+            ep, epath = link.get(side), f"{path}.{side}"
+            if not isinstance(ep, dict):
+                bad(epath, "required" if ep is None else "bad_type")
                 continue
-            target = by_name.get(e["node"])
+            unknown(ep, {"node", "adapter", "port"}, epath)
+            node_name, adapter, port = ep.get("node"), ep.get("adapter", 0), ep.get("port", 0)
+            target = by_name.get(node_name) if isinstance(node_name, str) else None
             if target is None:
-                bad(f"{epath}.node", "unknown_node", str(e["node"]))
+                if not any(isinstance(n, dict) and n.get("name") == node_name for n in nodes):
+                    bad(f"{epath}.node", "unknown_node", str(node_name)[:80])
                 continue
-            node, image = target
-            adapters = node.get("adapters", 1)
-            per = image["ports_per_adapter"] if image else 1
-            if type(e["adapter"]) is not int or type(e["port"]) is not int \
-                    or not 0 <= e["adapter"] < adapters or not 0 <= e["port"] < per:
+            image = images[target["image"]]
+            adapters, per = effective(target, image)["adapters"], image["ports_per_adapter"]
+            if not (is_int(adapter) and is_int(port) and 0 <= adapter < adapters and 0 <= port < per):
                 bad(epath, "bad_port", f"adapter 0..{adapters - 1}, port 0..{per - 1}")
                 continue
-            key = (e["node"], e["adapter"], e["port"])
+            key = (node_name, adapter, port)
             if key in used:
-                bad(epath, "port_in_use", f"{e['node']} {e['adapter']}/{e['port']} is in {used[key]}")
+                bad(epath, "port_in_use", f"{node_name} {adapter}/{port}")
                 continue
-            used[key] = path
-            ends.append(e)
+            used.add(key)
+            ends.append({"node": node_name, "adapter": adapter, "port": port})
         if len(ends) == 2:
             if ends[0]["node"] == ends[1]["node"]:
-                bad(path, "self_link")
-            out_links.append({"a": ends[0], "b": ends[1]})
-    memory = sum(n.get("ram_mb", 256) for n in out_nodes) + 1024
-    cores = max(2, min(LIMITS["max_cpus"], sum(n.get("cpus", 1) for n in out_nodes) // 2))
-    if not problems and memory > LIMITS["max_memory_mb"]:
-        bad("nodes", "limit_exceeded", f"memory {memory} MB > {LIMITS['max_memory_mb']} MB")
+                bad(path, "self_link", ends[0]["node"])
+            else:
+                out_links.append({"a": ends[0], "b": ends[1]})
     if problems:
         return problems, None
-    normal = {"format": LAB_FORMAT, "title": title.strip(), "nodes": out_nodes, "links": out_links}
-    normal["_resources"] = {"cores": cores, "memory_mb": memory}
-    return [], normal
+    resources = resources_of(out_nodes, images)
+    if LIMITS["max_memory_mb"] is not None and resources["memory_mb"] > LIMITS["max_memory_mb"]:
+        bad("nodes", "limit_exceeded", f"memory {resources['memory_mb']} > {LIMITS['max_memory_mb']} MiB")
+    if LIMITS["max_cpus"] is not None and resources["cores"] > LIMITS["max_cpus"]:
+        bad("nodes", "limit_exceeded", f"cores {resources['cores']} > {LIMITS['max_cpus']}")
+    if problems:
+        return problems, None
+    return [], {"format": LAB_FORMAT, "title": title, "nodes": out_nodes, "links": out_links, "_resources": resources}
 
 
 def lab_hash(normal):
-    body = {k: v for k, v in normal.items() if not k.startswith("_")}
-    raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+    """sha256 of the normalised definition without its title and without the mock's own fields."""
+    body = {k: v for k, v in normal.items() if k != "title" and not k.startswith("_")}
+    return "sha256:" + hashlib.sha256(canonical(body).encode()).hexdigest()
 
 
 def lab_document(normal, lab_def):
@@ -250,7 +299,7 @@ def lab_document(normal, lab_def):
     for n in normal["nodes"]:
         image = images[n["image"]]
         ports = []
-        for adapter in range(n.get("adapters", 1)):
+        for adapter in range(effective(n, image)["adapters"]):
             for port in range(image["ports_per_adapter"]):
                 name = image["port_name"].replace("{adapter}", str(adapter)).replace("{port}", str(port))
                 short = "e" + name[8:] if name.startswith("Ethernet") else name
@@ -404,9 +453,9 @@ def site_of(request):
 async def info(request):
     site_of(request)
     features = ["consoles", "observer", "images", "lab_definitions"] + (["resume"] if RESUME else [])
-    return web.json_response({"schema": "gns3lab.info/1", "version": "0.4.0-mock",
+    return web.json_response({"schema": "gns3lab.info/1", "version": "0.5.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
-                              "features": features, "limits": LIMITS})
+                              "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
 
 
 async def images(request):
@@ -496,7 +545,7 @@ async def create_session(request):
         if (live.instance_id, live.key) != (instance_id, lab_def or lab_ref):
             return error(409, "session_conflict", "У студента уже запущена другая лаба; сначала остановите её",
                          conflict={"instance_id": live.instance_id, "course_id": live.course_id,
-                                   "lab_ref": live.lab_ref, "status": live.status()})
+                                   "lab_ref": live.lab_ref, "lab_def": live.lab_def, "status": live.status()})
         return web.json_response(m.present(live), status=200)
     if lab_ref is not None and lab_ref not in m.labs:
         return error(404, "lab_not_found", "Unknown lab_ref")
