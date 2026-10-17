@@ -96,6 +96,15 @@ function fmtFilters(f){
   if (f.bpf && f.bpf.length) out.push({ k: "BPF-фильтр", v: String(f.bpf[0]), s: "bpf" });
   return out;
 }
+/* порты ноды для клавиатуры консоли: полное имя и сосед по линку */
+function consolePorts(n){
+  const peers = new Map();
+  st.model.links.forEach(l => [[l.a, l.b], [l.b, l.a]].forEach(([e, o]) => {
+    if (e.nodeId === n.id) peers.set(e.adapter + "/" + e.port, ((st.model.nodes.get(o.nodeId) || {}).name || "?") + " " + o.text);
+  }));
+  const list = (n.ports || []).map(p => ({ name: String(p.name || p.short_name || ""), peer: peers.get(p.adapter_number + "/" + p.port_number) || "" }));
+  return list.filter(p => p.name).sort((a, b) => (b.peer ? 1 : 0) - (a.peer ? 1 : 0) || natSort(a.name, b.name));
+}
 const natSort = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
 
 /* ---------- факты из лабы и слои L1/L2/L3/маршрутизация (формат и правила — docs/live-state.md) ---------- */
@@ -1035,7 +1044,7 @@ body.addEventListener("click", e => {
   else if (t.dataset.act === "console" && st.sel && st.sel.kind === "node") {
     /* консоли открывает mod_gns3lab/lab: он знает сессию и решает, можно ли */
     const n = st.model.nodes.get(st.sel.id);
-    if (n) root.dispatchEvent(new CustomEvent("gns3lab:openconsole", { detail: { nodeId: n.id, name: n.name, consoleType: n.consoleType, nodeType: n.type } }));
+    if (n) root.dispatchEvent(new CustomEvent("gns3lab:openconsole", { detail: { nodeId: n.id, name: n.name, consoleType: n.consoleType, nodeType: n.type, ports: consolePorts(n) } }));
   }
 });
 body.addEventListener("keydown", e => {
@@ -1180,6 +1189,8 @@ root.addEventListener("gns3lab:session", e => {
     /* статусы нод — из живых данных сессии, а не из сохранённого проекта */
     ((doc.topology && doc.topology.nodes) || []).forEach(n => { delete n.status; if (types[n.node_id]) n.console_type = types[n.node_id]; });
     liveKey = key;
+    /* имя проекта сессии техническое (lab-…-s-…): заголовок остаётся названием лабы из превью */
+    doc.name = st.model ? st.model.name : doc.name;
     load(doc, "сессия", statuses, null, false);
   } else {
     st.demoStatus = statuses;

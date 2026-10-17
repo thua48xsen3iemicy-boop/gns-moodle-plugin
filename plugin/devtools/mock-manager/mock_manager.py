@@ -23,7 +23,8 @@
 
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
-консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль.
+консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль. Режимы IOS (enable, configure terminal,
+interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашение — для клавиатуры консоли.
 
 Управление для ручных проверок:
     curl -X POST localhost:8090/mock/nodes/<node_id>/stop    # нода остановлена: консоль закроется
@@ -649,9 +650,36 @@ async def slot_console(request):
     ws = web.WebSocketResponse(protocols=("lab-slot",))
     await ws.prepare(request)
     request.app["consoles"].setdefault(node_id, set()).add(ws)
-    prompt = f"{name}#".encode()
+    # Режимы IOS настолько, насколько их видит клавиатура консоли: приглашение меняется, команды — эхо.
+    modes = [""]  # "", "config", "config-if", "config-router"...
+    priv = [True]
+
+    def prompt():
+        mode = f"({modes[-1]})" if modes[-1] else ""
+        return f"{name}{mode}{'#' if priv[0] else '>'}".encode()
+
+    def run(cmd):
+        word = cmd.split()[0].lower() if cmd else ""
+        if word == "enable":
+            priv[0] = True
+        elif word == "disable":
+            priv[0], modes[:] = False, [""]
+        elif cmd.lower() in ("configure terminal", "conf t") and priv[0] and not modes[-1]:
+            modes.append("config")
+        elif word in ("interface", "int") and modes[-1].startswith("config"):
+            modes[1:] = ["config", "config-if"]
+        elif word == "router" and modes[-1].startswith("config"):
+            modes[1:] = ["config", "config-router"]
+        elif word == "exit" and len(modes) > 1:
+            modes.pop()
+        elif word == "end":
+            modes[:] = [""]
+        elif cmd:
+            return f"\r\n% mock {name}: {cmd}"
+        return ""
+
     line = ""
-    await ws.send_bytes(b"\r\n" + prompt)
+    await ws.send_bytes(b"\r\n" + prompt())
     try:
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
@@ -662,15 +690,18 @@ async def slot_console(request):
                     if cmd == "reload":
                         await ws.close()
                         return ws
-                    out = f"\r\n% mock {name}: {cmd}" if cmd else ""
-                    await ws.send_bytes(out.encode() + b"\r\n" + prompt)
+                    await ws.send_bytes(run(cmd).encode() + b"\r\n" + prompt())
                 elif ch in "\x7f\b":
                     if line:
                         line = line[:-1]
                         await ws.send_bytes(b"\b \b")
+                elif ch == "\x15":
+                    await ws.send_bytes(b"\b \b" * len(line))
+                    line = ""
                 elif ch == "\x1a":
                     line = ""
-                    await ws.send_bytes(b"^Z\r\n" + prompt)
+                    modes[:] = [""]
+                    await ws.send_bytes(b"^Z\r\n" + prompt())
                 elif ch >= " ":
                     line += ch
                     await ws.send_bytes(ch.encode())

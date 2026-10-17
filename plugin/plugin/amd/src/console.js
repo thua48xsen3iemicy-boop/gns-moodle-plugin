@@ -28,6 +28,8 @@
 
 import Ajax from 'core/ajax';
 import {getStrings} from 'core/str';
+import {CommandBar} from 'mod_gns3lab/keyboard';
+import {PLACEHOLDERS, SETS} from 'mod_gns3lab/commands';
 
 /** Close code of the gateway: the console closed or is unavailable on the slot side. */
 const CLOSE_UPSTREAM = 4000;
@@ -37,9 +39,6 @@ const CLOSE_UPSTREAM = 4000;
  * A pasted configuration goes out in several frames.
  */
 const MAX_FRAME = 4096;
-
-/** Node types that run Cisco IOS: the snippets make sense only there. */
-const CISCO_TYPES = ['iou', 'dynamips'];
 
 /** Reconnection pauses, seconds; the last one repeats. */
 const BACKOFF = [1, 2, 4, 8, 16, 30];
@@ -61,17 +60,6 @@ const KEYS = [
     {label: '␣', seq: ' ', key: 'keyspace'},
 ];
 
-/** Clear the line, leave configuration mode, enter enable: works from any Cisco IOS mode. */
-const IOS_PREFIX = '\x15\r\x1aenable\r';
-
-/** Static snippets for Cisco IOS until they come from the activity settings. */
-const SNIPPETS = [
-    'show ip interface brief',
-    'show running-config',
-    'show ip route',
-    'show ip ospf neighbor',
-];
-
 /** Interface names in the output that become links to the port on the topology. */
 const PORT_RE = /\b((?:GigabitEthernet|FastEthernet|Ethernet|Serial|Loopback|Gi|Fa|Et|Se|Lo|e)\d+(?:\/\d+){0,2})\b/g;
 
@@ -87,7 +75,10 @@ const THEME = {
 const STRING_KEYS = [
     'consoleconnecting', 'consoleconnected', 'consolereconnected', 'consolereconnecting', 'consolenodestopped',
     'consoleerror', 'consolereadonly', 'consoleclose', 'consolecopied', 'consolecopyfailed', 'consolekeys',
-    'consolesnippets', 'consoletabs', 'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown',
+    'consoletabs', 'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown',
+    'kb_commands', 'kb_keyboard', 'kb_send', 'kb_placeholder', 'kb_fill', 'kb_needif', 'kb_needrouter', 'kb_ports',
+    ...PLACEHOLDERS.map(p => 'ph_' + p),
+    ...[...new Set(SETS.flatMap(set => set.groups.map(g => 'kbg_' + g.key)))],
 ];
 
 let xtermPromise = null;
@@ -364,11 +355,49 @@ export class ConsolePanel {
         this.tablist = root.querySelector('[data-region="tabs"]');
         this.host = root.querySelector('[data-region="termhost"]');
         this.keys = root.querySelector('[data-region="keys"]');
-        this.snippets = root.querySelector('[data-region="snippets"]');
         this.obsbar = root.querySelector('[data-region="obsbar"]');
         this.toastEl = root.querySelector('[data-region="toast"]');
+        this.bar = null;
         this.resizer = new ResizeObserver(() => this.fitActive());
         this.resizer.observe(this.host);
+        root.addEventListener('focusin', () => this.updateLayout());
+        root.addEventListener('focusout', () => setTimeout(() => this.updateLayout(), 0));
+        this.watchViewport();
+    }
+
+    /**
+     * Keeps the full screen lab inside the visible part of the screen when the system keyboard is open.
+     *
+     * Phones shrink only the visual viewport: a fixed element of 100dvh would go on under the keyboard and
+     * hide the input line. The app takes the height and the offset of the visual viewport instead.
+     */
+    watchViewport() {
+        const vv = window.visualViewport;
+        if (!vv || !this.app.classList.contains('is-fullscreen')) {
+            return;
+        }
+        const fit = () => {
+            const shrunk = vv.height < window.innerHeight - 1 || vv.offsetTop > 0;
+            this.app.style.height = shrunk ? `${vv.height}px` : '';
+            this.app.style.top = shrunk ? `${vv.offsetTop}px` : '';
+            this.app.style.bottom = shrunk ? 'auto' : '';
+            this.fitActive();
+        };
+        vv.addEventListener('resize', fit);
+        vv.addEventListener('scroll', fit);
+    }
+
+    /**
+     * On phones the consoles take the whole screen while the student types or the command panel is open.
+     */
+    updateLayout() {
+        const active = document.activeElement;
+        const typing = !!active && this.root.contains(active) && /^(INPUT|TEXTAREA)$/.test(active.tagName);
+        const on = isMobile() && !this.root.hidden && (typing || (!!this.bar && this.bar.isPadOpen()));
+        if (this.app.classList.contains('kb-open') !== on) {
+            this.app.classList.toggle('kb-open', on);
+            requestAnimationFrame(() => this.fitActive());
+        }
     }
 
     /**
@@ -382,8 +411,23 @@ export class ConsolePanel {
         this.strings = Object.fromEntries(STRING_KEYS.map((key, i) => [key, values[i]]));
         this.tablist.setAttribute('aria-label', this.strings.consoletabs);
         this.keys.setAttribute('aria-label', this.strings.consolekeys);
-        this.snippets.setAttribute('aria-label', this.strings.consolesnippets);
         this.buildStrips();
+        this.bar = new CommandBar({
+            root: this.root,
+            strings: this.strings,
+            send: seq => this.sendTo(this.active, seq),
+            focusTerminal: () => {
+                const tab = this.tabs.get(this.active);
+                if (tab) {
+                    tab.term.focus();
+                }
+            },
+            toast: message => this.toast(message),
+            onLayout: () => {
+                this.updateLayout();
+                requestAnimationFrame(() => this.fitActive());
+            },
+        });
         this.setReadonly(this.readonly);
     }
 
@@ -393,9 +437,10 @@ export class ConsolePanel {
      * @param {object} node
      * @param {string} node.nodeId node id
      * @param {string} node.name node name for the tab
-     * @param {string} [node.nodeType] GNS3 node type, decides whether the Cisco snippets are shown
+     * @param {string} [node.nodeType] GNS3 node type, chooses the commands of the keyboard
+     * @param {Array} [node.ports] ports of the node for the keyboard: {name, peer}
      */
-    async open({nodeId, name, nodeType = ''}) {
+    async open({nodeId, name, nodeType = '', ports = []}) {
         await this.prepare();
         if (!this.tabs.has(nodeId)) {
             const {Terminal, FitAddon} = await loadXterm();
@@ -405,6 +450,7 @@ export class ConsolePanel {
             }
             this.tabs.set(nodeId, this.createTab(nodeId, name, nodeType, Terminal, FitAddon));
         }
+        this.tabs.get(nodeId).ports = ports;
         this.root.hidden = false;
         this.app.classList.add('has-consoles');
         this.show(nodeId);
@@ -466,7 +512,13 @@ export class ConsolePanel {
         this.addKeyHandler(term, nodeId);
         this.addPortLinks(term, nodeId);
 
-        const tab = {nodeId, name, nodeType, button, select, el, term, fit, conn: null};
+        const tab = {nodeId, name, nodeType, button, select, el, term, fit, conn: null, ports: [], history: [], historyPos: 0};
+        // The keyboard follows the prompt of the device (Cisco mode).
+        term.onWriteParsed(() => {
+            if (this.active === nodeId && this.bar) {
+                this.bar.updatePrompt();
+            }
+        });
         tab.conn = new ConsoleConnection({
             cmid: this.cmid,
             userid: this.userid,
@@ -574,9 +626,7 @@ export class ConsolePanel {
      */
     show(nodeId) {
         this.active = nodeId;
-        const active = this.tabs.get(nodeId);
-        // In a Linux console Ctrl+Z and "enable" of the IOS snippets would do harm.
-        this.snippets.hidden = !active || !CISCO_TYPES.includes(active.nodeType);
+        this.bar.setTab(this.tabs.get(nodeId) || null);
         this.tabs.forEach((tab, id) => {
             const on = id === nodeId;
             tab.el.hidden = !on;
@@ -610,8 +660,10 @@ export class ConsolePanel {
             const next = this.tabs.keys().next();
             if (next.done) {
                 this.active = null;
+                this.bar.setTab(null);
                 this.root.hidden = true;
                 this.app.classList.remove('has-consoles');
+                this.updateLayout();
             } else {
                 this.show(next.value);
             }
@@ -642,6 +694,9 @@ export class ConsolePanel {
     setReadonly(readonly) {
         this.readonly = readonly;
         this.obsbar.hidden = !readonly;
+        if (this.bar) {
+            this.bar.setReadonly(readonly);
+        }
         this.root.querySelectorAll('.k').forEach(b => {
             b.disabled = readonly;
         });
@@ -679,21 +734,23 @@ export class ConsolePanel {
     }
 
     /**
-     * Builds the key and snippet strips.
+     * Builds the key strip.
      */
     buildStrips() {
         const bind = (button, action) => {
-            let hadFocus = false;
-            // Keep the on-screen keyboard open: do not take the focus from the terminal.
+            let hadFocus = null;
+            // Keep the system keyboard open: do not take the focus from the terminal or the input line.
             button.addEventListener('pointerdown', event => {
-                const tab = this.tabs.get(this.active);
-                hadFocus = !!tab && document.activeElement === tab.term.textarea;
+                const active = document.activeElement;
+                hadFocus = active && this.root.contains(active) && /^(INPUT|TEXTAREA)$/.test(active.tagName) ? active : null;
                 event.preventDefault();
             });
             button.addEventListener('click', () => {
                 action();
                 const tab = this.tabs.get(this.active);
-                if (tab && (hadFocus || !isMobile())) {
+                if (hadFocus) {
+                    hadFocus.focus();
+                } else if (tab && !isMobile()) {
                     tab.term.focus();
                 }
             });
@@ -718,14 +775,6 @@ export class ConsolePanel {
         });
         // Ctrl from the strip applies to the next typed letter.
         this.ctrlButton = this.keys.querySelector('[aria-pressed]');
-        SNIPPETS.forEach(text => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'k snip';
-            button.textContent = text;
-            bind(button, () => this.sendTo(this.active, IOS_PREFIX + text + '\r'));
-            this.snippets.appendChild(button);
-        });
     }
 
     /**

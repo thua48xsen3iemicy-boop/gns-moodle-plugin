@@ -18,7 +18,7 @@
  *
  * Talks to the viewer through events on its root element:
  * - gns3lab:session (sent here) — the session changed, detail {session, readonly};
- * - gns3lab:openconsole (from the viewer) — open the console of a node, detail {nodeId, name, consoleType}.
+ * - gns3lab:openconsole (from the viewer) — open the console of a node, detail {nodeId, name, consoleType, nodeType, ports}.
  *
  * Permissions are decided by the server; the flags here only choose what to draw.
  *
@@ -302,7 +302,7 @@ class Lab {
             return;
         }
         this.showMessage('');
-        this.consoles.open({nodeId: node.nodeId, name: node.name, nodeType: node.nodeType});
+        this.consoles.open({nodeId: node.nodeId, name: node.name, nodeType: node.nodeType, ports: node.ports || []});
     }
 
     /**

@@ -136,7 +136,17 @@
             <div class="ctoast" data-region="toast" role="status" hidden></div>
         </div>
         <div class="strip" data-region="keys"></div>
-        <div class="strip" data-region="snippets"></div>
+        <div class="strip csuggest" data-region="suggest" hidden></div>
+        <form class="cinput" data-region="inputbar" autocomplete="off">
+            <button type="button" class="k ctoggle" data-region="cmdtoggle" aria-expanded="false" aria-controls="{{uniqid}}-cmdpad" hidden>&#9776;</button>
+            <span class="cmode" data-region="mode" hidden></span>
+            <input type="text" class="cline" data-region="line" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" aria-label="{{#str}}kb_line, mod_gns3lab{{/str}}">
+            <button type="submit" class="k csend">&#9166;</button>
+        </form>
+        <div class="cmdpad" id="{{uniqid}}-cmdpad" data-region="cmdpad" hidden>
+            <div class="cgroups" data-region="groups" role="tablist"></div>
+            <div class="cgrid" data-region="grid"></div>
+        </div>
     </section>
     {{/cancontrol}}
 </div>
