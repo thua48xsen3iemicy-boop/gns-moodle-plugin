@@ -352,6 +352,12 @@ body.gns3lab-fullscreen {
     stroke: var(--accent);
     stroke-dasharray: 4 3;
 }
+.gns3lab-app .nname-g {
+    cursor: pointer;
+}
+.gns3lab-app .nname-g.ghost {
+    opacity: .32;
+}
 .gns3lab-app .nname {
     font: 600 13px var(--display);
     fill: var(--fg);

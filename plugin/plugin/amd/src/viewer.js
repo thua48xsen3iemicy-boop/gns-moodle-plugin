@@ -388,7 +388,7 @@ function missReason(h, l1){
 
 /* ---------- состояние ---------- */
 const svg = sel$("svg"), vp = sel$("vp"), wrap = sel$("wrap"), panel = sel$("panel"), body = sel$("panelBody");
-const lyr = { draw: sel$("lyrDraw"), links: sel$("lyrLinks"), nodes: sel$("lyrNodes"), labels: sel$("lyrLabels") };
+const lyr = { draw: sel$("lyrDraw"), links: sel$("lyrLinks"), nodes: sel$("lyrNodes"), labels: sel$("lyrLabels"), names: sel$("lyrNames") };
 const view = { k: 1, tx: 0, ty: 0 };
 const st = { model: null, sel: null, statusOn: false, demoStatus: null, sourceLabel: "пример",
   layer: "l1", factsKey: "ok", factsAvail: false, fx: null, der: null };
@@ -475,7 +475,9 @@ function renderScene(){
       "aria-label": `${n.name}, ${typeName(n.type)}${status ? ", " + STATUS_NAME[status] : ""}` }, lyr.nodes);
     el("rect", { class: "halo", x: n.cx - 31, y: n.cy - 31, width: 62, height: 62, rx: 12 }, g);
     el("use", { href: "#" + prefix + "-ico-" + cat(n), x: n.cx - 22, y: n.cy - 22, width: 44, height: 44 }, g);
-    const t = el("text", { class: "nname", x: n.cx, y: n.cy + 42, "text-anchor": "middle" }, g);
+    /* имя — в своём слое: без выделения оно над подписями портов, при выделении — под ними (applySel) */
+    const ng = el("g", { class: "nname-g dimmable" + (ghost ? " ghost" : ""), "data-node": n.id }, lyr.names);
+    const t = el("text", { class: "nname", x: n.cx, y: n.cy + 42, "text-anchor": "middle" }, ng);
     t.textContent = n.name;
     if (status) el("circle", { class: "led led-" + status, cx: n.cx + 21, cy: n.cy - 20, r: 5.5 }, g);
     const gs = guestsOf(n), f = st.fx && st.fx.nodes.get(n.id);
@@ -740,6 +742,8 @@ function syncLayerUI(){
 function applySel(){
   const s = st.sel, m = st.model, D = st.der;
   svg.classList.toggle("has-sel", !!s);
+  /* общий вид: имена узлов поверх подписей портов; выбран объект — его подписи портов поверх имён */
+  vp.appendChild(s ? lyr.labels : lyr.names);
   svg.querySelectorAll(".on,.sel").forEach(e => e.classList.remove("on", "sel"));
   if (!s) return;
   const mark = (attr, idv, cls) => svg.querySelectorAll(`[${attr}="${CSS.escape(idv)}"]`).forEach(e => e.classList.add(...cls));
@@ -1099,7 +1103,8 @@ function load(doc, label, demoStatus, guests, withFacts){
   st.model = buildModel(doc);
   st.guests = guests || null;
   st.sourceLabel = label;
-  st.demoStatus = demoStatus || pseudoStatus(st.model);
+  /* придуманные статусы — только в демо; у лабы менеджера статусы приходят лишь от запущенной сессии */
+  st.demoStatus = demoStatus || (DATA.live ? pseudoStatus(st.model) : null);
   st.sel = null;
   st.factsAvail = !!withFacts && !!FACTS.ok;
   if (!st.factsAvail) st.layer = "l1";
@@ -1130,10 +1135,12 @@ function readFile(file){
 }
 sel$("fileInput").addEventListener("change", e => { readFile(e.target.files[0]); e.target.value = ""; });
 let dragDepth = 0;
-wrap.addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; sel$("drop").hidden = false; });
+/* открыть свой .gns3 можно только в демо: у лабы менеджера схема — эталон активности */
+const demoData = !!DATA.live;
+wrap.addEventListener("dragenter", e => { if (!demoData) return; e.preventDefault(); dragDepth++; sel$("drop").hidden = false; });
 wrap.addEventListener("dragover", e => e.preventDefault());
 wrap.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; sel$("drop").hidden = true; } });
-wrap.addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; sel$("drop").hidden = true; readFile(e.dataTransfer.files[0]); });
+wrap.addEventListener("drop", e => { if (!demoData) return; e.preventDefault(); dragDepth = 0; sel$("drop").hidden = true; readFile(e.dataTransfer.files[0]); });
 
 /* ---------- кнопки ---------- */
 sel$("btnFit").addEventListener("click", fit);
