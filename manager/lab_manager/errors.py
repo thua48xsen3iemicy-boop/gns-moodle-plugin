@@ -30,6 +30,7 @@ SESSION_ERRORS: dict[str, bool] = {
     "LAB_UNAVAILABLE": False,
     "SLOT_COLD_RESUME_UNSUPPORTED": False,
     "NO_SLOTS": False,
+    "PROJECT_MISSING": False,
     "STUDENT_DIR_BUSY": False,
 }
 

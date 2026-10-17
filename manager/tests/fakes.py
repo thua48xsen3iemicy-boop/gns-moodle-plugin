@@ -284,6 +284,7 @@ class FakeSlot:
                                                    "message": "Another laboratory owns this slot; stop it first"}})
         lab = self.labs.get(pid)
         record = self.projects.get(pid)
+        missing = bool(record and record.get("missing"))
         if lab is None and action == "deploy" and record and record["student_state"] and self.student_state:
             # The record in the student directory: same nodes, nothing recreated.
             lab = self.labs[pid] = {"project_id": pid, "ticket": record["ticket"], "state": "STOPPED"}
@@ -307,8 +308,10 @@ class FakeSlot:
         lab["state"] = "STOPPING" if action == "stop" else "DEPLOYING"
         op = {"operation_id": str(uuid.uuid4()), "project_id": pid, "action": action, "status": "RUNNING",
               "fingerprint": fingerprint, "remaining": self.op_polls, "error": None,
-              "fail": {"code": "RuntimeError", "message": "Provisioning completion is unknown; refusing to "
-                       "skip or replay commands. Operator reconciliation required"} if cold else None}
+              "fail": {"code": "PROVISIONING_UNKNOWN" if self.student_state else "RuntimeError",
+                       "message": "Provisioning completion is unknown; refusing to "
+                       "skip or replay commands. Operator reconciliation required"} if cold else
+                      {"code": "PROJECT_MISSING", "message": "Saved project is missing"} if missing else None}
         self.ops[op["operation_id"]] = op
         self.keys[key] = op["operation_id"]
         self.timeline.append(("slot:" + action, self.address))

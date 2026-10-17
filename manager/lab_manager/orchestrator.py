@@ -625,9 +625,13 @@ class Orchestrator:
                 await self.store.update_call(call["id"], status="failed", result={"error": op.get("error")})
                 err = op.get("error") or {}
                 text = str(err.get("message", ""))
-                if "Provisioning completion is unknown" in text:
-                    raise Failure("Слот не умеет продолжить проект, созданный в другом слоте (cold resume)",
-                                  "SLOT_COLD_RESUME_UNSUPPORTED")
+                # Stable codes of slot 0.4.1; the text is matched only for older slots. Both are about
+                # the student's project, not the slot: the slot is released as usual.
+                if err.get("code") == "PROVISIONING_UNKNOWN" or "Provisioning completion is unknown" in text:
+                    raise Failure("Проект создан старым слотом или его первая подготовка оборвалась: "
+                                  "продолжить его нельзя", "SLOT_COLD_RESUME_UNSUPPORTED", slot_state="free")
+                if err.get("code") == "PROJECT_MISSING":
+                    raise Failure("Проекта лабы нет в каталоге студента", "PROJECT_MISSING", slot_state="free")
                 raise Failure(f"Слот: {err.get('code', op['status'])}: {text}"[:500], "SLOT_OPERATION_FAILED")
             await self.store.update_call(call["id"], status="succeeded")
         await self.store.mark_deployed(s["workspace_id"], call["body"])

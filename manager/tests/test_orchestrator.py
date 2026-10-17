@@ -117,6 +117,30 @@ async def test_slot_03_cannot_continue_a_project_from_another_slot(tmp_path, dsn
         assert s["status"] == "failed" and s["error"]["code"] == "SLOT_COLD_RESUME_UNSUPPORTED"
 
 
+async def test_project_of_slot_03_on_slot_041_and_missing_project(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await env.run()
+        await stop(env, sid)
+        await env.run()
+        pid = str((await session(env, sid))["project_id"])
+        env.slots[201].labs.clear()  # Another slot (or a restarted one) sees only the directory
+        env.projects[pid]["student_state"] = False  # Created by slot 0.3: no record in the directory
+        again = await start(env)
+        await env.run()
+        s = await session(env, again)
+        assert s["status"] == "failed" and s["error"]["code"] == "SLOT_COLD_RESUME_UNSUPPORTED"
+        assert (await env.services.store.slot(201))["state"] == "free"  # The slot is not at fault
+
+        env.slots[201].labs.clear()
+        env.projects[pid].update(student_state=True, missing=True)  # Record without the project
+        again = await start(env)
+        await env.run()
+        s = await session(env, again)
+        assert s["status"] == "failed" and s["error"]["code"] == "PROJECT_MISSING"
+        assert (await env.services.store.slot(201))["state"] == "free"
+
+
 async def test_project_continues_on_the_same_slot(tmp_path, dsn):
     async with make_env(tmp_path, dsn, vmids=(201,)) as env:
         sid = await start(env)
