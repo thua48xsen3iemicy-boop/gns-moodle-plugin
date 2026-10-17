@@ -126,7 +126,10 @@ class FakeAgent:
     def __init__(self, pve: FakePve, ceph_root="/mnt/pve/data"):
         self.pve = pve
         self.timeline = pve.timeline
-        self.missing_students = set()  # students/<key> not provisioned on CephFS
+        self.students = {"placeholder"}  # Existing students/<key> directories
+        self.missing_students = set()  # Directories that vanish after provisioning (race)
+        self.wrong_owner = set()  # Existing directories with an unexpected owner
+        self.student_ids_configured = True
         self.error_codes = False  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
         self.ceph_root = ceph_root
         self.requests = []
@@ -144,7 +147,7 @@ class FakeAgent:
 
     def _mounts(self, ct, body):
         key = body["student_key"]
-        if key in self.missing_students:
+        if key in self.missing_students or key not in self.students:
             if self.error_codes:
                 return self._err(422, {"code": "SOURCE_MISSING", "message": "Student directory missing"})
             return self._err(422, "Required CephFS directory does not exist")
@@ -161,6 +164,16 @@ class FakeAgent:
         self.requests.append((node, request.method, path, body))
         if path == "/health":
             return httpx.Response(200, json={"status": "ok"})
+        m = re.fullmatch(r"/students/([A-Za-z0-9][A-Za-z0-9_-]{0,63})", path)
+        if m and request.method == "PUT":
+            key = m.group(1)
+            if not self.student_ids_configured:
+                return self._err(503, "Configure mapped gns3 host UID/GID first")
+            if key in self.wrong_owner:
+                return self._err(409, "Existing student directory has a different owner")
+            self.students.add(key)
+            self.timeline.append(("agent:student", key))
+            return httpx.Response(200, json={"student_key": key, "ready": True})
         m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop)", path)
         if not m:
             return self._err(404, "Not Found")

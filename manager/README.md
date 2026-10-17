@@ -48,13 +48,17 @@ pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
    ```sh
    CEPH=/mnt/pve/data
    install -d -o root -g root -m 0755 $CEPH/students $CEPH/students/placeholder
-   # Для каждого студента — пока вручную; позже это будет делать агент (AGENT_REQUESTS.md §3).
-   # 101000 = uid gns3 в слоте (1000) + 100000:
-   install -d -o 101000 -g 101000 -m 0700 $CEPH/students/main-42
    ```
 
-   `student_key` = `<slug сайта>-<user_id Moodle>`. Если каталога нет, сессия завершается ошибкой
-   `STUDENT_DIR_MISSING`, а слот остаётся свободным.
+   Каталоги студентов `students/<slug сайта>-<user_id>` создаёт агент по запросу менеджера
+   перед каждым стартом. Для этого на каждом узле задаётся владелец — `gns3` слота на хосте
+   (uid/gid в слоте + 100000, см. `agent/README.md`, «Student directory provisioning»):
+
+   ```sh
+   systemctl edit lab-node-agent    # Environment=LAB_STUDENT_HOST_UID=101000 / LAB_STUDENT_HOST_GID=101000
+   ```
+
+   Без этой настройки агент отвечает 503, и сессии ждут на этапе `student_dir`.
 
 ## 3. Установка в LXC менеджера
 
@@ -185,7 +189,8 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 - агент: формат запросов и таймауты, разбор всех ошибок `agent.py` (403/404/409×3/422/503/504)
   и кодов ошибок из `AGENT_REQUESTS.md` §2;
   клиент вручную прогнан против настоящего `agent.py` из ветки (с подменённым `pct`);
-- нет каталога студента → `STUDENT_DIR_MISSING`, слот свободен для других;
+- создание каталога студента через агента (`PUT /students/<key>`): порядок, ожидание при 409/503,
+  тайм-аут без порчи слота; клиент прогнан против настоящего `ensure_student` на временной ФС;
 - порядок `stop (если CT запущен) → cores/memory → агент start (mounts + pct start) → readyz → deploy`
   и `slot stop → агент shutdown → заглушка RO`; shutdown завис → `force`;
 - слоты не привязаны: тот же студент идёт в другой слот, слот — к другому студенту;

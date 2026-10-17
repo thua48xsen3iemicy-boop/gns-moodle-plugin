@@ -81,6 +81,23 @@ async def test_validation_error_list_is_rejection():
     await agent.close()
 
 
+async def test_ensure_student():
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path, request.content))
+        if request.url.path.endswith("/main-7"):
+            return httpx.Response(409, json={"detail": "Existing student directory has a different owner"})
+        return httpx.Response(200, json={"student_key": "main-42", "ready": True})
+
+    agent = client(handler)
+    assert await agent.ensure_student("pve1", "main-42") == {"student_key": "main-42", "ready": True}
+    assert seen == [("PUT", "/students/main-42", b"")]
+    with pytest.raises(AgentCommandFailed):
+        await agent.ensure_student("pve1", "main-7")
+    await agent.close()
+
+
 async def test_transport_errors_are_uncertain():
     def handler(request):
         raise httpx.ReadTimeout("slow", request=request)

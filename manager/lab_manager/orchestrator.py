@@ -11,6 +11,7 @@ stored in the database. Nothing is deleted or recreated "just in case".
     plugin status  stage            what happens
     queued         wait_slot        placement over free slots and node memory, allocation
     starting       ct_prepare       CT stopped (agent), sized to the lab (Proxmox config)
+    starting       student_dir      agent: PUT /students/<key> (idempotent, mapped gns3 owner)
     starting       ct_start         agent: mounts (code mp0, student mp1) + pct start + guest actions
     starting       slot_ready       /healthz and /v1/readyz of Lab Slot
     starting       lab_submit       deploy with Idempotency-Key (same project_id when resuming)
@@ -230,6 +231,7 @@ class Orchestrator:
             "wait_slot": None,
             "ready": None,
             "ct_prepare": st.agent_stop_timeout * 3,
+            "student_dir": 120,
             "ct_start": st.agent_start_timeout * 2,
             "ct_stop": st.agent_stop_timeout * 3,
             "slot_ready": st.slot_ready_timeout,
@@ -240,7 +242,10 @@ class Orchestrator:
     async def _check_stage_timeout(self, s) -> bool:
         limit = self._stage_limit(s["stage"])
         if limit is not None and (now() - s["stage_started_at"]).total_seconds() > limit:
-            await self._fail(s, Failure(f"Этап {s['stage']} не завершился за {int(limit)} с", "TIMEOUT"))
+            # Before ct_start the CT was not touched for this session: the slot stays usable.
+            slot_state = "free" if s["stage"] == "student_dir" else "failed"
+            await self._fail(s, Failure(f"Этап {s['stage']} не завершился за {int(limit)} с", "TIMEOUT",
+                                        slot_state=slot_state))
             return True
         return False
 
@@ -358,6 +363,21 @@ class Orchestrator:
         lab = self.catalog.get(s["lab_ref"])
         if lab.resources:
             await self._size_ct(s, lab.resources)
+        return await self._goto(s, "student_dir", "Подготовка каталога студента…")
+
+    async def _stage_student_dir(self, s):
+        if s["stop_requested"]:
+            return await self._goto_stop(s)
+        try:
+            body = await self.agent.ensure_student(await self._node(s), s["student_key"])
+        except AgentCommandFailed:
+            # 409: another owner, or a concurrent creation not finished yet. Retried until the
+            # stage timeout; a wrong owner then fails the session (the agent never repairs it).
+            raise Wait("Ожидание каталога студента…") from None
+        except AgentRejected as exc:
+            raise Failure(f"Агент не создал каталог студента: {exc.message}", "STUDENT_DIR_REJECTED",
+                          slot_state="free") from exc
+        await self.store.event(s["id"], s["slot_vmid"], "student_dir_ready", {"ready": body["ready"]})
         return await self._goto(s, "ct_start", "Запуск контейнера слота…")
 
     async def _size_ct(self, s, resources):

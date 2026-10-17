@@ -40,7 +40,9 @@ async def test_full_cycle_order(tmp_path, dsn):
         s = await session(env, sid)
         assert s["status"] == "running", s["status_message"]
         assert s["slot_vmid"] == 201
-        assert names(env.timeline) == ["agent:stop", "pve:config", "agent:start", "slot:readyz", "slot:deploy"]
+        assert names(env.timeline) == ["agent:stop", "pve:config", "agent:student", "agent:start",
+                                       "slot:readyz", "slot:deploy"]
+        assert ("agent:student", "main-42") in env.timeline
         config = env.pve.cts[201]["config"]
         assert config["cores"] == "8" and config["memory"] == "16384"  # Sized to the lab
         assert config["mp1"] == "/mnt/pve/data/students/main-42,mp=/srv/student,ro=0,shared=1"
@@ -282,6 +284,34 @@ async def test_agent_rejection_fails_session(tmp_path, dsn):
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "AGENT_REJECTED"
         assert "not marked as a lab slot" in s["status_message"]
+
+
+async def test_student_dir_with_wrong_owner_waits_then_fails_keeping_slot_free(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.agent.wrong_owner = {"main-42"}
+        sid = await start(env)
+        await env.run(4)
+        s = await session(env, sid)
+        assert s["stage"] == "student_dir" and s["status_message"] == "Ожидание каталога студента…"
+        async with env.services.pool.connection() as conn, conn.transaction():
+            await conn.execute("UPDATE sessions SET stage_started_at = now() - interval '1 hour' WHERE id = %s",
+                               (sid,))
+        await env.run(2)
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "TIMEOUT"
+        assert (await env.services.store.slot(201))["state"] == "free"
+        assert env.pve.cts[201]["status"] == "stopped"
+
+
+async def test_student_dir_not_configured_on_agent_waits(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        env.agent.student_ids_configured = False  # 503 until LAB_STUDENT_HOST_UID/GID are set
+        sid = await start(env)
+        await env.run(4)
+        assert (await session(env, sid))["stage"] == "student_dir"
+        env.agent.student_ids_configured = True
+        await env.run()
+        assert (await session(env, sid))["status"] == "running"
 
 
 @pytest.mark.parametrize("error_codes", [False, True])

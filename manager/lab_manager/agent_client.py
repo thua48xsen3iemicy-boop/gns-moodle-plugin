@@ -10,6 +10,10 @@ Agent endpoints (all synchronous, one operation per CT at a time):
     PUT  /slots/{vmid}/mounts            {code_revision, student_key, data_mode}   (CT stopped)
     POST /slots/{vmid}/start             {..mounts.., actions[]}  mounts, pct start, guest actions
     POST /slots/{vmid}/stop              {force}  pct shutdown --timeout 60, or pct stop if force
+    PUT  /students/{student_key}         ensure students/<key> (0700, mapped gns3 owner)
+                                         -> {"student_key", "ready": true}; 409 if the existing
+                                         directory has another owner (also briefly during a
+                                         concurrent creation), 503 if the agent lacks the uid/gid
 
 Errors. Preferred: {"detail": {"code": "...", "message": "..."}} with the codes in
 docs/AGENT_REQUESTS.md; until the agent sends codes, the FastAPI {"detail": "..."} text of
@@ -74,6 +78,7 @@ CODES = {
     "SOURCE_MISSING": AgentSourceMissing,
     "CT_NOT_ON_NODE": AgentWrongNode,
     "SLOT_BUSY": AgentBusy,
+    "STUDENT_DIR_OWNER": AgentRejected,
     "NOT_STOPPED": AgentNotStopped,
     "PCT_FAILED": AgentCommandFailed,
     "STORAGE_UNAVAILABLE": AgentUncertain,
@@ -177,6 +182,13 @@ class AgentClient:
         body = dict(self.mounts_body(student_key, code_revision, data_mode), actions=list(actions))
         return await self._call("POST", node, f"/slots/{vmid}/start", json=body,
                                 timeout=self.start_timeout, mutating=True)
+
+    async def ensure_student(self, node: str, student_key: str) -> dict:
+        """Idempotent: creates the student directory or confirms it; never touches contents."""
+        body = await self._call("PUT", node, f"/students/{student_key}", mutating=True)
+        if body.get("ready") is not True or body.get("student_key") != student_key:
+            raise AgentUncertain(200, "Unexpected student provisioning response")
+        return body
 
     async def stop(self, node, vmid, *, force=False):
         return await self._call("POST", node, f"/slots/{vmid}/stop", json={"force": force},
