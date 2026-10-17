@@ -2,7 +2,9 @@
 
 Ведёт себя как настоящий менеджер 0.3 (manager/ в ветке менеджера, CONTRACTS §2) там, где это видит плагин:
 - авторизация Bearer + X-Moodle-Site, ошибки {"error", "message"};
-- GET /api/v1/info: options ["max_duration"], features ["consoles", "observer"] (+ "resume" при MOCK_RESUME=1);
+- GET /api/v1/info: options ["max_duration"], features ["consoles", "observer", "resume", …] (MOCK_RESUME=0 убирает
+  "resume" — так вёл себя менеджер до 0.5.1);
+- один проект на студента × активность × лабу: имя проекта постоянное (<лаба>-w<номер>), node_id те же;
 - неизвестное поле в теле запроса на любом уровне — 400 unsupported_field;
 - у студента одна живая лаба на сайт: та же активность и lab_ref — 200 с ней, другая — 409 session_conflict
   с объектом conflict;
@@ -59,7 +61,7 @@ CONSOLE_TOKEN = os.environ.get("MOCK_CONSOLE_TOKEN", "dev-console-token")
 GW_INTERNAL_URL = os.environ.get("GW_INTERNAL_URL", "http://127.0.0.1:8080")
 GW_INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "dev-internal-key")
 GW_PUBLIC_URL = os.environ.get("GW_PUBLIC_URL", "ws://127.0.0.1:8080")
-RESUME = os.environ.get("MOCK_RESUME") == "1"
+RESUME = os.environ.get("MOCK_RESUME", "1") != "0"  # менеджер 0.5.1: работа сохраняется всегда
 QUEUED_FOR, STARTING_FOR, STOPPING_FOR = 1.0, 4.0, 2.0
 DEFAULT_MAX_DURATION, MAX_DURATION_LIMIT = 90, 480  # minutes
 
@@ -331,6 +333,7 @@ class Session:
         self.site, self.user_id, self.instance_id, self.lab_ref = site, user_id, instance_id, lab_ref
         self.lab_def = lab_def  # sha256:… for a lab from Moodle, then lab_ref is None
         self.key = lab_def or lab_ref  # key in Manager.labs
+        self.workspace = 0  # number of the student's project, set by the manager
         self.course_id = course_id
         self.max_duration = max_duration * 60
         self.fail = fail  # {"code", "retryable"}: the session fails half way through starting
@@ -374,6 +377,7 @@ class Manager:
     def __init__(self):
         self.labs = load_labs()
         self.sessions: list[Session] = []
+        self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
         self.stale = False
@@ -419,7 +423,7 @@ class Manager:
         if status == "running":
             lab = self.labs[s.key]
             doc = json.loads(json.dumps(lab["doc"]))
-            doc["name"] = f"{s.lab_ref or 'lab-' + s.lab_def[7:15]}-{s.id}"
+            doc["name"] = f"{s.lab_ref or 'lab-' + s.lab_def[7:15]}-w{s.workspace}"
             for n in doc["topology"]["nodes"]:
                 n["properties"] = {}  # как у настоящего менеджера: внутреннее слота не уходит наружу
                 n.pop("console", None)
@@ -554,6 +558,7 @@ async def create_session(request):
     max_duration = min(int(requested), MAX_DURATION_LIMIT) if requested else DEFAULT_MAX_DURATION
     s = Session(site, user_id, instance_id, lab_ref, body.get("course_id"), max_duration, m.fail_next, lab_def)
     m.fail_next = None
+    s.workspace = m.workspaces.setdefault((site, user_id, instance_id, s.key), len(m.workspaces) + 1)
     m.sessions.append(s)
     log.info("session %s: user %s, activity %s, lab %s, %s min, client %s", s.id, user_id, instance_id, s.key,
              max_duration, body.get("client"))
@@ -674,6 +679,8 @@ async def slot_console(request):
             modes.pop()
         elif word == "end":
             modes[:] = [""]
+        elif cmd.lower() in ("write memory", "write", "wr", "copy running-config startup-config") and priv[0]:
+            return "\r\nBuilding configuration...\r\n[OK]"
         elif cmd:
             return f"\r\n% mock {name}: {cmd}"
         return ""
