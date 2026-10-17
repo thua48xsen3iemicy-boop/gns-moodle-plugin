@@ -180,8 +180,12 @@ async def test_slot_failed_operation_fails_session_and_keeps_slot(tmp_path, dsn)
         await env.run()
         s = await session(env, sid)
         assert s["status"] == "failed" and "Missing QEMU image" in s["status_message"]
-        assert (await env.services.store.slot(201))["state"] == "failed"  # Operator decides
-        assert env.pve.cts[201]["status"] == "running"  # Nothing stopped or cleaned up
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "failed" and slot["student_key"] is None  # Operator decides
+        # The student's directory is released: lab stopped, CT stopped and parked.
+        assert env.slots[201].labs[str(s["project_id"])]["state"] == "STOPPED"
+        assert env.pve.cts[201]["status"] == "stopped"
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
         again = await start(env)  # The student can start right away on another slot
         await env.run()
         assert (await session(env, again))["slot_vmid"] == 202
@@ -193,14 +197,17 @@ async def test_slot_lab_failing_while_running(tmp_path, dsn):
         await env.run()
         env.slots[201].restart()
         env.orch._health_checked.clear()
-        await env.run(2)
-        assert (await session(env, sid))["status"] == "failed"
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "SLOT_LAB_FAILED"
         assert (await env.services.store.slot(201))["state"] == "failed"
+        assert env.pve.cts[201]["status"] == "stopped"  # The FAILED lab is stopped, the CT too
 
 
 async def test_stop_before_slot_is_allocated(tmp_path, dsn):
     async with make_env(tmp_path, dsn, vmids=(201,)) as env:
-        await env.services.store.set_slot_admin_state(201, "maintenance")
+        await start(env, user_id=7)  # The only slot is busy: a queue, not "no slots"
+        await env.run()
         sid = await start(env)
         await env.run(2)
         assert (await session(env, sid))["status"] == "queued"
@@ -348,7 +355,8 @@ async def test_failed_park_puts_slot_into_maintenance(tmp_path, dsn):
         assert "students/main-42," in env.pve.cts[201]["config"]["mp1"]
         other = await start(env, user_id=7)
         await env.run(3)
-        assert (await session(env, other))["status"] == "queued"  # Never handed out unparked
+        s = await session(env, other)  # Never handed out unparked; nothing else to run on
+        assert s["status"] == "failed" and s["error"]["code"] == "NO_SLOTS" and s["slot_vmid"] is None
 
 
 async def test_shutdown_error_is_rechecked_before_force(tmp_path, dsn):
@@ -522,3 +530,83 @@ async def test_running_slot_keeps_its_unused_promised_memory_reserved(tmp_path, 
         await env.run(1)
         # pve2: 28 GiB free minus 14 GiB still promised to the first lab -> 14 GiB < 16 GiB.
         assert (await session(env, b))["slot_vmid"] == 203
+
+
+async def _backdate_stage(env, sid, interval="1 hour"):
+    async with env.services.pool.connection() as conn, conn.transaction():
+        await conn.execute(f"UPDATE sessions SET stage_started_at = now() - interval '{interval}' WHERE id = %s",
+                           (sid,))
+
+
+async def test_no_usable_slots_fails_at_once(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        await env.services.store.set_slot_admin_state(201, "maintenance")
+        await env.services.store.set_slot_admin_state(202, "failed")
+        sid = await start(env)
+        await env.run(2)
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "NO_SLOTS"
+
+
+async def test_queue_timeout(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,), queue_timeout=600) as env:
+        await start(env, user_id=7)
+        await env.run()
+        sid = await start(env)
+        await env.run(2)
+        assert (await session(env, sid))["status"] == "queued"  # Busy slot: an ordinary queue
+        await _backdate_stage(env, sid, "11 minutes")
+        await env.run(2)
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "QUEUE_TIMEOUT"
+
+
+async def test_queue_timeout_zero_waits_forever(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,), queue_timeout=0) as env:
+        await start(env, user_id=7)
+        await env.run()
+        sid = await start(env)
+        await _backdate_stage(env, sid, "1 day")
+        await env.run(2)
+        assert (await session(env, sid))["status"] == "queued"
+
+
+async def test_student_dir_is_never_writable_in_two_slots(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201, 202, 203)) as env:
+        sid = await start(env)
+        await env.run()
+        assert (await env.services.store.slot(201))["student_key"] == "main-42"
+        env.agent.busy = True  # The CT cannot be stopped after the failure below
+        env.slots[201].restart()
+        env.orch._health_checked.clear()
+        await env.run()
+        assert (await session(env, sid))["stage"] == "ct_stop"
+        await _backdate_stage(env, sid)
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "SLOT_LAB_FAILED"
+        assert (await env.services.store.slot(201))["student_key"] == "main-42"  # CT may still run
+        env.agent.busy = False
+
+        again = await start(env)
+        await env.run()
+        s = await session(env, again)
+        assert s["status"] == "failed" and s["error"]["code"] == "STUDENT_DIR_BUSY"
+        assert s["slot_vmid"] is None
+        other = await start(env, user_id=7)  # Other students are not affected
+        await env.run()
+        assert (await session(env, other))["status"] == "running"
+
+        await env.services.store.set_slot_admin_state(201, "free")  # slot-enable: CT checked stopped
+        again = await start(env)
+        await env.run()
+        assert (await session(env, again))["status"] == "running"
+
+
+async def test_live_symbols_come_from_the_reference_lab(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        sid = await start(env)
+        await env.run()
+        nodes = {n["name"]: n for n in (await session(env, sid))["topology"]["topology"]["nodes"]}
+        assert nodes["SW1"]["symbol"] == ":/symbols/multilayer_switch.svg"
+        assert nodes["D1"]["symbol"] == ":/symbols/computer.svg"

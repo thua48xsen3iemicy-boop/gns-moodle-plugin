@@ -278,7 +278,8 @@ class FakeSlot:
             return self._json(409, {"detail": {"code": "OPERATION_IN_PROGRESS", "message": "busy"}})
         for other, lab in self.labs.items():
             if other != pid and lab["state"] != "STOPPED":
-                return self._json(409, {"detail": "Another laboratory owns this slot; stop it first"})
+                return self._json(409, {"detail": {"code": "SLOT_OCCUPIED", "project_id": other,
+                                                   "message": "Another laboratory owns this slot; stop it first"}})
         lab = self.labs.get(pid)
         if action != "deploy" and not lab:
             return self._json(404, {"detail": "Unknown managed laboratory"})

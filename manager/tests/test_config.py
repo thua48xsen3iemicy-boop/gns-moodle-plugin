@@ -80,3 +80,13 @@ def test_invalid_values(env, key, value):
     env[key] = value
     with pytest.raises(ConfigError):
         load(env)
+
+
+def test_slot_tokens_must_be_unique(env, tmp_path):
+    env["MANAGER_SLOTS_FILE"] = write(tmp_path / "slots2.json", [
+        {"vmid": 201, "address": "10.0.0.1", "api_token": SECRET},
+        {"vmid": 202, "address": "10.0.0.2", "api_token": SECRET},
+    ])
+    with pytest.raises(ConfigError, match="unique") as exc:
+        load(env)
+    assert SECRET not in str(exc.value)

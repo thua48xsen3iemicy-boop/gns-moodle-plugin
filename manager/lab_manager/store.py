@@ -76,6 +76,9 @@ class Store:
             )
             if not await cur.fetchone():
                 raise ValueError("Slot is in use or unknown")
+            if state == "free":
+                # `slot-enable` confirmed the CT is stopped: no student directory is writable there.
+                await conn.execute("UPDATE slots SET student_key = NULL WHERE vmid = %s", (vmid,))
             await self._event(conn, None, vmid, "slot_admin_state", {"state": state})
 
     # ------------------------------------------------------------------ sessions
@@ -231,6 +234,34 @@ class Store:
             await self._event(conn, session["id"], vmid, "slot_allocated",
                               {"generation": generation, "node": nodes[vmid]})
             return vmid
+
+    async def usable_slots(self):
+        """Slots that can be handed out now or later without the operator (П8 of the plugin)."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT vmid FROM slots WHERE in_config AND state NOT IN ('failed', 'maintenance')"
+            )
+            return [r["vmid"] for r in await cur.fetchall()]
+
+    async def slot_holding_student(self, student_key):
+        """A slot whose CT may still have this student's directory mounted read-write."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT vmid FROM slots WHERE student_key = %s ORDER BY vmid LIMIT 1", (student_key,)
+            )
+            row = await cur.fetchone()
+            return row["vmid"] if row else None
+
+    async def set_slot_student(self, session, student_key):
+        """Fenced: record (or clear, with None) the student mounted in the session's slot."""
+        async with self.pool.connection() as conn, conn.transaction():
+            cur = await conn.execute(
+                "UPDATE slots SET student_key = %s, updated_at = now() WHERE vmid = %s AND generation = %s"
+                " RETURNING vmid",
+                (student_key, session["slot_vmid"], session["slot_generation"]),
+            )
+            if not await cur.fetchone():
+                raise Fenced(f"Slot {session['slot_vmid']} generation changed")
 
     async def free_slots(self):
         async with self.pool.connection() as conn:

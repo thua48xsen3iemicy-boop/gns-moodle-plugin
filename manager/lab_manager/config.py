@@ -116,6 +116,7 @@ class Settings:
     slot_timeout: float = 10.0
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
+    queue_timeout: float = 600.0  # Seconds a session may wait for a slot; 0 = no limit
     default_max_duration: int = 180  # Minutes
     max_duration_limit: int = 480  # Minutes; upper bound for options.max_duration from the plugin
     worker_interval: float = 2.0
@@ -167,6 +168,10 @@ def load(env=None, check_mode=True) -> Settings:
         raise ConfigError("Duplicate site url or slug")
     if len({s.vmid for s in slots}) != len(slots) or len({s.address for s in slots}) != len(slots):
         raise ConfigError("Duplicate slot vmid or address")
+    # Every CT clone needs its own slot.env (agent AGENT_REQUESTS §5); the slot cannot see this.
+    tokens = [s.api_token for s in slots] + [s.console_token for s in slots if s.console_token]
+    if len(set(tokens)) != len(tokens):
+        raise ConfigError("Slot tokens must be unique per slot and differ between API and console")
 
     nodes = tuple(n.strip() for n in required("PVE_NODES").split(",") if n.strip())
     for node in nodes:
@@ -223,6 +228,7 @@ def load(env=None, check_mode=True) -> Settings:
         slot_timeout=_int(env, "SLOT_TIMEOUT", 10, 1, 300),
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),
+        queue_timeout=_int(env, "QUEUE_TIMEOUT", 600, 0, 86400),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),
         max_duration_limit=_int(env, "MAX_DURATION_LIMIT", 480, 1, 7 * 24 * 60),
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),

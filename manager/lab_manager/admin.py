@@ -63,7 +63,7 @@ def cmd_slots(args):
         rows = await services.store.slots()
         for r in rows:
             print(json.dumps({k: r[k] for k in ("vmid", "address", "state", "generation",
-                                                "session_id", "in_config", "state_message")},
+                                                "session_id", "student_key", "in_config", "state_message")},
                              ensure_ascii=False, default=str))
 
     asyncio.run(_with_services(run))

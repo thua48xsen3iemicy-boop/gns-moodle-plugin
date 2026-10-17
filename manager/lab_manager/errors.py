@@ -19,6 +19,7 @@ SESSION_ERRORS: dict[str, bool] = {
     "WRONG_STUDENT_MOUNT": True,
     "CT_SIZE_NOT_APPLIED": True,
     "TIMEOUT": True,
+    "QUEUE_TIMEOUT": True,
     "INTERNAL": True,
     # Configuration, lab or student directory: an administrator has to act.
     "PVE_REJECTED": False,
@@ -28,6 +29,8 @@ SESSION_ERRORS: dict[str, bool] = {
     "STUDENT_DIR_REJECTED": False,
     "LAB_UNAVAILABLE": False,
     "SLOT_COLD_RESUME_UNSUPPORTED": False,
+    "NO_SLOTS": False,
+    "STUDENT_DIR_BUSY": False,
 }
 
 

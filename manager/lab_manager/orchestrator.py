@@ -24,6 +24,13 @@ stored in the database. Nothing is deleted or recreated "just in case".
     stopping       ct_park          agent: placeholder mounted read-only instead of the student dir;
                                     verified, otherwise the slot goes to maintenance (never free)
     stopped/failed                  terminal; failed keeps the slot 'failed' for the operator
+
+A failure while the CT may hold the student's directory (ct_start .. lab_stop_wait) does not
+end the session at once: the lab is stopped if it may exist, the CT is stopped and parked,
+and only then the session is failed (the slot stays 'failed' for the operator, but with the
+placeholder mounted). Until the CT is confirmed stopped, slots.student_key names the student,
+and a new session of that student fails with STUDENT_DIR_BUSY instead of mounting the same
+directory read-write in a second slot.
 """
 
 import asyncio
@@ -50,6 +57,11 @@ LINK_KEYS = ("link_id", "nodes", "suspend", "filters", "link_type", "link_style"
 CONSOLE_TYPES = {"telnet", "vnc"}
 NODE_STATUSES = {"started", "stopped", "suspended"}
 
+# The CT may be running with the student's directory mounted read-write.
+MOUNTED_STAGES = ("ct_start", "slot_ready", "lab_submit", "lab_wait", "ready", "lab_stop", "lab_stop_wait")
+# The lab may exist in the slot: stop it before the CT.
+LAB_STAGES = ("lab_submit", "lab_wait", "ready")
+
 SLOT_STAGE_MESSAGES = {
     "DEPLOYING": "Создание или открытие проекта…",
     "STARTING": "Запуск устройств…",
@@ -61,7 +73,8 @@ SLOT_STAGE_MESSAGES = {
 
 
 class Failure(Exception):
-    """Unrecoverable for this session: it goes to failed, the slot to failed."""
+    """Unrecoverable for this session: it goes to failed, the slot to failed (after the CT is
+    stopped and parked when the failure happens in a MOUNTED_STAGES stage)."""
 
     def __init__(self, message, code="FAILED", slot_state="failed"):
         super().__init__(message)
@@ -83,15 +96,23 @@ def now():
     return datetime.now(timezone.utc)
 
 
-def session_topology(name: str, raw: dict, drawings=None) -> dict:
+def session_topology(name: str, raw: dict, reference=None) -> dict:
+    """Live topology for the plugin; reference is the lab's own topology (lab.gns3 or alike)."""
+    ref = (reference or {}).get("topology") or {}
+    # The slot creates nodes without a symbol and GNS3 2.2 draws them all as computers
+    # (slot ALIGNMENT §3.4): the symbol of the reference node with the same name wins.
+    symbols = {n.get("name"): n["symbol"] for n in ref.get("nodes", []) if n.get("symbol")}
     nodes = []
     for n in raw.get("nodes", []):
         node = {k: n[k] for k in NODE_KEYS if k in n}
+        if node.get("name") in symbols:
+            node["symbol"] = symbols[node["name"]]
         node["properties"] = {}  # QEMU options, paths and sockets are internal to the slot
         nodes.append(node)
     links = [{k: link[k] for k in LINK_KEYS if k in link} for link in raw.get("links", [])]
     # Lab Slot does not return drawings; they reference no node_id, so the reference ones fit.
-    return {"name": name, "topology": {"nodes": nodes, "links": links, "drawings": list(drawings or [])}}
+    return {"name": name, "topology": {"nodes": nodes, "links": links,
+                                       "drawings": list(ref.get("drawings") or [])}}
 
 
 def node_states(topology: dict) -> dict:
@@ -259,11 +280,25 @@ class Orchestrator:
 
     async def _fail(self, s, failure: Failure):
         log.error("Session %s failed at %s: %s", s["id"], s["stage"], failure.code)
+        if s["slot_vmid"] is not None and s["stage"] in MOUNTED_STAGES:
+            # Release the student's directory before giving up: stop the lab if it may exist,
+            # then the CT, then park. The first error is kept and reported at the end.
+            error = s["error"] or {"code": failure.code, "stage": s["stage"], "message": failure.message[:500],
+                                   "slot_state": failure.slot_state}
+            lab = s["stage"] in LAB_STAGES and await self.store.current_call(s, ("deploy",)) is not None
+            stage, message = ("lab_stop", "Сбой, остановка лабы…") if lab else ("ct_stop", "Сбой, остановка слота…")
+            await self.store.update_session(
+                s, stage=stage, status="stopping", status_message=message, error=error, new_stage=True,
+                progress=None, slot_state="releasing", event=("failure_cleanup", {"code": failure.code}),
+            )
+            return
+        # A failure of the cleanup itself: the student still sees the first error.
+        error = s["error"] or {"code": failure.code, "stage": s["stage"], "message": failure.message[:500]}
+        codes = failure.code if error["code"] == failure.code else f"{error['code']}, then {failure.code}"
         await self.store.finish_session(
-            s, status="failed", message=failure.message[:500],
-            error={"code": failure.code, "stage": s["stage"], "message": failure.message[:500]},
+            s, status="failed", message=error["message"], error=error,
             slot_state=failure.slot_state if s["slot_vmid"] is not None else "free",
-            slot_message=f"session {s['id']}: {failure.code}",
+            slot_message=f"session {s['id']}: {codes}",
         )
 
     async def _goto(self, s, stage, message, *, status=None, slot_state=None, **fields):
@@ -291,11 +326,11 @@ class Orchestrator:
         """Current Proxmox node of the slot CT (it may have migrated since allocation)."""
         return await self.pve.find_ct_node(s["slot_vmid"])
 
-    def _reference_drawings(self, lab_ref):
+    def _reference(self, lab_ref):
         try:
-            return self.catalog.get(lab_ref).topology.get("topology", {}).get("drawings", [])
+            return self.catalog.get(lab_ref).topology
         except LabError:
-            return []
+            return None
 
     @staticmethod
     def _need_mb(resources):
@@ -343,20 +378,33 @@ class Orchestrator:
             await self.store.finish_session(s, status="stopped", message="Остановлено до запуска")
             return False
         self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
+        held = await self.store.slot_holding_student(s["student_key"])
+        if held is not None:
+            # An earlier session failed and its CT could not be confirmed stopped: the student's
+            # directory may still be writable there. Never mount it in a second slot.
+            raise Failure(f"Каталог студента ещё подключён к слоту {held}; нужен оператор", "STUDENT_DIR_BUSY")
+        if not await self.store.usable_slots():
+            raise Failure("Нет ни одного рабочего слота", "NO_SLOTS")
+        waiting = await self._try_allocate(s)
+        if waiting is None:
+            return True
+        limit = self.settings.queue_timeout
+        if limit and (now() - s["stage_started_at"]).total_seconds() > limit:
+            raise Failure(f"Слот не освободился за {int(limit)} с", "QUEUE_TIMEOUT")
+        await self.store.queued_message(s["id"], waiting)
+        return False
+
+    async def _try_allocate(self, s):
+        """Allocate a slot. Returns None on success, otherwise the message to show while waiting."""
         if not await self.store.free_slots():
-            await self.store.queued_message(s["id"], "Ожидание свободного слота…")
-            return False
+            return "Ожидание свободного слота…"
         try:
             candidates = await self.placement(s)
         except PveError:
-            await self.store.queued_message(s["id"], "Proxmox недоступен, ожидание…")
-            return False
+            return "Proxmox недоступен, ожидание…"
         if await self.store.allocate_slot(s, candidates) is None:
-            await self.store.queued_message(
-                s["id"], "Недостаточно ресурсов на узлах, ожидание…" if not candidates
-                else "Ожидание свободного слота…")
-            return False
-        return True
+            return "Недостаточно ресурсов на узлах, ожидание…" if not candidates else "Ожидание свободного слота…"
+        return None
 
     # ------------------------------------------------------------------ starting
     async def _stage_ct_prepare(self, s):
@@ -437,6 +485,7 @@ class Orchestrator:
         except AgentBusy:
             raise Wait() from None
         if state == "stopped":
+            await self.store.set_slot_student(s, key)  # Before the mount can exist
             try:
                 result = await self.agent.start(
                     node, vmid, student_key=key, code_revision=self.settings.slot_code_revision,
@@ -564,7 +613,7 @@ class Orchestrator:
             await self.store.update_call(call["id"], status="succeeded")
         await self.store.mark_deployed(s["workspace_id"], call["body"])
         raw = await self._slot(s).topology(str(s["project_id"]))
-        topology = session_topology(s["project_name"], raw, self._reference_drawings(s["lab_ref"]))
+        topology = session_topology(s["project_name"], raw, self._reference(s["lab_ref"]))
         if s["stop_requested"]:
             return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping",
                                     slot_state="releasing", topology=topology)
@@ -652,6 +701,7 @@ class Orchestrator:
             raise Wait("Остановка контейнера слота…") from None
         if await self.agent.status(node, vmid) != "stopped":
             raise Wait("Остановка контейнера слота…")
+        await self.store.set_slot_student(s, None)
         return await self._goto(s, "ct_park", "Освобождение слота…")
 
     async def _stage_ct_park(self, s):
@@ -673,6 +723,10 @@ class Orchestrator:
                 slot_state, slot_message = "maintenance", f"session {s['id']}: placeholder not confirmed"
                 log.error("Session %s: slot %s not parked; maintenance", s["id"], vmid)
         if s["error"]:
+            if slot_state == "free" and s["error"].get("slot_state", "free") != "free":
+                # A slot-level failure: parked, but kept for the operator.
+                slot_state = s["error"]["slot_state"]
+                slot_message = f"session {s['id']}: {s['error']['code']}"
             await self.store.finish_session(s, status="failed", message=s["error"]["message"], error=s["error"],
                                             slot_state=slot_state, slot_message=slot_message)
         else:
