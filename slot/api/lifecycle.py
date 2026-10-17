@@ -30,6 +30,71 @@ TRANSITIONS = {
 }
 
 router = APIRouter(prefix="/v1/operations", tags=["operations"])
+LAB_STATE_DIR = "/opt/gns3/projects/.lab-slot"
+
+
+class LabStore:
+    """Lab records in the student's directory, so a project continues in any slot.
+
+    Operations and idempotency keys stay in the slot's SQLite: they live for one session.
+    """
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def path(self, pid):
+        return self.root / (pid + ".json")
+
+    @staticmethod
+    def decode(data):
+        try:
+            return json.loads(data)
+        except ValueError as exc:
+            raise OSError("Corrupt lab record") from exc
+
+    def get(self, pid):
+        try:
+            return self.decode(self.path(pid).read_bytes())
+        except FileNotFoundError:
+            return None
+
+    def all(self):
+        try:
+            paths = sorted(self.root.iterdir())
+        except FileNotFoundError:
+            return []
+        return [
+            self.decode(p.read_bytes())
+            for p in paths
+            if p.suffix == ".json" and not p.name.startswith(".")
+        ]
+
+    def write(self, pid, obj):
+        # Atomic replace: a power loss leaves the old or the new record, never a mix.
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = self.root / f".{pid}.{uuid4().hex}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(json.dumps(obj).encode())
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path(pid))
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        self.sync()
+
+    def delete(self, pid):
+        self.path(pid).unlink(missing_ok=True)
+        self.sync()
+
+    def sync(self):
+        fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 @router.get("/{operation_id}")
@@ -57,6 +122,13 @@ class Lifecycle:
             )
             self.tasks = set()
             self.project_locks = {}
+            self.labs = LabStore(
+                Path(os.getenv("SLOT_LAB_STATE_DIR", LAB_STATE_DIR)) / "labs"
+            )
+            try:
+                self.labs.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except OSError:
+                pass  # Reported by /v1/readyz as LAB_STATE_UNAVAILABLE
             for op in self.all("operation"):
                 if op["status"] == "RUNNING":
                     op.update(
@@ -89,12 +161,16 @@ class Lifecycle:
             raise
 
     def get(self, kind, ident):
+        if kind == "lab":
+            return self.labs.get(ident)
         row = self.db.execute(
             "SELECT data FROM records WHERE kind=? AND id=?", (kind, ident)
         ).fetchone()
         return json.loads(row[0]) if row else None
 
     def all(self, kind):
+        if kind == "lab":
+            return self.labs.all()
         return [
             json.loads(r[0])
             for r in self.db.execute("SELECT data FROM records WHERE kind=?", (kind,))
@@ -102,6 +178,9 @@ class Lifecycle:
 
     def save(self, kind, ident, obj):
         obj["updated_at"] = time.time()
+        if kind == "lab":
+            self.labs.write(ident, obj)
+            return
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO records VALUES (?,?,?)",
@@ -293,16 +372,23 @@ class Lifecycle:
             "previous_state": previous_state,
         }
         op["updated_at"] = time.time()
+        # The lab record goes first: a crash before the operation is stored leaves a
+        # non-final state, which the next start turns into FAILED / SERVICE_RESTART.
         try:
-            with self.db:
-                for kind, ident, data in (
-                    ("lab", pid, lab),
-                    ("operation", op["operation_id"], op),
-                ):
+            previous = self.get("lab", pid)
+            self.labs.write(pid, lab)
+            try:
+                with self.db:
                     self.db.execute(
                         "INSERT OR REPLACE INTO records VALUES (?,?,?)",
-                        (kind, ident, json.dumps(data)),
+                        ("operation", op["operation_id"], json.dumps(op)),
                     )
+            except BaseException:
+                if previous is None:
+                    self.labs.delete(pid)
+                else:
+                    self.labs.write(pid, previous)
+                raise
         except BaseException:
             if newly_locked:
                 self.project_locks.pop(pid).close()

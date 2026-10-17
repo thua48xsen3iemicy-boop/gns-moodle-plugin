@@ -17,7 +17,7 @@ router = APIRouter(tags=["health"])
 
 
 # Manager negotiation (manager/docs/CONTRACTS.md §4.1); names are registered in its §7.
-FEATURES = ["qemu", "iou", "vpcs", "qga", "iol-cli"]
+FEATURES = ["qemu", "iou", "vpcs", "qga", "iol-cli", "student-state"]
 
 
 @router.get("/healthz")
@@ -87,6 +87,7 @@ async def readyz(request: Request):
         checks["sqlite"] = {"ok": False, "code": "SQLITE_UNAVAILABLE"}
     for name, root in (
         ("storage", getattr(lifecycle, "root", None)),
+        ("lab_state", getattr(getattr(lifecycle, "labs", None), "root", None)),
         (
             "locks",
             Path(os.getenv("SLOT_PROJECT_LOCK_DIR", "/opt/gns3/projects/.slot-locks")),
