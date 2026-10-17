@@ -127,6 +127,7 @@ class FakeAgent:
         self.pve = pve
         self.timeline = pve.timeline
         self.missing_students = set()  # students/<key> not provisioned on CephFS
+        self.error_codes = False  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
         self.ceph_root = ceph_root
         self.requests = []
         self.busy = False
@@ -144,10 +145,12 @@ class FakeAgent:
     def _mounts(self, ct, body):
         key = body["student_key"]
         if key in self.missing_students:
+            if self.error_codes:
+                return self._err(422, {"code": "SOURCE_MISSING", "message": "Student directory missing"})
             return self._err(422, "Required CephFS directory does not exist")
         code = f"{self.ceph_root}/slot" + (f"/{body['code_revision']}" if body.get("code_revision") else "")
         ro = 1 if body.get("data_mode") == "ro" else 0
-        ct["config"]["mp0"] = f"{code},mp=/opt/slot,ro=1,shared=1"
+        ct["config"]["mp0"] = f"{code},mp=/srv/gns3-ro/slot,ro=1,shared=1"  # docs/AGENT_REQUESTS.md
         ct["config"]["mp1"] = f"{self.ceph_root}/students/{key},mp=/srv/student,ro={ro},shared=1"
         return None
 

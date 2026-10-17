@@ -11,13 +11,16 @@ Agent endpoints (all synchronous, one operation per CT at a time):
     POST /slots/{vmid}/start             {..mounts.., actions[]}  mounts, pct start, guest actions
     POST /slots/{vmid}/stop              {force}  pct shutdown --timeout 60, or pct stop if force
 
-Error mapping (the agent returns FastAPI {"detail": "..."} strings):
+Errors. Preferred: {"detail": {"code": "...", "message": "..."}} with the codes in
+docs/AGENT_REQUESTS.md; until the agent sends codes, the FastAPI {"detail": "..."} text of
+feature/proxmox-node-agent is classified by HTTP status and wording:
     403  VMID outside the lab range, privileged CT or no 'labslot' tag   -> AgentRejected
     404  CT is not on this node (migrated)                                 -> AgentWrongNode
     409  "Another operation on this slot is in progress"                   -> AgentBusy
     409  "Slot must be stopped to change mount points"                     -> AgentNotStopped
     409  "Proxmox command failed: ..."                                     -> AgentCommandFailed
-    422  student/code directory missing, symlink or not on CephFS          -> AgentRejected
+    422  "Required CephFS directory does not exist"                        -> AgentSourceMissing
+    422  symlink, unsafe ancestor, ACL, not on CephFS, invalid request     -> AgentRejected
     503/504, connection errors, timeouts: the outcome is unknown           -> AgentUncertain
 """
 
@@ -27,14 +30,19 @@ import httpx
 
 
 class AgentError(RuntimeError):
-    def __init__(self, status: int | None, message: str):
-        super().__init__(f"Node agent {status or 'unreachable'}: {message}")
+    def __init__(self, status: int | None, message: str, code: str | None = None):
+        super().__init__(f"Node agent {status or 'unreachable'}{' ' + code if code else ''}: {message}")
         self.status = status
         self.message = message
+        self.code = code
 
 
 class AgentRejected(AgentError):
     """Configuration or request problem; repeating does not help."""
+
+
+class AgentSourceMissing(AgentRejected):
+    """The student (or code) directory is not provisioned; the CT was not touched."""
 
 
 class AgentWrongNode(AgentError):
@@ -57,26 +65,49 @@ class AgentUncertain(AgentError):
     """The request may or may not have been executed (timeout, 503/504, connection lost)."""
 
 
+CODES = {
+    "VMID_OUT_OF_RANGE": AgentRejected,
+    "NOT_LAB_SLOT": AgentRejected,
+    "PRIVILEGED_CT": AgentRejected,
+    "INVALID_REQUEST": AgentRejected,
+    "SOURCE_UNSAFE": AgentRejected,
+    "SOURCE_MISSING": AgentSourceMissing,
+    "CT_NOT_ON_NODE": AgentWrongNode,
+    "SLOT_BUSY": AgentBusy,
+    "NOT_STOPPED": AgentNotStopped,
+    "PCT_FAILED": AgentCommandFailed,
+    "STORAGE_UNAVAILABLE": AgentUncertain,
+    "PCT_UNAVAILABLE": AgentUncertain,
+    "PCT_TIMEOUT": AgentUncertain,
+}
+
+
 def _classify(resp: httpx.Response) -> AgentError:
     try:
         detail = resp.json().get("detail")
     except (ValueError, AttributeError):
         detail = None
+    status = resp.status_code
+    if isinstance(detail, dict) and detail.get("code") in CODES:
+        code = detail["code"]
+        return CODES[code](status, str(detail.get("message", code))[:800], code)
     text = detail if isinstance(detail, str) else "validation error" if detail else resp.reason_phrase
     text = str(text)[:800]
-    if resp.status_code in (403, 422):
-        return AgentRejected(resp.status_code, text)
-    if resp.status_code == 404:
+    if status == 422 and "does not exist" in text:
+        return AgentSourceMissing(status, text)
+    if status in (403, 422):
+        return AgentRejected(status, text)
+    if status == 404:
         return AgentWrongNode(404, text)
-    if resp.status_code == 409:
+    if status == 409:
         if "in progress" in text:
             return AgentBusy(409, text)
         if "must be stopped" in text:
             return AgentNotStopped(409, text)
         return AgentCommandFailed(409, text)
-    if resp.status_code in (503, 504) or resp.status_code >= 500:
-        return AgentUncertain(resp.status_code, text)
-    return AgentRejected(resp.status_code, text)
+    if status >= 500:
+        return AgentUncertain(status, text)
+    return AgentRejected(status, text)
 
 
 class AgentClient:

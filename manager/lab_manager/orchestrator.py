@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 
 from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentRejected,
-                           AgentUncertain, AgentWrongNode)
+                           AgentSourceMissing, AgentUncertain, AgentWrongNode)
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotUnavailable
@@ -400,12 +400,10 @@ class Orchestrator:
                     actions=self.settings.agent_start_actions)
             except (AgentBusy, AgentNotStopped, AgentUncertain):
                 raise Wait() from None  # Re-read the real state on the next tick
-            except AgentRejected as exc:
-                if "does not exist" in exc.message:
-                    # The agent checks paths before touching the CT: the slot itself is fine.
-                    raise Failure("Каталог студента на CephFS не создан; обратитесь к администратору",
-                                  "STUDENT_DIR_MISSING", slot_state="free") from exc
-                raise
+            except AgentSourceMissing as exc:
+                # The agent checks paths before touching the CT: the slot itself is fine.
+                raise Failure("Каталог студента на CephFS не создан; обратитесь к администратору",
+                              "STUDENT_DIR_MISSING", slot_state="free") from exc
             except AgentCommandFailed as exc:
                 raise Failure(f"Агент не смог запустить слот: {exc.message}", "SLOT_START_FAILED") from exc
             await self.store.event(s["id"], vmid, "ct_started",

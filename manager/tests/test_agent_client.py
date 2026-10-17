@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
-from lab_manager.agent_client import (AgentBusy, AgentClient, AgentCommandFailed, AgentNotStopped,
-                                      AgentRejected, AgentUncertain, AgentWrongNode)
+from lab_manager.agent_client import (CODES, AgentBusy, AgentClient, AgentCommandFailed, AgentNotStopped,
+                                      AgentRejected, AgentSourceMissing, AgentUncertain, AgentWrongNode)
 
 
 def client(handler):
@@ -48,7 +48,8 @@ async def test_requests_match_agent_api():
     (409, "Another operation on this slot is in progress", AgentBusy),
     (409, "Slot must be stopped to change mount points", AgentNotStopped),
     (409, "Proxmox command failed: CT 2001 already running", AgentCommandFailed),
-    (422, "Required CephFS directory does not exist", AgentRejected),
+    (422, "Required CephFS directory does not exist", AgentSourceMissing),
+    (422, "Mount ancestor is not administrator-controlled", AgentRejected),
     (503, "CephFS is not mounted at its expected root", AgentUncertain),
     (504, "Proxmox command timed out; check actual container state", AgentUncertain),
 ])
@@ -57,6 +58,26 @@ async def test_error_classification(status, detail, exc):
     with pytest.raises(exc) as err:
         await agent.status("pve1", 2001)
     assert err.value.message == detail
+    await agent.close()
+
+
+@pytest.mark.parametrize("code", sorted(CODES))
+async def test_error_codes_take_precedence_over_text(code):
+    # Codes requested in docs/AGENT_REQUESTS.md; the HTTP status does not matter then.
+    body = {"detail": {"code": code, "message": "in progress / must be stopped / does not exist"}}
+    agent = client(lambda r: httpx.Response(409, json=body))
+    with pytest.raises(CODES[code]) as err:
+        await agent.status("pve1", 2001)
+    assert type(err.value) is CODES[code] and err.value.code == code
+    await agent.close()
+
+
+async def test_validation_error_list_is_rejection():
+    body = {"detail": [{"type": "extra_forbidden", "loc": ["body", "x"], "msg": "Extra inputs"}]}
+    agent = client(lambda r: httpx.Response(422, json=body))
+    with pytest.raises(AgentRejected) as err:
+        await agent.stop("pve1", 2001)
+    assert not isinstance(err.value, AgentSourceMissing)
     await agent.close()
 
 

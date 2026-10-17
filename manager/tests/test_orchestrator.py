@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from conftest import make_env
 from fakes import GIB
 
@@ -283,9 +284,11 @@ async def test_agent_rejection_fails_session(tmp_path, dsn):
         assert "not marked as a lab slot" in s["status_message"]
 
 
-async def test_missing_student_dir_fails_session_but_frees_slot(tmp_path, dsn):
+@pytest.mark.parametrize("error_codes", [False, True])
+async def test_missing_student_dir_fails_session_but_frees_slot(tmp_path, dsn, error_codes):
     async with make_env(tmp_path, dsn, vmids=(201,)) as env:
         env.agent.missing_students = {"main-42"}
+        env.agent.error_codes = error_codes
         sid = await start(env)
         await env.run()
         s = await session(env, sid)

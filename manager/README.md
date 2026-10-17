@@ -38,6 +38,8 @@ pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
 1. Агент на каждый узел — по `agent/README.md` (ветка `feature/proxmox-node-agent`):
    `make-demo-pki.sh` (или своя PKI), `install-node.sh`, `LAB_VMID_MIN/MAX`, firewall.
    Менеджеру из PKI нужны `manager.crt`, `manager.key` и `node-server-ca.crt`.
+   Код слота агент должен монтировать в `/srv/gns3-ro/slot`; в ветке пока `/opt/slot`, это
+   исправляет разработчик агента. Все запросы к агенту — в [`docs/AGENT_REQUESTS.md`](docs/AGENT_REQUESTS.md).
 2. Слоты: CT из диапазона `LAB_VMID_MIN..MAX`, `unprivileged: 1`, `pct set <vmid> --tags labslot`,
    внутри — Lab Slot по `slot/README.md` и `/usr/local/sbin/lab-slot-init` из `agent/guest/`.
 3. Каталоги на CephFS (агент требует, чтобы предки принадлежали root и не были доступны на
@@ -46,7 +48,7 @@ pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
    ```sh
    CEPH=/mnt/pve/data
    install -d -o root -g root -m 0755 $CEPH/students $CEPH/students/placeholder
-   # Для каждого студента (пока вручную или скриптом; DESIGN §5, §11 В2).
+   # Для каждого студента — пока вручную; позже это будет делать агент (AGENT_REQUESTS.md §3).
    # 101000 = uid gns3 в слоте (1000) + 100000:
    install -d -o 101000 -g 101000 -m 0700 $CEPH/students/main-42
    ```
@@ -180,7 +182,8 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
   переключают; 503 на GET переключает; изменяющий запрос с неизвестным исходом не повторяется;
   нода возвращается после `PVE_RETRY_AFTER`; все ноды недоступны; миграция CT;
 - UPID: ожидание `stopped`/`OK`, ошибка `exitstatus`, недоступный узел задачи и таймаут → «неизвестно»;
-- агент: формат запросов и таймауты, разбор всех ошибок `agent.py` (403/404/409×3/422/503/504);
+- агент: формат запросов и таймауты, разбор всех ошибок `agent.py` (403/404/409×3/422/503/504)
+  и кодов ошибок из `AGENT_REQUESTS.md` §2;
   клиент вручную прогнан против настоящего `agent.py` из ветки (с подменённым `pct`);
 - нет каталога студента → `STUDENT_DIR_MISSING`, слот свободен для других;
 - порядок `stop (если CT запущен) → cores/memory → агент start (mounts + pct start) → readyz → deploy`
