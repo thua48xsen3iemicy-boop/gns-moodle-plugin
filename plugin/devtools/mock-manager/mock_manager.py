@@ -13,7 +13,7 @@
 - сессия идёт queued → starting → running за ~5 с, со stage и progress; stop — stopping → stopped за ~2 с;
   options.max_duration задаёт expires_at; у failed-сессии error {"code", "retryable"};
 - у запущенной сессии topology (properties нод пустые), nodes со статусами и nodes_stale, если включено;
-- билеты консолей выдаёт настоящий шлюз (gateway/console_gateway.py) через /internal/tickets;
+- билеты консолей выдаёт настоящий шлюз (manager/gateway/console_gateway.py в ветке менеджера) через /internal/tickets;
   к остановленной ноде — 409 node_not_running (если статусы не устарели).
 
 Лабы из Moodle (CONTRACTS §2.6 менеджера 0.5, ветка claude/determined-brown-lfgnxy):

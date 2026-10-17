@@ -11,11 +11,13 @@
 Нужны Python 3.10+ и `aiohttp` (`pip install aiohttp`). Три процесса: шлюз, mock-менеджер и Moodle.
 
 ```bash
-# 1. Шлюз консолей: билеты от mock-менеджера, консоли — у поддельного слота на :8091
-cd gateway
+# 1. Шлюз консолей — код менеджера (manager/gateway/, ветка claude/determined-brown-lfgnxy).
+#    Без checkout ветки менеджера достаточно одного файла:
+git show origin/claude/determined-brown-lfgnxy:manager/gateway/console_gateway.py > /tmp/console_gateway.py
+#    Билеты от mock-менеджера, консоли — у поддельного слота на :8091
 GW_PORT=8080 GW_INTERNAL_KEY=dev-internal-key \
 GW_SLOTS='{"127.0.0.1": "dev-console-token"}' GW_SLOT_PORT=8091 \
-GW_ALLOWED_ORIGINS=http://127.0.0.1:8000 python3 console_gateway.py
+GW_ALLOWED_ORIGINS=http://127.0.0.1:8000 python3 /tmp/console_gateway.py
 
 # 2. Mock-менеджер: API на :8090, поддельный Lab Slot на :8091 (значения по умолчанию совпадают со шлюзом выше)
 python3 devtools/mock-manager/mock_manager.py

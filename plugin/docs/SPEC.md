@@ -65,7 +65,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 
 `topology` и `nodes` — только при `running`. Плагин опрашивает сессию раз в 3 с, пока статус переходный.
 
-## 4. Контракт шлюза (уже реализован в `gateway/`)
+## 4. Контракт шлюза (шлюз ведёт менеджер: `manager/gateway/`, ветка `claude/determined-brown-lfgnxy`)
 
 - Билет одноразовый, живёт 30 с. Для каждого (пере)подключения — новый билет.
 - Браузер: `new WebSocket(gateway_url + "/console/" + node_id + "?ticket=" + ticket)`, `binaryType = "arraybuffer"`.
