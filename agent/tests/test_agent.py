@@ -231,3 +231,100 @@ def test_real_ceph_mount_validation(tmp_path, monkeypatch):
     with pytest.raises(agent.HTTPException) as err:
         agent.validate_cephfs()
     assert err.value.status_code == 503
+
+
+@pytest.fixture
+def student_env(env, monkeypatch):
+    monkeypatch.setattr(agent, 'STUDENT_UID', str(os.getuid()))
+    monkeypatch.setattr(agent, 'STUDENT_GID', str(os.getgid()))
+    chowns = []
+    def chown(fd, uid, gid):
+        # Unprivileged test directory already belongs to these IDs.
+        assert (uid, gid) == (os.getuid(), os.getgid())
+        chowns.append((uid, gid))
+    monkeypatch.setattr(agent.os, 'fchown', chown)
+    return env, chowns
+
+
+def test_create_student_idempotently(student_env):
+    (client, calls, _, _, ceph), chowns = student_env
+    for _ in range(2):
+        r = client.put('/students/new_student')
+        assert r.status_code == 200, r.text
+        assert r.json() == {'student_key': 'new_student', 'ready': True}
+    assert (ceph / 'students/new_student').stat().st_mode & 0o777 == 0o700
+    assert len(chowns) == 1
+    assert not any(c[0] == agent.PCT for c in calls)
+
+
+def test_existing_student_contents_untouched(student_env):
+    (client, _, _, _, ceph), chowns = student_env
+    marker = ceph / 'students/student42/data'
+    marker.write_text('keep')
+    assert client.put('/students/student42').status_code == 200
+    assert marker.read_text() == 'keep'
+    assert chowns == []
+
+
+def test_wrong_owner_is_not_repaired(student_env, monkeypatch):
+    (client, _, _, _, ceph), chowns = student_env
+    monkeypatch.setattr(agent, 'STUDENT_UID', str(os.getuid() + 1))
+    assert client.put('/students/student42').status_code == 409
+    assert chowns == []
+
+
+@pytest.mark.parametrize('key', ['bad;id', 'bad\n', '..', '$(id)'])
+def test_student_invalid_key(student_env, key):
+    (client, calls, *_), chowns = student_env
+    from urllib.parse import quote
+    assert client.put('/students/' + quote(key, safe='')).status_code in (404, 422)
+    assert calls == [] and chowns == []
+
+
+def test_student_symlink_and_unsafe_parent(student_env):
+    (client, calls, _, _, ceph), chowns = student_env
+    (ceph / 'students/evil').symlink_to(ceph / 'slot')
+    assert client.put('/students/evil').status_code == 422
+    (ceph / 'students').chmod(0o777)
+    assert client.put('/students/new').status_code == 422
+    assert not (ceph / 'students/new').exists()
+    assert chowns == []
+
+
+def test_student_missing_config_and_storage(student_env, monkeypatch):
+    (client, calls, *_), chowns = student_env
+    monkeypatch.setattr(agent, 'STUDENT_UID', None)
+    assert client.put('/students/new').status_code == 503
+    assert calls == []
+    monkeypatch.setattr(agent, 'STUDENT_UID', str(os.getuid()))
+    def unavailable():
+        raise agent.HTTPException(503, 'unavailable')
+    monkeypatch.setattr(agent, 'validate_cephfs', unavailable)
+    assert client.put('/students/new').status_code == 503
+    assert chowns == []
+
+
+def test_student_nested_mount_rejected(student_env, monkeypatch):
+    (client, _, _, _, ceph), chowns = student_env
+    monkeypatch.setattr(agent, 'run_cmd', lambda *a, **kw: '/elsewhere')
+    assert client.put('/students/new').status_code == 422
+    assert not (ceph / 'students/new').exists()
+    assert chowns == []
+
+
+def test_student_chown_failure_fails_closed(student_env, monkeypatch):
+    (client, _, _, _, ceph), _ = student_env
+    def denied(*args):
+        raise PermissionError('Ceph denied ownership change')
+    monkeypatch.setattr(agent.os, 'fchown', denied)
+    assert client.put('/students/new').status_code == 503
+    assert (ceph / 'students/new').is_dir()
+    assert not list((ceph / 'students/new').iterdir())
+
+
+def test_student_parent_acl_rejected(student_env, monkeypatch):
+    (client, _, _, _, ceph), chowns = student_env
+    monkeypatch.setattr(agent.os, 'getxattr', lambda *args: b'acl')
+    assert client.put('/students/new').status_code == 422
+    assert not (ceph / 'students/new').exists()
+    assert chowns == []

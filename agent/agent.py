@@ -30,6 +30,9 @@ LOCK_DIR = Path("/run/lab-node-agent")
 VMID_MIN = int(os.environ.get("LAB_VMID_MIN", "2000"))
 VMID_MAX = int(os.environ.get("LAB_VMID_MAX", "2999"))
 REQUIRED_TAG = "labslot"
+# Host-side mapped IDs; intentionally unset until the template mapping is known.
+STUDENT_UID = os.environ.get("LAB_STUDENT_HOST_UID")
+STUDENT_GID = os.environ.get("LAB_STUDENT_HOST_GID")
 ALLOWED_FS = frozenset(("ceph", "fuse.ceph", "fuse.ceph-fuse"))
 
 # Each action runs as root INSIDE the container, not in the host namespace.
@@ -279,3 +282,65 @@ def stop(vmid: VMID, options: Stop):
         else:
             run_cmd([PCT, "shutdown", str(vmid), "--timeout", "60"], timeout=80)
         return {"vmid": vmid, "state": lxc_state(vmid)}
+
+
+@app.put("/students/{student_key}")
+def ensure_student(student_key: Key):
+    # Path parameters need the same fullmatch protection as mount body keys.
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", student_key) is None:
+        raise HTTPException(422, "Expected one safe path component")
+    try:
+        uid, gid = int(STUDENT_UID), int(STUDENT_GID)
+        if not (1 <= uid < 2**32 - 1 and 1 <= gid < 2**32 - 1):
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise HTTPException(503, "Configure mapped gns3 host UID/GID first")
+    validate_cephfs()
+    parent = CEPH_ROOT / "students"
+    validate_no_symlinks(parent)
+    if run_cmd([FINDMNT, "-T", str(parent), "-n", "-o", "TARGET"], timeout=10) != str(CEPH_ROOT):
+        raise HTTPException(422, "Students parent is not on expected CephFS mount")
+    try:
+        parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            st = os.fstat(parent_fd)
+            if st.st_uid not in ADMIN_UIDS or st.st_mode & 0o022:
+                raise HTTPException(422, "Students parent must be administrator-controlled")
+            # Reject access and default ACLs (mkdir must not inherit extra access).
+            for acl in ("system.posix_acl_access", "system.posix_acl_default"):
+                try:
+                    os.getxattr(parent_fd, acl)
+                except OSError as exc:
+                    if exc.errno not in (errno.ENODATA, errno.ENOTSUP):
+                        raise HTTPException(503, "Cannot verify students parent ACL")
+                else:
+                    raise HTTPException(422, "Students parent ACL is unsupported")
+            created = False
+            try:
+                os.mkdir(student_key, mode=0o700, dir_fd=parent_fd)
+                created = True
+            except FileExistsError:
+                pass
+            fd = os.open(student_key, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                         dir_fd=parent_fd)
+            try:
+                # Do not chown nested mounts, including a substituted host filesystem.
+                target = parent / student_key
+                if run_cmd([FINDMNT, "-T", str(target), "-n", "-o", "TARGET"], timeout=10) != str(CEPH_ROOT):
+                    raise HTTPException(422, "Student directory is not on expected CephFS mount")
+                if created:
+                    os.fchown(fd, uid, gid)
+                    log.info("created student directory key=%s uid=%s gid=%s", student_key, uid, gid)
+                st = os.fstat(fd)
+                if (st.st_uid, st.st_gid) != (uid, gid):
+                    raise HTTPException(409, "Existing student directory has a different owner")
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise HTTPException(422, "Student path is not a real directory")
+        log.warning("student directory operation failed key=%s errno=%s", student_key, exc.errno)
+        raise HTTPException(503, "Cannot provision student directory; inspect ownership before retry")
+    return {"student_key": student_key, "ready": True}

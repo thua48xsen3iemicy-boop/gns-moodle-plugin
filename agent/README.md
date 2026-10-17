@@ -50,7 +50,7 @@ Requires Proxmox VE, Python 3.10+ with `python3-venv`, working CephFS mounted ex
 
    Guest must have `unprivileged: 1`. This agent intentionally rejects privileged guests. The guest must be **stopped** when attaching mount points.
 
-7. On CephFS pre-create the expected dirs with correct UID/GID/ACL policy; `agent.py` will NOT create arbitrary source folders:
+7. On CephFS pre-create the expected dirs with correct UID/GID/ACL policy; `agent.py` will NOT create arbitrary source folders; the student leaf may instead be provisioned with the endpoint below:
 
    ```bash
    mkdir -p /mnt/pve/data/slot /mnt/pve/data/students/student42
@@ -64,6 +64,7 @@ All endpoints require a valid **client TLS certificate** signed by `manager-clie
 
 | Method | Endpoint | Behavior |
 |---|---|---|
+| PUT | `/students/{student_key}` | Ensure a student directory with configured mapped gns3 ownership |
 | GET | `/health` | Liveness (not storage health) |
 | GET | `/slots/{vmid}/status` | Running or stopped; only tagged/approved local LXC |
 | PUT | `/slots/{vmid}/mounts` | Attach approved CephFS paths while stopped |
@@ -206,3 +207,41 @@ service or calls real `pct`. Before production verify on your PVE release:
 pct flags/output, pmxcfs parsing, CephFS/findmnt/ACL behavior, UID mappings,
 RO/RW enforcement, guest actions, timeouts, service restart and reboot with
 CephFS unavailable. These tests do not establish full Proxmox compatibility.
+
+## Student directory provisioning
+
+The Manager calls **PUT `/students/{student_key}`** (no body) before start, using
+its usual mTLS credentials. The agent creates only `students/<student_key>` with
+mode 0700 and the configured host-side UID/GID of the slot's `gns3` account.
+It does not start LXC, invoke guest actions, create parent directories or touch
+existing contents. Both first creation and repeats return 200 with
+`{"student_key":"student42","ready":true}`. Existing directories must have the
+expected owner; otherwise 409 is returned without changing ownership or contents.
+Concurrent creation may temporarily return 409 until the creator assigns ownership;
+retry safely. Failed provisioning can leave a root-owned empty directory requiring
+administrator inspection; the agent never repairs it by recursively chowning.
+
+The administrator creates and protects `/mnt/pve/data/students` and configures:
+
+```ini
+# systemctl edit lab-node-agent
+[Service]
+Environment=LAB_STUDENT_HOST_UID=101000
+Environment=LAB_STUDENT_HOST_GID=101000
+```
+
+These numbers are examples **only**: if `gns3` is UID/GID 1000 inside an LXC
+using the standard 100000 offset, its host IDs are 101000. Determine actual
+`gns3` IDs and LXC UID/GID mappings from the trusted slot template before enabling
+this endpoint. Never use the host's `gns3` account by name or guess mappings.
+Absent/invalid configuration returns 503. All slots using these directories
+must share the configured mapping; differing mappings need a separate reviewed
+policy. IDs and paths cannot be selected through HTTP. No Manager code is changed.
+Parent symlinks, unsafe permissions, ACL inheritance and nested mounts are rejected.
+
+```bash
+curl --cert /etc/lab-manager/manager.crt \
+  --key /etc/lab-manager/manager.key \
+  --cacert /etc/lab-manager/node-server-ca.crt \
+  -X PUT https://pve2.lab.local:8443/students/student42
+```
