@@ -102,6 +102,7 @@ def test_unfinished_provisioning_is_refused_in_another_slot(
     op = deploy(client, data, "s2-deploy")
     assert op["status"] == "FAILED"
     assert "Provisioning completion is unknown" in op["error"]["message"]
+    assert op["error"]["code"] == "PROVISIONING_UNKNOWN"
     assert pid in projects  # nothing recreated or deleted
 
 

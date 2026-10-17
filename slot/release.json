@@ -1,8 +1,8 @@
 {
-  "version": "0.4.0",
-  "build_id": "sha256:bb3b8418dcddc1483077445a560eeb6dbad45aa7d43a7304512105fc87308844",
+  "version": "0.4.1",
+  "build_id": "sha256:cffdfd1666a76c447209cc4aac5cc0f0712f3d5cddf4180daf3d27444920caba",
   "files": {
-    "README.md": "5bf73745631638d87f7c0d2a835e7e71669f6267632699516fe7bb0b85eb5560",
+    "README.md": "3d30a1fb72bc2e246f787cf81d5e787dcdc53daec41fefe4eb000acaa367333d",
     "api/__init__.py": "b61bb532c208db9570b32a1b4903291e1cb21600ea4bd89c101ca995f7ec324d",
     "api/auth.py": "3b6238c07a3068450132d3051b7cd6aa7a979381809607daf305c1203879ae9f",
     "api/cli.py": "20feb2960e769e47d24f61ce4e5818dd0f1c09f0987c32561ea343590a96a4cc",
@@ -10,14 +10,14 @@
     "api/console.py": "49312689f4af9f4b5569b8cec09a5a55d9218899d5db405f4202e9764a2d1999",
     "api/health.py": "eafefca5bf1e593918178dd3e7ef020324b1e9f757f69597b483cc6062f1120e",
     "api/labs.py": "a728ee3565c61fd9f13aa316478e8b2d6036087148e002a9d4d104a0504eda84",
-    "api/lifecycle.py": "8ca7fcaddf9f5e5cd5b3078fb8f3c526603c102ca55ea4ab849d9424c136cb25",
+    "api/lifecycle.py": "391c9dca26baff260b037d29fbdee7eb5c3bd6c89a18a53128082b575d87dd4d",
     "api/models.py": "80b0a80423c38ee866bfbca38deeeb71447aface9347abdb91013e653378bc7b",
     "api/nodes.py": "1fc0b6b896202c379ecc10da45a2d1a108be4435e7f80f9f615194c4f30af79f",
-    "docs/ALIGNMENT.md": "05f9f3f381f1045ca3ea874d0afe5e0c9c850338e97cda1c2d3616e1f16fae19",
+    "docs/ALIGNMENT.md": "8e2f33f7332b8056df302bcb444903e23d440c43628cfed1a1f897832c0cb561",
     "examples/cisco-3x2.json": "c96f71ffb6f753998dc7bf0fbf9f5517e51a613df839f51e2cc09d167903aeab",
     "lab-slot.service": "6d4af7568b72bd18abf137d0c2659c53e39ec2433544e35a0087c382d4bfa754",
     "main.py": "ad605e75c7fa2bfa2d28fe8c87aab4fa907153f8106992c02ffe9899cc8bbd4e",
-    "release.py": "4be3e50a507eec82454dd132b9f23f4f22297bcedcfb0ed524e4abebfc2e611d",
+    "release.py": "4678d4b4aa35166d370a22a3f04fb9b8b4f907d49e1eb54e0fcc03be35fa12c3",
     "requirements.txt": "4c096559578f14792cece3b25e61ae0df1d3589b75016be731a3dd9553994e4b",
     "run.py": "0ad49eb2844088edb8fd49898e1ff83c391c7d6abd7cc79bec3845a81821c9ec",
     "slot.env.example": "3a12a86ef94be04d6b348872ae1824a93a1279d1c7d34583006d8e477f0df963",
@@ -25,8 +25,8 @@
     "tests/test_console.py": "5f54f0c1021ddd2fad7cdd6e4a8656e6e83e7e7e79373ce195687df2b8cada84",
     "tests/test_fixed_mount.py": "e9193a75a6304f8ee0fd1c8defff7e526f9a1baec0bc5ab14a412fec7f64cbd3",
     "tests/test_reliability.py": "dcad676de41c74aee786420b5889c4f9516b9ddf17176bb5baa345d0e9ba3f55",
-    "tests/test_slot.py": "cf6e2aa7f72661c5a6880fd2852e6c92bc6b69494879e06cae3ae350640d5f2f",
-    "tests/test_student_state.py": "4ba5b39249d73784cd76898c5c58ae1ae3000c4dd090136c8423aecf5b957f10",
+    "tests/test_slot.py": "1ff17f83c1890ea25f13beabdb2f37ddb4b7c84b20198a1c320691313d155ce6",
+    "tests/test_student_state.py": "f209f28cca83beb5be522fc0e0f976034307aaf6dcda8ff7f65c7b482f619015",
     "tools/check_slot.py": "a951dab74d9a7a8c72e29ea98214ed02ccee3cb0beb77f9ff53b5b78adb6b4fd"
   }
 }

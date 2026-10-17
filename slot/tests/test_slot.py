@@ -303,10 +303,14 @@ def test_resume_missing_project_never_recreates(mock_server):
     )
     projects.pop(pid)
     original = nodes[pid].copy()
-    assert (
-        wait(client, client.post(f"/v1/labs/{pid}/resume", headers=HEADERS))["status"]
-        == "FAILED"
-    )
+    op = wait(client, client.post(f"/v1/labs/{pid}/resume", headers=HEADERS))
+    assert op["status"] == "FAILED"
+    assert op["error"]["code"] == "PROJECT_MISSING"
+    # The manager continues a project with deploy of the first ticket: same refusal.
+    op = wait(client, client.post("/v1/labs/deploy", json=data, headers=HEADERS))
+    assert op["status"] == "FAILED"
+    assert op["error"]["code"] == "PROJECT_MISSING"
+    assert op["error"]["message"].startswith("Saved project is missing")
     assert pid not in projects
     assert nodes[pid] == original
 

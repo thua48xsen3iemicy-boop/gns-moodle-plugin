@@ -30,6 +30,15 @@ TRANSITIONS = {
 }
 
 router = APIRouter(prefix="/v1/operations", tags=["operations"])
+
+
+class LabError(RuntimeError):
+    """Operation failure with a stable error.code; the manager decides by the code, not the text."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
 LAB_STATE_DIR = "/opt/gns3/projects/.lab-slot"
 
 
@@ -544,8 +553,9 @@ class Lifecycle:
                 if (
                     op["action"] == "resume" or lab.get("creation_complete")
                 ) and not any(p["project_id"] == pid for p in projects):
-                    raise RuntimeError(
-                        "Saved project is missing; refusing to recreate student disks"
+                    raise LabError(
+                        "PROJECT_MISSING",
+                        "Saved project is missing; refusing to recreate student disks",
                     )
                 for project in projects:
                     if (
@@ -567,8 +577,9 @@ class Lifecycle:
                     lab["creation_complete"] = True
                     self.save("lab", pid, lab)
                 if not initial and not lab.get("provisioned"):
-                    raise RuntimeError(
-                        "Provisioning completion is unknown; refusing to skip or replay commands. Operator reconciliation required"
+                    raise LabError(
+                        "PROVISIONING_UNKNOWN",
+                        "Provisioning completion is unknown; refusing to skip or replay commands. Operator reconciliation required",
                     )
                 await self.validate_topology(lab)
                 self.update(lab, "STARTING", "start_devices", progress=20)
@@ -595,7 +606,8 @@ class Lifecycle:
                 self.update(lab, "READY", "ready", progress=100, active_node_id=None)
             op["status"] = "SUCCEEDED"
         except Exception as exc:  # noqa: BLE001 - persist failures at the background-task boundary.
-            error = {"code": type(exc).__name__, "message": str(exc)}
+            code = exc.code if isinstance(exc, LabError) else type(exc).__name__
+            error = {"code": code, "message": str(exc)}
             self.update(lab, "FAILED", "operation_failed", error=error)
             op.update(status="FAILED", error=error)
         finally:
