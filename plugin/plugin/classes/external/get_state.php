@@ -69,6 +69,7 @@ class get_state extends external_api {
             'readonly' => false,
             'managerconfigured' => $configured,
             'labready' => $configured && trim($access->instance->labref) !== '',
+            'resume' => false,
         ];
         $own = $userid === 0;
         if ($own && !has_capability('mod/gns3lab:use', $access->context)) {
@@ -81,7 +82,9 @@ class get_state extends external_api {
         if (!$result['labready']) {
             return $result;
         }
-        $session = \core\di::get(manager_client::class)->find_session($userid, (int) $access->instance->id);
+        $client = \core\di::get(manager_client::class);
+        $result['resume'] = in_array('resume', $client->get_info()->features, true);
+        $session = $client->find_session($userid, (int) $access->instance->id);
         if ($session !== null) {
             $result['session'] = session_data::export($session);
         }
@@ -99,6 +102,7 @@ class get_state extends external_api {
             'readonly' => new external_value(PARAM_BOOL, 'Another user\'s lab: consoles are read only'),
             'managerconfigured' => new external_value(PARAM_BOOL, 'The lab manager is set up on this site'),
             'labready' => new external_value(PARAM_BOOL, 'The manager is set up and the activity has a reference lab'),
+            'resume' => new external_value(PARAM_BOOL, 'The next start continues the saved project, else work is lost'),
             'session' => session_data::structure(VALUE_OPTIONAL),
         ]);
     }

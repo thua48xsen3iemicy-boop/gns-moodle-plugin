@@ -22,6 +22,7 @@ use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
+use mod_gns3lab\local\manager_exception;
 use mod_gns3lab\local\session_data;
 
 /**
@@ -59,13 +60,47 @@ class start_session extends external_api {
         if ($labref === '') {
             throw new \moodle_exception('nolabref', 'gns3lab');
         }
-        $session = \core\di::get(manager_client::class)->create_session(
-            $userid,
-            (int) $access->instance->id,
-            (int) $access->course->id,
-            $labref
-        );
+        try {
+            $session = \core\di::get(manager_client::class)->create_session(
+                $userid,
+                (int) $access->instance->id,
+                (int) $access->course->id,
+                $labref,
+                (int) $access->instance->maxduration
+            );
+        } catch (manager_exception $e) {
+            if ($e->remotecode === 'session_conflict') {
+                self::conflict($e);
+            }
+            throw $e;
+        }
         return session_data::export($session);
+    }
+
+    /**
+     * Turns a conflict into a message that names the other activity, if the user can see it.
+     *
+     * The manager reports the student's own other live lab (CONTRACTS §2.2). The link travels as the
+     * exception link, the page shows it next to the message.
+     *
+     * @param manager_exception $e session_conflict from the manager
+     */
+    protected static function conflict(manager_exception $e): void {
+        $instanceid = (int) ($e->details->conflict->instance_id ?? 0);
+        if ($instanceid <= 0) {
+            return;
+        }
+        $cm = get_coursemodule_from_instance('gns3lab', $instanceid);
+        if (!$cm) {
+            return;
+        }
+        $modinfo = get_fast_modinfo($cm->course);
+        $cminfo = $modinfo->get_cm($cm->id);
+        if (!can_access_course($modinfo->get_course()) || !$cminfo->uservisible) {
+            return;
+        }
+        $url = new \core\url('/mod/gns3lab/view.php', ['id' => $cm->id]);
+        throw new \moodle_exception('sessionconflictat', 'gns3lab', $url->out(false), $cminfo->get_formatted_name());
     }
 
     /**

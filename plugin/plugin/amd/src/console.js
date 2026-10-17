@@ -32,6 +32,15 @@ import {getStrings} from 'core/str';
 /** Close code of the gateway: the console closed or is unavailable on the slot side. */
 const CLOSE_UPSTREAM = 4000;
 
+/**
+ * Largest input frame, in UTF-16 code units: at most 12 KB of UTF-8, well below the 64 KB the gateway takes.
+ * A pasted configuration goes out in several frames.
+ */
+const MAX_FRAME = 4096;
+
+/** Node types that run Cisco IOS: the snippets make sense only there. */
+const CISCO_TYPES = ['iou', 'dynamips'];
+
 /** Reconnection pauses, seconds; the last one repeats. */
 const BACKOFF = [1, 2, 4, 8, 16, 30];
 
@@ -78,7 +87,7 @@ const THEME = {
 const STRING_KEYS = [
     'consoleconnecting', 'consoleconnected', 'consolereconnected', 'consolereconnecting', 'consolenodestopped',
     'consoleerror', 'consolereadonly', 'consoleclose', 'consolecopied', 'consolecopyfailed', 'consolekeys',
-    'consolesnippets', 'consoletabs', 'keyctrl', 'keybreak', 'keyspace', 'consolereconnect',
+    'consolesnippets', 'consoletabs', 'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown',
 ];
 
 let xtermPromise = null;
@@ -127,7 +136,7 @@ export class ConsoleConnection {
      * @param {string} options.nodeId node id in the live project
      * @param {object} options.term xterm.js Terminal
      * @param {object} options.strings language strings
-     * @param {Function} options.nodeStatus async () => node status from a fresh session state, or null
+     * @param {Function} options.nodeStatus async () => {status, stale} from a fresh session state
      * @param {Function} options.onState called with the new state name
      * @param {Function} [options.transform] changes typed input before it is sent
      */
@@ -181,6 +190,12 @@ export class ConsoleConnection {
             if (this.state === 'closed') {
                 return;
             }
+            if (error.errorcode === 'managererror_node_not_running') {
+                // Waits for the node: the panel reconnects when the session reports it started.
+                this.term.write(note(this.strings.consolenodestopped));
+                this.setState('stopped');
+                return;
+            }
             this.term.write(note(this.strings.consoleerror + ' ' + (error.message || '')));
             this.setState('failed');
             return;
@@ -230,16 +245,19 @@ export class ConsoleConnection {
         }
         this.ws = null;
         if (event.code === CLOSE_UPSTREAM) {
-            let status = null;
+            let node = {status: null, stale: false};
             try {
-                status = await this.nodeStatus();
+                node = await this.nodeStatus();
             } catch (error) {
-                status = null;
+                node = {status: null, stale: false};
             }
             if (this.state === 'closed') {
                 return;
             }
-            if (status !== 'started') {
+            if (node.stale) {
+                // The manager has only an old snapshot: "started" proves nothing, keep trying with the usual pauses.
+                this.term.write(note(this.strings.consolenodesunknown));
+            } else if (node.status !== 'started') {
                 this.term.write(note(this.strings.consolenodestopped));
                 this.setState('stopped');
                 return;
@@ -265,8 +283,17 @@ export class ConsoleConnection {
      * @param {string} data what xterm.js or a key button produced
      */
     send(data) {
-        if (!this.readonly && this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(data);
+        if (this.readonly || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            return;
+        }
+        for (let start = 0; start < data.length;) {
+            let end = Math.min(start + MAX_FRAME, data.length);
+            const last = data.charCodeAt(end - 1);
+            if (end < data.length && last >= 0xd800 && last <= 0xdbff) {
+                end--; // Keep a surrogate pair in one frame.
+            }
+            this.ws.send(data.slice(start, end));
+            start = end;
         }
     }
 
@@ -321,7 +348,7 @@ export class ConsolePanel {
      * @param {number} options.cmid course module id
      * @param {number} options.userid whose lab, 0 for the current user
      * @param {boolean} options.readonly observer: input disabled
-     * @param {Function} options.nodeStatus async nodeId => status from a fresh session state
+     * @param {Function} options.nodeStatus async nodeId => {status, stale} from a fresh session state
      */
     constructor({root, app, cmid, userid, readonly, nodeStatus}) {
         this.root = root;
@@ -366,8 +393,9 @@ export class ConsolePanel {
      * @param {object} node
      * @param {string} node.nodeId node id
      * @param {string} node.name node name for the tab
+     * @param {string} [node.nodeType] GNS3 node type, decides whether the Cisco snippets are shown
      */
-    async open({nodeId, name}) {
+    async open({nodeId, name, nodeType = ''}) {
         await this.prepare();
         if (!this.tabs.has(nodeId)) {
             const {Terminal, FitAddon} = await loadXterm();
@@ -375,7 +403,7 @@ export class ConsolePanel {
                 this.show(nodeId);
                 return;
             }
-            this.tabs.set(nodeId, this.createTab(nodeId, name, Terminal, FitAddon));
+            this.tabs.set(nodeId, this.createTab(nodeId, name, nodeType, Terminal, FitAddon));
         }
         this.root.hidden = false;
         this.app.classList.add('has-consoles');
@@ -391,11 +419,12 @@ export class ConsolePanel {
      *
      * @param {string} nodeId node id
      * @param {string} name node name
+     * @param {string} nodeType GNS3 node type
      * @param {Function} Terminal xterm.js Terminal class
      * @param {Function} FitAddon fit addon class
      * @returns {object} tab
      */
-    createTab(nodeId, name, Terminal, FitAddon) {
+    createTab(nodeId, name, nodeType, Terminal, FitAddon) {
         const button = document.createElement('div');
         button.className = 'ctab';
         button.setAttribute('role', 'presentation');
@@ -437,7 +466,7 @@ export class ConsolePanel {
         this.addKeyHandler(term, nodeId);
         this.addPortLinks(term, nodeId);
 
-        const tab = {nodeId, name, button, select, el, term, fit, conn: null};
+        const tab = {nodeId, name, nodeType, button, select, el, term, fit, conn: null};
         tab.conn = new ConsoleConnection({
             cmid: this.cmid,
             userid: this.userid,
@@ -545,6 +574,9 @@ export class ConsolePanel {
      */
     show(nodeId) {
         this.active = nodeId;
+        const active = this.tabs.get(nodeId);
+        // In a Linux console Ctrl+Z and "enable" of the IOS snippets would do harm.
+        this.snippets.hidden = !active || !CISCO_TYPES.includes(active.nodeType);
         this.tabs.forEach((tab, id) => {
             const on = id === nodeId;
             tab.el.hidden = !on;

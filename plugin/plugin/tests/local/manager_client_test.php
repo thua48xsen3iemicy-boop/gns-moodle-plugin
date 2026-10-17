@@ -127,4 +127,92 @@ final class manager_client_test extends \advanced_testcase {
         $this->assertSame('', $exported['topology']);
         $this->assertSame([], $exported['nodes']);
     }
+
+    public function test_options_and_client_only_when_info_allows(): void {
+        global $CFG;
+        $this->manager->with_info();
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+
+        $this->client->create_session(42, 7, 3, 'cisco-3x2', 120);
+        $this->client->create_session(42, 7, 3, 'cisco-3x2', 0);
+
+        [$first, $second] = $this->manager->requests_to('POST', '/api/v1/sessions');
+        $this->assertSame(['max_duration' => 120], $first['body']['options']);
+        $this->assertSame((string) get_config('mod_gns3lab', 'version'), $first['body']['client']['plugin_version']);
+        $this->assertSame($CFG->release, $first['body']['client']['moodle_release']);
+        $this->assertArrayNotHasKey('options', $second['body'], '0 means the manager default: nothing to send');
+        $this->assertCount(1, $this->manager->requests_to('GET', '/api/v1/info'), 'info is cached');
+    }
+
+    public function test_old_manager_without_info_gets_spec_fields_only(): void {
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+
+        $this->client->create_session(42, 7, 3, 'cisco-3x2', 120);
+
+        [$request] = $this->manager->requests_to('POST', '/api/v1/sessions');
+        $this->assertSame(['user_id', 'instance_id', 'lab_ref', 'course_id'], array_keys($request['body']));
+        $info = $this->client->get_info();
+        $this->assertFalse($info->known);
+        $this->assertSame([], $info->features);
+    }
+
+    public function test_unavailable_info_is_asked_again_soon(): void {
+        $this->manager->on('GET', '/api/v1/info', 503, ['error' => 'storage_unavailable', 'message' => 'x']);
+        $this->assertFalse($this->client->get_info()->known);
+
+        $this->manager->with_info(['consoles', 'resume']);
+        $this->assertFalse($this->client->get_info()->known, 'still cached');
+        $cache = \cache::make('mod_gns3lab', 'info');
+        $key = 'm' . md5('https://manager.test');
+        $entry = $cache->get($key);
+        $this->assertLessThanOrEqual(time() + manager_client::INFO_RETRY, $entry->until);
+        $entry->until = time() - 1;
+        $cache->set($key, $entry);
+
+        $this->assertSame(['consoles', 'resume'], $this->client->get_info()->features);
+    }
+
+    public function test_session_export_of_new_fields(): void {
+        $failed = fake_manager::session('failed');
+        $failed['error'] = ['code' => 'SLOT_START_FAILED', 'retryable' => true];
+        $exported = session_data::export(json_decode(json_encode($failed)));
+        $this->assertSame('SLOT_START_FAILED', $exported['errorcode']);
+        $this->assertTrue($exported['errorretryable']);
+        $this->assertSame(-1, $exported['progress']);
+
+        $starting = fake_manager::session('starting');
+        $starting['progress'] = 40;
+        $exported = session_data::export(json_decode(json_encode($starting)));
+        $this->assertSame('lab_wait', $exported['stage']);
+        $this->assertSame(40, $exported['progress']);
+        $this->assertSame('', $exported['errorcode']);
+        $this->assertFalse($exported['errorretryable']);
+
+        $running = fake_manager::session();
+        $running['nodes_stale'] = true;
+        $this->assertTrue(session_data::export(json_decode(json_encode($running)))['nodesstale']);
+        $this->assertFalse(session_data::export(json_decode(json_encode(fake_manager::session())))['nodesstale']);
+    }
+
+    public function test_unknown_error_code_is_not_retryable(): void {
+        $failed = fake_manager::session('failed');
+        $failed['error'] = ['code' => 'SOMETHING_NEW'];
+
+        $exported = session_data::export(json_decode(json_encode($failed)));
+
+        $this->assertSame('SOMETHING_NEW', $exported['errorcode']);
+        $this->assertFalse($exported['errorretryable']);
+    }
+
+    public function test_activity_sessions_for_the_observer_list(): void {
+        $this->manager->on('GET', '/api/v1/sessions', 200, [
+            fake_manager::session('stopped') + ['user_id' => 42],
+        ]);
+
+        $sessions = $this->client->list_activity_sessions(7);
+
+        $this->assertSame(42, $sessions[0]->user_id);
+        [$request] = $this->manager->requests_to('GET', '/api/v1/sessions');
+        $this->assertSame('instance_id=7', $request['query']);
+    }
 }

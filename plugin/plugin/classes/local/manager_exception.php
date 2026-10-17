@@ -30,7 +30,7 @@ class manager_exception extends \moodle_exception {
     /** Manager error codes that have their own message in the language pack. */
     private const KNOWN = [
         'lab_not_found', 'lab_invalid', 'session_conflict', 'session_not_found', 'session_not_running',
-        'node_not_found', 'gateway_unavailable', 'unauthorized',
+        'node_not_found', 'node_not_running', 'gateway_unavailable', 'unauthorized',
     ];
 
     /**
@@ -40,13 +40,16 @@ class manager_exception extends \moodle_exception {
      *     notconfigured, unreachable, badresponse
      * @param int $httpstatus HTTP status, 0 if there was no response
      * @param string $remotemessage message from the manager, for the debug info only
+     * @param \stdClass|null $details the whole error body, for extra fields such as conflict
      */
     public function __construct(
         /** @var string error code from the manager or a local code */
         public readonly string $remotecode,
         /** @var int HTTP status, 0 if there was no response */
         public readonly int $httpstatus = 0,
-        string $remotemessage = ''
+        string $remotemessage = '',
+        /** @var \stdClass|null the whole error body from the manager */
+        public readonly ?\stdClass $details = null
     ) {
         $key = match (true) {
             in_array($remotecode, self::KNOWN, true) => 'managererror_' . $remotecode,

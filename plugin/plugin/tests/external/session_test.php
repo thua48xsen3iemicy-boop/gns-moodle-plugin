@@ -59,7 +59,10 @@ final class session_test extends \advanced_testcase {
 
         $state = external_api::clean_returnvalue(get_state::execute_returns(), get_state::execute($this->lab->cmid));
 
-        $this->assertSame(['canuse' => true, 'readonly' => false, 'managerconfigured' => true, 'labready' => true], $state);
+        $this->assertSame(
+            ['canuse' => true, 'readonly' => false, 'managerconfigured' => true, 'labready' => true, 'resume' => false],
+            $state
+        );
     }
 
     public function test_state_with_a_running_session(): void {
@@ -126,5 +129,61 @@ final class session_test extends \advanced_testcase {
 
         $this->expectExceptionMessage(get_string('nosession', 'gns3lab'));
         stop_session::execute($this->lab->cmid);
+    }
+
+    public function test_state_tells_whether_work_is_kept(): void {
+        $this->manager->with_info(['consoles', 'observer', 'resume']);
+        $this->setUser($this->student);
+
+        $state = external_api::clean_returnvalue(get_state::execute_returns(), get_state::execute($this->lab->cmid));
+
+        $this->assertTrue($state['resume']);
+    }
+
+    public function test_start_passes_the_activity_limit(): void {
+        global $DB;
+        $DB->set_field('gns3lab', 'maxduration', 45, ['id' => $this->lab->id]);
+        $this->manager->with_info();
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+        $this->setUser($this->student);
+
+        start_session::execute($this->lab->cmid);
+
+        [$request] = $this->manager->requests_to('POST', '/api/v1/sessions');
+        $this->assertSame(['max_duration' => 45], $request['body']['options']);
+    }
+
+    public function test_conflict_links_to_the_other_activity(): void {
+        $other = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id, 'name' => 'OSPF']);
+        $this->manager->on('POST', '/api/v1/sessions', 409, [
+            'error' => 'session_conflict',
+            'message' => 'Другая лаба',
+            'conflict' => ['instance_id' => (int) $other->id, 'course_id' => (int) $this->course->id,
+                'lab_ref' => 'ospf', 'status' => 'running'],
+        ]);
+        $this->setUser($this->student);
+
+        try {
+            start_session::execute($this->lab->cmid);
+            $this->fail('No exception');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('sessionconflictat', $e->errorcode);
+            $this->assertStringContainsString('OSPF', $e->getMessage());
+            $this->assertSame((new \core\url('/mod/gns3lab/view.php', ['id' => $other->cmid]))->out(false), $e->link);
+        }
+    }
+
+    public function test_conflict_in_an_activity_the_user_cannot_open(): void {
+        $course = $this->getDataGenerator()->create_course();
+        $hidden = $this->getDataGenerator()->create_module('gns3lab', ['course' => $course->id]);
+        $this->manager->on('POST', '/api/v1/sessions', 409, [
+            'error' => 'session_conflict',
+            'message' => 'Другая лаба',
+            'conflict' => ['instance_id' => (int) $hidden->id, 'course_id' => null, 'lab_ref' => 'x', 'status' => 'running'],
+        ]);
+        $this->setUser($this->student);
+
+        $this->expectExceptionMessage(get_string('managererror_session_conflict', 'gns3lab'));
+        start_session::execute($this->lab->cmid);
     }
 }

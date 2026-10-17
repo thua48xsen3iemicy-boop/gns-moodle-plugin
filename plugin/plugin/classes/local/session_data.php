@@ -45,7 +45,11 @@ class session_data {
         return new external_single_structure([
             'sessionid' => new external_value(PARAM_ALPHANUMEXT, 'Session id on the lab manager'),
             'status' => new external_value(PARAM_ALPHA, 'queued, starting, running, stopping, stopped or failed'),
-            'statusmessage' => new external_value(PARAM_TEXT, 'Status text from the lab manager'),
+            'stage' => new external_value(PARAM_ALPHANUMEXT, 'Step of the manager inside the status, empty if unknown'),
+            'progress' => new external_value(PARAM_INT, 'Percent of the current step, -1 if unknown'),
+            'statusmessage' => new external_value(PARAM_TEXT, 'Status text from the lab manager (in Russian)'),
+            'errorcode' => new external_value(PARAM_ALPHANUMEXT, 'Why a failed session failed, empty otherwise'),
+            'errorretryable' => new external_value(PARAM_BOOL, 'Starting again may help'),
             'startedat' => new external_value(PARAM_INT, 'Start time, 0 if not started'),
             'expiresat' => new external_value(PARAM_INT, 'Time the lab will be stopped, 0 if unknown'),
             'topology' => new external_value(PARAM_RAW, 'Live .gns3 document as JSON, empty unless running'),
@@ -54,6 +58,7 @@ class session_data {
                 'status' => new external_value(PARAM_ALPHA, 'started, stopped or suspended'),
                 'consoletype' => new external_value(PARAM_ALPHA, 'telnet, vnc or none'),
             ]), 'Node states, empty unless running'),
+            'nodesstale' => new external_value(PARAM_BOOL, 'Node states are an old snapshot: the slot did not answer'),
         ], 'Lab session', $required);
     }
 
@@ -79,14 +84,23 @@ class session_data {
         if ($running && isset($session->topology) && $session->topology instanceof \stdClass) {
             $topology = json_encode($session->topology, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         }
+        $error = $session->status === 'failed' && isset($session->error) && $session->error instanceof \stdClass
+            ? $session->error : null;
+        $progress = $session->progress ?? null;
         return [
             'sessionid' => $session->session_id,
             'status' => $session->status,
+            'stage' => is_string($session->stage ?? null) ? $session->stage : '',
+            'progress' => is_int($progress) ? max(0, min(100, $progress)) : -1,
             'statusmessage' => (string) ($session->status_message ?? ''),
+            // An unknown code counts as not retryable (CONTRACTS §2.5).
+            'errorcode' => $error && is_string($error->code ?? null) ? $error->code : '',
+            'errorretryable' => $error && ($error->retryable ?? false) === true,
             'startedat' => self::timestamp($session->started_at ?? null),
             'expiresat' => self::timestamp($session->expires_at ?? null),
             'topology' => $topology,
             'nodes' => $nodes,
+            'nodesstale' => $running && ($session->nodes_stale ?? false) === true,
         ];
     }
 

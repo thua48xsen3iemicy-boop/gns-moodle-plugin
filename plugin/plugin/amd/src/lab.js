@@ -28,6 +28,7 @@
  */
 
 import Ajax from 'core/ajax';
+import {saveCancelPromise} from 'core/notification';
 import {getStrings} from 'core/str';
 import {ConsolePanel} from 'mod_gns3lab/console';
 
@@ -40,10 +41,17 @@ const POLL_TRANSIENT = 3000;
 /** Poll interval of a running lab, for node states and the time left, ms. */
 const POLL_RUNNING = 15000;
 
+/** Manager steps with an own text (CONTRACTS §2.3); an unknown step shows the text of its status. */
+const STAGES = [
+    'wait_slot', 'ct_prepare', 'student_dir', 'ct_start', 'slot_ready', 'lab_submit', 'lab_wait', 'ready',
+    'lab_stop', 'lab_stop_wait', 'ct_stop', 'ct_park',
+];
+
 const STRING_KEYS = [
     'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
-    'status_failed', 'timeleft', 'startlab', 'stoplab', 'consoleneedsrunning', 'consolevnclater', 'consolenone',
-    'managernotconfigured', 'labnotready',
+    'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'consoleneedsrunning', 'consolevnclater',
+    'consolenone', 'managernotconfigured', 'labnotready', 'failedretry', 'failedadmin', 'stopconfirmtitle',
+    'stopconfirm', 'conflictlink', ...STAGES.map(stage => 'stage_' + stage),
 ];
 
 /**
@@ -82,7 +90,7 @@ class Lab {
         });
 
         this.startBtn.addEventListener('click', () => this.act('mod_gns3lab_start_session'));
-        this.stopBtn.addEventListener('click', () => this.act('mod_gns3lab_stop_session'));
+        this.stopBtn.addEventListener('click', () => this.stop());
         app.addEventListener('gns3lab:openconsole', event => this.openConsole(event.detail));
         setInterval(() => this.renderTime(), 1000);
     }
@@ -133,11 +141,27 @@ class Lab {
             this.showMessage('');
             this.apply({...this.state, session});
         } catch (error) {
-            this.showMessage(error.message || String(error));
+            // A conflict names the activity with the other running lab and links to it.
+            const link = error.errorcode === 'sessionconflictat' ? error.link : null;
+            this.showMessage(error.message || String(error), link);
         } finally {
             this.busy = false;
             this.render();
         }
+    }
+
+    /**
+     * Stops the lab, asking first when the manager does not keep the work.
+     */
+    async stop() {
+        if (!this.state.resume) {
+            try {
+                await saveCancelPromise(this.strings.stopconfirmtitle, this.strings.stopconfirm, this.strings.stoplab);
+            } catch (cancelled) {
+                return;
+            }
+        }
+        await this.act('mod_gns3lab_stop_session');
     }
 
     /**
@@ -181,8 +205,8 @@ class Lab {
         const status = session ? session.status : 'none';
         this.app.dataset.session = status;
         let text = this.strings['status_' + status] || status;
-        if (session && session.statusmessage) {
-            text = session.statusmessage;
+        if (session) {
+            text = this.sessionText(session) || text;
         } else if (!state.managerconfigured) {
             text = this.strings.managernotconfigured;
         } else if (!state.labready) {
@@ -190,13 +214,36 @@ class Lab {
         }
         this.statusEl.textContent = text;
         this.statusEl.dataset.status = status;
+        // The manager's own text (in Russian) stays available as a detail.
+        this.statusEl.title = (session && session.statusmessage) || '';
 
         const live = session && !['stopped', 'failed'].includes(status);
+        const retry = status === 'failed' && session.errorretryable;
+        this.startBtn.textContent = retry ? this.strings.startagain : this.strings.startlab;
         this.startBtn.hidden = !state.canuse || !!live;
         this.stopBtn.hidden = !state.canuse || !live || status === 'stopping';
         this.startBtn.disabled = this.busy || !state.labready;
         this.stopBtn.disabled = this.busy;
         this.renderTime();
+    }
+
+    /**
+     * Text of a session in the site language: its step and progress, or why it failed.
+     *
+     * @param {object} session session
+     * @returns {string} empty if the session says nothing more than its status
+     */
+    sessionText(session) {
+        if (session.status === 'failed' && session.errorcode) {
+            return session.errorretryable
+                ? this.strings.failedretry
+                : this.strings.failedadmin.replace('{$a}', session.errorcode);
+        }
+        if (!TRANSIENT.includes(session.status) || !STAGES.includes(session.stage)) {
+            return '';
+        }
+        const text = this.strings['stage_' + session.stage];
+        return session.progress >= 0 ? `${text} ${session.progress}%` : text;
     }
 
     /**
@@ -220,9 +267,16 @@ class Lab {
      * Shows or clears an error message.
      *
      * @param {string} text message, empty to clear
+     * @param {string|null} link URL of a page that helps, shown after the message
      */
-    showMessage(text) {
+    showMessage(text, link = null) {
         this.messageEl.textContent = text;
+        if (text && link) {
+            const a = document.createElement('a');
+            a.href = link;
+            a.textContent = this.strings.conflictlink;
+            this.messageEl.append(' ', a);
+        }
         this.messageEl.hidden = !text;
     }
 
@@ -248,23 +302,23 @@ class Lab {
             return;
         }
         this.showMessage('');
-        this.consoles.open({nodeId: node.nodeId, name: node.name});
+        this.consoles.open({nodeId: node.nodeId, name: node.name, nodeType: node.nodeType});
     }
 
     /**
      * Node status from a fresh state, asked by a console that the gateway closed.
      *
      * @param {string} nodeId node id
-     * @returns {Promise<string|null>}
+     * @returns {Promise<{status: string|null, stale: boolean}>} stale: the manager has only an old snapshot
      */
     async freshNodeStatus(nodeId) {
         const state = await this.refresh();
         const session = state && state.session;
         if (!session || session.status !== 'running') {
-            return null;
+            return {status: null, stale: false};
         }
         const node = session.nodes.find(n => n.nodeid === nodeId);
-        return node ? node.status : null;
+        return {status: node ? node.status : null, stale: session.nodesstale};
     }
 }
 

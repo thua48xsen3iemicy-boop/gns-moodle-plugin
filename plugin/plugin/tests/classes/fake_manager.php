@@ -91,11 +91,16 @@ class fake_manager {
      */
     public static function session(string $status = 'running'): array {
         $session = [
+            'schema' => 'gns3lab.session/1',
             'session_id' => 's-3f9a1c0d2b4e5f60',
+            'lab_ref' => 'cisco-3x2',
             'status' => $status,
+            'stage' => $status === 'running' ? 'ready' : ($status === 'starting' ? 'lab_wait' : $status),
             'status_message' => 'Лаба запущена',
+            'error' => null,
             'started_at' => '2026-10-17T10:00:00Z',
             'expires_at' => '2026-10-17T11:30:00Z',
+            'features' => $status === 'running' ? ['consoles'] : [],
         ];
         if ($status === 'running') {
             $session['topology'] = [
@@ -115,6 +120,21 @@ class fake_manager {
             ];
         }
         return $session;
+    }
+
+    /**
+     * Answers GET /api/v1/info like manager 0.3 (CONTRACTS §2.1).
+     *
+     * @param array $features features to announce
+     */
+    public function with_info(array $features = ['consoles', 'observer']): void {
+        $this->on('GET', '/api/v1/info', 200, [
+            'schema' => 'gns3lab.info/1',
+            'version' => '0.3.0',
+            'session_schemas' => ['gns3lab.session/1'],
+            'options' => ['max_duration'],
+            'features' => $features,
+        ]);
     }
 
     /**

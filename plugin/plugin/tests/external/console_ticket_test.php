@@ -184,4 +184,17 @@ final class console_ticket_test extends \advanced_testcase {
         $roleid = $DB->get_field('role', 'id', ['shortname' => 'teacher'], MUST_EXIST);
         assign_capability('moodle/site:accessallgroups', CAP_PROHIBIT, $roleid, \context_module::instance($this->lab->cmid));
     }
+
+    public function test_stopped_node_is_reported_by_code(): void {
+        $this->manager->on('POST', self::TICKETS, 409, ['error' => 'node_not_running', 'message' => 'Node is not running']);
+        $this->setUser($this->student);
+
+        try {
+            $this->ticket();
+            $this->fail('No exception');
+        } catch (\moodle_exception $e) {
+            // The console waits for the node on this code instead of reconnecting.
+            $this->assertSame('managererror_node_not_running', $e->errorcode);
+        }
+    }
 }

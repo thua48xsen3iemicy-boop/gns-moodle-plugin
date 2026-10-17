@@ -1031,7 +1031,7 @@ body.addEventListener("click", e => {
   else if (t.dataset.act === "console" && st.sel && st.sel.kind === "node") {
     /* консоли открывает mod_gns3lab/lab: он знает сессию и решает, можно ли */
     const n = st.model.nodes.get(st.sel.id);
-    if (n) root.dispatchEvent(new CustomEvent("gns3lab:openconsole", { detail: { nodeId: n.id, name: n.name, consoleType: n.consoleType } }));
+    if (n) root.dispatchEvent(new CustomEvent("gns3lab:openconsole", { detail: { nodeId: n.id, name: n.name, consoleType: n.consoleType, nodeType: n.type } }));
   }
 });
 body.addEventListener("keydown", e => {

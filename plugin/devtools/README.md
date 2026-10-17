@@ -44,5 +44,16 @@ curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/star
 
 Команда `reload` в консоли закрывает её на стороне слота: так проверяется переподключение.
 
-Переменные mock-менеджера (`MOCK_PORT`, `MOCK_SLOT_PORT`, `MOCK_SECRET`, `MOCK_CONSOLE_TOKEN`, `GW_INTERNAL_URL`,
+```bash
+# следующий запуск упадёт с этим кодом (retryable: false — «Сообщите преподавателю код: …»)
+curl -X POST localhost:8090/mock/fail-next -d '{"code": "AGENT_REJECTED", "retryable": false}'
+# статусы нод «устарели» (nodes_stale): закрытие консоли не значит «нода остановлена»
+curl -X POST localhost:8090/mock/stale/on
+curl -X POST localhost:8090/mock/stale/off
+```
+
+`MOCK_RESUME=1` — mock объявляет `resume` в `GET /api/v1/info` (работа студента сохраняется, остановка без
+подтверждения).
+
+Переменные mock-менеджера (`MOCK_PORT`, `MOCK_SLOT_PORT`, `MOCK_SECRET`, `MOCK_CONSOLE_TOKEN`, `MOCK_RESUME`, `GW_INTERNAL_URL`,
 `GW_INTERNAL_KEY`, `GW_PUBLIC_URL`, `MOCK_FIXTURES`) заданы в начале `mock_manager.py`, там же значения по умолчанию.

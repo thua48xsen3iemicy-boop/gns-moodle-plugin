@@ -37,6 +37,12 @@ class manager_client {
     /** @var string site secret */
     protected string $secret;
 
+    /** How long the answer of GET /api/v1/info is kept, seconds. */
+    public const INFO_TTL = 300;
+
+    /** How soon a failed GET /api/v1/info is asked again, seconds. */
+    public const INFO_RETRY = 30;
+
     /** @var int timeout of one request, seconds */
     protected int $timeout;
 
@@ -72,6 +78,37 @@ class manager_client {
     public static function is_configured(): bool {
         $config = get_config('gns3lab');
         return trim((string) ($config->managerurl ?? '')) !== '' && (string) ($config->managersecret ?? '') !== '';
+    }
+
+    /**
+     * What the manager accepts and offers (CONTRACTS §2.1), cached for a few minutes.
+     *
+     * A manager without GET /api/v1/info only knows SPEC §3: then nothing beyond it is sent.
+     * The answer is cached per manager URL; a failed request is retried sooner than a good answer expires.
+     *
+     * @return \stdClass known (bool: the manager answered info), options (string[]), features (string[])
+     */
+    public function get_info(): \stdClass {
+        $cache = \cache::make('mod_gns3lab', 'info');
+        $key = 'm' . md5($this->baseurl);
+        $hit = $cache->get($key);
+        if ($hit && $hit->until > time()) {
+            return $hit->info;
+        }
+        $info = (object) ['known' => false, 'options' => [], 'features' => []];
+        $ttl = self::INFO_TTL;
+        try {
+            $data = $this->expect_object($this->request('GET', '/api/v1/info'));
+            $info->known = true;
+            $info->options = self::strings($data->options ?? []);
+            $info->features = self::strings($data->features ?? []);
+        } catch (manager_exception $e) {
+            if (!$e->is_not_found()) {
+                $ttl = self::INFO_RETRY;
+            }
+        }
+        $cache->set($key, (object) ['until' => time() + $ttl, 'info' => $info]);
+        return $info;
     }
 
     /**
@@ -123,19 +160,36 @@ class manager_client {
     /**
      * Starts a session or returns the live one of the same activity (idempotent).
      *
+     * Options and the client description are sent only when GET /api/v1/info says the manager takes them:
+     * the manager refuses unknown fields (CONTRACTS §1.2).
+     *
      * @param int $userid Moodle user id
      * @param int $instanceid gns3lab instance id
      * @param int $courseid course id
      * @param string $labref reference lab
+     * @param int $maxduration session limit of the activity in minutes, 0 for the manager default
      * @return \stdClass session
      */
-    public function create_session(int $userid, int $instanceid, int $courseid, string $labref): \stdClass {
-        return $this->expect_session($this->request('POST', '/api/v1/sessions', [
+    public function create_session(int $userid, int $instanceid, int $courseid, string $labref, int $maxduration = 0): \stdClass {
+        global $CFG;
+
+        $body = [
             'user_id' => $userid,
             'instance_id' => $instanceid,
             'lab_ref' => $labref,
             'course_id' => $courseid,
-        ]));
+        ];
+        $info = $this->get_info();
+        if ($maxduration > 0 && in_array('max_duration', $info->options, true)) {
+            $body['options'] = ['max_duration' => $maxduration];
+        }
+        if ($info->known) {
+            $body['client'] = [
+                'plugin_version' => (string) get_config('mod_gns3lab', 'version'),
+                'moodle_release' => \core_text::substr((string) $CFG->release, 0, 64),
+            ];
+        }
+        return $this->expect_session($this->request('POST', '/api/v1/sessions', $body));
     }
 
     /**
@@ -146,6 +200,20 @@ class manager_client {
      */
     public function stop_session(string $sessionid): \stdClass {
         return $this->expect_session($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/stop'));
+    }
+
+    /**
+     * Sessions of all students of an activity, for the observer page: live or the last finished one each.
+     *
+     * @param int $instanceid gns3lab instance id
+     * @return \stdClass[] sessions without topology and nodes, with user_id
+     */
+    public function list_activity_sessions(int $instanceid): array {
+        $sessions = $this->request('GET', '/api/v1/sessions', null, ['instance_id' => $instanceid]);
+        if (!is_array($sessions)) {
+            throw new manager_exception('badresponse', 200, 'sessions is not a list');
+        }
+        return array_map(fn($s) => $this->expect_session($s), $sessions);
     }
 
     /**
@@ -223,7 +291,11 @@ class manager_client {
         }
         $code = is_object($data) && isset($data->error) && is_string($data->error) ? $data->error : 'http_' . $status;
         $message = is_object($data) && isset($data->message) && is_string($data->message) ? $data->message : '';
-        throw new manager_exception($code, $status, $message);
+        if ($code === 'unsupported_field') {
+            // The plugin sent something the manager does not take: a plugin bug, not a user error.
+            debugging("mod_gns3lab: the lab manager refused a field of {$method} {$path}: {$message}", DEBUG_NORMAL);
+        }
+        throw new manager_exception($code, $status, $message, $data instanceof \stdClass ? $data : null);
     }
 
     /**
@@ -240,6 +312,16 @@ class manager_client {
             $this->http = new http_client(['ignoresecurity' => true]);
         }
         return $this->http;
+    }
+
+    /**
+     * Keeps the strings of a decoded JSON list.
+     *
+     * @param mixed $list decoded JSON
+     * @return string[]
+     */
+    protected static function strings(mixed $list): array {
+        return is_array($list) ? array_values(array_filter($list, 'is_string')) : [];
     }
 
     /**
