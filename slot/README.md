@@ -10,7 +10,8 @@ Ubuntu 24.04, GNS3 **2.2.61**, Python, FastAPI, Uvicorn. Moodle и Proxmox не 
 `/opt/gns3/projects/` на RW CephFS; образы: `/opt/gns3/images/{QEMU,IOU}`;
 QGA: `/opt/gns3/qga/`. Общие образы никогда не изменяются.
 
-На машине с RW-доступом к коду, Ubuntu 24.04 и той же архитектурой/Python:
+На RW-стороне с Ubuntu 24.04/Python 3.12 и той же архитектурой,
+где подготовленный код также доступен по `/srv/gns3-ro/slot`:
 
 ```sh
 cd /srv/gns3-ro/slot
@@ -19,7 +20,8 @@ venv/bin/python -m pip install -r requirements.txt
 ```
 
 Venv собирается по тому же абсолютному пути, который видят LXC. Обновлять общий
-релиз следует при остановленных сервисах, сохраняя предыдущий релиз для отката.
+код следует только при согласованно остановленных использующих его сервисах.
+Выбор версии и источника монтирования относится к внешнему Lab Manager.
 На каждом LXC (администратор; проверить параметры перед выполнением):
 
 ```sh
@@ -28,7 +30,7 @@ sudo cp /srv/gns3-ro/slot/slot.env.example /etc/lab-slot/slot.env
 sudo sed -i "s/REPLACE_WITH_LONG_RANDOM_SECRET/$(openssl rand -hex 32)/" /etc/lab-slot/slot.env
 sudo chmod 600 /etc/lab-slot/slot.env
 sudo install -d -o gns3 -g gns3 -m 0700 /opt/gns3/qga /opt/gns3/projects/.slot-locks
-sudo systemctl link /srv/gns3-ro/slot/lab-slot.service
+sudo cp /srv/gns3-ro/slot/lab-slot.service /etc/systemd/system/lab-slot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now lab-slot.service
 ```
@@ -253,93 +255,75 @@ POST deploy/resume/stop/wipe возвращает компактные `operatio
 Исторический GET operation остаётся доступен даже при изменении состояния.
 Эти правила действуют и для ключей, сохранённых предыдущей версией SQLite.
 
-### Безопасное обновление общей CephFS
+### Подготовка и запуск из фиксированного RO-каталога
 
-Нельзя копировать файлы поверх используемого релиза. Новый релиз создаётся в
-окончательном физическом каталоге, например
-`/srv/gns3-ro/releases/<BUILD>/slot`; общий `/srv/gns3-ro/slot` становится ссылкой
-на него. Каждый релиз имеет **свой venv**, собранный сразу по этому физическому
-пути. Не переносите готовый venv из старого пути и не копируйте старые console
-scripts. Все LXC сохраняют RO CephFS и прежнюю публичную точку `/srv/gns3-ro/slot`.
+Внутри LXC код и venv всегда находятся в `/srv/gns3-ro/slot`, непосредственно
+в смонтированном RO CephFS. Других каталогов версий или ссылок Slot не требует.
+Он не выбирает версию, не меняет mount point и не управляет другими LXC.
+Будущий Lab Manager выбирает источник CephFS, управляет LXC, обновлением, откатом
+и координацией нескольких Slot. Конкретный физический источник кода Slot не знает.
 
-Обновление контролируемое: сначала подготовить и проверить новый каталог,
-потом остановить **все lab-slot.service, использующие общую ссылку**, переключить
-ссылку и запустить сервисы. GNS3 и VM при этом можно оставить работающими;
-кратковременно недоступны API/WS. После старта ранее READY получает FAILED до
-явного Resume с **новым** ключом. SQLite и `/opt/gns3/projects` не переносятся.
-Cold Resume между разными LXC здесь не реализуется.
+На текущем ручном стенде перед заменой общего кода администратор согласованно
+останавливает **все использующие этот код lab-slot.service**. После подготовки
+и проверки файлов он запускает сервисы снова. Это временный административный
+порядок, а не функциональность Slot. Нельзя менять используемый код по одному
+файлу во время работы процессов. Рабочие проекты, SQLite, конфигурация и токены
+при обновлении кода не заменяются; GNS3 и VM можно оставить работающими.
 
-Команды на RW-узле (BUNDLE — подготовленный каталог `slot/` выбранного Git-коммита;
-BUILD задаётся оператором, например полный commit SHA). Команды не выполняются
-приложением автоматически:
-
-```sh
-set -eu
-BUILD=REPLACE_WITH_SOURCE_COMMIT_SHA
-BUNDLE=/path/to/checked-out/gns-moodle-plugin/slot
-NEW=/srv/gns3-ro/releases/$BUILD/slot
-# Новый уникальный путь; mkdir откажется перезаписывать существующий релиз.
-mkdir -p "/srv/gns3-ro/releases/$BUILD"
-mkdir "$NEW"
-cp -a "$BUNDLE/." "$NEW/"
-# В BUNDLE не должно быть venv или runtime-данных; не копируйте рабочий каталог LXC.
-python3.12 -m venv "$NEW/venv"
-"$NEW/venv/bin/python" -m pip install -r "$NEW/requirements.txt"
-"$NEW/venv/bin/python" -m pip check
-"$NEW/venv/bin/python" "$NEW/release.py" seal --build-id "$BUILD"
-"$NEW/venv/bin/python" "$NEW/release.py" check
-```
-
-Manifest SHA256 включает Python, unit, requirements, примеры и документацию.
-`release.py check` проверяет обязательные файлы, Python 3.12, диапазоны версий
-зависимостей и импорт компонентов. `build_id` — заданный source SHA или автоматически
-вычисленная идентичность содержимого. Это обнаружение смешанных/повреждённых файлов,
-не криптографическая подпись поставщика. `seal` разрешён только при сборке нового
-каталога; никогда не пересоздавайте manifest для сокрытия ошибки работающего релиза.
-После seal каталог считается неизменяемым. Изменили код в разработке — запустите
-seal заново перед тестами и check; исходный `release.json` включён в репозиторий.
-
-**На каждом LXC из полного списка использующих общий путь**:
+На каждом использующем обновляемый код LXC:
 
 ```sh
 sudo systemctl stop lab-slot.service
-sudo systemctl is-active lab-slot.service  # ожидается inactive; exit code ненулевой
+# Проверить, что на всём согласованном списке LXC сервисы остановлены.
+sudo systemctl is-active lab-slot.service  # ожидается inactive, ненулевой exit code
 ```
 
-Оператор обязан дождаться остановки на всём списке. Скрипт не обнаруживает LXC
-автоматически: флаг ниже — явное подтверждение выполненной координации, не её имитация.
-На первом переходе, если slot ещё обычный каталог, только после этой остановки
-на RW-узле переименуйте его в резервный путь (пример: `/srv/gns3-ro/slot-legacy`).
-Старый venv после переименования не запускайте: при откате сначала верните весь
-каталог на исходный путь. Для последующих обновлений достаточно переключения ссылки:
+Затем на RW-стороне подготовить полный комплект кода. Окружение должно быть
+Ubuntu 24.04/Python 3.12 той же архитектуры. Venv создаётся по тому же абсолютному
+пути `/srv/gns3-ro/slot/venv`, который виден в LXC; готовый venv не переносить
+из другого абсолютного пути. После подготовки исходников:
 
 ```sh
-# Только при первой миграции обычного каталога, после остановки всех API:
-# mv /srv/gns3-ro/slot /srv/gns3-ro/slot-legacy
-"$NEW/venv/bin/python" "$NEW/tools/activate_release.py" "$NEW" --all-services-stopped
+cd /srv/gns3-ro/slot
+python3.12 -m venv venv
+venv/bin/python -m pip install -r requirements.txt
+venv/bin/python -m pip check
+# SHA коммита пакуемого кода задаётся администратором на RW-стороне.
+BUILD=REPLACE_WITH_SOURCE_COMMIT_SHA
+venv/bin/python release.py seal --build-id "$BUILD"
+venv/bin/python release.py check
 ```
 
-Скрипт откажется заменять обычный каталог, проверит релиз и pip check, затем атомарно
-заменит ссылку в том же CephFS-каталоге. `run.py` фиксирует физический путь импортов
-и проверяет соответствие venv; unit выполняет preflight до запуска Uvicorn.
-На каждом остановленном LXC обновите локальную копию unit (это также устраняет
-старую systemd-ссылку на unit из другого релиза), проверьте новый релиз и запустите:
+`seal` — только инструмент подготовки пакета на RW-стороне, не средство обновления
+или выбора версии в LXC. Manifest SHA256 включает Python, unit, requirements,
+примеры и документацию. `check` проверяет обязательные файлы, контрольные суммы,
+Python 3.12, диапазоны зависимостей и импорты. `build_id` — заданный source SHA
+или автоматически вычисленная идентичность содержимого. Это контроль целостности,
+не подпись поставщика. При ошибке проверка завершается отказом; автоматического
+пересоздания manifest нет. Нельзя выполнять seal на работающем Slot для сокрытия
+повреждения. После изменения исходников в разработке обновите manifest перед тестами.
+
+На LXC код остаётся RO; выполняются только проверка и запуск. Изменения каталогов
+и миграция текущего стенда не требуются:
 
 ```sh
-sudo /srv/gns3-ro/slot/venv/bin/python /srv/gns3-ro/slot/release.py check
-sudo ln -sfn /srv/gns3-ro/slot/lab-slot.service /etc/systemd/system/lab-slot.service
+sudo -u gns3 /srv/gns3-ro/slot/venv/bin/python /srv/gns3-ro/slot/release.py check
+sudo cp /srv/gns3-ro/slot/lab-slot.service /etc/systemd/system/lab-slot.service
 sudo systemctl daemon-reload
 sudo systemctl start lab-slot.service
 sudo systemctl status lab-slot.service
 ```
 
-Используйте `tools/check_slot.py` ниже перед возобновлением лаборатории. При отказе
-не удаляйте данные: остановите все Slot API и той же процедурой верните ссылку на
-предыдущий проверенный физический релиз, затем обновите unit и запустите сервисы.
-Предыдущий релиз должен поддерживать ту же SQLite-схему; эта версия не меняет схему
-таблицы records. Откат самого первого legacy-каталога требует восстановления его
-исходного абсолютного пути при остановленных API. Не переключать релиз для части
-работающих LXC: общий alias действует на весь парк.
+Unit использует Python из `/srv/gns3-ro/slot/venv`, этот же WorkingDirectory,
+`/etc/lab-slot/slot.env`, SQLite в `/var/lib/lab-slot` и локальный GNS3 API.
+`run.py` проверяет путь кода и соответствие venv, выполняет preflight и запускает
+Uvicorn с одним worker. Ни startup, ни readiness, ни check не требуют записи
+в каталог исходников; unit отключает запись bytecode. Не отключайте проверку
+manifest ради запуска неполного пакета.
+
+После перезапуска ранее READY получает FAILED до явного Resume с новым ключом.
+Состояние SQLite и проекты остаются на прежних путях. Диагностика перед Resume:
+`venv/bin/python tools/check_slot.py` с токеном из защищённой конфигурации.
 
 ### Короткая повторная интеграционная проверка
 

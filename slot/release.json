@@ -1,8 +1,8 @@
 {
   "version": "0.3.0",
-  "build_id": "sha256:563cf7e407e3f2e91f37f1c9d9abbd84ee577a6d3431bea84878922725fca1c3",
+  "build_id": "sha256:ec6b101a3eeba08f72dfe41354fec322d1be681b2c002b37cd7be76499111fc5",
   "files": {
-    "README.md": "7bf33e8c9bcc7fcfc13d7647659c6602292f63387c11b81b27cd97bb41ae68dc",
+    "README.md": "adbbfa1968951bc6a5181e66c5b9f092490fad6e450f33214fd18466f4e7967d",
     "api/__init__.py": "b61bb532c208db9570b32a1b4903291e1cb21600ea4bd89c101ca995f7ec324d",
     "api/auth.py": "661baf07461006a1dd53ddc014cfea3f5870d2833ff3ef77bba438103f8ced00",
     "api/cli.py": "20feb2960e769e47d24f61ce4e5818dd0f1c09f0987c32561ea343590a96a4cc",
@@ -18,12 +18,12 @@
     "main.py": "ad605e75c7fa2bfa2d28fe8c87aab4fa907153f8106992c02ffe9899cc8bbd4e",
     "release.py": "f3fdc45cda4d0a2a8083b06dbf6b669f465a86183ab61131ff72f6b1f143be31",
     "requirements.txt": "2cb4d8d7bc6402e6bfc25852717cddb20dbec80aa2040c8dbe05ea859c09b427",
-    "run.py": "35d0fdf378f532bc3cc6c78102464a8d4a88cae8275f0d33718e3ff5470f574d",
+    "run.py": "e5e49b63a5a11a17c6cfc9238a63f3594cffee0f57f0772c5b58f2acbc778eda",
     "slot.env.example": "ebe63013255a8da029dabb3056124da447a8c2511e2354b1c8537c022e21a5c1",
     "tests/conftest.py": "7cfa49ac79d7b260000a9539cf1f375ab0fcf2199e0f3751756850aa1ce53242",
-    "tests/test_reliability.py": "eaefc106647fa981dd5fdbca586925b1416c4dd0229d637049ddf0a2be23f03a",
+    "tests/test_fixed_mount.py": "f3cf7cc9dab629365a53338e639becdcde24d1b0f0765a0725ecdfd7608d71e5",
+    "tests/test_reliability.py": "7d818ab76488ecb74fca10862b639e45cc6f43dcd33b77183cae400d2b3ee9b0",
     "tests/test_slot.py": "36a5b709f248f045d6b06d3fba7d71068b7a8f8f386e90c1155f611eab9b2e17",
-    "tools/activate_release.py": "61b4bd0c0f7a5c4117666b31b628cff2806164d4d3d3cbc8f581137074274f42",
     "tools/check_slot.py": "a951dab74d9a7a8c72e29ea98214ed02ccee3cb0beb77f9ff53b5b78adb6b4fd"
   }
 }
