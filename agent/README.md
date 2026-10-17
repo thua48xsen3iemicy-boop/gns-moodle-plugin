@@ -84,8 +84,8 @@ The request body for `POST /slots/2201/start`:
 
 Mounts always have host path → guest path mapping:
 
-- `mp0`: `/mnt/pve/data/slot` (or `/slot/<code_revision>`) → `/opt/slot`, always **read-only**.
-- `mp1`: `/mnt/pve/data/students/<student_key>` → `/srv/student`, **read-only** when `data_mode=ro`, or **read-write** when `data_mode=rw`.
+- `mp0`: `/mnt/pve/data/slot` (or `/slot/<code_revision>`) → `/srv/gns3-ro/slot`, always **read-only**.
+- `mp1`: `/mnt/pve/data/students/<student_key>` → `/opt/gns3/projects`, **read-only** when `data_mode=ro`, or **read-write** when `data_mode=rw`.
 
 Only one safe path component may be supplied for `student_key` and `code_revision`: letters, numbers, `_` or `-`, up to 64 chars. The mount roots, guest paths, mount indices, and CephFS mount check are built into the agent. To add other approved directory classes, extend the server's explicit policy, not an arbitrary `source` field.
 
@@ -245,3 +245,32 @@ curl --cert /etc/lab-manager/manager.crt \
   --cacert /etc/lab-manager/node-server-ca.crt \
   -X PUT https://pve2.lab.local:8443/students/student42
 ```
+
+## Mount contract with Slot
+
+The destination paths match `slot/run.py`, `slot/lab-slot.service` and Slot's
+project lock directory:
+
+| Host source | LXC destination | Access |
+|---|---|---|
+| `/mnt/pve/data/slot` or `/mnt/pve/data/slot/<code_revision>` | `/srv/gns3-ro/slot` | RO |
+| `/mnt/pve/data/students/<student_key>` | `/opt/gns3/projects` | `data_mode` RO/RW |
+
+The code source must contain `run.py`, `release.py`, `main.py` and `venv/`
+directly. Build the venv at `/srv/gns3-ro/slot/venv` in an environment compatible
+with the slot template (see Slot's README). An old venv built under another
+absolute path must be rebuilt. Normal GNS3 project creation needs `data_mode=rw`;
+RO is supported for mounting but does not permit writable lab operations.
+
+The LXC template must configure GNS3's project directory to
+`/opt/gns3/projects`, provide shared read-only images under `/opt/gns3/images`
+(including `QEMU/` and `IOU/`), and provision `/opt/gns3/qga` with appropriate
+permissions. This agent manages only mp0 and mp1; it does not provision those
+image/QGA paths, change GNS3 configuration, install the guest service or token,
+or move persistent Slot state from `/var/lib/lab-slot`.
+
+For previously configured containers: stop the LXC, update the agent, then
+reapply mounts or call start. mp0/mp1 destinations are replaced; no student data
+is moved or deleted. Check for any manually configured mounts overlapping the
+new destinations and coordinate changes through the Manager. Running containers
+are never remounted live.

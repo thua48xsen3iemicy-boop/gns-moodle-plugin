@@ -199,8 +199,8 @@ def apply_mounts(vmid: int, mounts: Mounts) -> None:
     ro = 1 if mounts.data_mode == "ro" else 0
     run_cmd([
         PCT, "set", str(vmid),
-        "--mp0", f"{code_path},mp=/opt/slot,ro=1,shared=1",
-        "--mp1", f"{data_path},mp=/srv/student,ro={ro},shared=1",
+        "--mp0", f"{code_path},mp=/srv/gns3-ro/slot,ro=1,shared=1",
+        "--mp1", f"{data_path},mp=/opt/gns3/projects,ro={ro},shared=1",
     ], timeout=40)
 
 

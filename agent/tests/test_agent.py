@@ -61,8 +61,8 @@ def test_start_with_bind_and_allowlisted_guest_action(env):
     assert response.status_code == 200, response.text
     assert response.json()["state"] == "running"
     assert [agent.PCT, "set", "2201",
-            "--mp0", f"{ceph}/slot,mp=/opt/slot,ro=1,shared=1",
-            "--mp1", f"{ceph}/students/student42,mp=/srv/student,ro=0,shared=1"] in calls
+            "--mp0", f"{ceph}/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+            "--mp1", f"{ceph}/students/student42,mp=/opt/gns3/projects,ro=0,shared=1"] in calls
     assert [agent.PCT, "exec", "2201", "--", "/usr/bin/systemctl", "daemon-reload"] in calls
 
 
@@ -138,7 +138,7 @@ def test_mount_mode_and_repeat(env, mode, ro):
     client, calls, _, _, ceph = env
     for _ in range(2):
         assert client.put('/slots/2201/mounts', json={'student_key': 'student42', 'data_mode': mode}).status_code == 200
-    assert f'{ceph}/students/student42,mp=/srv/student,ro={ro},shared=1' in calls[-1]
+    assert f'{ceph}/students/student42,mp=/opt/gns3/projects,ro={ro},shared=1' in calls[-1]
 
 
 def test_repeated_start_and_stop(env):
@@ -328,3 +328,36 @@ def test_student_parent_acl_rejected(student_env, monkeypatch):
     assert client.put('/students/new').status_code == 422
     assert not (ceph / 'students/new').exists()
     assert chowns == []
+
+
+def test_mount_destinations_match_repository_slot(env):
+    """Compare generated pct mounts to the existing Slot contract across components."""
+    import ast
+    slot = Path(__file__).resolve().parents[2] / 'slot'
+    if not slot.is_dir():
+        pytest.skip('Standalone agent checkout has no Slot sources')
+    tree = ast.parse((slot / 'run.py').read_text())
+    root = next(node.value.args[0].value for node in tree.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == 'ROOT' for t in node.targets))
+    unit = (slot / 'lab-slot.service').read_text()
+    assert f'WorkingDirectory={root}\n' in unit
+    client, calls, *_ = env
+    assert client.put('/slots/2201/mounts', json={'student_key': 'student42'}).status_code == 200
+    command = next(c for c in calls if c[:2] == [agent.PCT, 'set'])
+    assert f',mp={root},ro=1,shared=1' in command[command.index('--mp0') + 1]
+    config = dict(line.split('=', 1) for line in (slot / 'slot.env.example').read_text().splitlines()
+                  if line and not line.startswith('#') and '=' in line)
+    projects = str(Path(config['SLOT_PROJECT_LOCK_DIR']).parent)
+    assert f',mp={projects},ro=0,shared=1' in command[command.index('--mp1') + 1]
+
+
+def test_revision_mounted_at_same_slot_destination(env):
+    client, calls, _, _, ceph = env
+    (ceph / 'slot' / 'release1').mkdir()
+    result = client.post('/slots/2201/start', json={
+        'student_key': 'student42', 'code_revision': 'release1', 'data_mode': 'ro'})
+    assert result.status_code == 200, result.text
+    command = next(c for c in calls if c[:2] == [agent.PCT, 'set'])
+    assert f'{ceph}/slot/release1,mp=/srv/gns3-ro/slot,ro=1,shared=1' in command
+    assert f'{ceph}/students/student42,mp=/opt/gns3/projects,ro=1,shared=1' in command
