@@ -1,0 +1,23 @@
+[Unit]
+Description=Lab Proxmox Node Agent (mTLS)
+After=network-online.target pve-cluster.service
+Wants=network-online.target
+Requires=pve-cluster.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/lab-node-agent
+Environment=LAB_CEPH_ROOT=/mnt/pve/data
+Environment=LAB_VMID_MIN=2000
+Environment=LAB_VMID_MAX=2999
+ExecStart=/opt/lab-node-agent/venv/bin/uvicorn agent:app --host 0.0.0.0 --port 8443 --workers 1 --ssl-certfile /etc/lab-node-agent/server.crt --ssl-keyfile /etc/lab-node-agent/server.key --ssl-ca-certs /etc/lab-node-agent/manager-ca.crt --ssl-cert-reqs 2 --no-proxy-headers
+Restart=on-failure
+RestartSec=3
+UMask=0077
+LimitNOFILE=65535
+# Hardening flags that prevent pct/lxc operations are intentionally NOT enabled.
+
+[Install]
+WantedBy=multi-user.target

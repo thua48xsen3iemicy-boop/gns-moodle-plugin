@@ -1,0 +1,39 @@
+#!/bin/sh
+# Install *inside the LXC* (not on the Proxmox host), root:root 0755.
+set -eu
+# Prepare only the fixed lock directory; never recursively chown student data.
+/usr/bin/python3 - <<'PY'
+import os
+import pwd
+import stat
+
+user = pwd.getpwnam("gns3")
+if user.pw_uid == 0 or user.pw_gid == 0:
+    raise SystemExit("gns3 must be unprivileged")
+# Student-controlled data is prepared as gns3, not guest root.
+os.setgroups([])
+os.setgid(user.pw_gid)
+os.setuid(user.pw_uid)
+parent = os.open("/opt/gns3/projects", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    try:
+        os.mkdir(".slot-locks", mode=0o700, dir_fd=parent)
+    except FileExistsError:
+        pass
+    fd = os.open(".slot-locks", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                 dir_fd=parent)
+    try:
+        if os.fstat(fd).st_dev != os.fstat(parent).st_dev:
+            raise SystemExit("Unsafe .slot-locks filesystem")
+        info = os.fstat(fd)
+        if ((info.st_uid, info.st_gid) != (user.pw_uid, user.pw_gid)
+                or stat.S_IMODE(info.st_mode) != 0o700):
+            raise SystemExit("Existing .slot-locks has unsafe ownership or permissions")
+    finally:
+        os.close(fd)
+finally:
+    os.close(parent)
+PY
+/usr/bin/systemctl daemon-reload
+/usr/bin/install -d -m 0755 /run/lab-slot
+/usr/bin/systemctl restart lab-slot.service
