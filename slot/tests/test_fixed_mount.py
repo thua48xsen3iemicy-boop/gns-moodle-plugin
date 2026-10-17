@@ -31,11 +31,16 @@ def test_runner_plain_directory_correct_venv(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "path", sys.path.copy())
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(release, "preflight", lambda: {"ok": True})
+    monkeypatch.delenv("SLOT_LISTEN_HOST", raising=False)
     calls = []
     monkeypatch.setattr("uvicorn.run", lambda *a, **kw: calls.append((a, kw)))
     run.main(root)
     assert Path.cwd() == root
     assert calls == [(("main:app",), {"host": "127.0.0.1", "port": 8080, "workers": 1})]
+    # Manager and console gateway reach the Slot on the LXC address only when configured.
+    monkeypatch.setenv("SLOT_LISTEN_HOST", "10.19.36.216")
+    run.main(root)
+    assert calls[-1] == (("main:app",), {"host": "10.19.36.216", "port": 8080, "workers": 1})
     assert sorted(p.name for p in root.iterdir()) == ["venv"]
 
 

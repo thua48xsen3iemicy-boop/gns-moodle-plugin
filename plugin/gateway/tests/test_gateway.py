@@ -1,70 +1,92 @@
-"""Проверка шлюза против поддельного GNS3: фильтр telnet, билеты, режим наблюдателя.
+"""Проверка шлюза против поддельного Lab Slot: билеты, субпротокол с токеном, наблюдатель, коды закрытия.
 Запуск: pip install aiohttp && python3 gateway/tests/test_gateway.py
 """
-import asyncio, base64, json, os, sys, time
+import asyncio, json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-os.environ.update(GW_INTERNAL_KEY="k", GW_SLOT_USERS=json.dumps({"127.0.0.1": ["gw", "pw"]}), GNS3_PORT="38080")
+os.environ.update(GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret"}), GW_SLOT_PORT="38080")
 import console_gateway as gw
 from aiohttp import web, ClientSession, WSMsgType
 
-# --- проверка фильтра на разрезанных кадрах
-tf = gw.TelnetFilter()
-parts = [b"\xff\xfb\x01\xff", b"\xfb\x03\xff\xfd\x1fR1", b">\xff\xfa\x1f\x00\x50", b"\x00\x18\xff\xf0 ok \xff\xff!"]
-assert b"".join(tf.feed(p) for p in parts) == b"R1> ok \xff!", "filter"
-print("filter OK")
+P, N1, N2, OFF = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
+                  "33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444")
 
-# --- поддельный GNS3
-exp = int(time.time()) + 3600
-TOKEN = "h." + base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=") + ".s"
-seen = []
-async def auth(r):
-    b = await r.json(); assert b == {"username": "gw", "password": "pw"}
-    return web.json_response({"access_token": TOKEN})
+# --- поддельный Slot: /v1/console/{project_id}/{node_id}, токен в субпротоколе, вывод уже без telnet-команд
+seen, paths = [], []
 async def cons(r):
-    ws = web.WebSocketResponse(); await ws.prepare(r)
-    if r.query.get("token") != TOKEN: await ws.close(code=1008); return ws
-    await ws.send_bytes(b"\xff\xfb\x01\xff\xfb"); await ws.send_bytes(b"\x03\r\nR1>")
+    paths.append(r.path)
+    protocols = [x.strip() for x in r.headers.get("Sec-WebSocket-Protocol", "").split(",")]
+    if "lab-slot" not in protocols or "bearer.console-secret" not in protocols or r.match_info["n"] == OFF:
+        return web.Response(status=403)                  # как Starlette: close() до accept()
+    ws = web.WebSocketResponse(protocols=("lab-slot",)); await ws.prepare(r)
+    await ws.send_bytes(b"\r\nR1> \xff")                 # 0xFF в данных должен дойти без изменений
     async for m in ws:
         seen.append((m.type, m.data))
-        if m.type == WSMsgType.TEXT: await ws.send_bytes(m.data.encode())
+        if m.type == WSMsgType.TEXT:
+            if m.data == "reload\r":
+                await ws.close(); break                   # telnet ноды закрылся
+            await ws.send_bytes(m.data.encode())
     return ws
 fake = web.Application()
-fake.router.add_post("/v3/access/users/authenticate", auth)
-fake.router.add_get("/v3/projects/{p}/nodes/{n}/console/ws", cons)
+fake.router.add_get("/v1/console/{p}/{n}", cons)
 
 async def main():
     r1 = web.AppRunner(fake); await r1.setup(); await web.TCPSite(r1, "127.0.0.1", 38080).start()
     r2 = web.AppRunner(gw.make_app()); await r2.setup(); await web.TCPSite(r2, "127.0.0.1", 38081).start()
     async with ClientSession() as s:
-        async def ticket(ro):
+        async def ticket(ro, project=P, nodes=(N1, OFF)):
             async with s.post("http://127.0.0.1:38081/internal/tickets", headers={"X-Internal-Key": "k"},
-                              json={"slot": "127.0.0.1", "project_id": "p1", "nodes": ["n1"], "readonly": ro}) as r:
-                return (await r.json())["ticket"]
+                              json={"slot": "127.0.0.1", "project_id": project, "nodes": list(nodes), "readonly": ro}) as r:
+                return r.status, (await r.json())["ticket"] if r.status == 200 else None
+        async def prompt(ws):
+            out = b""
+            while b"R1>" not in out: out += (await ws.receive()).data
+            return out
+        # ID уходят в путь запроса к слоту — без UUID билет не выдаётся
+        assert (await ticket(False, project="../v1/labs"))[0] == 400
+        assert (await ticket(False, nodes=["n1"]))[0] == 400
+        print("non-UUID ids rejected OK")
         # обычный студент
-        t = await ticket(False)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/n1?ticket={t}")
-        out = b""
-        while b"R1>" not in out: out += (await ws.receive()).data
-        assert out == b"\r\nR1>", out
-        await ws.send_str("en\r"); await ws.send_bytes(b'{"cols":120,"rows":40}'); await ws.send_bytes(b"junk")
-        echo = (await ws.receive()).data; assert echo == b"en\r", echo
+        _, t = await ticket(False)
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}")
+        assert await prompt(ws) == b"\r\nR1> \xff"
+        assert paths[-1] == f"/v1/console/{P}/{N1}", paths
+        await ws.send_str("en\r"); await ws.send_bytes(b'{"cols":120,"rows":40}')
+        assert (await ws.receive()).data == b"en\r"
         await ws.close()
+        got = [x[1] for x in seen if x[0] in (WSMsgType.TEXT, WSMsgType.BINARY)]
+        assert got == ["en\r"], got                       # бинарные кадры (в т.ч. размер окна) в слот не идут
+        print("student input OK, binary frames dropped")
         # повторное использование билета
         try:
-            await s.ws_connect(f"http://127.0.0.1:38081/console/n1?ticket={t}"); raise SystemExit("FAIL: билет принят повторно")
+            await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}"); raise SystemExit("FAIL: билет принят повторно")
         except Exception as e: print("reuse rejected:", type(e).__name__)
         # чужая нода
-        t2 = await ticket(False)
+        _, t2 = await ticket(False)
         try:
-            await s.ws_connect(f"http://127.0.0.1:38081/console/n2?ticket={t2}"); raise SystemExit("FAIL: пустил к чужой ноде")
+            await s.ws_connect(f"http://127.0.0.1:38081/console/{N2}?ticket={t2}"); raise SystemExit("FAIL: пустил к чужой ноде")
         except Exception as e: print("other node rejected:", type(e).__name__)
+        # консоль на стороне слота закрылась — браузер получает 4000
+        _, t = await ticket(False)
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}")
+        await prompt(ws); await ws.send_str("reload\r")
+        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4000, m
+        print("upstream close -> 4000 OK")
+        # слот отказал (нода не запущена) — тоже 4000, без трассировки
+        _, t = await ticket(False)
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{OFF}?ticket={t}")
+        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4000, m
+        print("upstream refused -> 4000 OK")
+        # неверный токен слота — то же поведение
+        gw.SLOTS["127.0.0.1"] = "wrong"
+        _, t = await ticket(False)
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}")
+        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4000, m
+        gw.SLOTS["127.0.0.1"] = "console-secret"
+        print("wrong slot token -> 4000 OK")
         # наблюдатель
-        got = [x[1] for x in seen if x[0] in (WSMsgType.TEXT, WSMsgType.BINARY)]
-        assert got == ["en\r", b'{"cols": 120, "rows": 40}'], got   # мусорный бинарный кадр отброшен
-        print("student input + resize OK"); seen.clear(); t3 = await ticket(True)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/n1?ticket={t3}")
-        out = b""
-        while b"R1>" not in out: out += (await ws.receive()).data
+        seen.clear(); _, t3 = await ticket(True)
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t3}")
+        await prompt(ws)
         await ws.send_str("conf t\r"); await ws.send_bytes(b'{"cols":80,"rows":24}')
         await asyncio.sleep(0.3); await ws.close(); await asyncio.sleep(0.2)
         leaked = [x for x in seen if x[0] in (WSMsgType.TEXT, WSMsgType.BINARY)]
