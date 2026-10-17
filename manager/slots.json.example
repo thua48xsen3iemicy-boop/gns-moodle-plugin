@@ -1,0 +1,10 @@
+[
+  {
+    "vmid": 201,
+    "address": "10.19.36.216",
+    "port": 8080,
+    "profile": "default",
+    "api_token": "SLOT_API_TOKEN_OF_THIS_LXC",
+    "console_token": "SLOT_CONSOLE_TOKEN_OF_THIS_LXC"
+  }
+]

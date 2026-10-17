@@ -1,0 +1,8 @@
+#!/bin/sh
+# Operator commands with the service environment: sudo -u lab-manager ./lab-manager-admin <command>
+set -eu
+set -a
+. /etc/lab-manager/manager.env
+set +a
+cd /srv/gns3-ro/manager
+exec venv/bin/python -m lab_manager.admin "$@"
