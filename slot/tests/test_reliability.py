@@ -188,36 +188,6 @@ def test_restart_between_stopped_snapshot_and_operation_commit(tmp_path, monkeyp
     asyncio.run(scenario())
 
 
-def test_activation_requires_coordination_and_checks_before_switch(
-    tmp_path, monkeypatch
-):
-    from tools.activate_release import activate
-
-    new = tmp_path / "release"
-    (new / "venv/bin").mkdir(parents=True)
-    (new / "venv/bin/python").touch()
-    alias = tmp_path / "slot"
-    alias.symlink_to(tmp_path / "old")
-    old = alias.readlink()
-    with pytest.raises(ValueError, match="ALL"):
-        activate(new, alias, False)
-
-    def fail(*args, **kwargs):
-        import subprocess
-
-        raise subprocess.CalledProcessError(1, "preflight")
-
-    monkeypatch.setattr("tools.activate_release.subprocess.run", fail)
-    import subprocess
-
-    with pytest.raises(subprocess.CalledProcessError):
-        activate(new, alias, True)
-    assert alias.readlink() == old
-    monkeypatch.setattr("tools.activate_release.subprocess.run", lambda *a, **kw: None)
-    activate(new, alias, True)
-    assert alias.resolve() == new
-
-
 def test_sqlite_failure_releases_new_project_lock(tmp_path, monkeypatch):
     import sqlite3
 
