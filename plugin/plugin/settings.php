@@ -17,7 +17,7 @@
 /**
  * Site settings for mod_gns3lab.
  *
- * Not used yet: the plugin works with the bundled demo topology until the lab manager is connected.
+ * Without the lab manager URL and secret activities show the bundled demo topology.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors

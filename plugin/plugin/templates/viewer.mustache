@@ -25,6 +25,9 @@
     * fullscreenurl - URL of the full screen page
     * backurl - URL of the activity page
     * isdemo - demo data is shown
+    * previewerror - the reference lab could not be loaded from the lab manager
+    * cancontrol - the user can start the lab: show the session bar and the consoles
+    * cmid - course module id
     * datajson - JSON with topology, live (node states, guests) and facts (ok, broken)
 
     Example context (json):
@@ -34,6 +37,9 @@
         "fullscreenurl": "https://example.org/mod/gns3lab/lab.php?id=1",
         "backurl": "https://example.org/mod/gns3lab/view.php?id=1",
         "isdemo": true,
+        "previewerror": false,
+        "cancontrol": true,
+        "cmid": 1,
         "datajson": "{}"
     }
 }}
@@ -43,6 +49,9 @@
     {{#isdemo}}
     <p class="text-muted small mb-0 flex-grow-1">{{#str}}demonotice, mod_gns3lab{{/str}}</p>
     {{/isdemo}}
+    {{#previewerror}}
+    <p class="text-danger small mb-0 flex-grow-1">{{#str}}previewerror, mod_gns3lab{{/str}}</p>
+    {{/previewerror}}
 </div>
 {{/fullscreen}}
 <div class="gns3lab-app {{#fullscreen}}is-fullscreen{{/fullscreen}}{{^fullscreen}}is-inline{{/fullscreen}}" id="{{uniqid}}-app" data-json="{{datajson}}">
@@ -79,6 +88,17 @@
             <input class="vh" type="file" id="{{uniqid}}-fileInput" accept=".gns3,.json,application/json">
         </div>
     </header>
+    {{#cancontrol}}
+    <div class="ctl" data-region="control">
+        <span class="cstatus" data-region="status" role="status"></span>
+        <span class="ctime" data-region="timeleft" hidden></span>
+        <span class="cmsg" data-region="message" role="alert" hidden></span>
+        <span class="cbtns">
+            <button class="gbtn primary" type="button" data-region="start" hidden>{{#str}}startlab, mod_gns3lab{{/str}}</button>
+            <button class="gbtn" type="button" data-region="stop" hidden>{{#str}}stoplab, mod_gns3lab{{/str}}</button>
+        </span>
+    </div>
+    {{/cancontrol}}
 
     <div class="stage">
         <div class="wrap" id="{{uniqid}}-wrap">
@@ -139,9 +159,25 @@
             <div class="panelbody" id="{{uniqid}}-panelBody"></div>
         </aside>
     </div>
+    {{#cancontrol}}
+    <section class="gns3lab-consoles" data-region="consoles" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}" hidden>
+        <div class="ctabs" data-region="tabs" role="tablist"></div>
+        <p class="obsbar" data-region="obsbar" hidden>{{#str}}consolereadonly, mod_gns3lab{{/str}}</p>
+        <div class="ctermhost" data-region="termhost">
+            <div class="ctoast" data-region="toast" role="status" hidden></div>
+        </div>
+        <div class="strip" data-region="keys"></div>
+        <div class="strip" data-region="snippets"></div>
+    </section>
+    {{/cancontrol}}
 </div>
 {{#js}}
 require(['mod_gns3lab/viewer'], function(viewer) {
     viewer.init('{{uniqid}}');
 });
+{{#cancontrol}}
+require(['mod_gns3lab/lab'], function(lab) {
+    lab.init('{{uniqid}}', {{cmid}});
+});
+{{/cancontrol}}
 {{/js}}

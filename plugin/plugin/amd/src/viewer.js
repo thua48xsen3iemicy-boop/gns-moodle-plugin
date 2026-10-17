@@ -17,6 +17,8 @@
  * Topology viewer: .gns3 rendered as SVG, layers L1/L2/L3/OSPF from device facts, details panel.
  *
  * Ported from prototypes/topology-viewer.html; the prototype stays the reference for behaviour.
+ * Talks to mod_gns3lab/lab through events on the root element: listens to gns3lab:session (show the live
+ * topology and node states) and gns3lab:showport (a port name clicked in a console), sends gns3lab:openconsole.
  * UI strings are still Russian literals here; moving them to lang strings is a follow-up.
  *
  * @module     mod_gns3lab/viewer
@@ -76,6 +78,9 @@ function cat(n){
   return "server";
 }
 function portName(node, adapter, port){
+  /* в живой топологии сессии properties пустые, но GNS3 отдаёт ports с именами портов устройства */
+  const gp = node.ports && node.ports.find(x => x.adapter_number === adapter && x.port_number === port);
+  if (gp && (gp.short_name || gp.name)) return gp.short_name || gp.name;
   const pm = node.props && node.props.ports_mapping;
   if (Array.isArray(pm)) { const p = pm.find(x => x.port_number === port); if (p && p.name) return p.name; }
   if (node.type === "ethernet_switch" || node.type === "ethernet_hub") return "Ethernet" + port;
@@ -397,7 +402,7 @@ function buildModel(doc){
     if (!n || !n.node_id) continue;
     const w = +n.width || 60, h = +n.height || 45, x = +n.x || 0, y = +n.y || 0;
     nodes.set(n.node_id, { id: n.node_id, name: n.name || "без имени", type: n.node_type || "", symbol: n.symbol || "",
-      x, y, w, h, cx: x + w / 2, cy: y + h / 2, props: n.properties || {},
+      x, y, w, h, cx: x + w / 2, cy: y + h / 2, props: n.properties || {}, ports: Array.isArray(n.ports) ? n.ports : null,
       consoleType: n.console_type || (n.properties && n.properties.console_type) || null,
       console: n.console != null ? n.console : null, status: n.status || null });
   }
@@ -895,9 +900,6 @@ function nodeHTML(n){
     }
   }
   const hasConsole = n.consoleType && n.consoleType !== "none";
-  const consoleNote = n.consoleType === "vnc"
-    ? `В плагине откроется экран через noVNC: браузер подключится к шлюзу сессии, шлюз — к <code>…/nodes/${esc(n.id)}/console/vnc</code>.`
-    : `В плагине откроется терминал (xterm.js): браузер подключится к шлюзу сессии, шлюз — к <code>…/nodes/${esc(n.id)}/console/ws</code> со своим токеном.`;
   const layered = st.der && st.layer !== "l1";
   return `
     <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div>
@@ -909,7 +911,7 @@ function nodeHTML(n){
     ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="glead">Ни один порт не подключён.</p>`}
     ${vlan}`}
     ${guests}
-    ${hasConsole ? `<div><button class="gbtn primary" type="button" data-act="console">Открыть консоль</button><p class="note" id="${prefix}-consoleNote" hidden>${consoleNote} В этом прототипе шлюза нет, поэтому кнопка только показывает, что произойдёт.</p></div>` : ""}
+    ${hasConsole ? `<div><button class="gbtn primary" type="button" data-act="console">Открыть консоль</button></div>` : ""}
     <p class="idline">node_id ${esc(n.id)}</p>`;
 }
 function linkHTML(l){
@@ -1026,7 +1028,11 @@ body.addEventListener("click", e => {
   else if (t.dataset.gotoVlan) select({ kind: "vlan", id: t.dataset.gotoVlan });
   else if (t.dataset.gotoAdj) select({ kind: "adj", id: t.dataset.gotoAdj });
   else if (t.dataset.act === "close") select(null);
-  else if (t.dataset.act === "console") { const n = sel$("consoleNote"); if (n) n.hidden = false; }
+  else if (t.dataset.act === "console" && st.sel && st.sel.kind === "node") {
+    /* консоли открывает mod_gns3lab/lab: он знает сессию и решает, можно ли */
+    const n = st.model.nodes.get(st.sel.id);
+    if (n) root.dispatchEvent(new CustomEvent("gns3lab:openconsole", { detail: { nodeId: n.id, name: n.name, consoleType: n.consoleType, nodeType: n.type } }));
+  }
 });
 body.addEventListener("keydown", e => {
   const t = e.target.closest && e.target.closest("tr[data-goto-link]");
@@ -1148,7 +1154,46 @@ sel$("factsSel").addEventListener("change", e => {
 let lastW = 0;
 window.addEventListener("resize", () => { const w = wrap.clientWidth; if (Math.abs(w - lastW) > 40) { lastW = w; fit(); } });
 
-load(DATA.topology, DATA.source || "демо", DATA.live && DATA.live.node_status, DATA.live && DATA.live.guests, true);
+/* ---------- сессия менеджера (события от mod_gns3lab/lab) ---------- */
+const loadPreview = () => load(DATA.topology, DATA.source || "демо", DATA.live && DATA.live.node_status, DATA.live && DATA.live.guests, true);
+let liveKey = null;
+root.addEventListener("gns3lab:session", e => {
+  const s = e.detail.session;
+  if (!s || s.status !== "running" || !s.topology) {
+    if (liveKey) { liveKey = null; loadPreview(); }
+    return;
+  }
+  const statuses = {}, types = {};
+  s.nodes.forEach(n => { statuses[n.nodeid] = n.status; types[n.nodeid] = n.consoletype; });
+  if (!st.statusOn) { st.statusOn = true; sel$("btnStatus").setAttribute("aria-pressed", "true"); }
+  const key = s.sessionid + "\n" + s.topology;
+  if (key !== liveKey) {
+    let doc;
+    try { doc = JSON.parse(s.topology); } catch (err) { toast("Менеджер прислал топологию, которая не читается как JSON."); return; }
+    /* статусы нод — из живых данных сессии, а не из сохранённого проекта */
+    ((doc.topology && doc.topology.nodes) || []).forEach(n => { delete n.status; if (types[n.node_id]) n.console_type = types[n.node_id]; });
+    liveKey = key;
+    load(doc, "сессия", statuses, null, false);
+  } else {
+    st.demoStatus = statuses;
+    const keep = st.sel; renderScene(); st.sel = keep; applySel(); renderPanel();
+  }
+});
+/* имя порта, нажатое в консоли: показать линк этого порта */
+const portKey = v => {
+  const m = /^([a-z]*)\s*(\d+(?:\/\d+)*)$/i.exec(String(v).trim()); if (!m) return null;
+  const p = m[1].toLowerCase();
+  return { k: ["g", "f", "e", "s", "l"].find(c => p.startsWith(c)) || p, num: m[2] };
+};
+root.addEventListener("gns3lab:showport", e => {
+  const want = portKey(e.detail.port); if (!want || !st.model) return;
+  const same = end => { const k = portKey(end.text); return k && k.num === want.num && (k.k === want.k || !k.k); };
+  const l = st.model.links.find(x => (x.a.nodeId === e.detail.nodeId && same(x.a)) || (x.b.nodeId === e.detail.nodeId && same(x.b)));
+  if (l) { select({ kind: "link", id: l.id }); if (mobile()) setSheet(true); }
+  else toast(`Порт ${e.detail.port} не подключён на схеме.`);
+});
+
+loadPreview();
 lastW = wrap.clientWidth;
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { const keep = st.sel; renderScene(); st.sel = keep; applySel(); });
 };

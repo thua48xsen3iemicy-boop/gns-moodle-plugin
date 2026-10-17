@@ -60,8 +60,9 @@ docs/          SPEC.md и прочая документация
 - Moodle — через `moodle-docker` той же версии; `plugin/` монтируется в `public/mod/gns3lab` (bind mount, не симлинк:
   страницы подключают `../../config.php` относительным путём).
 - `grunt amd` запускай из каталога плагина внутри дерева Moodle: ESLint ищет `.eslintrc` Moodle по реальному пути файла.
-- Менеджера пока нет: используй mock из `devtools/mock-manager` (создать по SPEC). Шлюз в dev может смотреть
-  на поддельный Lab Slot (как в тесте шлюза) или на реальный слот, если владелец даст адрес.
+- Настоящий менеджер — в ветке `claude/epic-feynman-54aj67` (`manager/`, нужен Proxmox). Для разработки плагина —
+  mock `devtools/mock-manager` (`devtools/README.md`): то же поведение API и поддельная консоль Lab Slot.
+  Договорённости с менеджером — `docs/MANAGER_REQUESTS.md` (наши) и `manager/docs/PLUGIN_REQUESTS.md` (его ответы).
 - Проверки перед коммитом: `moodle-plugin-ci phpcs` (стандарт moodle), `phplint`, `phpdoc`, PHPUnit и Behat плагина,
   `python3 gateway/tests/test_gateway.py`.
 - Режим разработчика Moodle включён, после правок — сброс кэшей (`admin/cli/purge_caches.php`).
