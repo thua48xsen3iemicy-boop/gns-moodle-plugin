@@ -6,6 +6,8 @@
 `feature/proxmox-node-agent`, mTLS) монтирует каталог студента и запускает LXC, запускает и останавливает лабу в Lab Slot, выдаёт билеты шлюзу консолей.
 Слоты не привязаны к студентам. Как всё устроено и почему — в [`docs/DESIGN.md`](docs/DESIGN.md),
 там же открытые вопросы.
+Форматы данных между плагином, менеджером, каталогом лаб и слотом и правила их расширения —
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md); запросы к агенту узла — [`docs/AGENT_REQUESTS.md`](docs/AGENT_REQUESTS.md).
 
 Стек: Python 3.12, FastAPI, Uvicorn, httpx, pydantic, psycopg 3, PostgreSQL (локально в LXC менеджера).
 
