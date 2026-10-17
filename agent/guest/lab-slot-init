@@ -1,0 +1,6 @@
+#!/bin/sh
+# Install *inside the LXC* (not on the Proxmox host), root:root 0755.
+set -eu
+/usr/bin/systemctl daemon-reload
+/usr/bin/install -d -m 0755 /run/lab-slot
+/usr/bin/systemctl restart lab-slot.service
