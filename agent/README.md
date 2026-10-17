@@ -274,3 +274,9 @@ reapply mounts or call start. mp0/mp1 destinations are replaced; no student data
 is moved or deleted. Check for any manually configured mounts overlapping the
 new destinations and coordinate changes through the Manager. Running containers
 are never remounted live.
+
+## Coordination with Manager development
+
+[Manager contract review](docs/MANAGER_CONTRACT_REVIEW.md) records questions and
+integration requirements against a pinned snapshot of the Manager contract branch.
+It distinguishes implemented Agent behavior from proposed extensions.
