@@ -8,8 +8,7 @@ from lab_manager.agent_client import (CODES, AgentBusy, AgentClient, AgentComman
 
 
 def client(handler):
-    return AgentClient("https://{node}.mgmt:8443", transport=httpx.MockTransport(handler),
-                       start_timeout=330, stop_timeout=100)
+    return AgentClient("https://{node}.mgmt:8443", transport=httpx.MockTransport(handler))
 
 
 async def test_requests_match_agent_api():
@@ -32,11 +31,11 @@ async def test_requests_match_agent_api():
     assert seen == [
         ("pve2.mgmt", "GET", "/slots/2001/status", None, 30),
         ("pve2.mgmt", "PUT", "/slots/2001/mounts",
-         {"code_revision": None, "student_key": "main-42", "data_mode": "ro"}, 30),
+         {"code_revision": None, "student_key": "main-42", "data_mode": "ro"}, 120),
         ("pve2.mgmt", "POST", "/slots/2001/start",
          {"code_revision": "r7", "student_key": "main-42", "data_mode": "rw",
-          "actions": ["init_slot", "start_slot_service"]}, 330),
-        ("pve2.mgmt", "POST", "/slots/2001/stop", {"force": True}, 100),
+          "actions": ["init_slot", "start_slot_service"]}, 420),
+        ("pve2.mgmt", "POST", "/slots/2001/stop", {"force": True}, 130),
     ]
     await agent.close()
 

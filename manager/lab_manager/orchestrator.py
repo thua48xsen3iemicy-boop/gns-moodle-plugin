@@ -12,7 +12,8 @@ stored in the database. Nothing is deleted or recreated "just in case".
     queued         wait_slot        placement over free slots and node memory, allocation
     starting       ct_prepare       CT stopped (agent), sized to the lab (Proxmox config)
     starting       student_dir      agent: PUT /students/<key> (idempotent, mapped gns3 owner)
-    starting       ct_start         agent: mounts (code mp0, student mp1) + pct start + guest actions
+    starting       ct_start         agent: mounts (code mp0, student mp1) + pct start + guest actions;
+                                    both mounts then verified exactly from the Proxmox config
     starting       slot_ready       /healthz and /v1/readyz of Lab Slot
     starting       lab_submit       deploy with Idempotency-Key (same project_id when resuming)
     starting       lab_wait         operation polling: DEPLOYING/STARTING/PROVISIONING
@@ -20,7 +21,8 @@ stored in the database. Nothing is deleted or recreated "just in case".
     stopping       lab_stop         slot stop with Idempotency-Key
     stopping       lab_stop_wait    operation polling: STOPPING -> STOPPED
     stopping       ct_stop          agent: pct shutdown (pct stop only as last resort)
-    stopping       ct_park          agent: placeholder mounted read-only instead of the student dir
+    stopping       ct_park          agent: placeholder mounted read-only instead of the student dir;
+                                    verified, otherwise the slot goes to maintenance (never free)
     stopped/failed                  terminal; failed keeps the slot 'failed' for the operator
 """
 
@@ -297,8 +299,9 @@ class Orchestrator:
     async def placement(self, s) -> list[tuple[int, str]]:
         """Free slots that fit the lab, best fit first (least memory left on the node).
 
-        Node usage comes from /cluster/resources; slots already handed out but whose CT is not
-        running yet are subtracted too, otherwise two labs could be placed on the same room.
+        Node usage comes from /cluster/resources. For every slot already handed out, the part of
+        its promised memory that the CT does not use yet is subtracted too, otherwise two labs
+        could be placed on the same room while the first one is still starting.
         """
         free = await self.store.free_slots()
         if not free:
@@ -309,8 +312,10 @@ class Orchestrator:
         reserved = defaultdict(int)
         for r in await self.store.reservations():
             ct = cts.get(r["slot_vmid"])
-            if ct and ct.get("status") != "running":
-                reserved[ct["node"]] += self._need_mb(r["resources"]) * MIB or int(ct.get("maxmem") or 0)
+            if ct:
+                # Promised memory not yet in use: a starting GNS3 grows to its limit later.
+                promised = self._need_mb(r["resources"]) * MIB or int(ct.get("maxmem") or 0)
+                reserved[ct["node"]] += max(0, promised - int(ct.get("mem") or 0))
         need = self._need_mb(s["resources"]) * MIB
         reserve = self.settings.node_memory_reserve_mb * MIB
         fitting = []
@@ -398,12 +403,24 @@ class Orchestrator:
             raise Failure("Proxmox не применил ресурсы слота", "CT_SIZE_NOT_APPLIED")
         await self.store.event(s["id"], vmid, "ct_sized", wanted)
 
-    def _check_student_mount(self, config, key):
-        """mp1 must be this student's directory, writable. Never run a lab on someone else's."""
-        value = str(config.get("mp1", ""))
-        source, _, options = value.partition(",")
+    @staticmethod
+    def _mount(config, key):
+        source, _, options = str(config.get(key, "")).partition(",")
         opts = dict(o.split("=", 1) for o in options.split(",") if "=" in o)
-        return source.rstrip("/").endswith(f"/students/{key}") and opts.get("ro", "0") in ("0", "")
+        return source.rstrip("/"), opts
+
+    def mounts_ok(self, config, student_key, *, read_only):
+        """Exact agent mount contract: code at /srv/gns3-ro/slot RO, student dir at
+        /opt/gns3/projects. A matching suffix under another root is not accepted."""
+        root = self.settings.agent_ceph_root
+        rev = self.settings.slot_code_revision
+        code_src, code = self._mount(config, "mp0")
+        data_src, data = self._mount(config, "mp1")
+        ro = "1" if read_only else "0"
+        return (code_src == (f"{root}/slot/{rev}" if rev else f"{root}/slot")
+                and code.get("mp") == "/srv/gns3-ro/slot" and code.get("ro") == "1"
+                and data_src == f"{root}/students/{student_key}"
+                and data.get("mp") == "/opt/gns3/projects" and data.get("ro", "0") == ro)
 
     async def _stage_ct_start(self, s):
         if s["stop_requested"]:
@@ -421,17 +438,22 @@ class Orchestrator:
             except (AgentBusy, AgentNotStopped, AgentUncertain):
                 raise Wait() from None  # Re-read the real state on the next tick
             except AgentSourceMissing as exc:
-                # The agent checks paths before touching the CT: the slot itself is fine.
-                raise Failure("Каталог студента на CephFS не создан; обратитесь к администратору",
-                              "STUDENT_DIR_MISSING", slot_state="free") from exc
+                # The agent re-checks sources after `pct set`: mounts may already be changed, so
+                # the slot is released only through stop + verified park, never directly.
+                error = {"code": "STUDENT_DIR_MISSING", "stage": "ct_start",
+                         "message": "Каталог студента на CephFS не найден; обратитесь к администратору"}
+                await self.store.update_session(s, error=error, event=("start_source_missing",
+                                                                        {"detail": exc.message[:200]}))
+                return await self._goto(s, "ct_stop", "Остановка…", status="stopping", slot_state="releasing")
             except AgentCommandFailed as exc:
                 raise Failure(f"Агент не смог запустить слот: {exc.message}", "SLOT_START_FAILED") from exc
             await self.store.event(s["id"], vmid, "ct_started",
                                    {"node": node, "actions": result.get("completed_actions")})
         # Running: our own start (the slot is ours since allocation) or one interrupted by a
         # restart. Either way confirm the student mount from the Proxmox config first.
-        if not self._check_student_mount(await self.pve.ct_config(vmid), key):
-            raise Failure("У запущенного слота подключён не тот каталог студента", "WRONG_STUDENT_MOUNT")
+        if not self.mounts_ok(await self.pve.ct_config(vmid), key, read_only=False):
+            raise Failure("У запущенного слота точки монтирования не совпадают с ожидаемыми",
+                          "WRONG_STUDENT_MOUNT")
         return await self._goto(s, "slot_ready", "Ожидание готовности слота…")
 
     async def _stage_slot_ready(self, s):
@@ -611,7 +633,8 @@ class Orchestrator:
                 try:
                     result = await self.agent.stop(node, vmid, force=False)
                 except AgentCommandFailed:
-                    result = {"state": "running"}
+                    # Re-read before escalating: the shutdown may have completed anyway.
+                    result = {"state": await self.agent.status(node, vmid)}
                 if result.get("state") != "stopped":
                     # Shutdown did not finish: pct stop is the last resort.
                     await self.store.event(s["id"], vmid, "ct_hard_stop", {"node": node})
@@ -624,8 +647,10 @@ class Orchestrator:
         return await self._goto(s, "ct_park", "Освобождение слота…")
 
     async def _stage_ct_park(self, s):
-        """Replace the student mount so a manual start of the free slot shows nobody's data."""
+        """Replace the student mount, then release. The slot becomes free only when the
+        placeholder is confirmed in the Proxmox config; otherwise it goes to maintenance."""
         key = self.settings.placeholder_student_key
+        slot_state, slot_message = "free", ""
         if key:
             vmid, node = s["slot_vmid"], await self._node(s)
             try:
@@ -634,11 +659,19 @@ class Orchestrator:
             except (AgentBusy, AgentUncertain, AgentNotStopped):
                 raise Wait() from None
             except (AgentRejected, AgentCommandFailed) as exc:
-                # Not fatal: the CT is stopped and the next start replaces the mounts anyway.
                 await self.store.event(s["id"], vmid, "park_failed", {"error": exc.message[:200]})
-        reason = s["stop_reason"] or "user"
-        message = "Время лабы истекло" if reason == "maxduration" else "Лаба остановлена"
-        await self.store.finish_session(s, status="stopped", message=message)
+            if not self.mounts_ok(await self.pve.ct_config(vmid), key, read_only=True):
+                # Last student's directory may still be configured: no automatic reuse.
+                slot_state, slot_message = "maintenance", f"session {s['id']}: placeholder not confirmed"
+                log.error("Session %s: slot %s not parked; maintenance", s["id"], vmid)
+        if s["error"]:
+            await self.store.finish_session(s, status="failed", message=s["error"]["message"], error=s["error"],
+                                            slot_state=slot_state, slot_message=slot_message)
+        else:
+            reason = s["stop_reason"] or "user"
+            message = "Время лабы истекло" if reason == "maxduration" else "Лаба остановлена"
+            await self.store.finish_session(s, status="stopped", message=message,
+                                            slot_state=slot_state, slot_message=slot_message)
         self._health_checked.pop(s["id"], None)
         return False
 

@@ -74,7 +74,8 @@ def test_short_secret_rejected_without_leaking_it(env, tmp_path):
                                        ("AGENT_URL_TEMPLATE", "http://{node}:8443"),
                                        ("AGENT_URL_TEMPLATE", "https://agent:8443"),
                                        ("AGENT_START_ACTIONS", "rm_rf"), ("SLOT_CODE_REVISION", "../x"),
-                                       ("PLACEHOLDER_STUDENT_KEY", "a/b"), ("LAB_PERSISTENCE", "pinned")])
+                                       ("PLACEHOLDER_STUDENT_KEY", "a/b"), ("LAB_PERSISTENCE", "pinned"),
+                                       ("LAB_CEPH_ROOT", "/mnt/../etc"), ("AGENT_START_TIMEOUT", "330")])
 def test_invalid_values(env, key, value):
     env[key] = value
     with pytest.raises(ConfigError):

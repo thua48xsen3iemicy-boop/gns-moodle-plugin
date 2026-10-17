@@ -66,7 +66,8 @@ class Services:
         self.agent = AgentClient(
             settings.agent_url_template, ca_file=settings.agent_ca_file, cert_file=settings.agent_cert_file,
             key_file=settings.agent_key_file, timeout=settings.agent_timeout,
-            start_timeout=settings.agent_start_timeout, stop_timeout=settings.agent_stop_timeout,
+            start_timeout=settings.agent_start_timeout, mounts_timeout=settings.agent_mounts_timeout,
+            stop_timeout=settings.agent_stop_timeout,
             transport=agent_transport,
         )
         self.slots = {

@@ -45,7 +45,8 @@ async def test_full_cycle_order(tmp_path, dsn):
         assert ("agent:student", "main-42") in env.timeline
         config = env.pve.cts[201]["config"]
         assert config["cores"] == "8" and config["memory"] == "16384"  # Sized to the lab
-        assert config["mp1"] == "/mnt/pve/data/students/main-42,mp=/srv/student,ro=0,shared=1"
+        assert config["mp1"] == "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"
+        assert config["mp0"] == "/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1"
         start_req = [r for r in env.agent.requests if r[2].endswith("/start")][0]
         assert start_req[3] == {"code_revision": None, "student_key": "main-42", "data_mode": "rw",
                                 "actions": ["init_slot"]}
@@ -62,7 +63,7 @@ async def test_full_cycle_order(tmp_path, dsn):
         assert s["status"] == "stopped"
         assert env.timeline == [("slot:stop", "10.0.0.1"), ("agent:stop", "shutdown"),
                                 ("agent:mounts", "placeholder", "ro")]
-        assert "students/placeholder,mp=/srv/student,ro=1" in env.pve.cts[201]["config"]["mp1"]
+        assert "students/placeholder,mp=/opt/gns3/projects,ro=1" in env.pve.cts[201]["config"]["mp1"]
         slot = await env.services.store.slot(201)
         assert slot["state"] == "free" and slot["session_id"] is None
 
@@ -248,7 +249,26 @@ async def test_restart_of_manager_mid_start(tmp_path, dsn):
         assert names(env.timeline).count("slot:deploy") == 1
 
 
-async def test_running_ct_with_foreign_mount_is_never_used(tmp_path, dsn):
+@pytest.mark.parametrize("mp0,mp1", [
+    # Another student's directory.
+    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/pve/data/students/main-7,mp=/opt/gns3/projects,ro=0,shared=1"),
+    # Right suffix under a foreign root.
+    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/other/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
+    # Right source, wrong destination.
+    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/pve/data/students/main-42,mp=/srv/student,ro=0,shared=1"),
+    # Read-only student directory.
+    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=1,shared=1"),
+    # Code at the old /opt/slot, or writable code.
+    ("/mnt/pve/data/slot,mp=/opt/slot,ro=1,shared=1",
+     "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
+    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=0,shared=1",
+     "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
+])
+async def test_running_ct_with_unexpected_mounts_is_never_used(tmp_path, dsn, mp0, mp1):
     async with make_env(tmp_path, dsn) as env:
         sid = await start(env)
         await env.orch.step(await session(env, sid))  # Only the allocation step
@@ -256,7 +276,7 @@ async def test_running_ct_with_foreign_mount_is_never_used(tmp_path, dsn):
         assert s["stage"] == "ct_prepare"
         await env.services.store.update_session(s, stage="ct_start")
         env.pve.cts[201]["status"] = "running"
-        env.pve.cts[201]["config"]["mp1"] = "/mnt/pve/data/students/main-7,mp=/srv/student,ro=0,shared=1"
+        env.pve.cts[201]["config"].update(mp0=mp0, mp1=mp1)
         await env.run()
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "WRONG_STUDENT_MOUNT"
@@ -314,6 +334,35 @@ async def test_student_dir_not_configured_on_agent_waits(tmp_path, dsn):
         assert (await session(env, sid))["status"] == "running"
 
 
+async def test_failed_park_puts_slot_into_maintenance(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await env.run()
+        env.agent.park_fails = True
+        await stop(env, sid)
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "stopped"  # For the student the lab did stop
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "maintenance"  # The last student's directory is still configured
+        assert "students/main-42," in env.pve.cts[201]["config"]["mp1"]
+        other = await start(env, user_id=7)
+        await env.run(3)
+        assert (await session(env, other))["status"] == "queued"  # Never handed out unparked
+
+
+async def test_shutdown_error_is_rechecked_before_force(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        sid = await start(env)
+        await env.run()
+        env.agent.shutdown_fails_but_stops = True
+        env.timeline.clear()
+        await stop(env, sid)
+        await env.run()
+        assert (await session(env, sid))["status"] == "stopped"
+        assert ("agent:stop", "force") not in env.timeline
+
+
 @pytest.mark.parametrize("error_codes", [False, True])
 async def test_missing_student_dir_fails_session_but_frees_slot(tmp_path, dsn, error_codes):
     async with make_env(tmp_path, dsn, vmids=(201,)) as env:
@@ -324,7 +373,8 @@ async def test_missing_student_dir_fails_session_but_frees_slot(tmp_path, dsn, e
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "STUDENT_DIR_MISSING"
         assert env.pve.cts[201]["status"] == "stopped"
-        assert (await env.services.store.slot(201))["state"] == "free"  # The slot itself is fine
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]  # Parked before release
+        assert (await env.services.store.slot(201))["state"] == "free"
         other = await start(env, user_id=7)
         await env.run()
         assert (await session(env, other))["status"] == "running"
@@ -454,3 +504,21 @@ async def test_proxmox_unavailable_keeps_session_queued(tmp_path, dsn):
         env.services.pve._down_until.clear()
         await env.run()
         assert (await session(env, sid))["status"] == "running"
+
+
+async def test_running_slot_keeps_its_unused_promised_memory_reserved(tmp_path, dsn):
+    nodes = {201: "pve2", 202: "pve2", 203: "pve1"}
+    async with make_env(tmp_path, dsn, vmids=(201, 202, 203), nodes_of=nodes, node_memory_reserve_mb=0) as env:
+        env.pve.node_mem["pve1"]["mem"] = 64 * GIB - 40 * GIB  # 40 GiB free
+        env.pve.node_mem["pve2"]["mem"] = 64 * GIB - 30 * GIB  # 30 GiB free: best fit for the first lab
+        a = await start(env, user_id=1)
+        await env.run()
+        assert (await session(env, a))["slot_vmid"] in (201, 202)
+        # CT running but GNS3 devices use only 2 GiB so far; node usage shows those 2 GiB.
+        vmid = (await session(env, a))["slot_vmid"]
+        env.pve.cts[vmid]["mem"] = 2 * GIB
+        env.pve.node_mem["pve2"]["mem"] += 2 * GIB
+        b = await start(env, user_id=2)
+        await env.run(1)
+        # pve2: 28 GiB free minus 14 GiB still promised to the first lab -> 14 GiB < 16 GiB.
+        assert (await session(env, b))["slot_vmid"] == 203

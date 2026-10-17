@@ -90,13 +90,14 @@ class Settings:
     pve_token_id: str
     pve_token_secret: str = field(repr=False)
     pve_ca_file: Path
-    agent_url_template: str  # e.g. https://{node}.mgmt:8443, {node} = Proxmox node name
+    agent_url_template: str  # e.g. https://{node}.lab.local:8443, {node} = Proxmox node name
     agent_ca_file: Path
     agent_cert_file: Path
     agent_key_file: Path = field(repr=False)
     gateway_internal_url: str
     gateway_internal_key: str = field(repr=False)
     gateway_public_url: str
+    agent_ceph_root: str = "/mnt/pve/data"  # LAB_CEPH_ROOT of the agents: expected mount sources
     slot_code_revision: str | None = None  # None: shared <ceph>/slot, else <ceph>/slot/<revision>
     agent_start_actions: tuple[str, ...] = ("init_slot",)
     placeholder_student_key: str | None = None  # Mounted read-only into a released slot
@@ -106,9 +107,12 @@ class Settings:
     listen_port: int = 8090
     pve_timeout: float = 10.0
     pve_retry_after: float = 60.0
+    # Above the sum of the agent's subprocess timeouts (agent MANAGER_CONTRACT_REVIEW.md §5):
+    # start 385 s with three actions, PUT mounts 85 s, graceful stop 110 s.
     agent_timeout: float = 30.0
-    agent_start_timeout: float = 330.0  # pct start (120 s) + up to three guest actions (45 s each)
-    agent_stop_timeout: float = 100.0  # pct shutdown --timeout 60 + margin
+    agent_start_timeout: float = 420.0
+    agent_mounts_timeout: float = 120.0
+    agent_stop_timeout: float = 130.0
     slot_timeout: float = 10.0
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
@@ -124,6 +128,13 @@ def _key(env, name, default=""):
     if value and not KEY_RE.fullmatch(value):
         raise ConfigError(f"{name} must match {KEY_RE.pattern}")
     return value or None
+
+
+def _ceph_root(env):
+    value = env.get("LAB_CEPH_ROOT", "/mnt/pve/data").strip().rstrip("/")
+    if not re.fullmatch(r"(/[A-Za-z0-9_.-]+)+", value) or "/../" in value + "/" or "/./" in value + "/":
+        raise ConfigError("LAB_CEPH_ROOT must be an absolute path without '..'")
+    return value
 
 
 def load(env=None, check_mode=True) -> Settings:
@@ -188,6 +199,7 @@ def load(env=None, check_mode=True) -> Settings:
         pve_token_secret=required("PVE_TOKEN_SECRET"),
         pve_ca_file=Path(required("PVE_CA_FILE")),
         agent_url_template=template,
+        agent_ceph_root=_ceph_root(env),
         agent_ca_file=Path(required("AGENT_CA_FILE")),
         agent_cert_file=Path(required("AGENT_CERT_FILE")),
         agent_key_file=Path(required("AGENT_KEY_FILE")),
@@ -204,8 +216,9 @@ def load(env=None, check_mode=True) -> Settings:
         pve_timeout=_int(env, "PVE_TIMEOUT", 10, 1, 300),
         pve_retry_after=_int(env, "PVE_RETRY_AFTER", 60, 1, 3600),
         agent_timeout=_int(env, "AGENT_TIMEOUT", 30, 5, 300),
-        agent_start_timeout=_int(env, "AGENT_START_TIMEOUT", 330, 60, 1800),
-        agent_stop_timeout=_int(env, "AGENT_STOP_TIMEOUT", 100, 70, 900),
+        agent_start_timeout=_int(env, "AGENT_START_TIMEOUT", 420, 400, 3600),
+        agent_mounts_timeout=_int(env, "AGENT_MOUNTS_TIMEOUT", 120, 90, 900),
+        agent_stop_timeout=_int(env, "AGENT_STOP_TIMEOUT", 130, 120, 900),
         slot_timeout=_int(env, "SLOT_TIMEOUT", 10, 1, 300),
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),

@@ -46,7 +46,8 @@ class AgentRejected(AgentError):
 
 
 class AgentSourceMissing(AgentRejected):
-    """The student (or code) directory is not provisioned; the CT was not touched."""
+    """The student (or code) directory is missing. During start the agent re-checks sources
+    after `pct set`, so the CT mounts may already be changed: re-check before reuse."""
 
 
 class AgentWrongNode(AgentError):
@@ -117,11 +118,13 @@ def _classify(resp: httpx.Response) -> AgentError:
 
 class AgentClient:
     def __init__(self, url_template: str, *, ca_file=None, cert_file=None, key_file=None,
-                 timeout: float = 30.0, start_timeout: float = 330.0, stop_timeout: float = 100.0,
+                 timeout: float = 30.0, start_timeout: float = 420.0, mounts_timeout: float = 120.0,
+                 stop_timeout: float = 130.0,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.url_template = url_template
         self.timeout = timeout
         self.start_timeout = start_timeout
+        self.mounts_timeout = mounts_timeout
         self.stop_timeout = stop_timeout
         if transport is None:
             # mTLS: the agent authenticates the manager by its client certificate.
@@ -176,7 +179,7 @@ class AgentClient:
     async def set_mounts(self, node, vmid, *, student_key, code_revision=None, data_mode="rw"):
         return await self._call("PUT", node, f"/slots/{vmid}/mounts",
                                 json=self.mounts_body(student_key, code_revision, data_mode),
-                                mutating=True)
+                                timeout=self.mounts_timeout, mutating=True)
 
     async def start(self, node, vmid, *, student_key, code_revision=None, data_mode="rw", actions=()):
         body = dict(self.mounts_body(student_key, code_revision, data_mode), actions=list(actions))
@@ -185,7 +188,8 @@ class AgentClient:
 
     async def ensure_student(self, node: str, student_key: str) -> dict:
         """Idempotent: creates the student directory or confirms it; never touches contents."""
-        body = await self._call("PUT", node, f"/students/{student_key}", mutating=True)
+        body = await self._call("PUT", node, f"/students/{student_key}", timeout=self.mounts_timeout,
+                                mutating=True)
         if body.get("ready") is not True or body.get("student_key") != student_key:
             raise AgentUncertain(200, "Unexpected student provisioning response")
         return body

@@ -112,16 +112,18 @@ Uvicorn работает в один процесс: оркестратор жи
 | Переменная | Смысл |
 |---|---|
 | `DATABASE_URL` | `postgresql:///lab_manager` (сокет, peer) |
-| `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`), `secret` (Bearer) |
+| `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`; **после появления данных не меняется**: новый slug — это новые каталоги студентов), `secret` (Bearer) |
 | `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token` |
 | `LABS_DIR` | каталог лаб; `meta.json` может задавать `resources: {cores, memory_mb}` |
 | `PVE_NODES`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_FILE` | точки входа API, токен, CA кластера |
 | `AGENT_URL_TEMPLATE` | `https://{node}.lab.local:8443`; `{node}` — имя узла Proxmox, хост — как в SAN сертификата агента |
 | `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | `node-server-ca.crt`, `manager.crt`, `manager.key` |
+| `LAB_CEPH_ROOT` | тот же, что у агентов (`/mnt/pve/data`): по нему менеджер точно сверяет источники `mp0`/`mp1` |
+| `AGENT_START_TIMEOUT`, `AGENT_MOUNTS_TIMEOUT`, `AGENT_STOP_TIMEOUT` | 420/120/130 с — больше сумм таймаутов внутри агента |
 | `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
 | `SLOT_CODE_REVISION` | пусто: общий `<ceph>/slot`; иначе `<ceph>/slot/<revision>` |
 | `PLACEHOLDER_STUDENT_KEY` | что монтировать RO в освобождённый слот (`placeholder`; пусто — не перемонтировать) |
-| `LAB_PERSISTENCE` | `fresh` (новый проект в каждой сессии) или `resume` (тот же проект; когда слот будет хранить состояние в `/srv/student`, DESIGN §6.1) |
+| `LAB_PERSISTENCE` | `fresh` (новый проект в каждой сессии) или `resume` (тот же проект; когда слот научится переносить состояние лабы — `student-state`, DESIGN §6.1) |
 | `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении |
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
 | `DEFAULT_MAX_DURATION` | длительность сессии, минуты |
@@ -183,6 +185,7 @@ DATABASE_URL=postgresql:///lab_manager_test /tmp/lm-venv/bin/python -m pytest -q
 **Внимание:** `DATABASE_URL` для тестов — только одноразовая база. Тесты пересоздают её схему `public`.
 
 Proxmox, агент узла, Lab Slot и шлюз подменяются через `httpx.MockTransport` (`tests/fakes.py`).
+Ответы на ревью разработчика агента и что по ним исправлено — [`docs/AGENT_REVIEW_ANSWERS.md`](docs/AGENT_REVIEW_ANSWERS.md).
 Что проверено тестами:
 - перебор нод Proxmox: первая не отвечает → вторая; последняя рабочая — первой; 4xx и 500 не
   переключают; 503 на GET переключает; изменяющий запрос с неизвестным исходом не повторяется;
@@ -191,6 +194,8 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 - агент: формат запросов и таймауты, разбор всех ошибок `agent.py` (403/404/409×3/422/503/504)
   и кодов ошибок из `AGENT_REQUESTS.md` §2;
   клиент вручную прогнан против настоящего `agent.py` из ветки (с подменённым `pct`);
+- точная сверка `mp0`/`mp1` (чужой root, неверная цель, RO/RW); неудачная парковка → `maintenance`;
+  резерв памяти запущенного, но ещё не развернувшегося слота;
 - создание каталога студента через агента (`PUT /students/<key>`): порядок, ожидание при 409/503,
   тайм-аут без порчи слота; клиент прогнан против настоящего `ensure_student` на временной ФС;
 - порядок `stop (если CT запущен) → cores/memory → агент start (mounts + pct start) → readyz → deploy`
@@ -212,6 +217,6 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 Требует стенда (тестами не подтверждено):
 - настоящий агент: mTLS, длительность `pct start`/действий, формат `mp1` в конфиге CT после `pct set`;
 - реальный PVE: права токена из §5, `/cluster/resources` с узлами, применение `cores`/`memory`;
-- CephFS: владелец каталога студента (uid `gns3` слота), запись в `/srv/student` из слота;
+- CephFS: владелец каталога студента (uid `gns3` слота), запись в `/opt/gns3/projects` из слота; `.slot-locks` в каталоге студента (DESIGN §5);
 - настоящий Lab Slot и GNS3: длительность deploy, `readyz` после старта LXC, путь кода (DESIGN §11, В1);
 - шлюз консолей с реальными `GW_SLOTS`, systemd unit, preflight в LXC.

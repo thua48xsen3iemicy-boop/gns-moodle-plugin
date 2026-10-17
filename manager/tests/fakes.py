@@ -58,7 +58,8 @@ class FakePve:
                 del self.responses[(method, pattern)]
                 return httpx.Response(status, json=body)
         if path == "/cluster/resources":
-            data = [{"vmid": v, "type": "lxc", "node": ct["node"], "status": ct["status"], "maxmem": ct["maxmem"]}
+            data = [{"vmid": v, "type": "lxc", "node": ct["node"], "status": ct["status"], "maxmem": ct["maxmem"],
+                     "mem": ct.get("mem", 0) if ct["status"] == "running" else 0}
                     for v, ct in self.cts.items()]
             if request.url.params.get("type") != "vm":
                 data += [{"type": "node", "node": n, **m} for n, m in self.node_mem.items()]
@@ -138,6 +139,8 @@ class FakeAgent:
         self.start_fails = None  # detail text of a 409 "Proxmox command failed"
         self.lose_start_response = False  # Start happens, then the response is lost
         self.shutdown_hangs = False  # Graceful shutdown leaves the CT running
+        self.shutdown_fails_but_stops = False  # 409 from pct shutdown although the CT stopped
+        self.park_fails = False  # PUT mounts fails with a pct error
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -153,8 +156,8 @@ class FakeAgent:
             return self._err(422, "Required CephFS directory does not exist")
         code = f"{self.ceph_root}/slot" + (f"/{body['code_revision']}" if body.get("code_revision") else "")
         ro = 1 if body.get("data_mode") == "ro" else 0
-        ct["config"]["mp0"] = f"{code},mp=/srv/gns3-ro/slot,ro=1,shared=1"  # docs/AGENT_REQUESTS.md
-        ct["config"]["mp1"] = f"{self.ceph_root}/students/{key},mp=/srv/student,ro={ro},shared=1"
+        ct["config"]["mp0"] = f"{code},mp=/srv/gns3-ro/slot,ro=1,shared=1"  # agent 6a735df
+        ct["config"]["mp1"] = f"{self.ceph_root}/students/{key},mp=/opt/gns3/projects,ro={ro},shared=1"
         return None
 
     def handle(self, request: httpx.Request):
@@ -190,6 +193,8 @@ class FakeAgent:
         if action in ("mounts", "start") and ct["status"] != "stopped":
             return self._err(409, "Slot must be stopped to change mount points")
         if action == "mounts":
+            if self.park_fails:
+                return self._err(409, "Proxmox command failed: unable to apply mount points")
             err = self._mounts(ct, body)
             if err:
                 return err
@@ -214,6 +219,9 @@ class FakeAgent:
         self.timeline.append(("agent:stop", "force" if body["force"] else "shutdown"))
         if not body["force"] and self.shutdown_hangs:
             return self._err(409, "Proxmox command failed: shutdown timed out")
+        if not body["force"] and self.shutdown_fails_but_stops:
+            ct["status"] = "stopped"
+            return self._err(409, "Proxmox command failed: exit code 1")
         ct["status"] = "stopped"
         return httpx.Response(200, json={"vmid": vmid, "state": "stopped"})
 
