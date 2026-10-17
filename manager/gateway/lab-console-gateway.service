@@ -1,0 +1,29 @@
+[Unit]
+Description=Lab console gateway (browser consoles -> Lab Slot), in the manager's LXC
+Documentation=file:///srv/gns3-ro/manager/README.md
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/srv/gns3-ro/manager/gateway/console_gateway.py
+# Written by `lab-manager-admin gateway-env` (README §1.1); without it the unit does not start.
+ConditionPathExists=/etc/lab-manager/gateway.env
+
+[Service]
+Type=exec
+# The gateway faces browsers: its own throwaway user, no access to the manager's secrets
+# (Proxmox token, slot API tokens). systemd reads the env file as root before dropping privileges.
+DynamicUser=yes
+EnvironmentFile=/etc/lab-manager/gateway.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/gns3-ro/manager/venv/bin/python /srv/gns3-ro/manager/gateway/console_gateway.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+InaccessiblePaths=-/etc/lab-manager
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
