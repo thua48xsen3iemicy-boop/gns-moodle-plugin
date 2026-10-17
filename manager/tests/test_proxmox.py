@@ -62,12 +62,16 @@ async def test_4xx_does_not_switch_node():
     await pve.close()
 
 
+async def start(pve, vmid, node):
+    return await pve.request("POST", f"/nodes/{node}/lxc/{vmid}/status/start")
+
+
 async def test_application_500_is_returned_not_failed_over():
     fake = FakePve()
     fake.add_ct(201, node="pve1", status="running")
     pve = client(fake)
     with pytest.raises(PveApiError) as exc:
-        await pve.ct_start(201)
+        await start(pve, 201, "pve1")
     assert "already running" in str(exc.value)
     assert set(hosts(fake)) == {"pve1"}
     await pve.close()
@@ -114,7 +118,7 @@ async def test_all_nodes_down_raises_unavailable():
         await pve.request("GET", "/cluster/resources")
     # Even when all are marked down they are still tried (oldest failure first).
     fake.down_hosts = {"pve1", "pve2"}
-    assert await pve.request("GET", "/cluster/resources") == []
+    assert await pve.request("GET", "/cluster/resources", params={"type": "vm"}) == []
     await pve.close()
 
 
@@ -154,7 +158,7 @@ async def test_wait_task_until_stopped_ok():
     fake.add_ct(201, node="pve2")
     fake.task_polls = 3
     pve = client(fake)
-    upid = await pve.ct_start(201)
+    upid = await start(pve, 201, "pve2")
     assert upid_node(upid) == "pve2"
     status = await pve.wait_task(upid, timeout=10)
     assert status["exitstatus"] == "OK"
@@ -167,7 +171,7 @@ async def test_wait_task_failed_exitstatus():
     fake.add_ct(201, node="pve2", status="running")
     fake.exit_status["vzshutdown"] = "command 'lxc-stop -n 201 --nokill --timeout 60' failed: exit code 1"
     pve = client(fake)
-    upid = await pve.ct_shutdown(201, 60)
+    upid = await pve.request("POST", "/nodes/pve2/lxc/201/status/shutdown", data={"timeout": 60})
     with pytest.raises(PveTaskFailed) as exc:
         await pve.wait_task(upid)
     assert "exit code 1" in exc.value.exitstatus
@@ -179,7 +183,7 @@ async def test_wait_task_on_unreachable_node_is_unknown_not_success():
     fake = FakePve()
     fake.add_ct(201, node="pve2")
     pve = client(fake)
-    upid = await pve.ct_start(201)
+    upid = await start(pve, 201, "pve2")
     fake.task_node_down = {"pve2"}
     with pytest.raises(PveTaskUnknown):
         await pve.wait_task(upid)
@@ -201,7 +205,7 @@ async def test_wait_task_timeout_is_unknown():
     original = mod.asyncio.sleep
     mod.asyncio.sleep = no_sleep
     try:
-        upid = await pve.ct_start(201)
+        upid = await start(pve, 201, "pve2")
         with pytest.raises(PveTaskUnknown):
             await pve.wait_task(upid, timeout=5)
     finally:
@@ -221,11 +225,23 @@ async def test_ct_migration_is_followed():
     await pve.close()
 
 
+async def test_cluster_resources_lists_nodes_and_fills_node_cache():
+    fake = FakePve()
+    fake.add_ct(201, node="pve3")
+    pve = client(fake)
+    resources = await pve.cluster_resources()
+    assert {r["node"] for r in resources if r["type"] == "node"} == {"pve1", "pve2", "pve3"}
+    fake.requests.clear()
+    assert await pve.find_ct_node(201) == "pve3"
+    assert fake.requests == []  # Served from the cache filled by cluster_resources
+    await pve.close()
+
+
 async def test_config_put_uses_form_and_delete():
     fake = FakePve()
-    fake.add_ct(201, node="pve1", config={"hostname": "slot201", "mp0": "old"})
+    fake.add_ct(201, node="pve1", config={"hostname": "slot201", "cores": 2, "swap": 512})
     pve = client(fake)
-    await pve.ct_set_config(201, {"mp1": "/a,mp=/b"}, delete=["mp0"])
+    await pve.ct_set_config(201, {"cores": "8", "memory": "16384"}, delete=["swap"])
     config = await pve.ct_config(201)
-    assert config == {"hostname": "slot201", "mp1": "/a,mp=/b"}
+    assert config == {"hostname": "slot201", "cores": "8", "memory": "16384"}
     await pve.close()

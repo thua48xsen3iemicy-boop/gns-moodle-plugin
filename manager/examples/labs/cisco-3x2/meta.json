@@ -1,5 +1,8 @@
 {
   "title": "Три Cisco в кольце и шесть Debian",
   "description": "Пример лабы из slot/examples/cisco-3x2.json",
-  "profile": "default"
+  "resources": {
+    "cores": 8,
+    "memory_mb": 16384
+  }
 }

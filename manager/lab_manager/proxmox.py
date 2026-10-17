@@ -1,6 +1,8 @@
 """Proxmox VE API client with entry-point failover and UPID task waiting.
 
-Any cluster node proxies /nodes/{other}/... to the right node, so failover only changes
+Since the node agent (agent_client.py) does mounts, start and stop, the manager uses the
+Proxmox API for reads (where is a CT, how loaded are the nodes, what is configured) and for
+sizing a stopped CT to the lab (cores/memory). Any cluster node proxies /nodes/{other}/... to the right node, so failover only changes
 the entry point. The node that hosts a CT is looked up in /cluster/resources each time
 it is needed (CTs migrate), never stored for good.
 
@@ -175,6 +177,15 @@ class PveClient:
         raise PveUnavailable(f"No Proxmox node answered ({last_error})")
 
     # ------------------------------------------------------------------ cluster
+    async def cluster_resources(self) -> list[dict]:
+        """Nodes and guests in one call; also refreshes the CT -> node cache."""
+        resources = await self.request("GET", "/cluster/resources") or []
+        now = self.clock()
+        for res in resources:
+            if res.get("type") == "lxc" and "vmid" in res and "node" in res:
+                self._node_cache[res["vmid"]] = (res["node"], now)
+        return resources
+
     async def find_ct_node(self, vmid: int, *, max_age: float = 10.0) -> str:
         cached = self._node_cache.get(vmid)
         if cached and self.clock() - cached[1] < max_age:
@@ -210,7 +221,7 @@ class PveClient:
         return data or {}
 
     async def ct_set_config(self, vmid: int, values: dict, delete: list[str] | None = None):
-        """PUT config. Only for stopped CTs: mount changes are not hotplugged on purpose."""
+        """PUT config (cores/memory). Mount points are never set here: the node agent does it."""
         payload = dict(values)
         if delete:
             payload["delete"] = ",".join(delete)
@@ -218,16 +229,6 @@ class PveClient:
         if isinstance(data, str) and data.startswith("UPID:"):
             return data
         return None
-
-    async def ct_start(self, vmid: int) -> str:
-        return (await self._ct("POST", vmid, "/status/start"))[1]
-
-    async def ct_shutdown(self, vmid: int, timeout: int) -> str:
-        return (await self._ct("POST", vmid, "/status/shutdown", data={"timeout": timeout}))[1]
-
-    async def ct_stop(self, vmid: int) -> str:
-        """Last resort: a hard stop of the whole container."""
-        return (await self._ct("POST", vmid, "/status/stop"))[1]
 
     # ------------------------------------------------------------------ tasks
     async def task_status(self, upid: str) -> dict:

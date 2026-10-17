@@ -20,15 +20,12 @@ def run(env=None) -> dict:
 
     checks["pve_ca"] = {"ok": os.access(settings.pve_ca_file, os.R_OK)}
     checks["labs"] = {"ok": settings.labs_dir.is_dir() and os.access(settings.labs_dir, os.R_OK | os.X_OK)}
-    if settings.student_root is not None:
-        checks["students"] = {"ok": settings.student_root.is_dir()
-                              and os.access(settings.student_root, os.W_OK | os.X_OK)}
-    if settings.slot_mount_root is not None:
-        ok = settings.slot_mount_root.is_dir() and os.access(settings.slot_mount_root, os.W_OK | os.X_OK)
-        same_fs = ok and settings.student_root is not None and (
-            os.stat(settings.slot_mount_root).st_dev == os.stat(settings.student_root).st_dev)
-        # rename(2) between the two trees only works inside one mount (otherwise EXDEV).
-        checks["slot_mounts"] = {"ok": bool(ok and same_fs), "same_filesystem": bool(same_fs)}
+    checks["agent_tls"] = {"ok": all(os.access(p, os.R_OK) for p in (
+        settings.agent_ca_file, settings.agent_cert_file, settings.agent_key_file))}
+    checks["students"] = {"ok": settings.student_root.is_dir()
+                          and os.access(settings.student_root, os.W_OK | os.X_OK)}
+    if settings.placeholder_student_key:
+        checks["placeholder"] = {"ok": (settings.student_root / settings.placeholder_student_key).is_dir()}
     try:
         with psycopg.connect(settings.database_url, connect_timeout=5) as conn:
             exists = conn.execute("SELECT to_regclass('schema_migrations') IS NOT NULL").fetchone()[0]

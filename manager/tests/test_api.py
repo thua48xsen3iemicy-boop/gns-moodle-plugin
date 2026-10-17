@@ -68,7 +68,7 @@ async def test_session_lifecycle_contract(tmp_path, dsn):
         running = r.json()
         assert running["status"] == "running"
         assert running["started_at"].endswith("Z") and running["expires_at"].endswith("Z")
-        assert running["topology"]["name"] == "cisco-3x2-w1"
+        assert running["topology"]["name"] == f"cisco-3x2-{s['session_id']}"
         assert set(running["topology"]["topology"]) == {"nodes", "links", "drawings"}
         node_ids = {n["node_id"] for n in running["topology"]["topology"]["nodes"]}
         assert set(running["nodes"]) == node_ids
@@ -137,8 +137,8 @@ async def test_console_tickets(tmp_path, dsn):
                                   json={"node_id": node_id, "readonly": True, "issued_for_user_id": 9})
         assert r.status_code == 200
         assert r.json() == {"ticket": "t-1", "gateway_url": "wss://gateway.example.edu", "expires_in": 30}
-        ws = await env.services.store.workspace((await env.services.store.session(sid))["workspace_id"])
-        assert env.gateway.requests == [{"slot": "10.0.0.1", "project_id": str(ws["project_id"]),
+        pid = (await env.services.store.session(sid))["project_id"]
+        assert env.gateway.requests == [{"slot": "10.0.0.1", "project_id": str(pid),
                                          "nodes": [node_id], "readonly": True, "who": f"{sid}:observer"}]
 
 

@@ -1,11 +1,11 @@
 -- Lab Manager schema v1. Applied once by `python -m lab_manager.admin migrate`.
 
--- Lab Slot LXCs. Static fields come from MANAGER_SLOTS_FILE; tokens never stored here.
+-- Lab Slot LXCs: interchangeable executors, never bound to a student.
+-- Static fields come from MANAGER_SLOTS_FILE; tokens are never stored here.
 CREATE TABLE slots (
     vmid          integer PRIMARY KEY,
     address       text NOT NULL UNIQUE,
     port          integer NOT NULL DEFAULT 8080,
-    profile       text NOT NULL DEFAULT 'default',
     state         text NOT NULL DEFAULT 'maintenance'
                   CHECK (state IN ('free', 'preparing', 'ready', 'busy', 'releasing', 'failed', 'maintenance')),
     -- Fencing token: bumped on every allocation and release. A worker holding an older
@@ -17,18 +17,18 @@ CREATE TABLE slots (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
--- A student's persistent copy of one lab. Pinned to the slot that holds its GNS3 project
--- (slot state is local to the LXC; cold resume in another slot is not supported).
+-- A student's persistent copy of one lab (LAB_PERSISTENCE=resume): the same project_id and
+-- the exact DeployTicket are reused on whichever slot runs the next session.
 CREATE TABLE workspaces (
     id           bigserial PRIMARY KEY,
     site         text NOT NULL,    -- Site slug from MANAGER_SITES_FILE
     user_id      bigint NOT NULL,
     instance_id  bigint NOT NULL,
     lab_ref      text NOT NULL,
-    slot_vmid    integer REFERENCES slots (vmid),
     project_id   uuid NOT NULL UNIQUE,
     project_name text NOT NULL,
-    deployed     boolean NOT NULL DEFAULT false,  -- a deploy reached READY once: use resume
+    ticket       jsonb,            -- DeployTicket of the first deploy, replayed unchanged
+    deployed     boolean NOT NULL DEFAULT false,
     created_at   timestamptz NOT NULL DEFAULT now(),
     UNIQUE (site, user_id, instance_id, lab_ref)
 );
@@ -41,6 +41,11 @@ CREATE TABLE sessions (
     course_id       bigint,
     lab_ref         text NOT NULL,
     workspace_id    bigint NOT NULL REFERENCES workspaces (id),
+    student_key     text NOT NULL,   -- Directory name under students/ (node agent student_key)
+    project_id      uuid NOT NULL,   -- GNS3 project of this session (per session in fresh mode)
+    project_name    text NOT NULL,
+    resources       jsonb,           -- Lab requirements used for placement and CT sizing
+    slot_node       text,            -- Proxmox node of the slot at allocation (placement)
     status          text NOT NULL
                     CHECK (status IN ('queued', 'starting', 'running', 'stopping', 'stopped', 'failed')),
     stage           text NOT NULL,   -- Internal step of the orchestrator, see orchestrator.py
@@ -48,7 +53,7 @@ CREATE TABLE sessions (
     error           jsonb,
     slot_vmid       integer REFERENCES slots (vmid),
     slot_generation bigint,
-    pve_upid        text,            -- Proxmox task in flight for this session
+    pve_upid        text,            -- Proxmox task in flight for this session (config change)
     stop_requested  boolean NOT NULL DEFAULT false,
     stop_reason     text,
     max_duration    integer NOT NULL,  -- Minutes

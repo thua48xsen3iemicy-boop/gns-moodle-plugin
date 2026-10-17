@@ -1,39 +1,46 @@
-"""Session state machine: slot allocation, CT preparation, mount, start, deploy, stop, release.
+"""Session state machine: placement, CT preparation, start via the node agent, deploy, stop.
 
-Every stage is re-entrant: it first reads the real state (Proxmox, filesystem, slot) and
-only then acts, so after a manager restart the loop simply continues from the stage
+Slots are interchangeable executors. A session gets any free slot whose Proxmox node has
+room for the lab (best fit, so slots pack densely onto nodes); the next session of the same
+student may run on another slot and another node.
+
+Every stage is re-entrant: it first reads the real state (node agent, Proxmox config, Lab
+Slot) and only then acts, so after a manager restart the loop continues from the stage
 stored in the database. Nothing is deleted or recreated "just in case".
 
     plugin status  stage            what happens
-    queued         wait_slot        waiting for a free slot (or the student's pinned slot)
-    starting       ct_prepare       CT must be stopped before the mount changes
-    starting       mount            student work/ -> slot bind source (or mpN via Proxmox)
-    starting       ct_start         Proxmox start, UPID awaited
+    queued         wait_slot        placement over free slots and node memory, allocation
+    starting       ct_prepare       CT stopped (agent), sized to the lab (Proxmox config), student dir
+    starting       ct_start         agent: mounts (code mp0, student mp1) + pct start + guest actions
     starting       slot_ready       /healthz and /v1/readyz of Lab Slot
-    starting       lab_submit       deploy (first time) or resume, with Idempotency-Key
+    starting       lab_submit       deploy with Idempotency-Key (same project_id when resuming)
     starting       lab_wait         operation polling: DEPLOYING/STARTING/PROVISIONING
     running        ready            slot READY; maxduration and slot health watched
     stopping       lab_stop         slot stop with Idempotency-Key
     stopping       lab_stop_wait    operation polling: STOPPING -> STOPPED
-    stopping       ct_shutdown      Proxmox shutdown (hard stop only as last resort)
-    stopping       unmount          student work/ back home; slot placeholder restored
+    stopping       ct_stop          agent: pct shutdown (pct stop only as last resort)
+    stopping       ct_park          agent: placeholder mounted read-only instead of the student dir
     stopped/failed                  terminal; failed keeps the slot 'failed' for the operator
 """
 
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import psycopg
 
+from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentRejected,
+                           AgentUncertain, AgentWrongNode)
 from .labs import LabError, deploy_ticket
-from .proxmox import PveApiError, PveError, PveTaskFailed, PveTaskUnknown, PveUncertain
+from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotUnavailable
 from .storage import StorageError
 from .store import Fenced
 
 log = logging.getLogger("lab_manager.orchestrator")
+MIB = 1024 * 1024
 
 NODE_KEYS = ("node_id", "name", "node_type", "x", "y", "z", "width", "height", "symbol",
              "label", "console_type", "status", "ports", "locked")
@@ -97,10 +104,11 @@ def node_states(topology: dict) -> dict:
 
 
 class Orchestrator:
-    def __init__(self, settings, store, pve, slot_clients, catalog, storage, *, sleep=asyncio.sleep):
+    def __init__(self, settings, store, pve, agent, slot_clients, catalog, storage, *, sleep=asyncio.sleep):
         self.settings = settings
         self.store = store
         self.pve = pve
+        self.agent = agent
         self.slot_clients = slot_clients  # vmid -> SlotClient
         self.catalog = catalog
         self.storage = storage
@@ -197,7 +205,13 @@ class Orchestrator:
             log.warning("Session %s stage %s: %s", s["id"], s["stage"], exc)
             await self._check_stage_timeout(s)
             return False
-        except (PveError, SlotUnavailable) as exc:
+        except AgentRejected as exc:
+            await self._fail(s, Failure(f"Агент узла отклонил запрос: {exc.message}", "AGENT_REJECTED"))
+            return False
+        except AgentWrongNode:
+            self.pve.forget_ct_node(s["slot_vmid"])  # CT migrated: look the node up again
+            return False
+        except (PveError, SlotUnavailable, AgentError) as exc:
             log.warning("Session %s stage %s: %s", s["id"], s["stage"], exc)
             await self._check_stage_timeout(s)
             return False
@@ -217,9 +231,9 @@ class Orchestrator:
         return {
             "wait_slot": None,
             "ready": None,
-            "ct_prepare": st.pve_task_timeout * 3,
-            "ct_start": st.pve_task_timeout * 3,
-            "ct_shutdown": st.pve_task_timeout * 3 + st.ct_shutdown_timeout,
+            "ct_prepare": st.agent_stop_timeout * 3,
+            "ct_start": st.agent_start_timeout * 2,
+            "ct_stop": st.agent_stop_timeout * 3,
             "slot_ready": st.slot_ready_timeout,
             "lab_wait": st.lab_op_timeout,
             "lab_stop_wait": st.lab_op_timeout,
@@ -249,6 +263,12 @@ class Orchestrator:
         )
         return True
 
+    async def _goto_stop(self, s, *, lab_may_exist=False):
+        """Stop requested while starting: stop the lab properly if it may have reached the slot."""
+        if lab_may_exist:
+            return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping", slot_state="releasing")
+        return await self._goto(s, "ct_stop", "Остановка…", status="stopping", slot_state="releasing")
+
     # ------------------------------------------------------------------ helpers
     def _slot(self, s):
         client = self.slot_clients.get(s["slot_vmid"])
@@ -256,50 +276,9 @@ class Orchestrator:
             raise Failure("Слот отсутствует в конфигурации менеджера", "SLOT_NOT_CONFIGURED")
         return client
 
-    @staticmethod
-    def _site_slug(s):
-        return s["site"]  # Sessions store the site slug, never the URL
-
-    async def _ct_ensure(self, s, want: str):
-        """Bring the CT to 'running' or 'stopped', surviving restarts and lost task nodes."""
-        vmid = s["slot_vmid"]
-        if s["pve_upid"]:
-            try:
-                await self.pve.wait_task(s["pve_upid"], timeout=self.settings.pve_task_timeout)
-            except PveTaskFailed as exc:
-                status = (await self.pve.ct_status(vmid)).get("status")
-                await self.store.update_session(s, pve_upid=None, event=("pve_task_failed", {"exit": exc.exitstatus}))
-                if status == want:
-                    return
-                if want == "stopped":
-                    return await self._ct_last_resort_stop(s)
-                raise Failure(f"Proxmox: задача завершилась ошибкой ({exc.exitstatus})", "PVE_TASK_FAILED")
-            except PveTaskUnknown:
-                # The task's node may be down: trust only the real CT state.
-                status = (await self.pve.ct_status(vmid)).get("status")
-                if status != want:
-                    raise Wait()
-            s = await self.store.update_session(s, pve_upid=None)
-        status = (await self.pve.ct_status(vmid)).get("status")
-        if status == want:
-            return
-        try:
-            if want == "running":
-                upid = await self.pve.ct_start(vmid)
-            else:
-                upid = await self.pve.ct_shutdown(vmid, self.settings.ct_shutdown_timeout)
-        except PveUncertain:
-            raise Wait()  # Next tick re-reads the CT status before acting again
-        s = await self.store.update_session(s, pve_upid=upid, event=("pve_task", {"want": want}))
-        await self._ct_ensure(s, want)
-
-    async def _ct_last_resort_stop(self, s):
-        await self.store.event(s["id"], s["slot_vmid"], "ct_hard_stop", {})
-        log.warning("Session %s: CT %s did not shut down; hard stop", s["id"], s["slot_vmid"])
-        upid = await self.pve.ct_stop(s["slot_vmid"])
-        s = await self.store.update_session(s, pve_upid=upid)
-        await self.pve.wait_task(upid, timeout=self.settings.pve_task_timeout)
-        await self.store.update_session(s, pve_upid=None)
+    async def _node(self, s) -> str:
+        """Current Proxmox node of the slot CT (it may have migrated since allocation)."""
+        return await self.pve.find_ct_node(s["slot_vmid"])
 
     def _reference_drawings(self, lab_ref):
         try:
@@ -307,69 +286,136 @@ class Orchestrator:
         except LabError:
             return []
 
-    async def _workspace(self, s):
-        return await self.store.workspace(s["workspace_id"])
+    @staticmethod
+    def _need_mb(resources):
+        return int((resources or {}).get("memory_mb") or 0)
+
+    # ------------------------------------------------------------------ placement
+    async def placement(self, s) -> list[tuple[int, str]]:
+        """Free slots that fit the lab, best fit first (least memory left on the node).
+
+        Node usage comes from /cluster/resources; slots already handed out but whose CT is not
+        running yet are subtracted too, otherwise two labs could be placed on the same room.
+        """
+        free = await self.store.free_slots()
+        if not free:
+            return []
+        resources = await self.pve.cluster_resources()
+        nodes = {r["node"]: r for r in resources if r.get("type") == "node" and r.get("status") == "online"}
+        cts = {r["vmid"]: r for r in resources if r.get("type") == "lxc"}
+        reserved = defaultdict(int)
+        for r in await self.store.reservations():
+            ct = cts.get(r["slot_vmid"])
+            if ct and ct.get("status") != "running":
+                reserved[ct["node"]] += self._need_mb(r["resources"]) * MIB or int(ct.get("maxmem") or 0)
+        need = self._need_mb(s["resources"]) * MIB
+        reserve = self.settings.node_memory_reserve_mb * MIB
+        fitting = []
+        for vmid in free:
+            ct = cts.get(vmid)
+            node = nodes.get(ct["node"]) if ct else None
+            if node is None:
+                continue  # CT unknown to the cluster or its node is offline
+            want = need or int(ct.get("maxmem") or 0)
+            room = int(node.get("maxmem", 0)) - int(node.get("mem", 0)) - reserved[ct["node"]] - reserve
+            if room >= want:
+                fitting.append((room - want, vmid, ct["node"]))
+        fitting.sort()
+        return [(vmid, node) for _, vmid, node in fitting]
 
     # ------------------------------------------------------------------ queued
     async def _stage_wait_slot(self, s):
         if s["stop_requested"]:
             await self.store.finish_session(s, status="stopped", message="Остановлено до запуска")
             return False
-        lab = self.catalog.get(s["lab_ref"])
-        vmid = await self.store.allocate_slot(s, profile=lab.profile)
-        if vmid is None:
-            ws = await self._workspace(s)
-            if ws["slot_vmid"] is not None:
-                slot = await self.store.slot(ws["slot_vmid"])
-                message = ("Ваш слот на обслуживании, ожидание оператора…"
-                           if slot["state"] in ("failed", "maintenance") or not slot["in_config"]
-                           else "Ожидание освобождения вашего слота…")
-            else:
-                message = "Ожидание свободного слота…"
-            await self.store.queued_message(s["id"], message)
+        self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
+        if not await self.store.free_slots():
+            await self.store.queued_message(s["id"], "Ожидание свободного слота…")
+            return False
+        try:
+            candidates = await self.placement(s)
+        except PveError:
+            await self.store.queued_message(s["id"], "Proxmox недоступен, ожидание…")
+            return False
+        if await self.store.allocate_slot(s, candidates) is None:
+            await self.store.queued_message(
+                s["id"], "Недостаточно ресурсов на узлах, ожидание…" if not candidates
+                else "Ожидание свободного слота…")
             return False
         return True
 
     # ------------------------------------------------------------------ starting
     async def _stage_ct_prepare(self, s):
         if s["stop_requested"]:
-            return await self._goto(s, "ct_shutdown", "Остановка…", status="stopping", slot_state="releasing")
-        if self.storage.mode != "none":
-            await self._ct_ensure(s, "stopped")  # Mount points change only on a stopped CT
-        return await self._goto(s, "mount", "Подключение каталога студента…")
-
-    async def _stage_mount(self, s):
-        if s["stop_requested"]:
-            return await self._goto(s, "ct_shutdown", "Остановка…", status="stopping", slot_state="releasing")
-        vmid, slug, uid = s["slot_vmid"], self._site_slug(s), s["user_id"]
-        if self.storage.mode != "none":
-            if (await self.pve.ct_status(vmid)).get("status") != "stopped":
-                return await self._goto(s, "ct_prepare", "Подготовка слота…")
-            self.storage.ensure_student(slug, uid)
-        if self.storage.mode == "handover":
-            self.storage.attach(vmid, slug, uid)
-        elif self.storage.mode == "pve_config":
-            wanted = self.storage.pve_mount(slug, uid)
-            key = self.storage.mp_key
-            if (await self.pve.ct_config(vmid)).get(key) != wanted[key]:
-                try:
-                    await self.pve.ct_set_config(vmid, wanted)
-                except PveUncertain:
-                    raise Wait() from None
-                if (await self.pve.ct_config(vmid)).get(key) != wanted[key]:
-                    raise Failure("Proxmox не применил точку монтирования", "MOUNT_NOT_APPLIED")
-        await self.store.event(s["id"], vmid, "student_mounted", {"mode": self.storage.mode})
+            return await self._goto_stop(s)
+        vmid, node = s["slot_vmid"], await self._node(s)
+        try:
+            state = await self.agent.status(node, vmid)
+        except AgentBusy:
+            raise Wait() from None
+        if state == "running":
+            # A free slot should be stopped; mounts change only on a stopped CT.
+            await self.agent.stop(node, vmid, force=False)
+            raise Wait("Остановка слота перед запуском…")
+        lab = self.catalog.get(s["lab_ref"])
+        if lab.resources:
+            await self._size_ct(s, lab.resources)
+        self.storage.ensure_student(s["student_key"])
         return await self._goto(s, "ct_start", "Запуск контейнера слота…")
+
+    async def _size_ct(self, s, resources):
+        vmid = s["slot_vmid"]
+        wanted = {}
+        if "cores" in resources:
+            wanted["cores"] = str(resources["cores"])
+        if "memory_mb" in resources:
+            wanted["memory"] = str(resources["memory_mb"])
+        config = await self.pve.ct_config(vmid)
+        if all(str(config.get(k)) == v for k, v in wanted.items()):
+            return
+        upid = await self.pve.ct_set_config(vmid, wanted)
+        if upid:
+            await self.pve.wait_task(upid, timeout=60)
+        config = await self.pve.ct_config(vmid)
+        if not all(str(config.get(k)) == v for k, v in wanted.items()):
+            raise Failure("Proxmox не применил ресурсы слота", "CT_SIZE_NOT_APPLIED")
+        await self.store.event(s["id"], vmid, "ct_sized", wanted)
+
+    def _check_student_mount(self, config, key):
+        """mp1 must be this student's directory, writable. Never run a lab on someone else's."""
+        value = str(config.get("mp1", ""))
+        source, _, options = value.partition(",")
+        opts = dict(o.split("=", 1) for o in options.split(",") if "=" in o)
+        return source.rstrip("/").endswith(f"/students/{key}") and opts.get("ro", "0") in ("0", "")
 
     async def _stage_ct_start(self, s):
         if s["stop_requested"]:
-            return await self._goto(s, "ct_shutdown", "Остановка…", status="stopping", slot_state="releasing")
-        await self._ct_ensure(s, "running")
+            return await self._goto_stop(s)
+        vmid, node, key = s["slot_vmid"], await self._node(s), s["student_key"]
+        try:
+            state = await self.agent.status(node, vmid)
+        except AgentBusy:
+            raise Wait() from None
+        if state == "stopped":
+            try:
+                result = await self.agent.start(
+                    node, vmid, student_key=key, code_revision=self.settings.slot_code_revision,
+                    actions=self.settings.agent_start_actions)
+            except (AgentBusy, AgentNotStopped, AgentUncertain):
+                raise Wait() from None  # Re-read the real state on the next tick
+            except AgentCommandFailed as exc:
+                raise Failure(f"Агент не смог запустить слот: {exc.message}", "SLOT_START_FAILED") from exc
+            await self.store.event(s["id"], vmid, "ct_started",
+                                   {"node": node, "actions": result.get("completed_actions")})
+        # Running: our own start (the slot is ours since allocation) or one interrupted by a
+        # restart. Either way confirm the student mount from the Proxmox config first.
+        if not self._check_student_mount(await self.pve.ct_config(vmid), key):
+            raise Failure("У запущенного слота подключён не тот каталог студента", "WRONG_STUDENT_MOUNT")
         return await self._goto(s, "slot_ready", "Ожидание готовности слота…")
 
     async def _stage_slot_ready(self, s):
         if s["stop_requested"]:
-            return await self._goto(s, "ct_shutdown", "Остановка…", status="stopping", slot_state="releasing")
+            return await self._goto_stop(s)
         client = self._slot(s)
         if not await client.healthz():
             raise Wait("Ожидание запуска службы слота…")
@@ -382,25 +428,21 @@ class Orchestrator:
     async def _submit(self, s, action, body_factory):
         """Mutating slot call with a stored Idempotency-Key. Returns the operation id."""
         client = self._slot(s)
-        ws = await self._workspace(s)
         call = await self.store.current_call(s, (action,))
         if call is None or call["status"] == "failed":
             call = await self.store.new_call(s, action, body_factory() if body_factory else None)
         if call["status"] == "accepted" and call["operation_id"]:
             return str(call["operation_id"])
-        pid = str(ws["project_id"])
         try:
             if action == "deploy":
                 resp = await client.deploy(call["body"], call["idempotency_key"])
-            elif action == "resume":
-                resp = await client.resume(pid, call["idempotency_key"])
             else:
-                resp = await client.stop(pid, call["idempotency_key"])
+                resp = await client.stop(str(s["project_id"]), call["idempotency_key"])
         except SlotUnavailable:
             raise Wait("Слот недоступен, повтор…") from None
         except SlotError as exc:
             await self._handle_submit_conflict(s, call, action, exc)
-            raise Wait()
+            raise Wait() from None
         await self.store.update_call(call["id"], status="accepted", operation_id=resp["operation_id"],
                                      result={"replayed": resp.get("replayed"), "status": resp.get("status")})
         return resp["operation_id"]
@@ -418,7 +460,7 @@ class Orchestrator:
         if exc.code == "OPERATION_IN_PROGRESS":
             return  # Slot busy with another operation: wait
         if exc.code == "INVALID_TRANSITION":
-            status = await self._slot(s).lab_status(str((await self._workspace(s))["project_id"]))
+            status = await self._slot(s).lab_status(str(s["project_id"]))
             state = (status or {}).get("state")
             goal = "STOPPED" if action == "stop" else "READY"
             if state == goal:
@@ -427,37 +469,32 @@ class Orchestrator:
             if state == "FAILED":
                 raise Failure("Лаба в слоте в состоянии FAILED, нужен оператор", "SLOT_LAB_FAILED")
             return  # Transitional state: wait for it
-        if exc.status == 404 and action in ("resume", "stop"):
+        if exc.status == 404 and action == "stop":
             raise Failure("Слот не знает проект студента; нужен оператор", "SLOT_PROJECT_UNKNOWN")
         raise Failure(f"Слот отклонил {action}: {exc.message or exc.code}", exc.code or f"HTTP_{exc.status}")
 
+    async def _ticket(self, s):
+        """DeployTicket of this session. Resuming reuses the exact ticket of the first deploy."""
+        ws = await self.store.workspace(s["workspace_id"])
+        if self.settings.lab_persistence == "resume" and ws["ticket"]:
+            return ws["ticket"], ws
+        lab = self.catalog.get(s["lab_ref"])
+        return deploy_ticket(lab, project_id=str(s["project_id"]), project_name=s["project_name"]), ws
+
     async def _stage_lab_submit(self, s):
-        ws = await self._workspace(s)
-        call = await self.store.current_call(s, ("deploy", "resume"))
+        call = await self.store.current_call(s, ("deploy",))
         if s["stop_requested"]:
-            # If a deploy/resume may have reached the slot, stop the lab properly first.
-            if call:
-                return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping",
-                                        slot_state="releasing")
-            return await self._goto(s, "ct_shutdown", "Остановка…", status="stopping", slot_state="releasing")
+            return await self._goto_stop(s, lab_may_exist=call is not None)
         if call is None or call["status"] != "succeeded":
-            action = call["action"] if call else ("resume" if ws["deployed"] else "deploy")
-            lab = self.catalog.get(s["lab_ref"]) if action == "deploy" else None
-
-            def body():
-                return deploy_ticket(lab, project_id=str(ws["project_id"]), project_name=ws["project_name"])
-
-            await self._submit(s, action, body if action == "deploy" else None)
+            ticket, _ = await self._ticket(s)
+            await self._submit(s, "deploy", lambda: ticket)
         return await self._goto(s, "lab_wait", "Запуск лабы…")
 
     async def _stage_lab_wait(self, s):
-        ws = await self._workspace(s)
-        call = await self.store.current_call(s, ("deploy", "resume"))
-        if call is None:
+        call = await self.store.current_call(s, ("deploy",))
+        if call is None or (call["status"] != "succeeded" and not call["operation_id"]):
             return await self._goto(s, "lab_submit", "Запуск лабы…")
         if call["status"] != "succeeded":
-            if not call["operation_id"]:
-                return await self._goto(s, "lab_submit", "Запуск лабы…")
             op = await self._operation(s, call)
             if op["status"] == "RUNNING":
                 lab = op.get("laboratory") or {}
@@ -468,13 +505,15 @@ class Orchestrator:
             if op["status"] != "SUCCEEDED":
                 await self.store.update_call(call["id"], status="failed", result={"error": op.get("error")})
                 err = op.get("error") or {}
-                raise Failure(f"Слот: {err.get('code', op['status'])}: {err.get('message', '')}"[:500],
-                              "SLOT_OPERATION_FAILED")
+                text = str(err.get("message", ""))
+                if "Provisioning completion is unknown" in text:
+                    raise Failure("Слот не умеет продолжить проект, созданный в другом слоте (cold resume)",
+                                  "SLOT_COLD_RESUME_UNSUPPORTED")
+                raise Failure(f"Слот: {err.get('code', op['status'])}: {text}"[:500], "SLOT_OPERATION_FAILED")
             await self.store.update_call(call["id"], status="succeeded")
-        if not ws["deployed"]:
-            await self.store.mark_deployed(ws["id"])
-        raw = await self._slot(s).topology(str(ws["project_id"]))
-        topology = session_topology(ws["project_name"], raw, self._reference_drawings(s["lab_ref"]))
+        await self.store.mark_deployed(s["workspace_id"], call["body"])
+        raw = await self._slot(s).topology(str(s["project_id"]))
+        topology = session_topology(s["project_name"], raw, self._reference_drawings(s["lab_ref"]))
         if s["stop_requested"]:
             return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping",
                                     slot_state="releasing", topology=topology)
@@ -505,9 +544,8 @@ class Orchestrator:
         if time.monotonic() - last < 30:
             return False
         self._health_checked[s["id"]] = time.monotonic()
-        ws = await self._workspace(s)
         try:
-            status = await self._slot(s).lab_status(str(ws["project_id"]))
+            status = await self._slot(s).lab_status(str(s["project_id"]))
         except SlotUnavailable:
             return False  # Transient; the plugin still sees the last topology
         if status is None or status.get("state") == "FAILED":
@@ -517,15 +555,14 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ stopping
     async def _stage_lab_stop(self, s):
-        ws = await self._workspace(s)
         call = await self.store.current_call(s, ("stop",))
         if call is None or call["status"] not in ("accepted", "succeeded"):
             try:
-                status = await self._slot(s).lab_status(str(ws["project_id"]))
+                status = await self._slot(s).lab_status(str(s["project_id"]))
             except SlotUnavailable:
                 raise Wait("Слот недоступен, повтор остановки…") from None
             if status is None or status.get("state") == "STOPPED":
-                return await self._goto(s, "ct_shutdown", "Остановка контейнера слота…")
+                return await self._goto(s, "ct_stop", "Остановка контейнера слота…")
         if call is None or call["status"] != "succeeded":
             await self._submit(s, "stop", None)
         return await self._goto(s, "lab_stop_wait", "Остановка устройств…")
@@ -544,29 +581,40 @@ class Orchestrator:
                 raise Failure(f"Слот не смог остановить лабу: {err.get('code', op['status'])}",
                               "SLOT_STOP_FAILED")
             await self.store.update_call(call["id"], status="succeeded")
-        return await self._goto(s, "ct_shutdown", "Остановка контейнера слота…")
+        return await self._goto(s, "ct_stop", "Остановка контейнера слота…")
 
-    async def _stage_ct_shutdown(self, s):
-        await self._ct_ensure(s, "stopped")
-        return await self._goto(s, "unmount", "Отключение каталога студента…")
-
-    async def _stage_unmount(self, s):
-        vmid = s["slot_vmid"]
-        if self.storage.mode != "none":
-            if (await self.pve.ct_status(vmid)).get("status") != "stopped":
-                return await self._goto(s, "ct_shutdown", "Остановка контейнера слота…")
-        if self.storage.mode == "handover":
-            self.storage.detach(vmid, self._site_slug(s), s["user_id"])
-            self.storage.check_slot_placeholder(vmid)
-        elif self.storage.mode == "pve_config":
-            key = self.storage.mp_key
-            if key in await self.pve.ct_config(vmid):
+    async def _stage_ct_stop(self, s):
+        vmid, node = s["slot_vmid"], await self._node(s)
+        try:
+            if await self.agent.status(node, vmid) == "running":
                 try:
-                    await self.pve.ct_set_config(vmid, {}, delete=[key])
-                except PveUncertain:
-                    raise Wait() from None
-                if key in await self.pve.ct_config(vmid):
-                    raise Failure("Proxmox не снял точку монтирования", "UNMOUNT_NOT_APPLIED")
+                    result = await self.agent.stop(node, vmid, force=False)
+                except AgentCommandFailed:
+                    result = {"state": "running"}
+                if result.get("state") != "stopped":
+                    # Shutdown did not finish: pct stop is the last resort.
+                    await self.store.event(s["id"], vmid, "ct_hard_stop", {"node": node})
+                    log.warning("Session %s: CT %s did not shut down; hard stop", s["id"], vmid)
+                    await self.agent.stop(node, vmid, force=True)
+        except (AgentBusy, AgentUncertain):
+            raise Wait("Остановка контейнера слота…") from None
+        if await self.agent.status(node, vmid) != "stopped":
+            raise Wait("Остановка контейнера слота…")
+        return await self._goto(s, "ct_park", "Освобождение слота…")
+
+    async def _stage_ct_park(self, s):
+        """Replace the student mount so a manual start of the free slot shows nobody's data."""
+        key = self.settings.placeholder_student_key
+        if key:
+            vmid, node = s["slot_vmid"], await self._node(s)
+            try:
+                await self.agent.set_mounts(node, vmid, student_key=key, data_mode="ro",
+                                            code_revision=self.settings.slot_code_revision)
+            except (AgentBusy, AgentUncertain, AgentNotStopped):
+                raise Wait() from None
+            except (AgentRejected, AgentCommandFailed) as exc:
+                # Not fatal: the CT is stopped and the next start replaces the mounts anyway.
+                await self.store.event(s["id"], vmid, "park_failed", {"error": exc.message[:200]})
         reason = s["stop_reason"] or "user"
         message = "Время лабы истекло" if reason == "maxduration" else "Лаба остановлена"
         await self.store.finish_session(s, status="stopped", message=message)
@@ -581,9 +629,8 @@ class Orchestrator:
             return cached[1]
         nodes = node_states(s["topology"])
         try:
-            ws = await self._workspace(s)
-            raw = await self._slot(s).topology(str(ws["project_id"]))
-            live = node_states(session_topology(ws["project_name"], raw))
+            raw = await self._slot(s).topology(str(s["project_id"]))
+            live = node_states(session_topology(s["project_name"], raw))
             nodes = {k: live.get(k, v) for k, v in nodes.items()}
         except (SlotError, Failure):
             pass

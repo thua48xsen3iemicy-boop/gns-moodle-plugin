@@ -14,7 +14,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
-MOUNT_MODES = ("handover", "pve_config", "none")
+KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # One path component, as the node agent requires
+PERSISTENCE = ("fresh", "resume")
+GUEST_ACTIONS = ("init_slot", "daemon_reload", "start_slot_service", "restart_slot_service")
 
 
 class ConfigError(RuntimeError):
@@ -42,12 +44,14 @@ class SiteConfig(BaseModel):
 
 
 class SlotConfig(BaseModel):
-    """One Lab Slot LXC. Non-secret fields are mirrored into the slots table."""
+    """One Lab Slot LXC. Non-secret fields are mirrored into the slots table.
+
+    Slots are interchangeable executors: any slot runs any student's lab.
+    """
 
     vmid: int = Field(ge=100, le=999_999_999)
     address: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$")  # Host only, no scheme/port
     port: int = Field(default=8080, ge=1, le=65535)
-    profile: str = Field(default="default", pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
     api_token: str = Field(min_length=32, repr=False)
     console_token: str = Field(default="", repr=False)
 
@@ -86,21 +90,26 @@ class Settings:
     pve_token_id: str
     pve_token_secret: str = field(repr=False)
     pve_ca_file: Path
+    agent_url_template: str  # e.g. https://{node}.mgmt:8443, {node} = Proxmox node name
+    agent_ca_file: Path
+    agent_cert_file: Path
+    agent_key_file: Path = field(repr=False)
+    student_root: Path  # Manager-local path of LAB_CEPH_ROOT/students (RW CephFS)
     gateway_internal_url: str
     gateway_internal_key: str = field(repr=False)
     gateway_public_url: str
-    mount_mode: str = "handover"
-    student_root: Path | None = None  # Manager-local path of the students tree (RW CephFS)
-    slot_mount_root: Path | None = None  # Manager-local path of per-slot bind sources (handover)
-    pve_student_host_root: str = ""  # Students tree as seen on PVE hosts (pve_config)
-    student_mp_index: int = 0
-    student_mp_target: str = "/opt/gns3/student"
+    slot_code_revision: str | None = None  # None: shared <ceph>/slot, else <ceph>/slot/<revision>
+    agent_start_actions: tuple[str, ...] = ()
+    placeholder_student_key: str | None = None  # Mounted read-only into a released slot
+    lab_persistence: str = "fresh"
+    node_memory_reserve_mb: int = 2048
     listen_host: str = "127.0.0.1"
     listen_port: int = 8090
     pve_timeout: float = 10.0
     pve_retry_after: float = 60.0
-    pve_task_timeout: float = 120.0
-    ct_shutdown_timeout: int = 60
+    agent_timeout: float = 30.0
+    agent_start_timeout: float = 330.0  # pct start (120 s) + up to three guest actions (45 s each)
+    agent_stop_timeout: float = 100.0  # pct shutdown --timeout 60 + margin
     slot_timeout: float = 10.0
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
@@ -109,6 +118,20 @@ class Settings:
 
     def site(self, url: str | None) -> SiteConfig | None:
         return self.sites.get((url or "").rstrip("/"))
+
+
+def _path(env, name, required):
+    value = required(name)
+    if not re.fullmatch(r"(/[A-Za-z0-9_.-]+)+", value) or "/../" in value + "/" or "/./" in value + "/":
+        raise ConfigError(f"{name} must be an absolute path without '..' and unusual characters")
+    return Path(value)
+
+
+def _key(env, name, default=""):
+    value = env.get(name, default).strip()
+    if value and not KEY_RE.fullmatch(value):
+        raise ConfigError(f"{name} must match {KEY_RE.pattern}")
+    return value or None
 
 
 def load(env=None, check_mode=True) -> Settings:
@@ -148,18 +171,16 @@ def load(env=None, check_mode=True) -> Settings:
     token_id = required("PVE_TOKEN_ID")
     if not re.fullmatch(r"[^@\s!]+@[^@\s!]+![A-Za-z0-9_-]+", token_id):
         raise ConfigError("PVE_TOKEN_ID must look like USER@REALM!TOKENID")
-    ca_file = Path(required("PVE_CA_FILE"))
 
-    mode = env.get("STUDENT_MOUNT_MODE", "handover").strip()
-    if mode not in MOUNT_MODES:
-        raise ConfigError(f"STUDENT_MOUNT_MODE must be one of {MOUNT_MODES}")
-    student_root = Path(required("STUDENT_ROOT")) if mode != "none" else None
-    slot_mount_root = Path(required("SLOT_MOUNT_ROOT")) if mode == "handover" else None
-    host_root = required("PVE_STUDENT_HOST_ROOT") if mode == "pve_config" else ""
-    target = env.get("STUDENT_MP_TARGET", "/opt/gns3/student").strip()
-    for path in filter(None, (str(student_root or ""), str(slot_mount_root or ""), host_root, target)):
-        if not re.fullmatch(r"(/[A-Za-z0-9_.-]+)+", path) or "/../" in path + "/" or "/./" in path + "/":
-            raise ConfigError("Mount paths must be absolute, without '..' and unusual characters")
+    template = required("AGENT_URL_TEMPLATE").rstrip("/")
+    if not re.fullmatch(r"https://[A-Za-z0-9.{}-]*\{node\}[A-Za-z0-9.{}-]*(:\d{1,5})?", template):
+        raise ConfigError("AGENT_URL_TEMPLATE must be https://...{node}...[:port] (mTLS only)")
+    actions = tuple(a.strip() for a in env.get("AGENT_START_ACTIONS", "").split(",") if a.strip())
+    if any(a not in GUEST_ACTIONS for a in actions) or len(actions) > 3:
+        raise ConfigError(f"AGENT_START_ACTIONS: up to three of {GUEST_ACTIONS}")
+    persistence = env.get("LAB_PERSISTENCE", "fresh").strip()
+    if persistence not in PERSISTENCE:
+        raise ConfigError(f"LAB_PERSISTENCE must be one of {PERSISTENCE}")
 
     gateway_public = required("GATEWAY_PUBLIC_URL").rstrip("/")
     if not gateway_public.startswith(("wss://", "ws://")):
@@ -172,22 +193,27 @@ def load(env=None, check_mode=True) -> Settings:
         pve_nodes=nodes,
         pve_token_id=token_id,
         pve_token_secret=required("PVE_TOKEN_SECRET"),
-        pve_ca_file=ca_file,
+        pve_ca_file=Path(required("PVE_CA_FILE")),
+        agent_url_template=template,
+        agent_ca_file=Path(required("AGENT_CA_FILE")),
+        agent_cert_file=Path(required("AGENT_CERT_FILE")),
+        agent_key_file=Path(required("AGENT_KEY_FILE")),
+        student_root=_path(env, "STUDENT_ROOT", required),
         gateway_internal_url=required("GATEWAY_INTERNAL_URL").rstrip("/"),
         gateway_internal_key=required("GATEWAY_INTERNAL_KEY"),
         gateway_public_url=gateway_public,
-        mount_mode=mode,
-        student_root=student_root,
-        slot_mount_root=slot_mount_root,
-        pve_student_host_root=host_root,
-        student_mp_index=_int(env, "STUDENT_MP_INDEX", 0, 0, 255),
-        student_mp_target=target,
+        slot_code_revision=_key(env, "SLOT_CODE_REVISION"),
+        agent_start_actions=actions,
+        placeholder_student_key=_key(env, "PLACEHOLDER_STUDENT_KEY", "placeholder"),
+        lab_persistence=persistence,
+        node_memory_reserve_mb=_int(env, "NODE_MEMORY_RESERVE_MB", 2048, 0, 10**7),
         listen_host=env.get("MANAGER_LISTEN_HOST", "127.0.0.1"),
         listen_port=_int(env, "MANAGER_LISTEN_PORT", 8090, 1, 65535),
         pve_timeout=_int(env, "PVE_TIMEOUT", 10, 1, 300),
         pve_retry_after=_int(env, "PVE_RETRY_AFTER", 60, 1, 3600),
-        pve_task_timeout=_int(env, "PVE_TASK_TIMEOUT", 120, 5, 3600),
-        ct_shutdown_timeout=_int(env, "CT_SHUTDOWN_TIMEOUT", 60, 5, 600),
+        agent_timeout=_int(env, "AGENT_TIMEOUT", 30, 5, 300),
+        agent_start_timeout=_int(env, "AGENT_START_TIMEOUT", 330, 60, 1800),
+        agent_stop_timeout=_int(env, "AGENT_STOP_TIMEOUT", 100, 70, 900),
         slot_timeout=_int(env, "SLOT_TIMEOUT", 10, 1, 300),
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),

@@ -3,24 +3,42 @@ import asyncio
 import pytest
 from conftest import make_env
 
-from lab_manager.labs import project_name
 from lab_manager.store import Fenced
 
 
-async def new_session(store, user_id, instance_id=1, lab_ref="cisco-3x2"):
-    s, created = await store.create_session(
+async def new_session(store, user_id, instance_id=1, lab_ref="cisco-3x2", persistence="fresh"):
+    return await store.create_session(
         site="main", user_id=user_id, instance_id=instance_id, course_id=5, lab_ref=lab_ref,
-        max_duration=60, project_name=lambda wid: project_name(lab_ref, wid))
-    return s, created
+        max_duration=60, student_key=f"main-{user_id}", resources={"memory_mb": 1024},
+        persistence=persistence)
+
+
+def cand(*vmids):
+    return [(v, "pve1") for v in vmids]
 
 
 async def test_create_session_is_idempotent_under_concurrency(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         store = env.services.store
         results = await asyncio.gather(*(new_session(store, 7) for _ in range(8)))
-        ids = {s["id"] for s, _ in results}
-        assert len(ids) == 1
+        assert len({s["id"] for s, _ in results}) == 1
         assert sum(created for _, created in results) == 1
+
+
+async def test_project_identity_per_persistence_mode(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        store = env.services.store
+        a, _ = await new_session(store, 1, persistence="fresh")
+        await store.finish_session(a, status="stopped", message="x")
+        b, _ = await new_session(store, 1, persistence="fresh")
+        assert a["project_id"] != b["project_id"]  # Fresh: a new GNS3 project every time
+        assert b["project_name"] == f"cisco-3x2-{b['id']}"
+        await store.finish_session(b, status="stopped", message="x")
+        c, _ = await new_session(store, 1, persistence="resume")
+        await store.finish_session(c, status="stopped", message="x")
+        d, _ = await new_session(store, 1, persistence="resume")
+        assert c["project_id"] == d["project_id"]  # Resume: the workspace project
+        assert d["project_name"] == f"cisco-3x2-w{d['workspace_id']}"
 
 
 async def test_concurrent_allocation_gives_distinct_slots(tmp_path, dsn):
@@ -28,7 +46,7 @@ async def test_concurrent_allocation_gives_distinct_slots(tmp_path, dsn):
     async with make_env(tmp_path, dsn, vmids=vmids) as env:
         store = env.services.store
         sessions = [(await new_session(store, uid))[0] for uid in range(1, 9)]
-        got = await asyncio.gather(*(store.allocate_slot(s, profile="default") for s in sessions))
+        got = await asyncio.gather(*(store.allocate_slot(s, cand(*vmids)) for s in sessions))
         allocated = [v for v in got if v is not None]
         assert sorted(allocated) == list(vmids)  # 5 slots, 8 students: 5 distinct winners
         assert got.count(None) == 3
@@ -36,65 +54,61 @@ async def test_concurrent_allocation_gives_distinct_slots(tmp_path, dsn):
         assert all(rows[v]["state"] == "preparing" and rows[v]["generation"] == 2 for v in vmids)
 
 
+async def test_candidate_order_is_respected(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201, 202, 203)) as env:
+        store = env.services.store
+        s, _ = await new_session(store, 1)
+        assert await store.allocate_slot(s, [(203, "pve3"), (201, "pve1")]) == 203
+        assert (await store.session(s["id"]))["slot_node"] == "pve3"
+        s2, _ = await new_session(store, 2)
+        assert await store.allocate_slot(s2, [(203, "pve3"), (201, "pve1")]) == 201
+        s3, _ = await new_session(store, 3)
+        assert await store.allocate_slot(s3, []) is None
+
+
 async def test_same_session_is_not_allocated_twice(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         store = env.services.store
         s, _ = await new_session(store, 1)
-        got = await asyncio.gather(*(store.allocate_slot(s, profile="default") for _ in range(4)))
+        got = await asyncio.gather(*(store.allocate_slot(s, cand(201, 202)) for _ in range(4)))
         assert len([v for v in got if v]) == 1
 
 
-async def test_pinned_workspace_waits_for_its_slot(tmp_path, dsn):
+async def test_slots_are_not_bound_to_students(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         store = env.services.store
         a, _ = await new_session(store, 1)
-        assert await store.allocate_slot(a, profile="default") == 201
-        a = await store.session(a["id"])
-        await store.finish_session(a, status="stopped", message="done")
+        assert await store.allocate_slot(a, cand(201, 202)) == 201
+        await store.finish_session(await store.session(a["id"]), status="stopped", message="done")
         b, _ = await new_session(store, 2)
-        assert await store.allocate_slot(b, profile="default") == 202  # Least pinned slot first
-        b = await store.session(b["id"])
-        # Student 1 returns: pinned to 201, which is free -> gets 201 even though 202 is busy.
+        assert await store.allocate_slot(b, cand(201, 202)) == 201  # Same slot, other student
         a2, _ = await new_session(store, 1)
-        assert await store.allocate_slot(a2, profile="default") == 201
-        await store.finish_session(await store.session(a2["id"]), status="stopped", message="done")
-        # Slot 201 into maintenance: student 1 waits, does not move to another slot.
-        await store.set_slot_admin_state(201, "maintenance")
-        await store.finish_session(b, status="stopped", message="done")
-        a3, _ = await new_session(store, 1)
-        assert await store.allocate_slot(a3, profile="default") is None
-
-
-async def test_profile_is_respected(tmp_path, dsn):
-    async with make_env(tmp_path, dsn) as env:
-        store = env.services.store
-        s, _ = await new_session(store, 1)
-        assert await store.allocate_slot(s, profile="big") is None
+        assert await store.allocate_slot(a2, cand(201, 202)) == 202  # Student 1 just takes another
+        assert {r["slot_vmid"] for r in await store.reservations()} == {201, 202}
 
 
 async def test_fencing_rejects_stale_worker(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         store = env.services.store
         s, _ = await new_session(store, 1)
-        await store.allocate_slot(s, profile="default")
+        await store.allocate_slot(s, cand(201))
         stale = await store.session(s["id"])
-        await store.update_session(stale, stage="mount")  # Current generation: fine
+        await store.update_session(stale, stage="ct_start")  # Current generation: fine
         await store.finish_session(stale, status="stopped", message="released")  # Bumps generation
         with pytest.raises(Fenced):
-            await store.update_session(stale, stage="ct_start")
+            await store.update_session(stale, stage="slot_ready")
         s2, _ = await new_session(store, 2)
-        assert await store.allocate_slot(s2, profile="default") == 202
+        assert await store.allocate_slot(s2, cand(201)) == 201
         with pytest.raises(Fenced):
             await store.finish_session(stale, status="failed", message="late")
-        slot = await store.slot(201)
-        assert slot["state"] == "free"
+        assert (await store.slot(201))["session_id"] == s2["id"]
 
 
 async def test_admin_state_refuses_slot_in_use(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         store = env.services.store
         s, _ = await new_session(store, 1)
-        await store.allocate_slot(s, profile="default")
+        await store.allocate_slot(s, cand(201))
         with pytest.raises(ValueError):
             await store.set_slot_admin_state(201, "maintenance")
 
@@ -106,5 +120,7 @@ async def test_new_slots_start_in_maintenance(tmp_path, dsn):
         extra = SlotConfig(vmid=301, address="10.0.1.1", api_token="b" * 40)
         await env.services.store.sync_slots([*env.settings.slots.values(), extra])
         assert (await env.services.store.slot(301))["state"] == "maintenance"
+        assert await env.services.store.free_slots() == [201]
         await env.services.store.sync_slots([extra])
         assert (await env.services.store.slot(201))["in_config"] is False
+        assert await env.services.store.free_slots() == []

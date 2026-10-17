@@ -16,11 +16,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import VERSION
 from .db import latest_version, make_pool, schema_version
-from .labs import Catalog, LabError, LabNotFound, project_name
+from .agent_client import AgentClient
+from .labs import Catalog, LabError, LabNotFound
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
-from .storage import StudentStorage
+from .storage import StorageError, StudentStorage, student_key
 from .store import Store
 
 log = logging.getLogger("lab_manager.api")
@@ -51,8 +52,8 @@ def iso_or_none(value):
 class Services:
     """Everything a request or the orchestrator needs; built once at startup."""
 
-    def __init__(self, settings, *, pve_transport=None, slot_transport=None, gateway_transport=None,
-                 pool=None):
+    def __init__(self, settings, *, pve_transport=None, agent_transport=None, slot_transport=None,
+                 gateway_transport=None, pool=None):
         self.settings = settings
         self.pool = pool or make_pool(settings.database_url)
         self.store = Store(self.pool)
@@ -62,6 +63,12 @@ class Services:
             ca_file=settings.pve_ca_file, timeout=settings.pve_timeout,
             retry_after=settings.pve_retry_after, transport=pve_transport,
         )
+        self.agent = AgentClient(
+            settings.agent_url_template, ca_file=settings.agent_ca_file, cert_file=settings.agent_cert_file,
+            key_file=settings.agent_key_file, timeout=settings.agent_timeout,
+            start_timeout=settings.agent_start_timeout, stop_timeout=settings.agent_stop_timeout,
+            transport=agent_transport,
+        )
         self.slots = {
             vmid: SlotClient(s.address, s.port, s.api_token, timeout=settings.slot_timeout,
                              transport=slot_transport)
@@ -69,13 +76,9 @@ class Services:
         }
         self.gateway = GatewayClient(settings.gateway_internal_url, settings.gateway_internal_key,
                                      settings.gateway_public_url, transport=gateway_transport)
-        self.storage = StudentStorage(
-            mode=settings.mount_mode, student_root=settings.student_root,
-            slot_mount_root=settings.slot_mount_root, pve_host_root=settings.pve_student_host_root,
-            mp_index=settings.student_mp_index, mp_target=settings.student_mp_target,
-        )
-        self.orchestrator = Orchestrator(settings, self.store, self.pve, self.slots, self.catalog,
-                                         self.storage)
+        self.storage = StudentStorage(settings.student_root)
+        self.orchestrator = Orchestrator(settings, self.store, self.pve, self.agent, self.slots,
+                                         self.catalog, self.storage)
 
     async def leader_connection(self):
         from psycopg.rows import dict_row
@@ -85,6 +88,7 @@ class Services:
 
     async def close(self):
         await self.pve.close()
+        await self.agent.close()
         await self.gateway.close()
         for client in self.slots.values():
             await client.close()
@@ -191,12 +195,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             checks["labs"] = {"ok": settings.labs_dir.is_dir()}
         except OSError:
             checks["labs"] = {"ok": False}
-        for name, path in (("students", settings.student_root), ("slot_mounts", settings.slot_mount_root)):
-            if path is not None:
-                try:
-                    checks[name] = {"ok": path.is_dir()}
-                except OSError:
-                    checks[name] = {"ok": False}
+        try:
+            checks["students"] = {"ok": settings.student_root.is_dir()}
+        except OSError:
+            checks["students"] = {"ok": False}
         ready = all(c["ok"] for c in checks.values())
         return JSONResponse(status_code=200 if ready else 503,
                             content={"status": "ready" if ready else "not_ready", "version": VERSION,
@@ -235,15 +237,18 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 raise ApiError(409, "session_conflict", "A live session with another lab_ref exists")
             return JSONResponse(status_code=200, content=await present(existing))
         try:
-            await asyncio.to_thread(services.catalog.get, body.lab_ref)
+            lab = await asyncio.to_thread(services.catalog.get, body.lab_ref)
+            key = student_key(site.slug, body.user_id)
         except LabNotFound as exc:
             raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
         except LabError as exc:
             raise ApiError(409, "lab_invalid", str(exc)) from exc
+        except StorageError as exc:
+            raise ApiError(400, "invalid_request", str(exc)) from exc
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=settings.default_max_duration,
-            project_name=lambda wid: project_name(body.lab_ref, wid),
+            student_key=key, resources=lab.resources, persistence=settings.lab_persistence,
         )
         if not created and s["lab_ref"] != body.lab_ref:
             raise ApiError(409, "session_conflict", "A live session with another lab_ref exists")
@@ -279,12 +284,11 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if body.node_id not in node_ids:
             raise ApiError(404, "node_not_found", "Node does not belong to this session")
         slot = settings.slots.get(s["slot_vmid"])
-        ws = await store.workspace(s["workspace_id"])
         if slot is None:
             raise ApiError(503, "slot_unavailable", "Slot is not configured")
         who = f"{s['id']}:{'observer' if body.readonly else 'owner'}"
         try:
-            ticket = await services.gateway.issue(slot=slot.address, project_id=str(ws["project_id"]),
+            ticket = await services.gateway.issue(slot=slot.address, project_id=str(s["project_id"]),
                                                   node_id=body.node_id, readonly=body.readonly, who=who)
         except SlotError as exc:
             raise ApiError(502, "gateway_unavailable", "Console gateway did not issue a ticket") from exc

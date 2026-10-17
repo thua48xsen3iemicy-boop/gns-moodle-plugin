@@ -44,7 +44,10 @@ def cmd_check_config(args):
         "sites": sorted(x.slug for x in s.sites.values()),
         "slots": sorted(s.slots),
         "pve_nodes": list(s.pve_nodes),
-        "mount_mode": s.mount_mode,
+        "agent_url_template": s.agent_url_template,
+        "lab_persistence": s.lab_persistence,
+        "slot_code_revision": s.slot_code_revision,
+        "agent_start_actions": list(s.agent_start_actions),
         "labs_dir": str(s.labs_dir),
     }, ensure_ascii=False))
 
@@ -59,7 +62,7 @@ def cmd_slots(args):
     async def run(services):
         rows = await services.store.slots()
         for r in rows:
-            print(json.dumps({k: r[k] for k in ("vmid", "address", "profile", "state", "generation",
+            print(json.dumps({k: r[k] for k in ("vmid", "address", "state", "generation",
                                                 "session_id", "in_config", "state_message")},
                              ensure_ascii=False, default=str))
 
@@ -67,32 +70,16 @@ def cmd_slots(args):
 
 
 def cmd_slot_state(args):
-    """enable: maintenance/failed -> free (after the operator checked the CT and directories)."""
+    """enable: maintenance/failed -> free, after the operator checked the CT and its lab."""
 
     async def run(services):
-        if args.state == "free" and services.storage.mode == "handover":
-            services.storage.check_slot_placeholder(args.vmid)
-        if args.state == "free" and services.storage.mode != "none":
-            status = (await services.pve.ct_status(args.vmid)).get("status")
-            if status != "stopped":
-                raise SystemExit(f"CT {args.vmid} is {status}; shut it down first")
+        if args.state == "free":
+            node = await services.pve.find_ct_node(args.vmid)
+            state = await services.agent.status(node, args.vmid)
+            if state != "stopped":
+                raise SystemExit(f"CT {args.vmid} is {state} on {node}; stop it first")
         await services.store.set_slot_admin_state(args.vmid, args.state, args.message)
         print(json.dumps({"vmid": args.vmid, "state": args.state}))
-
-    asyncio.run(_with_services(run))
-
-
-def cmd_student_detach(args):
-    """Move a student's work/ back home from a stopped slot (after a failed session)."""
-
-    async def run(services):
-        status = (await services.pve.ct_status(args.vmid)).get("status")
-        if status != "stopped":
-            raise SystemExit(f"CT {args.vmid} is {status}; shut it down first")
-        services.storage.detach(args.vmid, args.site, args.user_id)
-        services.storage.check_slot_placeholder(args.vmid)
-        await services.store.event(None, args.vmid, "admin_student_detach", {"site": args.site})
-        print(json.dumps({"vmid": args.vmid, "detached": True}))
 
     asyncio.run(_with_services(run))
 
@@ -109,11 +96,6 @@ def main(argv=None):
         p.add_argument("vmid", type=int)
         p.add_argument("--message", default="")
         p.set_defaults(fn=cmd_slot_state, state=state)
-    p = sub.add_parser("student-detach")
-    p.add_argument("vmid", type=int)
-    p.add_argument("site")
-    p.add_argument("user_id", type=int)
-    p.set_defaults(fn=cmd_student_detach)
     args = parser.parse_args(argv)
     args.fn(args)
 

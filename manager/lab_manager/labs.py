@@ -3,7 +3,8 @@
 lab.gns3    reference topology for the preview (served as is)
 ticket.json DeployTicket for Lab Slot (slot/api/models.py); the slot validates it fully,
             the manager checks that its nodes match lab.gns3 and sets name/project_id
-meta.json   {"title", "description", "profile"?}; profile picks the slot resource profile
+meta.json   {"title", "description", "resources"?: {"cores", "memory_mb"}}: the slot CT is
+            sized to these before start (slots are generic executors)
 checks/     auto-check scripts (later)
 """
 
@@ -30,7 +31,7 @@ class Lab:
     lab_ref: str
     title: str
     description: str
-    profile: str
+    resources: dict | None  # {"cores": int, "memory_mb": int} or None: keep the CT as configured
     topology: dict
     ticket: dict
 
@@ -68,9 +69,13 @@ def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str
         problems.append(f"Node names differ: only in lab.gns3 {missing}, only in ticket.json {extra}")
     if not isinstance(meta.get("title"), str) or not meta["title"].strip():
         problems.append("meta.json needs a title")
-    profile = meta.get("profile", "default")
-    if not isinstance(profile, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", profile):
-        problems.append("meta.json profile is invalid")
+    res = meta.get("resources")
+    if res is not None:
+        ok = (isinstance(res, dict) and set(res) <= {"cores", "memory_mb"} and res
+              and all(type(v) is int for v in res.values())
+              and 1 <= res.get("cores", 1) <= 128 and 256 <= res.get("memory_mb", 256) <= 1024 * 1024)
+        if not ok:
+            problems.append("meta.json resources must be {cores: 1..128, memory_mb: 256..1048576}")
     return problems
 
 
@@ -97,7 +102,7 @@ class Catalog:
         if problems:
             raise LabError("; ".join(problems))
         return Lab(lab_ref, meta["title"].strip(), str(meta.get("description", "")),
-                   meta.get("profile", "default"), topology, ticket)
+                   meta.get("resources"), topology, ticket)
 
     def list(self) -> list[dict]:
         labs = []
@@ -135,5 +140,6 @@ def deploy_ticket(lab: Lab, *, project_id: str, project_name: str) -> dict:
     return ticket
 
 
-def project_name(lab_ref: str, workspace_id: int) -> str:
-    return f"{lab_ref}-w{workspace_id}"[:120]
+def project_name(lab_ref: str, suffix: str) -> str:
+    """GNS3 project name; unique per slot, so it carries the workspace or session id."""
+    return f"{lab_ref}-{suffix}"[:120]

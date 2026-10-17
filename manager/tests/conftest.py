@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fakes import FakeGateway, FakePve, FakeSlot, MultiTransport  # noqa: E402
+from fakes import FakeAgent, FakeGateway, FakePve, FakeSlot, MultiTransport  # noqa: E402
 
 from lab_manager.config import Settings, SiteConfig, SlotConfig  # noqa: E402
 
@@ -52,15 +52,12 @@ def dsn():
     return url
 
 
-def make_settings(tmp_path, dsn="postgresql:///unused", *, mode="handover", vmids=(201, 202), **overrides):
+def make_settings(tmp_path, dsn="postgresql:///unused", *, vmids=(201, 202), **overrides):
     labs = tmp_path / "labs"
     if not labs.exists():
         shutil.copytree(ROOT / "examples" / "labs", labs)
     students = tmp_path / "rw" / "students"
-    slots_root = tmp_path / "rw" / "slots"
-    students.mkdir(parents=True, exist_ok=True)
-    for vmid in vmids:
-        (slots_root / str(vmid) / "mnt").mkdir(parents=True, exist_ok=True)
+    (students / "placeholder").mkdir(parents=True, exist_ok=True)
     values = dict(
         database_url=dsn,
         sites={SITE_URL: SiteConfig(url=SITE_URL, slug="main", secret=SITE_SECRET),
@@ -73,14 +70,16 @@ def make_settings(tmp_path, dsn="postgresql:///unused", *, mode="handover", vmid
         pve_token_id="lab-manager@pve!manager",
         pve_token_secret="pve-secret",
         pve_ca_file=tmp_path / "ca.pem",
+        agent_url_template="https://{node}.agent:8443",
+        agent_ca_file=tmp_path / "agent-ca.pem",
+        agent_cert_file=tmp_path / "manager.crt",
+        agent_key_file=tmp_path / "manager.key",
+        student_root=students,
         gateway_internal_url="http://gateway.internal:8080",
         gateway_internal_key="gw-key",
         gateway_public_url="wss://gateway.example.edu",
-        mount_mode=mode,
-        student_root=students if mode != "none" else None,
-        slot_mount_root=slots_root if mode == "handover" else None,
-        pve_student_host_root="/mnt/pve/cephfs/lab/students" if mode == "pve_config" else "",
-        pve_task_timeout=5,
+        agent_start_actions=("start_slot_service",),
+        placeholder_student_key="placeholder",
         pve_retry_after=60,
         slot_ready_timeout=60,
         worker_interval=1,
@@ -94,22 +93,27 @@ class Env:
 
 
 @asynccontextmanager
-async def make_env(tmp_path, dsn, *, mode="handover", vmids=(201, 202), **overrides):
-    """Services wired to fakes, pool opened, slots synced and enabled."""
+async def make_env(tmp_path, dsn, *, vmids=(201, 202), nodes_of=None, **overrides):
+    """Services wired to fakes, pool opened, slots synced and enabled.
+
+    nodes_of: {vmid: node}; by default slots are spread over pve2, pve3, pve1, ...
+    """
     import httpx
 
     from lab_manager.app import Services, create_app
 
     env = Env()
     env.timeline = []
-    env.settings = make_settings(tmp_path, dsn, mode=mode, vmids=vmids, **overrides)
+    env.settings = make_settings(tmp_path, dsn, vmids=vmids, **overrides)
     env.pve = FakePve(env.timeline)
     for i, vmid in enumerate(vmids):
-        env.pve.add_ct(vmid, node=env.pve.nodes[(i + 1) % 3])
-    env.slots = {vmid: FakeSlot(s.address, env.timeline) for vmid, s in env.settings.slots.items()}
+        env.pve.add_ct(vmid, node=(nodes_of or {}).get(vmid, env.pve.nodes[(i + 1) % 3]))
+    env.agent = FakeAgent(env.pve, env.settings.student_root)
+    env.projects = {}
+    env.slots = {vmid: FakeSlot(s.address, env.timeline, env.projects) for vmid, s in env.settings.slots.items()}
     env.gateway = FakeGateway()
     env.services = Services(
-        env.settings, pve_transport=env.pve.transport(),
+        env.settings, pve_transport=env.pve.transport(), agent_transport=env.agent.transport(),
         slot_transport=MultiTransport(env.slots.values()), gateway_transport=env.gateway.transport(),
     )
     env.services.pve.task_interval = 0.001

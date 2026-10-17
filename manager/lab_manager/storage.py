@@ -1,36 +1,27 @@
-"""Student directories and how they reach a slot.
+"""Student directories on the RW CephFS (manager-local path STUDENT_ROOT).
 
-Layout on the RW CephFS (manager-local paths from the config):
+The node agent mounts LAB_CEPH_ROOT/students/<student_key> into the slot as /srv/student
+(mp1). The agent requires that directory to exist, to be a plain directory (no symlinks)
+and to be on the CephFS mount; creating it is the manager's job:
 
-    STUDENT_ROOT/<site_slug>/<user_id>/work/      what the slot sees as STUDENT_MP_TARGET
-    STUDENT_ROOT/<site_slug>/<user_id>/results/   check results; never mounted into a slot
-    SLOT_MOUNT_ROOT/<vmid>/mnt                    fixed bind-mount source of slot <vmid> (handover)
-    SLOT_MOUNT_ROOT/<vmid>/empty                  parked placeholder while a student is mounted
+    students/<student_key>/            created by the manager on the first session
+    students/<student_key>/results/    check results (written by the manager, slot read-only)
+    students/<placeholder>/            empty, mounted read-only into a released slot
 
-Modes (docs/DESIGN.md, "Каталог студента"):
-  handover   - the CT has a fixed mpN configured once by an administrator; the manager moves
-               the student's work/ into SLOT_MOUNT_ROOT/<vmid>/mnt with rename(2) while the
-               CT is stopped and moves it back on release. Needs no Proxmox root rights.
-  pve_config - the manager sets mpN through PUT /lxc/{vmid}/config. Proxmox allows bind
-               mounts only for the literal user root@pam, never for an API token.
-  none       - no student directory (first stand tests).
-
-All paths are built from validated components and walked with O_NOFOLLOW, so a symlink
-planted anywhere below the roots cannot redirect a mount or a rename.
+student_key = "<site_slug>-<user_id>": one path component, unique per Moodle site and user.
+The tree is walked with O_NOFOLLOW so a planted symlink cannot redirect the manager.
 """
 
 import errno
 import os
 import re
-import stat
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import SLUG_RE
+from .config import KEY_RE, SLUG_RE
 
 COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-PVE_PATH_RE = re.compile(r"^(/[A-Za-z0-9_.-]+)+$")
 
 
 class StorageError(RuntimeError):
@@ -39,27 +30,20 @@ class StorageError(RuntimeError):
 
 def safe_component(value) -> str:
     text = str(value)
-    if not COMPONENT_RE.fullmatch(text) or text in (".", "..") or ".." in text:
+    if not COMPONENT_RE.fullmatch(text) or ".." in text:
         raise StorageError("Unsafe path component")
     return text
 
 
-def student_parts(site_slug: str, user_id: int) -> tuple[str, str]:
-    if not SLUG_RE.fullmatch(site_slug):
+def student_key(site_slug: str, user_id: int) -> str:
+    if not SLUG_RE.fullmatch(site_slug or ""):
         raise StorageError("Unsafe site slug")
     if type(user_id) is not int or user_id <= 0:
         raise StorageError("user_id must be a positive integer")
-    return safe_component(site_slug), str(user_id)
-
-
-def pve_mount_value(host_root: str, site_slug: str, user_id: int, target: str) -> str:
-    """mpN property string. Commas or '=' in a path would inject extra mount options."""
-    slug, uid = student_parts(site_slug, user_id)
-    path = f"{host_root.rstrip('/')}/{slug}/{uid}/work"
-    for value in (path, target):
-        if not PVE_PATH_RE.fullmatch(value) or "/../" in value + "/" or "/./" in value + "/":
-            raise StorageError("Unsafe mount path")
-    return f"{path},mp={target},backup=0"
+    key = f"{site_slug}-{user_id}"
+    if not KEY_RE.fullmatch(key):
+        raise StorageError("Student key does not fit the node agent rules")
+    return key
 
 
 @contextmanager
@@ -72,6 +56,7 @@ def open_dir(root: Path, parts=(), *, create=False, mode=0o750):
             if create:
                 try:
                     os.mkdir(part, mode, dir_fd=fd)
+                    os.chmod(part, mode, dir_fd=fd, follow_symlinks=False)  # Not reduced by umask
                 except FileExistsError:
                     pass
             try:
@@ -87,148 +72,30 @@ def open_dir(root: Path, parts=(), *, create=False, mode=0o750):
         os.close(fd)
 
 
-def entry_kind(dir_fd: int, name: str) -> str | None:
-    try:
-        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return None
-    if stat.S_ISDIR(st.st_mode):
-        return "dir"
-    return "other"
-
-
 @dataclass
 class StudentStorage:
-    mode: str
-    student_root: Path | None = None
-    slot_mount_root: Path | None = None
-    pve_host_root: str = ""
-    mp_index: int = 0
-    mp_target: str = "/opt/gns3/student"
+    student_root: Path
+    # setgid + group rwx: gns3 in the slot (member of the shared group) writes here.
+    student_mode: int = 0o2770
+    # Group r-x only: the slot can read results but never change them.
+    results_mode: int = 0o2750
 
-    @property
-    def mp_key(self) -> str:
-        return f"mp{self.mp_index}"
-
-    # ------------------------------------------------------------------ student tree
-    def ensure_student(self, site_slug: str, user_id: int):
-        """Create <slug>/<uid>/{work,results}. Never changes or removes existing content."""
-        if self.mode == "none":
-            return
-        slug, uid = student_parts(site_slug, user_id)
-        with open_dir(self.student_root, (slug, uid), create=True) as fd:
-            if self.mode == "handover" and self._mounted_somewhere_marker(fd):
-                return  # work/ is currently inside a slot; do not create a second one
-            for name, mode in (("work", 0o770), ("results", 0o750)):
-                try:
-                    os.mkdir(name, mode, dir_fd=fd)
-                except FileExistsError:
-                    if entry_kind(fd, name) != "dir":
-                        raise StorageError(f"{name} is not a plain directory") from None
-
-    @staticmethod
-    def _mounted_somewhere_marker(fd) -> bool:
-        return entry_kind(fd, "work") is None and entry_kind(fd, ".mounted") == "other"
-
-    # ------------------------------------------------------------------ handover
-    def handover_state(self, vmid: int, site_slug: str, user_id: int) -> str:
-        """'home' (work/ at the student), 'slot' (in the slot) or 'inconsistent'."""
-        slug, uid = student_parts(site_slug, user_id)
-        with open_dir(self.student_root, (slug, uid)) as sfd, open_dir(
-            self.slot_mount_root, (safe_component(vmid),)
-        ) as vfd:
-            home = entry_kind(sfd, "work")
-            mnt, empty = entry_kind(vfd, "mnt"), entry_kind(vfd, "empty")
-            if home == "dir" and mnt == "dir" and empty is None:
-                return "home"
-            if home is None and mnt == "dir" and empty == "dir" and self._marker_vmid(sfd) == vmid:
-                return "slot"
-            return "inconsistent"
-
-    def attach(self, vmid: int, site_slug: str, user_id: int):
-        """Move work/ into the slot's bind source. The CT must be stopped (caller checks)."""
-        if self.mode != "handover":
-            return
-        slug, uid = student_parts(site_slug, user_id)
-        with open_dir(self.student_root, (slug, uid)) as sfd, open_dir(
-            self.slot_mount_root, (safe_component(vmid),)
-        ) as vfd:
-            home, mnt, empty = entry_kind(sfd, "work"), entry_kind(vfd, "mnt"), entry_kind(vfd, "empty")
-            marked = self._marker_vmid(sfd) == vmid
-            if home is None and mnt == "dir" and empty == "dir" and marked:
-                return  # Already attached
-            if home == "dir" and mnt == "dir" and empty is None:
-                # Marker first: after a crash between the renames the state stays recognizable.
-                marker = os.open(
-                    ".mounted", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o640, dir_fd=sfd
-                )
-                try:
-                    os.write(marker, f"{vmid}\n".encode())
-                finally:
-                    os.close(marker)
-                os.rename("mnt", "empty", src_dir_fd=vfd, dst_dir_fd=vfd)
-                mnt, empty, marked = None, "dir", True
-            if home == "dir" and mnt is None and empty == "dir" and marked:
-                os.rename("work", "mnt", src_dir_fd=sfd, dst_dir_fd=vfd)
-                return
-            raise StorageError("Student/slot directories are in an unexpected state; operator check needed")
-
-    def detach(self, vmid: int, site_slug: str, user_id: int):
-        """Move work/ back home and restore the placeholder. The CT must be stopped."""
-        if self.mode != "handover":
-            return
-        slug, uid = student_parts(site_slug, user_id)
-        with open_dir(self.student_root, (slug, uid)) as sfd, open_dir(
-            self.slot_mount_root, (safe_component(vmid),)
-        ) as vfd:
-            home, mnt, empty = entry_kind(sfd, "work"), entry_kind(vfd, "mnt"), entry_kind(vfd, "empty")
-            # The marker proves the directory in the slot belongs to this student.
-            marked = self._marker_vmid(sfd) == vmid
-            if home == "dir" and mnt == "dir" and empty is None:
-                self._unlink_marker(sfd)
-                return  # Already detached
-            if home is None and mnt == "dir" and empty == "dir" and marked:
-                os.rename("mnt", "work", src_dir_fd=vfd, dst_dir_fd=sfd)
-                home, mnt = "dir", None
-            if home == "dir" and mnt is None and empty == "dir" and marked:
-                os.rename("empty", "mnt", src_dir_fd=vfd, dst_dir_fd=vfd)
-                self._unlink_marker(sfd)
-                return
-            raise StorageError("Cannot detach: unexpected directory state; operator check needed")
-
-    @staticmethod
-    def _marker_vmid(fd) -> int | None:
-        try:
-            mfd = os.open(".mounted", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
-        except OSError:
-            return None
-        try:
-            text = os.read(mfd, 32).decode("ascii", "replace").strip()
-        finally:
-            os.close(mfd)
-        return int(text) if text.isdigit() else None
-
-    @staticmethod
-    def _unlink_marker(fd):
-        try:
-            os.unlink(".mounted", dir_fd=fd)
-        except FileNotFoundError:
-            pass
-
-    def check_slot_placeholder(self, vmid: int):
-        """Free slot: mnt exists and is an (empty) placeholder; nothing parked."""
-        if self.mode != "handover":
-            return
-        with open_dir(self.slot_mount_root, (safe_component(vmid),)) as vfd:
-            if entry_kind(vfd, "mnt") != "dir" or entry_kind(vfd, "empty") is not None:
-                raise StorageError(f"Slot {vmid} bind source is not a free placeholder")
-
-    # ------------------------------------------------------------------ pve_config
-    def pve_mount(self, site_slug: str, user_id: int) -> dict:
-        value = pve_mount_value(self.pve_host_root, site_slug, user_id, self.mp_target)
-        if self.student_root is not None:
-            slug, uid = student_parts(site_slug, user_id)
-            # Same tree as seen by the manager: refuses symlinks on the way to work/.
-            with open_dir(self.student_root, (slug, uid, "work")):
+    def ensure_student(self, key: str):
+        """Create students/<key>/ and results/. Never changes or removes existing content."""
+        if not KEY_RE.fullmatch(key):
+            raise StorageError("Unsafe student key")
+        with open_dir(self.student_root, (key,), create=True, mode=self.student_mode) as fd:
+            try:
+                os.mkdir("results", self.results_mode, dir_fd=fd)
+                os.chmod("results", self.results_mode, dir_fd=fd, follow_symlinks=False)
+            except FileExistsError:
                 pass
-        return {self.mp_key: value}
+            with open_dir(self.student_root, (key, "results")):
+                pass  # Refuses a symlink planted as results/
+
+    def check_student(self, key: str) -> bool:
+        try:
+            with open_dir(self.student_root, (safe_component(key),)):
+                return True
+        except (OSError, StorageError):
+            return False

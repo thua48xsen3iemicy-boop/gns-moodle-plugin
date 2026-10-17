@@ -12,11 +12,15 @@ def _form(request):
     return {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
 
 
+GIB = 1024 ** 3
+
+
 class FakePve:
     """A cluster of nodes; entry hosts are '<node>:8006'. CTs live on one node and may migrate."""
 
     def __init__(self, timeline=None, nodes=("pve1", "pve2", "pve3")):
         self.nodes = list(nodes)
+        self.node_mem = {n: {"maxmem": 64 * GIB, "mem": 8 * GIB, "status": "online"} for n in nodes}
         self.timeline = timeline if timeline is not None else []
         self.cts = {}
         self.tasks = {}
@@ -28,8 +32,9 @@ class FakePve:
         self.responses = {}  # (method, path regex) -> (status, json body) one-shot overrides
         self.counter = 0
 
-    def add_ct(self, vmid, node="pve2", status="stopped", config=None):
-        self.cts[vmid] = {"node": node, "status": status, "config": dict(config or {"hostname": f"slot{vmid}"})}
+    def add_ct(self, vmid, node="pve2", status="stopped", config=None, maxmem=4 * GIB):
+        self.cts[vmid] = {"node": node, "status": status, "maxmem": maxmem,
+                          "config": dict(config or {"hostname": f"slot{vmid}", "cores": 2, "memory": 4096})}
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -53,8 +58,10 @@ class FakePve:
                 del self.responses[(method, pattern)]
                 return httpx.Response(status, json=body)
         if path == "/cluster/resources":
-            data = [{"vmid": v, "type": "lxc", "node": ct["node"], "status": ct["status"]}
+            data = [{"vmid": v, "type": "lxc", "node": ct["node"], "status": ct["status"], "maxmem": ct["maxmem"]}
                     for v, ct in self.cts.items()]
+            if request.url.params.get("type") != "vm":
+                data += [{"type": "node", "node": n, **m} for n, m in self.node_mem.items()]
             return httpx.Response(200, json={"data": data})
         m = re.fullmatch(r"/nodes/([^/]+)/tasks/([^/]+)/status", path)
         if m:
@@ -91,6 +98,8 @@ class FakePve:
             for key in filter(None, form.pop("delete", "").split(",")):
                 ct["config"].pop(key, None)
             ct["config"].update(form)
+            if "memory" in form:
+                ct["maxmem"] = int(form["memory"]) * 1024 * 1024
             self.timeline.append(("pve:config", dict(form)))
             return httpx.Response(200, json={"data": None})
         actions = {
@@ -111,10 +120,97 @@ class FakePve:
         return httpx.Response(501, json={"data": None})
 
 
-class FakeSlot:
-    """Lab Slot semantics from slot/api/lifecycle.py, reduced to what the manager relies on."""
+class FakeAgent:
+    """Lab Node Agent semantics (status/mounts/start/stop) on top of FakePve's CTs."""
 
-    def __init__(self, address, timeline=None):
+    def __init__(self, pve: FakePve, student_root, ceph_root="/mnt/pve/data"):
+        self.pve = pve
+        self.timeline = pve.timeline
+        self.student_root = student_root
+        self.ceph_root = ceph_root
+        self.requests = []
+        self.busy = False
+        self.untagged = set()
+        self.start_fails = None  # detail text of a 409 "Proxmox command failed"
+        self.lose_start_response = False  # Start happens, then the response is lost
+        self.shutdown_hangs = False  # Graceful shutdown leaves the CT running
+
+    def transport(self):
+        return httpx.MockTransport(self.handle)
+
+    def _err(self, status, detail):
+        return httpx.Response(status, json={"detail": detail})
+
+    def _mounts(self, ct, body):
+        key = body["student_key"]
+        if not (self.student_root / key).is_dir() or (self.student_root / key).is_symlink():
+            return self._err(422, "Required CephFS directory does not exist")
+        code = f"{self.ceph_root}/slot" + (f"/{body['code_revision']}" if body.get("code_revision") else "")
+        ro = 1 if body.get("data_mode") == "ro" else 0
+        ct["config"]["mp0"] = f"{code},mp=/opt/slot,ro=1,shared=1"
+        ct["config"]["mp1"] = f"{self.ceph_root}/students/{key},mp=/srv/student,ro={ro},shared=1"
+        return None
+
+    def handle(self, request: httpx.Request):
+        node = request.url.host.split(".")[0]
+        path = request.url.path
+        body = json.loads(request.content) if request.content else None
+        self.requests.append((node, request.method, path, body))
+        if path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop)", path)
+        if not m:
+            return self._err(404, "Not Found")
+        vmid, action = int(m.group(1)), m.group(2)
+        ct = self.pve.cts.get(vmid)
+        if ct is None or ct["node"] != node:
+            return self._err(404, "LXC not found on this node")
+        if vmid in self.untagged:
+            return self._err(403, "Container is not marked as a lab slot")
+        if self.busy:
+            return self._err(409, "Another operation on this slot is in progress")
+        if action == "status":
+            return httpx.Response(200, json={"vmid": vmid, "state": ct["status"]})
+        if action in ("mounts", "start") and ct["status"] != "stopped":
+            return self._err(409, "Slot must be stopped to change mount points")
+        if action == "mounts":
+            err = self._mounts(ct, body)
+            if err:
+                return err
+            self.timeline.append(("agent:mounts", body["student_key"], body["data_mode"]))
+            return httpx.Response(200, json={"vmid": vmid, "mounts_configured": True})
+        if action == "start":
+            err = self._mounts(ct, body)
+            if err:
+                return err
+            if self.start_fails:
+                return self._err(409, f"Proxmox command failed: {self.start_fails}")
+            ct["status"] = "running"
+            self.timeline.append(("agent:start", body["student_key"]))
+            if self.lose_start_response:
+                self.lose_start_response = False
+                raise httpx.ReadTimeout("lost", request=request)
+            return httpx.Response(200, json={"vmid": vmid, "state": "running",
+                                             "completed_actions": body["actions"]})
+        # stop
+        if ct["status"] == "stopped":
+            return httpx.Response(200, json={"vmid": vmid, "state": "stopped"})
+        self.timeline.append(("agent:stop", "force" if body["force"] else "shutdown"))
+        if not body["force"] and self.shutdown_hangs:
+            return self._err(409, "Proxmox command failed: shutdown timed out")
+        ct["status"] = "stopped"
+        return httpx.Response(200, json={"vmid": vmid, "state": "stopped"})
+
+
+class FakeSlot:
+    """Lab Slot semantics from slot/api/lifecycle.py, reduced to what the manager relies on.
+
+    projects: registry shared by all fake slots, like the shared /opt/gns3/projects directory.
+    A project known there but not to this slot's own state fails like the real slot does
+    ("Provisioning completion is unknown"): no cold resume across slots.
+    """
+
+    def __init__(self, address, timeline=None, projects=None):
         self.address = address
         self.timeline = timeline if timeline is not None else []
         self.healthy = True
@@ -127,6 +223,7 @@ class FakeSlot:
         self.fail_next = None  # error dict for the next operation
         self.requests = []
         self.reachable = True
+        self.projects = projects if projects is not None else {}
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -164,12 +261,19 @@ class FakeSlot:
                    "stop": {"READY", "STOPPED", "FAILED"}}[action]
         if (lab or {}).get("state") not in allowed:
             return self._json(409, {"detail": {"code": "INVALID_TRANSITION", "message": "no"}})
+        if lab and ticket and ticket != lab["ticket"]:
+            return self._json(409, {"detail": "Existing project manifest differs"})
+        cold = False
         if lab is None:
+            cold = pid in self.projects and self.projects[pid] != self.address
             lab = self.labs[pid] = {"project_id": pid, "ticket": ticket}
             self.node_ids[pid] = {n["name"]: str(uuid.uuid4()) for n in ticket["nodes"]}
+            self.projects.setdefault(pid, self.address)
         lab["state"] = "STOPPING" if action == "stop" else "DEPLOYING"
         op = {"operation_id": str(uuid.uuid4()), "project_id": pid, "action": action, "status": "RUNNING",
-              "fingerprint": fingerprint, "remaining": self.op_polls, "error": None}
+              "fingerprint": fingerprint, "remaining": self.op_polls, "error": None,
+              "fail": {"code": "RuntimeError", "message": "Provisioning completion is unknown; refusing to "
+                       "skip or replay commands. Operator reconciliation required"} if cold else None}
         self.ops[op["operation_id"]] = op
         self.keys[key] = op["operation_id"]
         self.timeline.append(("slot:" + action, self.address))
@@ -229,8 +333,8 @@ class FakeSlot:
                     op["remaining"] -= 1
                 else:
                     lab = self.labs[op["project_id"]]
-                    if self.fail_next:
-                        op.update(status="FAILED", error=self.fail_next)
+                    if self.fail_next or op.get("fail"):
+                        op.update(status="FAILED", error=self.fail_next or op["fail"])
                         lab["state"] = "FAILED"
                         self.fail_next = None
                     else:
