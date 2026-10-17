@@ -47,6 +47,7 @@ $string['consolereconnected'] = 'Переподключено. Нажмите En
 $string['consolereconnecting'] = 'Связь потеряна, переподключение через {$a} с…';
 $string['consoles'] = 'Консоли устройств';
 $string['consoletabs'] = 'Открытые консоли';
+$string['consoleunavailable'] = 'Консоль устройства сейчас недоступна.';
 $string['consolevnclater'] = 'Графическая консоль появится позже.';
 $string['demonotice'] = 'У активности ещё нет эталонной лабы на менеджере, поэтому здесь демо-лаба: топология OSPF с фактами об устройствах. Переключайте слои L1, L2, L3 и OSPF и попробуйте конфиг с ошибками.';
 $string['demosource'] = 'демо';

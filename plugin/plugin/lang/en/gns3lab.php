@@ -47,6 +47,7 @@ $string['consolereconnected'] = 'Reconnected. Press Enter to get a prompt.';
 $string['consolereconnecting'] = 'Connection lost, reconnecting in {$a} s…';
 $string['consoles'] = 'Device consoles';
 $string['consoletabs'] = 'Open consoles';
+$string['consoleunavailable'] = 'The console of the device is unavailable right now.';
 $string['consolevnclater'] = 'The graphical console will come later.';
 $string['demonotice'] = 'The activity has no reference lab on the lab manager yet, so this is a demo lab: an OSPF topology with device facts. Switch the layers L1, L2, L3 and OSPF and try the configuration with mistakes.';
 $string['demosource'] = 'demo';

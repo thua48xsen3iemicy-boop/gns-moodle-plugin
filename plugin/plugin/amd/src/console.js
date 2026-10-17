@@ -31,14 +31,35 @@ import {getStrings} from 'core/str';
 import {CommandBar} from 'mod_gns3lab/keyboard';
 import {PLACEHOLDERS, SETS} from 'mod_gns3lab/commands';
 
-/** Close code of the gateway: the console closed or is unavailable on the slot side. */
+/** Close code of the gateway: the console closed on the slot side. */
 const CLOSE_UPSTREAM = 4000;
+
+/** Close code of the gateway: the slot refused the console (node not ready, slot unreachable, wrong token). */
+const CLOSE_UNAVAILABLE = 4001;
+
+/** A connection that lived this long, ms, counts as working: the reconnection pauses start again from 1 s. */
+const STABLE_AFTER = 10000;
+
+/** Before "Connected" is printed, ms: a socket the gateway closes at once never says it. */
+const CONNECTED_NOTE_DELAY = 400;
+
+/**
+ * Pause between the lines of a long paste into Cisco IOS, ms: IOU drops characters when a configuration
+ * comes in faster than it reads it.
+ */
+const PASTE_LINE_PAUSE = 30;
+
+/** Input this long with line breaks is a paste and is paced on Cisco devices. */
+const PASTE_MIN = 64;
 
 /**
  * Largest input frame, in UTF-16 code units: at most 12 KB of UTF-8, well below the 64 KB the gateway takes.
  * A pasted configuration goes out in several frames.
  */
 const MAX_FRAME = 4096;
+
+/** Node types that run Cisco IOS: long pastes go to them line by line. */
+const CISCO_TYPES = ['iou', 'dynamips'];
 
 /** Reconnection pauses, seconds; the last one repeats. */
 const BACKOFF = [1, 2, 4, 8, 16, 30];
@@ -75,7 +96,7 @@ const THEME = {
 const STRING_KEYS = [
     'consoleconnecting', 'consoleconnected', 'consolereconnected', 'consolereconnecting', 'consolenodestopped',
     'consoleerror', 'consolereadonly', 'consoleclose', 'consolecopied', 'consolecopyfailed', 'consolekeys',
-    'consoletabs', 'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown',
+    'consoletabs', 'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown', 'consoleunavailable',
     'kb_commands', 'kb_keyboard', 'kb_send', 'kb_placeholder', 'kb_fill', 'kb_needif', 'kb_needrouter', 'kb_ports',
     ...PLACEHOLDERS.map(p => 'ph_' + p),
     ...[...new Set(SETS.flatMap(set => set.groups.map(g => 'kbg_' + g.key)))],
@@ -130,8 +151,9 @@ export class ConsoleConnection {
      * @param {Function} options.nodeStatus async () => {status, stale} from a fresh session state
      * @param {Function} options.onState called with the new state name
      * @param {Function} [options.transform] changes typed input before it is sent
+     * @param {boolean} [options.paced] send long pastes line by line (Cisco IOS)
      */
-    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data}) {
+    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data, paced = false}) {
         this.cmid = cmid;
         this.userid = userid;
         this.nodeId = nodeId;
@@ -145,6 +167,13 @@ export class ConsoleConnection {
         this.attempt = 0;
         this.everOpened = false;
         this.timer = null;
+        this.paced = paced;
+        this.queue = [];
+        this.pump = null;
+        this.openedAt = 0;
+        this.gotData = false;
+        this.noteTimer = null;
+        this.pendingNote = null;
         this.encoder = new TextEncoder();
         this.disposables = [
             term.onData(data => this.send(transform(data))),
@@ -201,6 +230,15 @@ export class ConsoleConnection {
         ws.binaryType = 'arraybuffer';
         ws.onopen = () => this.opened(ws);
         ws.onmessage = event => {
+            if (ws !== this.ws) {
+                return;
+            }
+            if (!this.gotData) {
+                // The node answered: the connection works, the pauses start again from 1 s.
+                this.gotData = true;
+                this.attempt = 0;
+                this.flushConnectedNote();
+            }
             this.term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
         };
         ws.onclose = event => this.closed(ws, event);
@@ -216,12 +254,26 @@ export class ConsoleConnection {
         if (ws !== this.ws) {
             return;
         }
-        this.attempt = 0;
+        // The pauses are not reset here: the gateway accepts first and closes at once when the slot refuses.
+        this.openedAt = Date.now();
+        this.gotData = false;
         this.sendSize();
         // Nothing is sent on reconnection: the user presses Enter to get a prompt.
-        this.term.write(note(this.everOpened ? this.strings.consolereconnected : this.strings.consoleconnected));
-        this.everOpened = true;
+        this.pendingNote = this.everOpened ? this.strings.consolereconnected : this.strings.consoleconnected;
+        this.noteTimer = setTimeout(() => this.flushConnectedNote(), CONNECTED_NOTE_DELAY);
         this.setState('open');
+    }
+
+    /**
+     * Prints "Connected" once the connection is known to stay, before the first output of the node.
+     */
+    flushConnectedNote() {
+        clearTimeout(this.noteTimer);
+        if (this.pendingNote) {
+            this.term.write(note(this.pendingNote));
+            this.pendingNote = null;
+            this.everOpened = true;
+        }
     }
 
     /**
@@ -235,7 +287,17 @@ export class ConsoleConnection {
             return;
         }
         this.ws = null;
-        if (event.code === CLOSE_UPSTREAM) {
+        clearTimeout(this.noteTimer);
+        this.pendingNote = null;
+        this.stopPump();
+        if (this.openedAt && Date.now() - this.openedAt >= STABLE_AFTER) {
+            this.attempt = 0;
+        }
+        this.openedAt = 0;
+        if (event.code === CLOSE_UNAVAILABLE) {
+            this.term.write(note(this.strings.consoleunavailable));
+        }
+        if (event.code === CLOSE_UPSTREAM || event.code === CLOSE_UNAVAILABLE) {
             let node = {status: null, stale: false};
             try {
                 node = await this.nodeStatus();
@@ -271,12 +333,58 @@ export class ConsoleConnection {
     /**
      * Sends keyboard input.
      *
+     * On Cisco a long paste goes line by line with a short pause, and whatever is typed meanwhile waits its turn.
+     *
      * @param {string} data what xterm.js or a key button produced
      */
     send(data) {
         if (this.readonly || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return;
         }
+        if (this.paced && (this.queue.length || (data.length >= PASTE_MIN && /[\r\n]/.test(data)))) {
+            const lines = data.replace(/\r\n?|\n/g, '\r').split('\r');
+            lines.forEach((line, i) => {
+                const chunk = i < lines.length - 1 ? line + '\r' : line;
+                if (chunk) {
+                    this.queue.push(chunk);
+                }
+            });
+            if (!this.pump) {
+                this.drain();
+            }
+            return;
+        }
+        this.sendNow(data);
+    }
+
+    /**
+     * Sends the next queued line and schedules the one after it.
+     */
+    drain() {
+        const line = this.queue.shift();
+        if (line === undefined || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.stopPump();
+            return;
+        }
+        this.sendNow(line);
+        this.pump = setTimeout(() => this.drain(), PASTE_LINE_PAUSE);
+    }
+
+    /**
+     * Drops the rest of a paced paste, for example when the connection closes.
+     */
+    stopPump() {
+        clearTimeout(this.pump);
+        this.pump = null;
+        this.queue = [];
+    }
+
+    /**
+     * Sends input in frames below the gateway limit.
+     *
+     * @param {string} data input
+     */
+    sendNow(data) {
         for (let start = 0; start < data.length;) {
             let end = Math.min(start + MAX_FRAME, data.length);
             const last = data.charCodeAt(end - 1);
@@ -317,6 +425,8 @@ export class ConsoleConnection {
     close() {
         this.setState('closed');
         clearTimeout(this.timer);
+        clearTimeout(this.noteTimer);
+        this.stopPump();
         if (this.ws) {
             const ws = this.ws;
             this.ws = null;
@@ -527,6 +637,7 @@ export class ConsolePanel {
             strings: this.strings,
             nodeStatus: () => this.nodeStatus(nodeId),
             transform: data => this.applyCtrl(data),
+            paced: CISCO_TYPES.includes(nodeType),
             onState: state => {
                 button.dataset.state = state;
                 if (state === 'failed' || state === 'stopped') {

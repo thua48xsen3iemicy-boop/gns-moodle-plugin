@@ -14,7 +14,10 @@
     повторная фильтрация испортила бы байт 0xFF в данных;
   * пропускает от браузера только текстовые кадры (ввод с клавиатуры). Бинарные кадры,
     в том числе {"cols": N, "rows": M}, отбрасываются: Slot пока не передаёт размер окна (telnet NAWS);
-  * режим наблюдателя: вывод идёт, ввод отбрасывается.
+  * режим наблюдателя: вывод идёт, ввод отбрасывается;
+  * коды закрытия для браузера: 4000 — консоль закрылась на стороне слота, 4001 — слот не пустил к консоли
+    (нода не готова, слот недоступен, неверный токен в GW_SLOTS);
+  * WebSocket только с сайтов из GW_ALLOWED_ORIGINS: без этой настройки шлюз не запускается.
 
 Запуск:
     pip install aiohttp
@@ -96,7 +99,7 @@ async def issue_ticket(request: web.Request):
 
 async def console(request: web.Request):
     origin = request.headers.get("Origin")
-    if ALLOWED_ORIGINS and origin not in ALLOWED_ORIGINS:
+    if origin not in ALLOWED_ORIGINS:
         raise web.HTTPForbidden(text="чужой Origin")
     node_id = canonical_uuid(request.match_info["node_id"])
     g = request.app["tickets"].take(request.query.get("ticket", ""))
@@ -117,8 +120,8 @@ async def console(request: web.Request):
     browser = web.WebSocketResponse(heartbeat=HEARTBEAT, max_msg_size=MAX_MSG)
     await browser.prepare(request)
     if up is None:
-        # Тот же код 4000, что и при закрытии консоли: клиент перечитает сессию и решит, переподключаться ли.
-        await browser.close(code=4000, message=b"upstream unavailable")
+        # 4001, а не 4000: соединение открылось и сразу закрылось, клиент не должен считать его удачным.
+        await browser.close(code=4001, message=b"upstream unavailable")
         log.info("консоль недоступна: %s %s/%s (%s)", g["who"], slot, node_id, upstream_error)
         return browser
     log.info("консоль открыта: %s %s/%s%s", g["who"], slot, node_id, " (наблюдатель)" if g["readonly"] else "")
@@ -171,6 +174,8 @@ def make_app():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if not ALLOWED_ORIGINS:
+        raise SystemExit("GW_ALLOWED_ORIGINS не задан: укажите origin сайта Moodle, например https://moodle.example.edu")
     if not INTERNAL_KEY:
         log.warning("GW_INTERNAL_KEY не задан — выдача билетов отключена")
     web.run_app(make_app(), host=LISTEN_HOST, port=LISTEN_PORT)

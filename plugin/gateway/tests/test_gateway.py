@@ -3,7 +3,8 @@
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-os.environ.update(GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret"}), GW_SLOT_PORT="38080")
+os.environ.update(GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret"}), GW_SLOT_PORT="38080",
+                  GW_ALLOWED_ORIGINS="https://moodle.test")
 import console_gateway as gw
 from aiohttp import web, ClientSession, WSMsgType
 
@@ -33,6 +34,7 @@ async def main():
     r1 = web.AppRunner(fake); await r1.setup(); await web.TCPSite(r1, "127.0.0.1", 38080).start()
     r2 = web.AppRunner(gw.make_app()); await r2.setup(); await web.TCPSite(r2, "127.0.0.1", 38081).start()
     async with ClientSession() as s:
+        moodle = {"Origin": "https://moodle.test"}
         async def ticket(ro, project=P, nodes=(N1, OFF)):
             async with s.post("http://127.0.0.1:38081/internal/tickets", headers={"X-Internal-Key": "k"},
                               json={"slot": "127.0.0.1", "project_id": project, "nodes": list(nodes), "readonly": ro}) as r:
@@ -47,7 +49,7 @@ async def main():
         print("non-UUID ids rejected OK")
         # обычный студент
         _, t = await ticket(False)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}")
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle)
         assert await prompt(ws) == b"\r\nR1> \xff"
         assert paths[-1] == f"/v1/console/{P}/{N1}", paths
         await ws.send_str("en\r"); await ws.send_bytes(b'{"cols":120,"rows":40}')
@@ -58,34 +60,45 @@ async def main():
         print("student input OK, binary frames dropped")
         # повторное использование билета
         try:
-            await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}"); raise SystemExit("FAIL: билет принят повторно")
+            await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle); raise SystemExit("FAIL: билет принят повторно")
         except Exception as e: print("reuse rejected:", type(e).__name__)
         # чужая нода
         _, t2 = await ticket(False)
         try:
-            await s.ws_connect(f"http://127.0.0.1:38081/console/{N2}?ticket={t2}"); raise SystemExit("FAIL: пустил к чужой ноде")
+            await s.ws_connect(f"http://127.0.0.1:38081/console/{N2}?ticket={t2}", headers=moodle); raise SystemExit("FAIL: пустил к чужой ноде")
         except Exception as e: print("other node rejected:", type(e).__name__)
         # консоль на стороне слота закрылась — браузер получает 4000
         _, t = await ticket(False)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}")
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle)
         await prompt(ws); await ws.send_str("reload\r")
         m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4000, m
         print("upstream close -> 4000 OK")
-        # слот отказал (нода не запущена) — тоже 4000, без трассировки
+        # слот отказал (нода не запущена) — 4001 «консоль недоступна», без трассировки
         _, t = await ticket(False)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{OFF}?ticket={t}")
-        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4000, m
-        print("upstream refused -> 4000 OK")
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{OFF}?ticket={t}", headers=moodle)
+        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        print("upstream refused -> 4001 OK")
         # неверный токен слота — то же поведение
         gw.SLOTS["127.0.0.1"] = "wrong"
         _, t = await ticket(False)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}")
-        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4000, m
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle)
+        m = await ws.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
         gw.SLOTS["127.0.0.1"] = "console-secret"
-        print("wrong slot token -> 4000 OK")
+        print("wrong slot token -> 4001 OK")
+        # чужой сайт и запрос без Origin — 403, билет не тратится
+        _, t = await ticket(False)
+        for headers in ({"Origin": "https://evil.test"}, {}):
+            try:
+                await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=headers)
+                raise SystemExit("FAIL: пустил без Origin Moodle")
+            except Exception as e:
+                assert getattr(e, "status", None) == 403, e
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle)
+        await prompt(ws); await ws.close()
+        print("foreign or missing Origin -> 403 OK")
         # наблюдатель
         seen.clear(); _, t3 = await ticket(True)
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t3}")
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t3}", headers=moodle)
         await prompt(ws)
         await ws.send_str("conf t\r"); await ws.send_bytes(b'{"cols":80,"rows":24}')
         await asyncio.sleep(0.3); await ws.close(); await asyncio.sleep(0.2)
