@@ -81,25 +81,29 @@ app = FastAPI(
 )
 
 
+def api_error(status: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status, {"code": code, "message": message})
+
+
 def vmid_allowed(vmid: int) -> None:
     if not VMID_MIN <= vmid <= VMID_MAX:
-        raise HTTPException(403, "VMID outside allowed lab range")
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     conf = CONF_DIR / f"{vmid}.conf"
     try:
         content = conf.read_text(encoding="utf-8")
     except FileNotFoundError:
-        raise HTTPException(404, "LXC not found on this node")
+        raise api_error(404, "CT_NOT_ON_NODE", "LXC not found on this node")
     except OSError:
-        raise HTTPException(503, "Cannot read Proxmox configuration")
+        raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot read Proxmox configuration")
     # Do not attach writable host paths to privileged containers.
     if not re.search(r"(?m)^unprivileged:\s*1\s*$", content):
-        raise HTTPException(403, "Only unprivileged lab containers are accepted")
+        raise api_error(403, "PRIVILEGED_CT", "Only unprivileged lab containers are accepted")
     tags = set()
     for line in content.splitlines():
         if line.startswith("tags:"):
             tags.update(t for t in re.split(r"[;,\s]+", line.partition(":")[2].strip()) if t)
     if REQUIRED_TAG not in tags:
-        raise HTTPException(403, "Container is not marked as a lab slot")
+        raise api_error(403, "NOT_LAB_SLOT", "Container is not marked as a lab slot")
 
 
 def run_cmd(args: list[str], timeout: int = 45) -> str:
@@ -113,13 +117,15 @@ def run_cmd(args: list[str], timeout: int = 45) -> str:
         )
     except subprocess.TimeoutExpired:
         log.warning("operation timed out argv=%r", args)
-        raise HTTPException(504, "Proxmox command timed out; check actual container state")
+        raise api_error(504, "PCT_TIMEOUT", "Proxmox command timed out; check actual container state")
     except OSError:
-        raise HTTPException(503, "Proxmox command could not be executed")
+        raise api_error(503, "PCT_UNAVAILABLE", "Proxmox command could not be executed")
     if p.returncode != 0:
         log.warning("operation failed argv=%r returncode=%s", args, p.returncode)
         detail = (p.stderr or p.stdout or "Command failed").strip()[:800]
-        raise HTTPException(409, f"Proxmox command failed: {detail}")
+        if args[0] == FINDMNT:
+            raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot inspect CephFS mount")
+        raise api_error(409, "PCT_FAILED", f"Proxmox command failed: {detail}")
     return p.stdout.strip()
 
 
@@ -127,7 +133,7 @@ def lxc_state(vmid: int) -> str:
     output = run_cmd([PCT, "status", str(vmid)], timeout=15)
     match = re.fullmatch(r"status:\s*(running|stopped)(?:\s*.*)?", output)
     if not match:
-        raise HTTPException(503, "Unexpected LXC status output")
+        raise api_error(503, "PCT_UNAVAILABLE", "Unexpected LXC status output")
     return match.group(1)
 
 
@@ -138,7 +144,7 @@ def validate_no_symlinks(path: Path) -> None:
     remain admin-controlled, including ACLs. Ceph administrators are trusted.
     """
     if not path.is_absolute() or ".." in path.parts:
-        raise HTTPException(500, "CephFS root must be an absolute canonical path")
+        raise api_error(500, "AGENT_CONFIG_INVALID", "CephFS root must be an absolute canonical path")
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in path.parts[1:]:
@@ -146,23 +152,23 @@ def validate_no_symlinks(path: Path) -> None:
             if st.st_uid not in ADMIN_UIDS or (
                 st.st_mode & 0o022
             ):
-                raise HTTPException(422, "Mount ancestor is not administrator-controlled")
+                raise api_error(422, "SOURCE_UNSAFE", "Mount ancestor is not administrator-controlled")
             try:
                 os.getxattr(fd, "system.posix_acl_access")
             except OSError as exc:
                 if exc.errno not in (errno.ENODATA, errno.ENOTSUP):
-                    raise HTTPException(503, "Cannot verify mount ancestor ACL")
+                    raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot verify mount ancestor ACL")
             else:
-                raise HTTPException(422, "Extended ACL on mount ancestor is unsupported")
+                raise api_error(422, "SOURCE_UNSAFE", "Extended ACL on mount ancestor is unsupported")
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = child
     except FileNotFoundError:
-        raise HTTPException(422, "Required CephFS directory does not exist")
+        raise api_error(422, "SOURCE_MISSING", "Required CephFS directory does not exist")
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-            raise HTTPException(422, "Mount path has a symbolic link or non-directory component")
-        raise HTTPException(503, "Cannot inspect source directory")
+            raise api_error(422, "SOURCE_UNSAFE", "Mount path has a symbolic link or non-directory component")
+        raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot inspect source directory")
     finally:
         os.close(fd)
 
@@ -170,10 +176,10 @@ def validate_no_symlinks(path: Path) -> None:
 def validate_cephfs() -> None:
     validate_no_symlinks(CEPH_ROOT)
     if not CEPH_ROOT.is_mount():
-        raise HTTPException(503, "CephFS is not mounted at its expected root")
+        raise api_error(503, "STORAGE_UNAVAILABLE", "CephFS is not mounted at its expected root")
     fs_type = run_cmd([FINDMNT, "--mountpoint", str(CEPH_ROOT), "-n", "-o", "FSTYPE"], timeout=10)
     if fs_type not in ALLOWED_FS:
-        raise HTTPException(503, "Unexpected filesystem mounted at CephFS root")
+        raise api_error(503, "STORAGE_UNAVAILABLE", "Unexpected filesystem mounted at CephFS root")
 
 
 def source_paths(spec: Mounts) -> tuple[Path, Path]:
@@ -185,11 +191,11 @@ def source_paths(spec: Mounts) -> tuple[Path, Path]:
     for p in (code_path, data_path):
         validate_no_symlinks(p)
         if not p.is_relative_to(CEPH_ROOT):
-            raise HTTPException(422, "Source path escapes CephFS root")
+            raise api_error(422, "SOURCE_UNSAFE", "Source path escapes CephFS root")
         # A nested mount could otherwise replace a student directory with a host filesystem.
         mounted_at = run_cmd([FINDMNT, "-T", str(p), "-n", "-o", "TARGET"], timeout=10)
         if mounted_at != str(CEPH_ROOT):
-            raise HTTPException(422, "Source directory is not on expected CephFS mount")
+            raise api_error(422, "SOURCE_UNSAFE", "Source directory is not on expected CephFS mount")
     return code_path, data_path
 
 
@@ -211,7 +217,7 @@ def slot_lock(vmid: int):
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise HTTPException(409, "Another operation on this slot is in progress")
+            raise api_error(409, "SLOT_BUSY", "Another operation on this slot is in progress")
         try:
             yield
         finally:
@@ -220,7 +226,7 @@ def slot_lock(vmid: int):
 
 def require_stopped(vmid: int) -> None:
     if lxc_state(vmid) != "stopped":
-        raise HTTPException(409, "Slot must be stopped to change mount points")
+        raise api_error(409, "NOT_STOPPED", "Slot must be stopped to change mount points")
 
 
 @app.get("/health")
@@ -232,7 +238,7 @@ def health():
 @app.get("/slots/{vmid}/status")
 def status(vmid: VMID):
     if not VMID_MIN <= vmid <= VMID_MAX:
-        raise HTTPException(403, "VMID outside allowed lab range")
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
         return {"vmid": vmid, "state": lxc_state(vmid)}
@@ -241,7 +247,7 @@ def status(vmid: VMID):
 @app.put("/slots/{vmid}/mounts")
 def mounts(vmid: VMID, spec: Mounts):
     if not VMID_MIN <= vmid <= VMID_MAX:
-        raise HTTPException(403, "VMID outside allowed lab range")
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
         require_stopped(vmid)
@@ -252,7 +258,7 @@ def mounts(vmid: VMID, spec: Mounts):
 @app.post("/slots/{vmid}/start")
 def start(vmid: VMID, spec: Start):
     if not VMID_MIN <= vmid <= VMID_MAX:
-        raise HTTPException(403, "VMID outside allowed lab range")
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
         require_stopped(vmid)
@@ -272,7 +278,7 @@ def start(vmid: VMID, spec: Start):
 @app.post("/slots/{vmid}/stop")
 def stop(vmid: VMID, options: Stop):
     if not VMID_MIN <= vmid <= VMID_MAX:
-        raise HTTPException(403, "VMID outside allowed lab range")
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
         if lxc_state(vmid) == "stopped":
@@ -288,33 +294,33 @@ def stop(vmid: VMID, options: Stop):
 def ensure_student(student_key: Key):
     # Path parameters need the same fullmatch protection as mount body keys.
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", student_key) is None:
-        raise HTTPException(422, "Expected one safe path component")
+        raise api_error(422, "INVALID_REQUEST", "Expected one safe path component")
     try:
         uid, gid = int(STUDENT_UID), int(STUDENT_GID)
         if not (1 <= uid < 2**32 - 1 and 1 <= gid < 2**32 - 1):
             raise ValueError()
     except (TypeError, ValueError):
-        raise HTTPException(503, "Configure mapped gns3 host UID/GID first")
+        raise api_error(503, "STUDENT_IDS_NOT_CONFIGURED", "Configure mapped gns3 host UID/GID first")
     validate_cephfs()
     parent = CEPH_ROOT / "students"
     validate_no_symlinks(parent)
     if run_cmd([FINDMNT, "-T", str(parent), "-n", "-o", "TARGET"], timeout=10) != str(CEPH_ROOT):
-        raise HTTPException(422, "Students parent is not on expected CephFS mount")
+        raise api_error(422, "SOURCE_UNSAFE", "Students parent is not on expected CephFS mount")
     try:
         parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             st = os.fstat(parent_fd)
             if st.st_uid not in ADMIN_UIDS or st.st_mode & 0o022:
-                raise HTTPException(422, "Students parent must be administrator-controlled")
+                raise api_error(422, "SOURCE_UNSAFE", "Students parent must be administrator-controlled")
             # Reject access and default ACLs (mkdir must not inherit extra access).
             for acl in ("system.posix_acl_access", "system.posix_acl_default"):
                 try:
                     os.getxattr(parent_fd, acl)
                 except OSError as exc:
                     if exc.errno not in (errno.ENODATA, errno.ENOTSUP):
-                        raise HTTPException(503, "Cannot verify students parent ACL")
+                        raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot verify students parent ACL")
                 else:
-                    raise HTTPException(422, "Students parent ACL is unsupported")
+                    raise api_error(422, "SOURCE_UNSAFE", "Students parent ACL is unsupported")
             created = False
             try:
                 os.mkdir(student_key, mode=0o700, dir_fd=parent_fd)
@@ -327,20 +333,20 @@ def ensure_student(student_key: Key):
                 # Do not chown nested mounts, including a substituted host filesystem.
                 target = parent / student_key
                 if run_cmd([FINDMNT, "-T", str(target), "-n", "-o", "TARGET"], timeout=10) != str(CEPH_ROOT):
-                    raise HTTPException(422, "Student directory is not on expected CephFS mount")
+                    raise api_error(422, "SOURCE_UNSAFE", "Student directory is not on expected CephFS mount")
                 if created:
                     os.fchown(fd, uid, gid)
                     log.info("created student directory key=%s uid=%s gid=%s", student_key, uid, gid)
                 st = os.fstat(fd)
                 if (st.st_uid, st.st_gid) != (uid, gid):
-                    raise HTTPException(409, "Existing student directory has a different owner")
+                    raise api_error(409, "STUDENT_DIR_OWNER", "Existing student directory has a different owner")
             finally:
                 os.close(fd)
         finally:
             os.close(parent_fd)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-            raise HTTPException(422, "Student path is not a real directory")
+            raise api_error(422, "SOURCE_UNSAFE", "Student path is not a real directory")
         log.warning("student directory operation failed key=%s errno=%s", student_key, exc.errno)
-        raise HTTPException(503, "Cannot provision student directory; inspect ownership before retry")
+        raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot provision student directory; inspect ownership before retry")
     return {"student_key": student_key, "ready": True}

@@ -361,3 +361,70 @@ def test_revision_mounted_at_same_slot_destination(env):
     command = next(c for c in calls if c[:2] == [agent.PCT, 'set'])
     assert f'{ceph}/slot/release1,mp=/srv/gns3-ro/slot,ro=1,shared=1' in command
     assert f'{ceph}/students/student42,mp=/opt/gns3/projects,ro=1,shared=1' in command
+
+
+@pytest.mark.parametrize('url,body,status,code', [
+    ('/slots/150/start', {'student_key': 'student42'}, 403, 'VMID_OUT_OF_RANGE'),
+    ('/slots/2201/start', {'student_key': 'missing'}, 422, 'SOURCE_MISSING'),
+])
+def test_structured_api_errors(env, url, body, status, code):
+    client, *_ = env
+    result = client.post(url, json=body)
+    assert result.status_code == status
+    assert result.json()['detail']['code'] == code
+    assert isinstance(result.json()['detail']['message'], str)
+
+
+def test_student_configuration_and_owner_codes(student_env, monkeypatch):
+    (client, *_), _ = student_env
+    monkeypatch.setattr(agent, 'STUDENT_UID', None)
+    result = client.put('/students/new')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'STUDENT_IDS_NOT_CONFIGURED'
+    monkeypatch.setattr(agent, 'STUDENT_UID', str(os.getuid() + 1))
+    result = client.put('/students/student42')
+    assert result.status_code == 409
+    assert result.json()['detail']['code'] == 'STUDENT_DIR_OWNER'
+
+
+def test_validation_errors_remain_fastapi_list(env):
+    client, *_ = env
+    result = client.post('/slots/2201/stop', json={'force': 'false'})
+    assert result.status_code == 422
+    assert isinstance(result.json()['detail'], list)
+
+
+@pytest.mark.parametrize('tool,status,code', [
+    ('pct', 409, 'PCT_FAILED'), ('findmnt', 503, 'STORAGE_UNAVAILABLE'),
+])
+def test_command_error_codes(monkeypatch, tool, status, code):
+    import subprocess
+    monkeypatch.setattr(agent.subprocess, 'run',
+                        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, '', 'failed'))
+    with pytest.raises(agent.HTTPException) as err:
+        agent.run_cmd([agent.PCT if tool == 'pct' else agent.FINDMNT, 'status'])
+    assert err.value.status_code == status
+    assert err.value.detail['code'] == code
+
+
+def test_membership_and_state_error_codes(env):
+    client, _, state, conf, _ = env
+    assert client.get('/slots/2202/status').json()['detail']['code'] == 'CT_NOT_ON_NODE'
+    (conf / '2201.conf').write_text('unprivileged: 0\ntags: labslot\n')
+    assert client.get('/slots/2201/status').json()['detail']['code'] == 'PRIVILEGED_CT'
+    (conf / '2201.conf').write_text('unprivileged: 1\ntags: production\n')
+    assert client.get('/slots/2201/status').json()['detail']['code'] == 'NOT_LAB_SLOT'
+    (conf / '2201.conf').write_text('unprivileged: 1\ntags: labslot\n')
+    state['value'] = 'running'
+    result = client.post('/slots/2201/start', json={'student_key': 'student42'})
+    assert result.json()['detail']['code'] == 'NOT_STOPPED'
+    with agent.slot_lock(2201):
+        assert client.get('/slots/2201/status').json()['detail']['code'] == 'SLOT_BUSY'
+
+
+def test_source_unsafe_code(env):
+    client, _, _, _, ceph = env
+    (ceph / 'students/evil').symlink_to('/etc')
+    result = client.post('/slots/2201/start', json={'student_key': 'evil'})
+    assert result.status_code == 422
+    assert result.json()['detail']['code'] == 'SOURCE_UNSAFE'

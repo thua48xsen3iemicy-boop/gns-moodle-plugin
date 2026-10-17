@@ -280,3 +280,46 @@ are never remounted live.
 [Manager contract review](docs/MANAGER_CONTRACT_REVIEW.md) records questions and
 integration requirements against a pinned snapshot of the Manager contract branch.
 It distinguishes implemented Agent behavior from proposed extensions.
+
+## Structured errors and guest initialization
+
+Agent policy/operation errors now return
+`{"detail":{"code":"SOURCE_UNSAFE","message":"..."}}`. HTTP statuses retain
+their meanings; standard FastAPI validation errors remain a list under `detail`.
+Clients must use `code` for logic and treat unknown errors conservatively.
+
+| HTTP | Code | Meaning |
+|---|---|---|
+| 403 | `VMID_OUT_OF_RANGE`, `NOT_LAB_SLOT`, `PRIVILEGED_CT` | Slot policy rejection |
+| 404 | `CT_NOT_ON_NODE` | No CT config on this node; rediscover node |
+| 409 | `SLOT_BUSY`, `NOT_STOPPED` | Conflicting operation/state; re-read state |
+| 409 | `PCT_FAILED` | pct failed; inspect actual CT state |
+| 409 | `STUDENT_DIR_OWNER` | Student owner mismatch; no ownership repair |
+| 422 | `SOURCE_MISSING`, `SOURCE_UNSAFE`, `INVALID_REQUEST` | Missing/unsafe path or explicit input rejection |
+| 503 | `STUDENT_IDS_NOT_CONFIGURED` | Configure mapped host UID/GID; retry alone cannot fix it |
+| 503 | `STORAGE_UNAVAILABLE` | Cannot inspect/access storage, ACL or CT configuration |
+| 503 | `PCT_UNAVAILABLE` | pct/findmnt cannot execute, or CT status is unrecognized |
+| 504 | `PCT_TIMEOUT` | Command timed out; outcome may be unknown |
+| 500 | `AGENT_CONFIG_INVALID` | Invalid administrator-defined CephFS root |
+
+A nonzero findmnt exit returns `STORAGE_UNAVAILABLE`, rather than `PCT_FAILED`:
+it is a failed storage inspection, not a failed CT mutation. Missing source during
+start can occur **after** `pct set` at the second validation; never infer that the
+CT config is untouched. `STUDENT_DIR_OWNER` can still occur transiently between
+another creator's mkdir and chown, including on another node. This release does
+not distinguish that window from a permanent mismatch. Use bounded provisioning
+retry if desired; never repair ownership automatically.
+
+Update `/usr/local/sbin/lab-slot-init` **inside the trusted LXC template and existing
+guests** from `guest/lab-slot-init` (root:root 0755); updating the host Agent alone
+does not update guest files. Guest Python 3 and the unprivileged `gns3` account are
+required. The fixed initialization action drops supplementary groups/GID/UID to
+`gns3` before creating `/opt/gns3/projects/.slot-locks` (0700), then verifies its
+owner/mode and rejects symlinks/non-directories. Existing lock files and student
+contents are untouched; no recursive chown is performed. Preparation failure
+prevents service restart. Normal start must use `data_mode=rw` and include
+`init_slot`; other allowed actions do not prepare lock directories. A failure of
+guest init is surfaced by pct as `PCT_FAILED`; the CT may already be running.
+
+[Follow-up to Manager review](docs/MANAGER_REVIEW_FOLLOWUP.md) records the Agent
+changes and remaining Manager concurrency/migration questions against commit 45ecd13.
