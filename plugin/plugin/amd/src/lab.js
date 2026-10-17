@@ -28,8 +28,7 @@
  */
 
 import Ajax from 'core/ajax';
-import ModalEvents from 'core/modal_events';
-import {saveCancel, saveCancelPromise} from 'core/notification';
+import {saveCancelPromise} from 'core/notification';
 import {getStrings} from 'core/str';
 import {ConsolePanel} from 'mod_gns3lab/console';
 
@@ -52,15 +51,8 @@ const STRING_KEYS = [
     'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
     'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'consoleneedsrunning', 'consolevnclater',
     'consolenone', 'managernotconfigured', 'labnotready', 'failedretry', 'failedadmin', 'stopconfirmtitle',
-    'stopconfirm', 'conflictlink', 'stopsave', 'stopsavecheck', 'savingcisco', 'savefailed',
-    ...STAGES.map(stage => 'stage_' + stage),
+    'stopconfirm', 'conflictlink', ...STAGES.map(stage => 'stage_' + stage),
 ];
-
-/** Node types that run Cisco IOS: their configuration lives in memory until "write memory". */
-const CISCO_TYPES = ['iou', 'dynamips'];
-
-/** Saves the configuration from any IOS mode: clear the line, leave configuration, enable, write. */
-const IOS_SAVE = '\x15\x1a\renable\rwrite memory\r';
 
 /**
  * Controller of one lab on the page.
@@ -161,8 +153,7 @@ class Lab {
     /**
      * Stops the lab, asking first when the manager does not keep the work.
      *
-     * When it does, the disks of the devices are kept, not their memory: a Cisco device keeps only the
-     * configuration saved with "write memory". The student is offered to save it on every Cisco device first.
+     * When it does, the student saves the Cisco configuration (write memory) like on a real device.
      */
     async stop() {
         if (!this.state.resume) {
@@ -171,103 +162,8 @@ class Lab {
             } catch (cancelled) {
                 return;
             }
-        } else {
-            const cisco = this.ciscoNodes();
-            if (cisco.length) {
-                const save = await this.askSave();
-                if (save === null) {
-                    return;
-                }
-                if (save && !(await this.saveCisco(cisco))) {
-                    return;
-                }
-            }
         }
         await this.act('mod_gns3lab_stop_session');
-    }
-
-    /**
-     * Running Cisco devices of the session.
-     *
-     * @returns {Array} nodes {nodeId, name, nodeType}
-     */
-    ciscoNodes() {
-        const session = this.session;
-        if (!session || session.status !== 'running' || !session.topology) {
-            return [];
-        }
-        let doc;
-        try {
-            doc = JSON.parse(session.topology);
-        } catch (error) {
-            return [];
-        }
-        const started = new Set(session.nodes.filter(n => n.status === 'started').map(n => n.nodeid));
-        return ((doc.topology && doc.topology.nodes) || [])
-            .filter(n => CISCO_TYPES.includes(n.node_type) && started.has(n.node_id))
-            .map(n => ({nodeId: n.node_id, name: n.name || n.node_id, nodeType: n.node_type}));
-    }
-
-    /**
-     * Asks whether to stop and whether to save the Cisco configuration first.
-     *
-     * @returns {Promise<boolean|null>} save first, or null when the student cancelled
-     */
-    askSave() {
-        return new Promise(resolve => {
-            let answered = false;
-            let modalRef = null;
-            const body = `<p>${this.strings.stopsave}</p><div class="form-check">` +
-                '<input class="form-check-input" type="checkbox" id="gns3lab-savecisco" data-region="savecisco" checked>' +
-                `<label class="form-check-label" for="gns3lab-savecisco">${this.strings.stopsavecheck}</label></div>`;
-            saveCancel(this.strings.stopconfirmtitle, body, this.strings.stoplab, () => {
-                answered = true;
-                const box = modalRef && modalRef.getRoot()[0].querySelector('[data-region="savecisco"]');
-                resolve(!!box && box.checked);
-            }, () => {
-                answered = true;
-                resolve(null);
-            }).then(modal => {
-                modalRef = modal;
-                modal.getRoot().on(ModalEvents.hidden, () => {
-                    if (!answered) {
-                        resolve(null);
-                    }
-                });
-                return modal;
-            }).catch(() => resolve(null));
-        });
-    }
-
-    /**
-     * Saves the configuration on the Cisco devices through their consoles.
-     *
-     * @param {Array} nodes Cisco devices
-     * @returns {Promise<boolean>} go on with stopping
-     */
-    async saveCisco(nodes) {
-        this.busy = true;
-        this.render();
-        this.showMessage(this.strings.savingcisco);
-        let results;
-        try {
-            results = await this.consoles.runAll(nodes, IOS_SAVE, /\[OK\]/);
-        } finally {
-            this.busy = false;
-            this.render();
-        }
-        this.showMessage('');
-        const failed = results.filter(r => !r.ok).map(r => r.name);
-        if (!failed.length) {
-            return true;
-        }
-        try {
-            await saveCancelPromise(this.strings.stopconfirmtitle, this.strings.savefailed.replace('{$a}', failed.join(', ')),
-                this.strings.stoplab);
-            return true;
-        } catch (cancelled) {
-            return false;
-        }
     }
 
     /**
