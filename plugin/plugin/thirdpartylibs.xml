@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<libraries>
+  <library>
+    <location>amd/src/xterm.js</location>
+    <name>xterm.js</name>
+    <description>Terminal emulator for the device consoles.</description>
+    <version>5.5.0</version>
+    <license>MIT</license>
+    <repository>https://github.com/xtermjs/xterm.js</repository>
+    <copyrights>
+      <copyright>2017-2019 The xterm.js authors</copyright>
+      <copyright>2014-2016 SourceLair Private Company</copyright>
+      <copyright>2012-2013 Christopher Jeffrey</copyright>
+    </copyrights>
+    <customised/>
+  </library>
+  <library>
+    <location>amd/src/xterm-addon-fit.js</location>
+    <name>xterm.js addon-fit</name>
+    <description>Fits the terminal to its container.</description>
+    <version>0.10.0</version>
+    <license>MIT</license>
+    <repository>https://github.com/xtermjs/xterm.js</repository>
+    <copyrights>
+      <copyright>2019 The xterm.js authors</copyright>
+    </copyrights>
+    <customised/>
+  </library>
+</libraries>

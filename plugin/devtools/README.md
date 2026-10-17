@@ -1,0 +1,48 @@
+# devtools
+
+| Что | Зачем |
+|---|---|
+| `build_zip.sh` | ZIP плагина для установки через интерфейс Moodle |
+| `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` в демо-лабу плагина |
+| `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot |
+
+## Плагин с консолями без Proxmox
+
+Нужны Python 3.10+ и `aiohttp` (`pip install aiohttp`). Три процесса: шлюз, mock-менеджер и Moodle.
+
+```bash
+# 1. Шлюз консолей: билеты от mock-менеджера, консоли — у поддельного слота на :8091
+cd gateway
+GW_PORT=8080 GW_INTERNAL_KEY=dev-internal-key \
+GW_SLOTS='{"127.0.0.1": "dev-console-token"}' GW_SLOT_PORT=8091 \
+GW_ALLOWED_ORIGINS=http://127.0.0.1:8000 python3 console_gateway.py
+
+# 2. Mock-менеджер: API на :8090, поддельный Lab Slot на :8091 (значения по умолчанию совпадают со шлюзом выше)
+python3 devtools/mock-manager/mock_manager.py
+```
+
+3. В Moodle («Администрирование → Плагины → Модули деятельности → Лаба GNS3»):
+   - адрес менеджера — `http://127.0.0.1:8090`;
+   - секрет — `dev-secret`;
+   - адрес шлюза можно не задавать: mock отдаёт `ws://127.0.0.1:8080` вместе с билетом.
+
+   У активности эталонная лаба — `ospf-multi-area`: лабы mock-менеджера — это `fixtures/*.gns3`.
+
+`GW_ALLOWED_ORIGINS` — origin сайта Moodle, с которого браузер открывает консоли.
+
+После этого студент нажимает «Запустить лабу». Через ~5 с лаба запущена. Клик по R1 → «Открыть консоль» →
+приглашение `R1#`, на ввод отвечает эхо.
+
+Ручные проверки:
+
+```bash
+# нода остановлена: консоль закроется (4000), на странице «Нода остановлена»
+curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/stop
+# нода снова работает: консоль подключится сама
+curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/start
+```
+
+Команда `reload` в консоли закрывает её на стороне слота: так проверяется переподключение.
+
+Переменные mock-менеджера (`MOCK_PORT`, `MOCK_SLOT_PORT`, `MOCK_SECRET`, `MOCK_CONSOLE_TOKEN`, `GW_INTERNAL_URL`,
+`GW_INTERNAL_KEY`, `GW_PUBLIC_URL`, `MOCK_FIXTURES`) заданы в начале `mock_manager.py`, там же значения по умолчанию.
