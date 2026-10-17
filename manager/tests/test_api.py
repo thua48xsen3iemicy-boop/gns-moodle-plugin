@@ -68,7 +68,7 @@ async def test_session_lifecycle_contract(tmp_path, dsn):
         running = r.json()
         assert running["status"] == "running"
         assert running["started_at"].endswith("Z") and running["expires_at"].endswith("Z")
-        assert running["topology"]["name"] == f"cisco-3x2-{s['session_id']}"
+        assert running["topology"]["name"] == "cisco-3x2-w1"  # The workspace's project, kept between sessions
         assert set(running["topology"]["topology"]) == {"nodes", "links", "drawings"}
         node_ids = {n["node_id"] for n in running["topology"]["topology"]["nodes"]}
         assert set(running["nodes"]) == node_ids
@@ -200,11 +200,9 @@ async def test_info(tmp_path, dsn):
         r = await env.client.get("/api/v1/info")
         assert r.json() == {"schema": "gns3lab.info/1", "version": r.json()["version"],
                             "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
-                            "features": ["consoles", "observer"]}
+                            "features": ["consoles", "observer", "resume"]}
         async with anon(env) as c:
             assert (await c.get("/api/v1/info")).status_code == 401
-    async with make_env(tmp_path, dsn, lab_persistence="resume") as env:
-        assert "resume" in (await env.client.get("/api/v1/info")).json()["features"]
 
 
 async def test_unknown_fields_are_refused(tmp_path, dsn):

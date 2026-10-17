@@ -263,9 +263,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
-        features = ["consoles", "observer"]
-        if settings.lab_persistence == "resume":
-            features.append("resume")  # The next session continues the student's project
+        features = ["consoles", "observer", "resume"]  # The next session continues the student's project
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": OPTIONS, "features": features}
         if settings.images is not None:
@@ -350,7 +348,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
-            student_key=key, resources=resources, persistence=settings.lab_persistence,
+            student_key=key, resources=resources,
             lab_def=lab_def, definition=checked.definition if checked else None,
         )
         if not created and not same(s):

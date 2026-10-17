@@ -40,7 +40,7 @@ def test_valid_config(env):
     s = load(env)
     assert s.site("https://m.example").slug == "main"  # Trailing slash normalized
     assert s.pve_nodes == ("pve1:8006", "pve2:8006")
-    assert s.lab_persistence == "fresh" and s.placeholder_student_key == "placeholder"
+    assert s.placeholder_student_key == "placeholder"
     assert s.agent_start_actions == ("init_slot",)
     env["AGENT_START_ACTIONS"] = ""
     assert load(env).agent_start_actions == ()
@@ -74,7 +74,7 @@ def test_short_secret_rejected_without_leaking_it(env, tmp_path):
                                        ("AGENT_URL_TEMPLATE", "http://{node}:8443"),
                                        ("AGENT_URL_TEMPLATE", "https://agent:8443"),
                                        ("AGENT_START_ACTIONS", "rm_rf"), ("SLOT_CODE_REVISION", "../x"),
-                                       ("PLACEHOLDER_STUDENT_KEY", "a/b"), ("LAB_PERSISTENCE", "pinned"),
+                                       ("PLACEHOLDER_STUDENT_KEY", "a/b"), ("LAB_PERSISTENCE", "fresh"),
                                        ("LAB_CEPH_ROOT", "/mnt/../etc"), ("AGENT_START_TIMEOUT", "330")])
 def test_invalid_values(env, key, value):
     env[key] = value

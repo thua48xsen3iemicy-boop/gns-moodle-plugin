@@ -78,7 +78,7 @@ async def test_session_from_definition(tmp_path, dsn):
         assert s["topology"]["topology"]["drawings"] == []  # Drawings stay in Moodle
 
         ticket = next(iter(env.slots[201].labs.values()))["ticket"]
-        assert ticket["name"].startswith("lab-" + lab_def[7:15] + "-s-")
+        assert ticket["name"].startswith("lab-" + lab_def[7:15] + "-w")
         assert {n["name"]: n.get("image") for n in ticket["nodes"]} == {
             "SW1": "x86_64_crb_linux_l2-adventerprisek9-ms.bin", "SW2": "x86_64_crb_linux_l2-adventerprisek9-ms.bin",
             "PC1": "debian12.qcow2", "PC2": None}
@@ -120,7 +120,7 @@ async def test_image_removed_after_start_fails_session(tmp_path, dsn):
 
 
 async def test_resume_workspace_follows_lab_def(tmp_path, dsn):
-    async with make_env(tmp_path, dsn, vmids=(201,), images=IMAGES, lab_persistence="resume") as env:
+    async with make_env(tmp_path, dsn, vmids=(201,), images=IMAGES) as env:
         first = (await start_def(env)).json()["session_id"]
         await env.run()
         await env.client.post(f"/api/v1/sessions/{first}/stop")

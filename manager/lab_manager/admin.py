@@ -45,7 +45,6 @@ def cmd_check_config(args):
         "slots": sorted(s.slots),
         "pve_nodes": list(s.pve_nodes),
         "agent_url_template": s.agent_url_template,
-        "lab_persistence": s.lab_persistence,
         "slot_code_revision": s.slot_code_revision,
         "agent_start_actions": list(s.agent_start_actions),
         "labs_dir": str(s.labs_dir),

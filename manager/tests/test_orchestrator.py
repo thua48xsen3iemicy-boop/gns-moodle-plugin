@@ -85,28 +85,40 @@ async def test_student_is_not_bound_to_a_slot(tmp_path, dsn):
         assert "students/main-42," in env.pve.cts[202]["config"]["mp1"]
 
 
-async def test_resume_mode_reuses_project_and_reports_missing_cold_resume(tmp_path, dsn):
-    async with make_env(tmp_path, dsn, lab_persistence="resume") as env:
-        sid = await start(env)
-        await env.run()
-        first = await session(env, sid)
-        await stop(env, sid)
-        await env.run()
-        blocker = await start(env, user_id=7)
-        await env.run()
-        again = await start(env)
-        await env.run()
-        s = await session(env, again)
-        assert s["project_id"] == first["project_id"] and s["slot_vmid"] == 202
-        # Lab Slot 0.3 keeps lab state in its local SQLite: another slot cannot continue it.
+async def _continue_on_another_slot(env):
+    sid = await start(env)
+    await env.run()
+    first = await session(env, sid)
+    await stop(env, sid)
+    await env.run()
+    await start(env, user_id=7)  # Slot 201 is taken by someone else now
+    await env.run()
+    again = await start(env)
+    await env.run()
+    s = await session(env, again)
+    assert s["project_id"] == first["project_id"] and s["slot_vmid"] == 202
+    return first, s
+
+
+async def test_project_continues_on_another_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        first, s = await _continue_on_another_slot(env)
+        assert s["status"] == "running"
+        # The same GNS3 project from the student directory: same nodes, nothing recreated.
+        ids = lambda x: {n["name"]: n["node_id"] for n in x["topology"]["topology"]["nodes"]}  # noqa: E731
+        assert ids(s) == ids(first)
+        assert len(env.projects) == 2  # One project per student and lab, not one per session
+
+
+async def test_slot_03_cannot_continue_a_project_from_another_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, student_state=False) as env:
+        _, s = await _continue_on_another_slot(env)
+        # Lab Slot 0.3 kept its lab record in its own SQLite: another slot refuses the project.
         assert s["status"] == "failed" and s["error"]["code"] == "SLOT_COLD_RESUME_UNSUPPORTED"
-        assert [p for _, p, _ in env.slots[202].requests if p == "/v1/labs/deploy"]
-        await stop(env, blocker)
-        await env.run()
 
 
-async def test_resume_mode_on_the_same_slot_continues_project(tmp_path, dsn):
-    async with make_env(tmp_path, dsn, vmids=(201,), lab_persistence="resume") as env:
+async def test_project_continues_on_the_same_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
         sid = await start(env)
         await env.run()
         pid = (await session(env, sid))["project_id"]
@@ -117,20 +129,6 @@ async def test_resume_mode_on_the_same_slot_continues_project(tmp_path, dsn):
         s = await session(env, again)
         assert s["status"] == "running" and s["project_id"] == pid
         assert list(env.slots[201].labs) == [str(pid)]  # The same GNS3 project, not a new one
-
-
-async def test_fresh_mode_deploys_new_project_each_time(tmp_path, dsn):
-    async with make_env(tmp_path, dsn) as env:
-        sid = await start(env)
-        await env.run()
-        await stop(env, sid)
-        await env.run()
-        await start(env, user_id=7)
-        await env.run()
-        again = await start(env)
-        await env.run()
-        assert (await session(env, again))["status"] == "running"
-        assert len(env.projects) == 3
 
 
 async def test_placement_best_fit_packs_nodes(tmp_path, dsn):

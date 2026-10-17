@@ -585,9 +585,10 @@ class Orchestrator:
         raise Failure(f"Слот отклонил {action}: {exc.code or exc.status}: {exc.message}"[:500], "SLOT_REJECTED")
 
     async def _ticket(self, s):
-        """DeployTicket of this session. Resuming reuses the exact ticket of the first deploy."""
+        """DeployTicket of this session: the exact ticket of the workspace's first deploy (the slot
+        refuses another manifest for an existing project), otherwise built from the lab."""
         ws = await self.store.workspace(s["workspace_id"])
-        if self.settings.lab_persistence == "resume" and ws["ticket"]:
+        if ws["ticket"]:
             return ws["ticket"], ws
         if s["lab_def"]:
             try:

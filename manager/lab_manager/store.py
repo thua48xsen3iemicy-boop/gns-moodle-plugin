@@ -83,12 +83,11 @@ class Store:
 
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
-                             student_key, resources, persistence, lab_def=None, definition=None):
+                             student_key, resources, lab_def=None, definition=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
 
         The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
-        persistence='resume': the session reuses the workspace project_id (same GNS3 project);
-        'fresh': every session deploys a new project.
+        Every session of a workspace runs its one GNS3 project (same project_id, on any slot).
         """
         lab_key = lab_ref or lab_def
         label = lab_ref or "lab-" + lab_def.removeprefix("sha256:")[:8]  # Start of project names
@@ -118,10 +117,7 @@ class Store:
                     )
                     ws = await cur.fetchone()
                     sid = new_session_id()
-                    if persistence == "resume":
-                        project_id, name = ws["project_id"], ws["project_name"]
-                    else:
-                        project_id, name = uuid.uuid4(), f"{label}-{sid}"[:120]
+                    project_id, name = ws["project_id"], ws["project_name"]
                     await conn.execute(
                         "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref, lab_def,"
                         " workspace_id, student_key, project_id, project_name, resources,"

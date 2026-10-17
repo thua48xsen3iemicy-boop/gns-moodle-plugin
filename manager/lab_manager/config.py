@@ -17,7 +17,6 @@ from .images import IMAGE_ID_RE, ImageError, load_images
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # One path component, as the node agent requires
-PERSISTENCE = ("fresh", "resume")
 GUEST_ACTIONS = ("init_slot", "daemon_reload", "start_slot_service", "restart_slot_service")
 
 
@@ -133,7 +132,6 @@ class Settings:
     slot_code_revision: str | None = None  # None: shared <ceph>/slot, else <ceph>/slot/<revision>
     agent_start_actions: tuple[str, ...] = ("init_slot",)
     placeholder_student_key: str | None = None  # Mounted read-only into a released slot
-    lab_persistence: str = "fresh"
     node_memory_reserve_mb: int = 2048
     listen_host: str = "127.0.0.1"
     listen_port: int = 8090
@@ -222,9 +220,10 @@ def load(env=None, check_mode=True) -> Settings:
     actions = tuple(a.strip() for a in env.get("AGENT_START_ACTIONS", "init_slot").split(",") if a.strip())
     if any(a not in GUEST_ACTIONS for a in actions) or len(actions) > 3:
         raise ConfigError(f"AGENT_START_ACTIONS: up to three of {GUEST_ACTIONS}")
-    persistence = env.get("LAB_PERSISTENCE", "fresh").strip()
-    if persistence not in PERSISTENCE:
-        raise ConfigError(f"LAB_PERSISTENCE must be one of {PERSISTENCE}")
+    # Every session continues the student's project (Lab Slot >= 0.4.0 keeps its lab record in the
+    # student directory). The old fresh mode is gone; a leftover setting must not be silently ignored.
+    if env.get("LAB_PERSISTENCE", "resume").strip() != "resume":
+        raise ConfigError("LAB_PERSISTENCE was removed: a student's project always continues; delete the line")
 
     images = None
     if env.get("IMAGES_FILE", "").strip():
@@ -260,7 +259,6 @@ def load(env=None, check_mode=True) -> Settings:
         slot_code_revision=_key(env, "SLOT_CODE_REVISION"),
         agent_start_actions=actions,
         placeholder_student_key=_key(env, "PLACEHOLDER_STUDENT_KEY", "placeholder"),
-        lab_persistence=persistence,
         node_memory_reserve_mb=_int(env, "NODE_MEMORY_RESERVE_MB", 2048, 0, 10**7),
         listen_host=env.get("MANAGER_LISTEN_HOST", "127.0.0.1"),
         listen_port=_int(env, "MANAGER_LISTEN_PORT", 8090, 1, 65535),

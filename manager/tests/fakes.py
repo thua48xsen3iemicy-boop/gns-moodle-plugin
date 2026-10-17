@@ -229,12 +229,13 @@ class FakeAgent:
 class FakeSlot:
     """Lab Slot semantics from slot/api/lifecycle.py, reduced to what the manager relies on.
 
-    projects: registry shared by all fake slots, like the shared /opt/gns3/projects directory.
-    A project known there but not to this slot's own state fails like the real slot does
-    ("Provisioning completion is unknown"): no cold resume across slots.
+    projects: registry shared by all fake slots, like the student directories (/opt/gns3/projects).
+    Slot 0.4.0 (student_state=True) keeps its lab record there, so any slot continues a project
+    another slot created. Slot 0.3 (student_state=False) kept it in its own SQLite: a project known
+    in the directory but not to this slot fails ("Provisioning completion is unknown").
     """
 
-    def __init__(self, address, timeline=None, projects=None):
+    def __init__(self, address, timeline=None, projects=None, student_state=True):
         self.address = address
         self.timeline = timeline if timeline is not None else []
         self.healthy = True
@@ -249,6 +250,7 @@ class FakeSlot:
         self.reachable = True
         self.projects = projects if projects is not None else {}
         self.stopped_nodes = set()  # Node names reported as stopped in the topology
+        self.student_state = student_state
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -281,6 +283,11 @@ class FakeSlot:
                 return self._json(409, {"detail": {"code": "SLOT_OCCUPIED", "project_id": other,
                                                    "message": "Another laboratory owns this slot; stop it first"}})
         lab = self.labs.get(pid)
+        record = self.projects.get(pid)
+        if lab is None and action == "deploy" and record and record["student_state"] and self.student_state:
+            # The record in the student directory: same nodes, nothing recreated.
+            lab = self.labs[pid] = {"project_id": pid, "ticket": record["ticket"], "state": "STOPPED"}
+            self.node_ids[pid] = record["node_ids"]
         if action != "deploy" and not lab:
             return self._json(404, {"detail": "Unknown managed laboratory"})
         allowed = {"deploy": {None, "READY", "STOPPED", "FAILED"}, "resume": {"READY", "STOPPED", "FAILED"},
@@ -291,10 +298,12 @@ class FakeSlot:
             return self._json(409, {"detail": "Existing project manifest differs"})
         cold = False
         if lab is None:
-            cold = pid in self.projects and self.projects[pid] != self.address
+            cold = record is not None
             lab = self.labs[pid] = {"project_id": pid, "ticket": ticket}
             self.node_ids[pid] = {n["name"]: str(uuid.uuid4()) for n in ticket["nodes"]}
-            self.projects.setdefault(pid, self.address)
+            if record is None:
+                self.projects[pid] = {"address": self.address, "ticket": ticket, "node_ids": self.node_ids[pid],
+                                      "student_state": self.student_state}
         lab["state"] = "STOPPING" if action == "stop" else "DEPLOYING"
         op = {"operation_id": str(uuid.uuid4()), "project_id": pid, "action": action, "status": "RUNNING",
               "fingerprint": fingerprint, "remaining": self.op_polls, "error": None,
