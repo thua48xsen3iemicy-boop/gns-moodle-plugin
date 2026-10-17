@@ -71,6 +71,11 @@ def mock_server(tmp_path, monkeypatch):
                     return reply(201, node)
                 if len(path) == 3 and req.method == "GET":
                     return reply(200, nodes[pid])
+                if len(path) == 4 and req.method == "GET":
+                    for n in nodes[pid]:
+                        if n["node_id"] == path[3]:
+                            return reply(200, n)
+                    return reply(404, {"message": "No node"})
                 if len(path) == 4 and path[3] in ("start", "stop"):
                     for n in nodes[pid]:
                         if n["name"] != "bad-start":

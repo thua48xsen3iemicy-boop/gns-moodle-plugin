@@ -76,6 +76,7 @@ def preflight():
         for package, minimum, maximum in (
             ("fastapi", (0, 115), (1, 0)),
             ("uvicorn", (0, 34), (1, 0)),
+            ("websockets", (13, 0), (18, 0)),  # WS console; without it uvicorn answers 404
             ("httpx", (0, 28), (1, 0)),
             ("pydantic", (2, 7), (3, 0)),
         ):

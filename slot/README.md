@@ -39,7 +39,8 @@ sudo systemctl enable --now lab-slot.service
 Там хранятся SQLite, доверенный манифест, статусы и ключи идемпотентности.
 Не удалять эту директорию между перезапусками. Не разделять её между LXC.
 Переменные и токен находятся в `/etc/lab-slot/slot.env`, не на общей RO CephFS.
-GNS3 API фиксирован: `http://127.0.0.1:3080/v2`. Uvicorn: loopback:8080,
+GNS3 API фиксирован: `http://127.0.0.1:3080/v2`. Uvicorn: порт 8080, адрес
+`SLOT_LISTEN_HOST` (по умолчанию loopback; адрес LXC — только с firewall для Manager и шлюза),
 **один worker**. Второй экземпляр с тем же state-dir блокируется файловой блокировкой.
 Mount CephFS должен быть доступен до запуска сервиса.
 
@@ -160,7 +161,12 @@ curl -sS -X POST "$BASE/v1/labs/$PID/nodes/$NODE/wipe" \
 `POST .../qga/exec`, `POST .../serial/enable` и WS `/v1/console/{project_id}/{node_id}`.
 Отдельные публичные node start/stop, lab start/open/close удалены: используйте
 deploy/resume/stop для всей лаборатории. WebSocket авторизуется субпротоколами
-`['lab-slot', 'bearer.' + token]`; данные двоичные.
+`['lab-slot', 'bearer.' + token]`; данные двоичные, согласование telnet уже вырезано.
+Токеном может быть `SLOT_API_TOKEN` или `SLOT_CONSOLE_TOKEN`. Консольный токен выдаётся
+шлюзу консолей (`plugin/gateway`) и открывает только WS-консоли, не REST API и не QGA.
+Размер окна (telnet NAWS) пока не передаётся. WS требует пакет `websockets` из
+`requirements.txt`: без него Uvicorn отвечает на WS 404. Существующий venv обновите
+`venv/bin/python -m pip install -r requirements.txt`; `release.py check` проверяет его наличие.
 
 Bearer API предназначен доверенному Manager. QGA даёт выполнение команд в госте;
 не выдавайте токен студентам. Для удалённого доступа нужен защищённый шлюз/mTLS;
