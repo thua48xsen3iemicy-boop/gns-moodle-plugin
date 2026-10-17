@@ -21,6 +21,8 @@ use core\output\renderer_base;
 use core\output\templatable;
 use core\url;
 use mod_gns3lab\local\demo;
+use mod_gns3lab\local\lab_definition;
+use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
 
@@ -64,7 +66,10 @@ class viewer implements renderable, templatable {
         $labref = trim($this->instance->labref);
         $data = null;
         $previewerror = false;
-        if ($labref !== '' && manager_client::is_configured()) {
+        if (!empty($this->instance->labversionid)) {
+            $data = $this->library_preview((int) $this->instance->labversionid);
+            $previewerror = $data === null;
+        } else if ($labref !== '' && manager_client::is_configured()) {
             try {
                 $data = (object) [
                     'topology' => \core\di::get(manager_client::class)->get_lab_topology($labref),
@@ -94,6 +99,36 @@ class viewer implements renderable, templatable {
             'cmid' => $this->cm->id,
             'labref' => $this->instance->labref,
             'datajson' => json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        ];
+    }
+
+    /**
+     * Preview of a lab from the site lab library: its definition drawn with the image catalog.
+     *
+     * Without the catalog (manager down or not set up) the nodes are still drawn, with generic icons.
+     *
+     * @param int $versionid published version
+     * @return \stdClass|null topology and source, null if the version is gone
+     */
+    protected function library_preview(int $versionid): ?\stdClass {
+        global $DB;
+
+        $version = $DB->get_record('gns3lab_lab_versions', ['id' => $versionid, 'status' => lab_library::PUBLISHED]);
+        if (!$version) {
+            return null;
+        }
+        $images = [];
+        if (manager_client::is_configured()) {
+            try {
+                $images = \core\di::get(manager_client::class)->get_images();
+            } catch (manager_exception $e) {
+                debugging('mod_gns3lab: no image catalog from the lab manager: ' . $e->debuginfo, DEBUG_DEVELOPER);
+            }
+        }
+        $def = lab_definition::decode($version->definition);
+        return (object) [
+            'topology' => lab_definition::to_topology($def, $images),
+            'source' => get_string('libraryversion', 'gns3lab', $version->version),
         ];
     }
 }

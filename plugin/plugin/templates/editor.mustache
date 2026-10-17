@@ -1,0 +1,81 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+{{!
+    @template mod_gns3lab/editor
+
+    Lab editor of the site lab library: image palette, topology canvas and properties.
+
+    Context variables required for this template:
+    * labname - lab name
+    * libraryurl - URL of the lab library
+    * canpublish - the lab manager takes lab definitions
+    * datajson - JSON with labid, definition, version, status, images, limits, canpublish, catalogerror, strings
+
+    Example context (json):
+    {
+        "labname": "OSPF, three areas",
+        "libraryurl": "https://example.org/mod/gns3lab/library.php",
+        "canpublish": true,
+        "datajson": "{}"
+    }
+}}
+<div class="gns3lab-app gns3lab-editor is-fullscreen" id="{{uniqid}}-app" data-json="{{datajson}}">
+    <header class="bar">
+        <div class="ttl">
+            <a class="gbtn back" href="{{libraryurl}}" title="{{#str}}backtolibrary, mod_gns3lab{{/str}}" aria-label="{{#str}}backtolibrary, mod_gns3lab{{/str}}">&larr;</a>
+            <div>
+                <h2 class="ttl-h">{{labname}}</h2>
+                <p class="meta" data-region="meta"></p>
+            </div>
+        </div>
+        <div class="tools">
+            <button class="gbtn" type="button" data-act="undo" disabled>{{#str}}ed_undo, mod_gns3lab{{/str}}</button>
+            <button class="gbtn" type="button" data-act="link" aria-pressed="false" title="{{#str}}ed_link_help, mod_gns3lab{{/str}}">{{#str}}ed_link, mod_gns3lab{{/str}}</button>
+            <button class="gbtn" type="button" data-act="fit">{{#str}}fit, mod_gns3lab{{/str}}</button>
+            <button class="gbtn" type="button" data-act="check" {{^canpublish}}disabled{{/canpublish}}>{{#str}}ed_check, mod_gns3lab{{/str}}</button>
+            <button class="gbtn" type="button" data-act="save">{{#str}}ed_save, mod_gns3lab{{/str}}</button>
+            <button class="gbtn primary" type="button" data-act="publish" {{^canpublish}}disabled{{/canpublish}}>{{#str}}ed_publish, mod_gns3lab{{/str}}</button>
+        </div>
+    </header>
+    <div class="stage">
+        <aside class="ed-palette" data-region="palette" aria-label="{{#str}}ed_catalog, mod_gns3lab{{/str}}"></aside>
+        <div class="wrap" data-region="wrap">
+            <svg class="gns3lab-svg" data-region="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
+            <defs>
+                <pattern id="{{uniqid}}-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+                <circle style="fill:var(--grid)" cx="1.2" cy="1.2" r="1.2"/>
+                </pattern>
+                {{> mod_gns3lab/icons }}
+            </defs>
+                <rect width="100%" height="100%" fill="url(#{{uniqid}}-dots)"/>
+                <g data-region="vp">
+                    <g data-region="links"></g>
+                    <g data-region="nodes"></g>
+                    <g data-region="labels"></g>
+                    <g data-region="names"></g>
+                </g>
+            </svg>
+            <p class="hint" data-region="hint"></p>
+            <div class="gtoast" data-region="toast" role="status" hidden></div>
+        </div>
+        <aside class="panel ed-props" data-region="props" aria-label="{{#str}}details, mod_gns3lab{{/str}}"></aside>
+    </div>
+</div>
+{{#js}}
+require(['mod_gns3lab/editor'], function(editor) {
+    editor.init('{{uniqid}}');
+});
+{{/js}}

@@ -21,6 +21,7 @@ use core_external\external_function_parameters;
 use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\lab_access;
+use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\session_data;
 
@@ -68,7 +69,7 @@ class get_state extends external_api {
             'canuse' => false,
             'readonly' => false,
             'managerconfigured' => $configured,
-            'labready' => $configured && trim($access->instance->labref) !== '',
+            'labready' => $configured && lab_library::activity_lab($access->instance) !== null,
             'resume' => false,
         ];
         $own = $userid === 0;

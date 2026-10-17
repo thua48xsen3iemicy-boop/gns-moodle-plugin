@@ -18,6 +18,8 @@
  * Site settings for mod_gns3lab.
  *
  * Without the lab manager URL and secret activities show the bundled demo topology.
+ * The site lab library is linked next to the settings; lab authors, who are not administrators,
+ * find it in the primary navigation (hook_callbacks::primary_extend).
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -25,6 +27,13 @@
  */
 
 defined('MOODLE_INTERNAL') || die();
+
+$ADMIN->add('modsettings', new admin_category(
+    'modgns3labfolder',
+    new lang_string('pluginname', 'gns3lab'),
+    $module->is_enabled() === false
+));
+$settings = new admin_settingpage($section, new lang_string('settings'), 'moodle/site:config', $module->is_enabled() === false);
 
 if ($ADMIN->fulltree) {
     $settings->add(new admin_setting_configtext(
@@ -55,3 +64,14 @@ if ($ADMIN->fulltree) {
         PARAM_INT
     ));
 }
+
+$ADMIN->add('modgns3labfolder', $settings);
+$ADMIN->add('modgns3labfolder', new admin_externalpage(
+    'gns3lablibrary',
+    new lang_string('library', 'gns3lab'),
+    new \core\url('/mod/gns3lab/library.php'),
+    'mod/gns3lab:managelabs',
+    $module->is_enabled() === false
+));
+// The settings page is already in the tree.
+$settings = null;

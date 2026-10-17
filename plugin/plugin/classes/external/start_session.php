@@ -21,6 +21,7 @@ use core_external\external_function_parameters;
 use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\lab_access;
+use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
 use mod_gns3lab\local\session_data;
@@ -56,8 +57,8 @@ class start_session extends external_api {
         self::validate_context($access->context);
         [$userid] = $access->resolve_user(0);
 
-        $labref = trim($access->instance->labref);
-        if ($labref === '') {
+        $lab = lab_library::activity_lab($access->instance);
+        if ($lab === null) {
             throw new \moodle_exception('nolabref', 'gns3lab');
         }
         try {
@@ -65,7 +66,7 @@ class start_session extends external_api {
                 $userid,
                 (int) $access->instance->id,
                 (int) $access->course->id,
-                $labref,
+                $lab,
                 (int) $access->instance->maxduration
             );
         } catch (manager_exception $e) {

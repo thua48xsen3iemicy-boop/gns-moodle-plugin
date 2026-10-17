@@ -1,0 +1,90 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+{{!
+    @template mod_gns3lab/library
+
+    Site lab library: list of labs with tags, versions and usage.
+
+    Context variables required for this template:
+    * labs - labs: name, tags [{name, url}], published (version or 0), hasdraft, usage, modified,
+      editorurl, editurl, deleteurl (missing when activities use the lab)
+    * haslabs - there are labs to show
+    * tag - tag filter, empty for all labs
+    * clearurl - URL without the tag filter
+    * newurl - URL to create a lab
+    * managerwarning - why labs cannot be published now, or empty
+
+    Example context (json):
+    {
+        "labs": [{"name": "OSPF, three areas", "tags": [{"name": "ospf", "url": "#"}], "published": 2,
+                  "hasdraft": true, "usage": 3, "modified": "17/10/26, 12:00", "editorurl": "#", "editurl": "#"}],
+        "haslabs": true,
+        "tag": "",
+        "clearurl": "#",
+        "newurl": "#",
+        "managerwarning": ""
+    }
+}}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h2 class="me-auto mb-0">{{#str}}library, mod_gns3lab{{/str}}</h2>
+    <a class="btn btn-primary" href="{{newurl}}">{{#str}}labnew, mod_gns3lab{{/str}}</a>
+</div>
+<p class="text-muted">{{#str}}library_desc, mod_gns3lab{{/str}}</p>
+{{#managerwarning}}
+<div class="alert alert-warning">{{managerwarning}}</div>
+{{/managerwarning}}
+{{#tag}}
+<p>{{#str}}libraryfilter, mod_gns3lab, {{tag}}{{/str}} <a href="{{clearurl}}">{{#str}}libraryfilterclear, mod_gns3lab{{/str}}</a></p>
+{{/tag}}
+{{#haslabs}}
+<div class="table-responsive">
+<table class="table table-striped generaltable gns3lab-library">
+    <thead>
+        <tr>
+            <th scope="col">{{#str}}labname, mod_gns3lab{{/str}}</th>
+            <th scope="col">{{#str}}tags{{/str}}</th>
+            <th scope="col">{{#str}}labversion, mod_gns3lab{{/str}}</th>
+            <th scope="col">{{#str}}labusage, mod_gns3lab{{/str}}</th>
+            <th scope="col">{{#str}}lastmodified{{/str}}</th>
+            <th scope="col"><span class="visually-hidden">{{#str}}actions{{/str}}</span></th>
+        </tr>
+    </thead>
+    <tbody>
+        {{#labs}}
+        <tr>
+            <td><a href="{{editorurl}}">{{name}}</a></td>
+            <td>{{#tags}}<a class="badge bg-secondary text-decoration-none me-1" href="{{url}}">{{name}}</a>{{/tags}}</td>
+            <td>
+                {{#published}}{{#str}}labversionshort, mod_gns3lab, {{published}}{{/str}}{{/published}}
+                {{^published}}<span class="badge bg-warning text-dark">{{#str}}labnotpublished, mod_gns3lab{{/str}}</span>{{/published}}
+                {{#hasdraft}}<span class="badge bg-info text-dark">{{#str}}labhasdraft, mod_gns3lab{{/str}}</span>{{/hasdraft}}
+            </td>
+            <td>{{usage}}</td>
+            <td>{{modified}}</td>
+            <td class="text-nowrap">
+                <a class="btn btn-sm btn-secondary" href="{{editorurl}}">{{#str}}labeditor, mod_gns3lab{{/str}}</a>
+                <a class="btn btn-sm btn-secondary" href="{{editurl}}">{{#str}}labproperties, mod_gns3lab{{/str}}</a>
+                {{#deleteurl}}<a class="btn btn-sm btn-outline-danger" href="{{deleteurl}}">{{#str}}delete{{/str}}</a>{{/deleteurl}}
+            </td>
+        </tr>
+        {{/labs}}
+    </tbody>
+</table>
+</div>
+{{/haslabs}}
+{{^haslabs}}
+<p>{{#str}}librarynolabs, mod_gns3lab{{/str}}</p>
+{{/haslabs}}

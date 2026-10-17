@@ -138,6 +138,60 @@ class fake_manager {
     }
 
     /**
+     * Answers like a manager that takes labs from Moodle (MANAGER_REQUESTS П10–П13): info, images and validate.
+     *
+     * @param string $labdef hash that validate returns
+     */
+    public function with_lab_definitions(string $labdef = 'sha256:aaaa'): void {
+        $this->with_info(['consoles', 'observer', 'images', 'lab_definitions']);
+        $this->on('GET', '/api/v1/images', 200, ['images' => [self::image()]]);
+        $this->on('POST', '/api/v1/labs/validate', 200, [
+            'lab_def' => $labdef,
+            'resources' => ['cores' => 2, 'memory_mb' => 3072],
+            'warnings' => [],
+        ]);
+    }
+
+    /**
+     * An image of the catalog: Cisco IOU L3.
+     *
+     * @return array
+     */
+    public static function image(): array {
+        return [
+            'id' => 'cisco-iou-l3',
+            'title' => 'Cisco IOU L3',
+            'kind' => 'iou',
+            'category' => 'router',
+            'symbol' => ':/symbols/classic/router.svg',
+            'console_type' => 'telnet',
+            'ram_mb' => ['default' => 1024, 'min' => 512, 'max' => 2048],
+            'cpus' => null,
+            'adapters' => ['default' => 2, 'min' => 1, 'max' => 4],
+            'port_name' => 'Ethernet{adapter}/{port}',
+            'ports_per_adapter' => 4,
+        ];
+    }
+
+    /**
+     * A lab definition of two routers and a link, as the editor sends it.
+     *
+     * @return array
+     */
+    public static function lab(): array {
+        return [
+            'format' => 'gns3lab.lab/1',
+            'nodes' => [
+                ['name' => 'R1', 'image' => 'cisco-iou-l3', 'x' => -100, 'y' => 0, 'adapters' => 2],
+                ['name' => 'R2', 'image' => 'cisco-iou-l3', 'x' => 100, 'y' => 0, 'adapters' => 2, 'ram_mb' => 512],
+            ],
+            'links' => [
+                ['a' => ['node' => 'R1', 'adapter' => 0, 'port' => 1], 'b' => ['node' => 'R2', 'adapter' => 1, 'port' => 0]],
+            ],
+        ];
+    }
+
+    /**
      * Answers one request.
      *
      * @param RequestInterface $request request

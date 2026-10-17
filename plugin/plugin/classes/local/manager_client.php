@@ -86,7 +86,8 @@ class manager_client {
      * A manager without GET /api/v1/info only knows SPEC §3: then nothing beyond it is sent.
      * The answer is cached per manager URL; a failed request is retried sooner than a good answer expires.
      *
-     * @return \stdClass known (bool: the manager answered info), options (string[]), features (string[])
+     * @return \stdClass known (bool: the manager answered info), options (string[]), features (string[]),
+     *     limits (stdClass|null: per-site limits for lab definitions)
      */
     public function get_info(): \stdClass {
         $cache = \cache::make('mod_gns3lab', 'info');
@@ -95,13 +96,14 @@ class manager_client {
         if ($hit && $hit->until > time()) {
             return $hit->info;
         }
-        $info = (object) ['known' => false, 'options' => [], 'features' => []];
+        $info = (object) ['known' => false, 'options' => [], 'features' => [], 'limits' => null];
         $ttl = self::INFO_TTL;
         try {
             $data = $this->expect_object($this->request('GET', '/api/v1/info'));
             $info->known = true;
             $info->options = self::strings($data->options ?? []);
             $info->features = self::strings($data->features ?? []);
+            $info->limits = ($data->limits ?? null) instanceof \stdClass ? $data->limits : null;
         } catch (manager_exception $e) {
             if (!$e->is_not_found()) {
                 $ttl = self::INFO_RETRY;
@@ -109,6 +111,59 @@ class manager_client {
         }
         $cache->set($key, (object) ['until' => time() + $ttl, 'info' => $info]);
         return $info;
+    }
+
+    /**
+     * Whether the manager announces a feature in GET /api/v1/info.
+     *
+     * @param string $feature feature name, such as lab_definitions
+     * @return bool
+     */
+    public function has_feature(string $feature): bool {
+        return in_array($feature, $this->get_info()->features, true);
+    }
+
+    /**
+     * Image catalog for the lab editor (MANAGER_REQUESTS П10), cached like the info.
+     *
+     * @return \stdClass[] images with id, title, kind, category, symbol, console_type, ram_mb, cpus, adapters,
+     *     port_name, ports_per_adapter; empty if the manager has no catalog
+     */
+    public function get_images(): array {
+        if (!$this->has_feature('images')) {
+            return [];
+        }
+        $cache = \cache::make('mod_gns3lab', 'info');
+        $key = 'i' . md5($this->baseurl);
+        $hit = $cache->get($key);
+        if ($hit && $hit->until > time()) {
+            return $hit->images;
+        }
+        $data = $this->expect_object($this->request('GET', '/api/v1/images'));
+        $images = [];
+        foreach (is_array($data->images ?? null) ? $data->images : [] as $image) {
+            if ($image instanceof \stdClass && isset($image->id, $image->kind) && is_string($image->id)) {
+                $images[] = $image;
+            }
+        }
+        $cache->set($key, (object) ['until' => time() + self::INFO_TTL, 'images' => $images]);
+        return $images;
+    }
+
+    /**
+     * Checks a lab definition without storing it (MANAGER_REQUESTS П12).
+     *
+     * A definition with problems comes back as manager_exception lab_invalid, with problems in details.
+     *
+     * @param array $lab lab definition gns3lab.lab/1
+     * @return \stdClass lab_def (hash), resources {cores, memory_mb}, warnings
+     */
+    public function validate_lab(array $lab): \stdClass {
+        $result = $this->expect_object($this->request('POST', '/api/v1/labs/validate', ['lab' => $lab]));
+        if (!isset($result->lab_def) || !is_string($result->lab_def) || $result->lab_def === '') {
+            throw new manager_exception('badresponse', 200, 'validate without lab_def');
+        }
+        return $result;
     }
 
     /**
@@ -166,17 +221,23 @@ class manager_client {
      * @param int $userid Moodle user id
      * @param int $instanceid gns3lab instance id
      * @param int $courseid course id
-     * @param string $labref reference lab
+     * @param string|array $lab reference lab (lab_ref) or a lab definition from the lab library
      * @param int $maxduration session limit of the activity in minutes, 0 for the manager default
      * @return \stdClass session
      */
-    public function create_session(int $userid, int $instanceid, int $courseid, string $labref, int $maxduration = 0): \stdClass {
+    public function create_session(
+        int $userid,
+        int $instanceid,
+        int $courseid,
+        string|array $lab,
+        int $maxduration = 0
+    ): \stdClass {
         global $CFG;
 
         $body = [
             'user_id' => $userid,
             'instance_id' => $instanceid,
-            'lab_ref' => $labref,
+            is_array($lab) ? 'lab' : 'lab_ref' => $lab,
             'course_id' => $courseid,
         ];
         $info = $this->get_info();

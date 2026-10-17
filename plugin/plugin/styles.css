@@ -1403,3 +1403,149 @@ body.gns3lab-fullscreen {
     z-index: 2;
     position: relative;
 }
+
+/* lab editor: image palette on the left, canvas, properties on the right; on phones palette on top, properties below */
+.gns3lab-editor .ed-palette {
+    width: 196px;
+    flex: none;
+    overflow: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gns3lab-editor .ed-img {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: none;
+    color: var(--fg);
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.25;
+    cursor: grab;
+}
+.gns3lab-editor .ed-img:hover,
+.gns3lab-editor .ed-img:focus-visible {
+    border-color: var(--line);
+    background: var(--chip);
+}
+.gns3lab-editor .ed-img svg {
+    width: 30px;
+    height: 30px;
+    flex: none;
+}
+.gns3lab-editor .ed-note {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+}
+.gns3lab-editor .ed-field {
+    display: grid;
+    grid-template-columns: 8em 1fr;
+    align-items: center;
+    gap: 2px 8px;
+    margin: 0;
+    font-size: 13px;
+}
+.gns3lab-editor .ed-field small {
+    grid-column: 2;
+    color: var(--muted);
+}
+.gns3lab-editor .ed-error {
+    color: var(--bad);
+    font-size: 13px;
+    margin: 0;
+}
+.gns3lab-editor .ed-ok {
+    color: var(--ok);
+    margin: 0;
+}
+.gns3lab-editor .ed-ports {
+    width: 100%;
+    font-size: 13px;
+}
+.gns3lab-editor .ed-ports td {
+    padding: 2px 4px;
+    vertical-align: top;
+}
+.gns3lab-editor .ed-problems {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gns3lab-editor .ed-problems .rowbtn {
+    border-left: 3px solid var(--bad);
+}
+.gns3lab-editor .muted {
+    color: var(--muted);
+}
+.gns3lab-editor .gns3lab-svg.linking .node {
+    cursor: crosshair;
+}
+.gns3lab-editor .node.from .halo {
+    stroke: var(--accent);
+    stroke-dasharray: 5 4;
+}
+.gns3lab-editor .node.bad .halo {
+    stroke: var(--bad);
+    fill: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+.gns3lab-editor .node.unknown use {
+    opacity: .45;
+}
+.gns3lab-editor .link.bad .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 6 4;
+}
+.gns3lab-editor .plabel {
+    pointer-events: none;
+}
+.gns3lab-editor .gtoast.ok {
+    border-color: var(--accent);
+}
+.gns3lab-editor .tools .gbtn.primary {
+    width: auto;
+    height: 32px;
+}
+
+@media (max-width: 760px) {
+    .gns3lab-editor .stage {
+        flex-direction: column;
+    }
+    .gns3lab-editor .ed-palette {
+        width: auto;
+        flex-direction: row;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 6px 8px;
+    }
+    .gns3lab-editor .ed-palette .eyebrow {
+        display: none;
+    }
+    .gns3lab-editor .ed-img {
+        width: auto;
+        flex: none;
+        white-space: nowrap;
+    }
+    .gns3lab-editor .hint {
+        display: none;
+    }
+    .gns3lab-editor .panel.ed-props {
+        position: static;
+        max-height: 40%;
+        transform: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding-top: 12px;
+    }
+}

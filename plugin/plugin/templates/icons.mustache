@@ -1,0 +1,58 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_gns3lab/icons
+
+    Device icons of the topology viewer and the lab editor: SVG symbols for a <defs> element.
+    Symbol ids are {{uniqid}}-ico-<category>: router, switch, pc, server, cloud, firewall, hypervisor.
+
+    Example context (json):
+    {}
+}}
+<symbol id="{{uniqid}}-ico-router" viewBox="0 0 48 48">
+<circle style="fill:var(--ico)" cx="24" cy="24" r="20"/>
+<path style="fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round" d="M14 14l7 7M21 15.5V21h-5.5M34 34l-7-7M27 32.5V27h5.5M27 21l7-7M28.5 14H34v5.5M21 27l-7 7M14 28.5V34h5.5"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-switch" viewBox="0 0 48 48">
+<rect style="fill:var(--ico)" x="3" y="12" width="42" height="24" rx="5"/>
+<path style="fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round" d="M10 20h22M28 16.5l4 3.5-4 3.5M38 28H16M20 24.5L16 28l4 3.5"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-pc" viewBox="0 0 48 48">
+<rect style="fill:var(--ico)" x="6" y="6" width="36" height="26" rx="3"/>
+<rect style="fill:var(--ico-glyph)" x="10" y="10" width="28" height="18" rx="1.5" opacity=".35"/>
+<path style="fill:var(--ico)" d="M20 32h8v6h-8z"/>
+<rect style="fill:var(--ico)" x="13" y="38" width="22" height="4" rx="2"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-server" viewBox="0 0 48 48">
+<rect style="fill:var(--ico)" x="11" y="4" width="26" height="40" rx="3.5"/>
+<path style="fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round" d="M16 13h16M16 19h16M16 25h16"/>
+<circle style="fill:var(--ico-glyph)" cx="31" cy="36" r="2.2"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-cloud" viewBox="0 0 48 48">
+<path style="fill:var(--ico)" d="M13 37h22a8.5 8.5 0 0 0 1.2-16.9A11.5 11.5 0 0 0 14 17.6 9.7 9.7 0 0 0 13 37z"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-firewall" viewBox="0 0 48 48">
+<rect style="fill:var(--ico)" x="5" y="9" width="38" height="30" rx="2.5"/>
+<path style="fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round" d="M5 19h38M5 29h38M18 9v10M30 9v10M12 19v10M24 19v10M36 19v10M18 29v10M30 29v10"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-hypervisor" viewBox="0 0 48 48">
+<rect style="fill:var(--ico)" x="4" y="7" width="40" height="34" rx="4"/>
+<rect style="fill:var(--ico-glyph)" x="9" y="12" width="13" height="10" rx="1.5"/>
+<rect style="fill:var(--ico-glyph)" x="26" y="12" width="13" height="10" rx="1.5"/>
+<rect style="fill:var(--ico-glyph)" x="9" y="26" width="13" height="10" rx="1.5"/>
+<rect x="26" y="26" width="13" height="10" rx="1.5" style="fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round"/>
+</symbol>
