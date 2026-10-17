@@ -94,12 +94,11 @@ class Settings:
     agent_ca_file: Path
     agent_cert_file: Path
     agent_key_file: Path = field(repr=False)
-    student_root: Path  # Manager-local path of LAB_CEPH_ROOT/students (RW CephFS)
     gateway_internal_url: str
     gateway_internal_key: str = field(repr=False)
     gateway_public_url: str
     slot_code_revision: str | None = None  # None: shared <ceph>/slot, else <ceph>/slot/<revision>
-    agent_start_actions: tuple[str, ...] = ()
+    agent_start_actions: tuple[str, ...] = ("init_slot",)
     placeholder_student_key: str | None = None  # Mounted read-only into a released slot
     lab_persistence: str = "fresh"
     node_memory_reserve_mb: int = 2048
@@ -118,13 +117,6 @@ class Settings:
 
     def site(self, url: str | None) -> SiteConfig | None:
         return self.sites.get((url or "").rstrip("/"))
-
-
-def _path(env, name, required):
-    value = required(name)
-    if not re.fullmatch(r"(/[A-Za-z0-9_.-]+)+", value) or "/../" in value + "/" or "/./" in value + "/":
-        raise ConfigError(f"{name} must be an absolute path without '..' and unusual characters")
-    return Path(value)
 
 
 def _key(env, name, default=""):
@@ -175,7 +167,8 @@ def load(env=None, check_mode=True) -> Settings:
     template = required("AGENT_URL_TEMPLATE").rstrip("/")
     if not re.fullmatch(r"https://[A-Za-z0-9.{}-]*\{node\}[A-Za-z0-9.{}-]*(:\d{1,5})?", template):
         raise ConfigError("AGENT_URL_TEMPLATE must be https://...{node}...[:port] (mTLS only)")
-    actions = tuple(a.strip() for a in env.get("AGENT_START_ACTIONS", "").split(",") if a.strip())
+    # agent/guest/lab-slot-init: daemon-reload, /run/lab-slot, restart lab-slot.service.
+    actions = tuple(a.strip() for a in env.get("AGENT_START_ACTIONS", "init_slot").split(",") if a.strip())
     if any(a not in GUEST_ACTIONS for a in actions) or len(actions) > 3:
         raise ConfigError(f"AGENT_START_ACTIONS: up to three of {GUEST_ACTIONS}")
     persistence = env.get("LAB_PERSISTENCE", "fresh").strip()
@@ -198,7 +191,6 @@ def load(env=None, check_mode=True) -> Settings:
         agent_ca_file=Path(required("AGENT_CA_FILE")),
         agent_cert_file=Path(required("AGENT_CERT_FILE")),
         agent_key_file=Path(required("AGENT_KEY_FILE")),
-        student_root=_path(env, "STUDENT_ROOT", required),
         gateway_internal_url=required("GATEWAY_INTERNAL_URL").rstrip("/"),
         gateway_internal_key=required("GATEWAY_INTERNAL_KEY"),
         gateway_public_url=gateway_public,

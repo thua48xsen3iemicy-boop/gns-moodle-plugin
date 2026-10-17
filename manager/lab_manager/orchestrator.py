@@ -10,7 +10,7 @@ stored in the database. Nothing is deleted or recreated "just in case".
 
     plugin status  stage            what happens
     queued         wait_slot        placement over free slots and node memory, allocation
-    starting       ct_prepare       CT stopped (agent), sized to the lab (Proxmox config), student dir
+    starting       ct_prepare       CT stopped (agent), sized to the lab (Proxmox config)
     starting       ct_start         agent: mounts (code mp0, student mp1) + pct start + guest actions
     starting       slot_ready       /healthz and /v1/readyz of Lab Slot
     starting       lab_submit       deploy with Idempotency-Key (same project_id when resuming)
@@ -36,7 +36,6 @@ from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotSt
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotUnavailable
-from .storage import StorageError
 from .store import Fenced
 
 log = logging.getLogger("lab_manager.orchestrator")
@@ -104,14 +103,13 @@ def node_states(topology: dict) -> dict:
 
 
 class Orchestrator:
-    def __init__(self, settings, store, pve, agent, slot_clients, catalog, storage, *, sleep=asyncio.sleep):
+    def __init__(self, settings, store, pve, agent, slot_clients, catalog, *, sleep=asyncio.sleep):
         self.settings = settings
         self.store = store
         self.pve = pve
         self.agent = agent
         self.slot_clients = slot_clients  # vmid -> SlotClient
         self.catalog = catalog
-        self.storage = storage
         self.sleep = sleep
         self._wake = asyncio.Event()
         self._tasks: dict[str, asyncio.Task] = {}
@@ -215,7 +213,7 @@ class Orchestrator:
             log.warning("Session %s stage %s: %s", s["id"], s["stage"], exc)
             await self._check_stage_timeout(s)
             return False
-        except (StorageError, LabError) as exc:
+        except LabError as exc:
             await self._fail(s, Failure(str(exc), type(exc).__name__))
             return False
         except OSError as exc:
@@ -360,7 +358,6 @@ class Orchestrator:
         lab = self.catalog.get(s["lab_ref"])
         if lab.resources:
             await self._size_ct(s, lab.resources)
-        self.storage.ensure_student(s["student_key"])
         return await self._goto(s, "ct_start", "Запуск контейнера слота…")
 
     async def _size_ct(self, s, resources):
@@ -403,6 +400,12 @@ class Orchestrator:
                     actions=self.settings.agent_start_actions)
             except (AgentBusy, AgentNotStopped, AgentUncertain):
                 raise Wait() from None  # Re-read the real state on the next tick
+            except AgentRejected as exc:
+                if "does not exist" in exc.message:
+                    # The agent checks paths before touching the CT: the slot itself is fine.
+                    raise Failure("Каталог студента на CephFS не создан; обратитесь к администратору",
+                                  "STUDENT_DIR_MISSING", slot_state="free") from exc
+                raise
             except AgentCommandFailed as exc:
                 raise Failure(f"Агент не смог запустить слот: {exc.message}", "SLOT_START_FAILED") from exc
             await self.store.event(s["id"], vmid, "ct_started",

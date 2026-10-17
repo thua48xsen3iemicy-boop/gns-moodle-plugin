@@ -123,10 +123,10 @@ class FakePve:
 class FakeAgent:
     """Lab Node Agent semantics (status/mounts/start/stop) on top of FakePve's CTs."""
 
-    def __init__(self, pve: FakePve, student_root, ceph_root="/mnt/pve/data"):
+    def __init__(self, pve: FakePve, ceph_root="/mnt/pve/data"):
         self.pve = pve
         self.timeline = pve.timeline
-        self.student_root = student_root
+        self.missing_students = set()  # students/<key> not provisioned on CephFS
         self.ceph_root = ceph_root
         self.requests = []
         self.busy = False
@@ -143,7 +143,7 @@ class FakeAgent:
 
     def _mounts(self, ct, body):
         key = body["student_key"]
-        if not (self.student_root / key).is_dir() or (self.student_root / key).is_symlink():
+        if key in self.missing_students:
             return self._err(422, "Required CephFS directory does not exist")
         code = f"{self.ceph_root}/slot" + (f"/{body['code_revision']}" if body.get("code_revision") else "")
         ro = 1 if body.get("data_mode") == "ro" else 0

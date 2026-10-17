@@ -1,9 +1,9 @@
-# Lab Manager — прототип 0.2
+# Lab Manager — прототип 0.3
 
 Сервис между Moodle (`plugin/`) и слотами Lab Slot (`slot/`). Принимает запросы плагина по
 контракту `plugin/docs/SPEC.md` §3, подбирает для лабы свободный слот на узле, где хватает
-памяти, через агента на узле Proxmox (Lab Node Agent, mTLS) монтирует каталог студента и
-запускает LXC, запускает и останавливает лабу в Lab Slot, выдаёт билеты шлюзу консолей.
+памяти, через агента на узле Proxmox (Lab Node Agent, `agent/` в ветке
+`feature/proxmox-node-agent`, mTLS) монтирует каталог студента и запускает LXC, запускает и останавливает лабу в Lab Slot, выдаёт билеты шлюзу консолей.
 Слоты не привязаны к студентам. Как всё устроено и почему — в [`docs/DESIGN.md`](docs/DESIGN.md),
 там же открытые вопросы.
 
@@ -14,53 +14,51 @@
 | Что | Где |
 |---|---|
 | Код и venv | `/srv/gns3-ro/manager` (RO CephFS), venv собирается по этому же пути |
-| Конфиг и секреты | `/etc/lab-manager/` (`manager.env`, `sites.json`, `slots.json`, `pve-root-ca.pem`, `agent-ca.pem`, `manager.crt`, `manager.key`) — не в Git и не на CephFS |
+| Конфиг и секреты | `/etc/lab-manager/` (`manager.env`, `sites.json`, `slots.json`, `pve-root-ca.pem`, `node-server-ca.crt`, `manager.crt`, `manager.key`) — не в Git и не на CephFS |
 | PostgreSQL | локально в этом LXC, данные — `/var/lib/postgresql` на rootfs (RBD), не на CephFS |
 | Каталог лаб | `/srv/gns3-ro/labs/<lab_ref>/` (RO CephFS) |
-| Каталоги студентов | `/srv/lab-students` = `<LAB_CEPH_ROOT>/students` (RW CephFS) |
 
 Обновление кода: остановить сервис → заменить `/srv/gns3-ro/manager` → `admin migrate`, если
 есть новые миграции → запустить сервис.
 
 ## 1. LXC менеджера (на узле PVE, root)
 
-Непривилегированный CT с Ubuntu 24.04. Точки монтирования задаёт администратор. Пути на хосте
-ниже — пример; `LAB_CEPH_ROOT` агента по умолчанию `/mnt/pve/data`.
+Непривилегированный CT с Ubuntu 24.04. RO CephFS с кодом и лабами задаёт администратор:
 
 ```sh
 pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
-pct set <MGR_VMID> -mp1 /mnt/pve/data/students,mp=/srv/lab-students
 ```
 
-Менеджеру нужен сетевой доступ к API Proxmox (8006), к агентам узлов (порт из
-`AGENT_URL_TEMPLATE`), к слотам (8080) и к внутреннему API шлюза.
+Каталоги студентов менеджеру не нужны: монтирует их агент, а создаёт сторона Proxmox (п. 2).
+Нужен сетевой доступ к API Proxmox (8006), к агентам узлов (8443, firewall агента пускает
+только менеджер), к слотам (8080) и к внутреннему API шлюза.
 
-## 2. Каталоги студентов (на узле PVE, root, один раз)
+## 2. Сторона Proxmox: агент, слоты, каталоги
 
-Права даются через общую группу `labdata` (DESIGN §5). Её GID одинаков во всех слотах и в
-менеджере: ниже 2000 внутри CT, то есть 102000 на хосте при стандартной idmap. `gns3` в слотах
-и `lab-manager` в менеджере — её члены.
+1. Агент на каждый узел — по `agent/README.md` (ветка `feature/proxmox-node-agent`):
+   `make-demo-pki.sh` (или своя PKI), `install-node.sh`, `LAB_VMID_MIN/MAX`, firewall.
+   Менеджеру из PKI нужны `manager.crt`, `manager.key` и `node-server-ca.crt`.
+2. Слоты: CT из диапазона `LAB_VMID_MIN..MAX`, `unprivileged: 1`, `pct set <vmid> --tags labslot`,
+   внутри — Lab Slot по `slot/README.md` и `/usr/local/sbin/lab-slot-init` из `agent/guest/`.
+3. Каталоги на CephFS (агент требует, чтобы предки принадлежали root и не были доступны на
+   запись группе и остальным):
 
-```sh
-CEPH=/mnt/pve/data
-install -d -o 101001 -g 102000 -m 2770 $CEPH/students              # 101001 = uid lab-manager (1001)
-install -d -o 101001 -g 102000 -m 2750 $CEPH/students/placeholder  # пустая заглушка, RO
-```
+   ```sh
+   CEPH=/mnt/pve/data
+   install -d -o root -g root -m 0755 $CEPH/students $CEPH/students/placeholder
+   # Для каждого студента (пока вручную или скриптом; DESIGN §5, §11 В2).
+   # 101000 = uid gns3 в слоте (1000) + 100000:
+   install -d -o 101000 -g 101000 -m 0700 $CEPH/students/main-42
+   ```
 
-`students/<site>-<user_id>/` и `results/` внутри него менеджер создаёт сам при первом
-запуске сессии.
-
-Слоты (CT с vmid из `LAB_VMID_MIN..MAX` агента, непривилегированные, с тегом `labslot`) готовит
-администратор: Lab Slot по `slot/README.md`, группа `labdata` у `gns3`, служба `lab-slot`.
-Точки монтирования `mp0`/`mp1` при каждом старте ставит агент.
+   `student_key` = `<slug сайта>-<user_id Moodle>`. Если каталога нет, сессия завершается ошибкой
+   `STUDENT_DIR_MISSING`, а слот остаётся свободным.
 
 ## 3. Установка в LXC менеджера
 
 ```sh
 apt install -y python3.12-venv postgresql
-useradd --system --uid 1001 --home-dir /nonexistent --shell /usr/sbin/nologin lab-manager
-
-groupadd --gid 2000 labdata && usermod -aG labdata lab-manager
+useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin lab-manager
 
 # PostgreSQL: роль = системный пользователь (peer-аутентификация через сокет, без пароля).
 sudo -u postgres createuser lab-manager
@@ -78,7 +76,7 @@ cp /srv/gns3-ro/manager/sites.json.example  /etc/lab-manager/sites.json
 cp /srv/gns3-ro/manager/slots.json.example  /etc/lab-manager/slots.json
 cp /etc/pve/pve-root-ca.pem /etc/lab-manager/        # скопировать с узла PVE
 # mTLS к агентам: CA агентов, клиентский сертификат и ключ менеджера.
-cp agent-ca.pem manager.crt manager.key /etc/lab-manager/
+cp node-server-ca.crt manager.crt manager.key /etc/lab-manager/   # из pki/ после make-demo-pki.sh
 chown lab-manager:lab-manager /etc/lab-manager/sites.json /etc/lab-manager/slots.json /etc/lab-manager/manager.key
 chmod 600 /etc/lab-manager/sites.json /etc/lab-manager/slots.json /etc/lab-manager/manager.key
 chown root:lab-manager /etc/lab-manager/manager.env && chmod 640 /etc/lab-manager/manager.env
@@ -93,10 +91,9 @@ systemctl enable --now lab-manager.service
 ```
 
 Unit: `ExecStartPre` — preflight (конфиг, права 0600 на файлы секретов, CA Proxmox, сертификаты
-mTLS, каталог лаб, `STUDENT_ROOT` с правом записи, заглушка, версия схемы). Без `manager.env`,
-секретов или с неверной схемой сервис не стартует (fail closed). `run.py` проверяет, что код
-и venv лежат в `/srv/gns3-ro/manager`. Uvicorn работает в один процесс: оркестратор живёт в нём же.
-`ReadWritePaths=/srv/lab-students` — поправьте, если `STUDENT_ROOT` в другом месте.
+mTLS, каталог лаб, версия схемы). Без `manager.env`, секретов или с неверной схемой сервис не
+стартует (fail closed). `run.py` проверяет, что код и venv лежат в `/srv/gns3-ro/manager`.
+Uvicorn работает в один процесс: оркестратор живёт в нём же.
 
 Готовность: `curl -s 127.0.0.1:8090/readyz` (200 `ready` / 503 `not_ready` с причинами).
 
@@ -111,13 +108,12 @@ mTLS, каталог лаб, `STUDENT_ROOT` с правом записи, заг
 | `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token` |
 | `LABS_DIR` | каталог лаб; `meta.json` может задавать `resources: {cores, memory_mb}` |
 | `PVE_NODES`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_FILE` | точки входа API, токен, CA кластера |
-| `AGENT_URL_TEMPLATE` | `https://{node}.mgmt:8443`, где `{node}` — имя узла Proxmox |
-| `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | mTLS к агентам |
-| `AGENT_START_ACTIONS` | действия в госте после `pct start` (`init_slot`, `daemon_reload`, `start_slot_service`, `restart_slot_service`) |
+| `AGENT_URL_TEMPLATE` | `https://{node}.lab.local:8443`; `{node}` — имя узла Proxmox, хост — как в SAN сертификата агента |
+| `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | `node-server-ca.crt`, `manager.crt`, `manager.key` |
+| `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
 | `SLOT_CODE_REVISION` | пусто: общий `<ceph>/slot`; иначе `<ceph>/slot/<revision>` |
 | `PLACEHOLDER_STUDENT_KEY` | что монтировать RO в освобождённый слот (`placeholder`; пусто — не перемонтировать) |
-| `STUDENT_ROOT` | путь `<ceph>/students` внутри LXC менеджера |
-| `LAB_PERSISTENCE` | `fresh` (новый проект в каждой сессии) или `resume` (тот же проект; нужен cold resume в слоте, DESIGN §6.1) |
+| `LAB_PERSISTENCE` | `fresh` (новый проект в каждой сессии) или `resume` (тот же проект; когда слот будет хранить состояние в `/srv/student`, DESIGN §6.1) |
 | `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении |
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
 | `DEFAULT_MAX_DURATION` | длительность сессии, минуты |
@@ -185,13 +181,15 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
   нода возвращается после `PVE_RETRY_AFTER`; все ноды недоступны; миграция CT;
 - UPID: ожидание `stopped`/`OK`, ошибка `exitstatus`, недоступный узел задачи и таймаут → «неизвестно»;
 - агент: формат запросов и таймауты, разбор всех ошибок `agent.py` (403/404/409×3/422/503/504);
+  клиент вручную прогнан против настоящего `agent.py` из ветки (с подменённым `pct`);
+- нет каталога студента → `STUDENT_DIR_MISSING`, слот свободен для других;
 - порядок `stop (если CT запущен) → cores/memory → агент start (mounts + pct start) → readyz → deploy`
   и `slot stop → агент shutdown → заглушка RO`; shutdown завис → `force`;
 - слоты не привязаны: тот же студент идёт в другой слот, слот — к другому студенту;
 - размещение best fit по памяти узлов, резерв ещё не запущенных слотов, offline-узел, нехватка ресурсов;
 - режимы `fresh`/`resume`: новый проект в каждой сессии; тот же проект в том же слоте;
   понятная ошибка `SLOT_COLD_RESUME_UNSUPPORTED` в другом слоте;
-- защита путей: `..`, симлинки, `student_key` по правилам агента, права `results/` (2750);
+- `student_key`: только безопасный компонент пути по правилам агента;
 - выдача: конкурентная (8 студентов на 5 слотов), порядок кандидатов, fencing, идемпотентный `POST /sessions`;
 - восстановление: потерян ответ на старт (второго старта нет), рестарт менеджера посреди deploy,
   чужой каталог в `mp1` у запущенного CT, агент занят и миграция CT, повтор deploy с тем же
@@ -204,6 +202,6 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 Требует стенда (тестами не подтверждено):
 - настоящий агент: mTLS, длительность `pct start`/действий, формат `mp1` в конфиге CT после `pct set`;
 - реальный PVE: права токена из §5, `/cluster/resources` с узлами, применение `cores`/`memory`;
-- CephFS: группа `labdata` и setgid, видимость каталога студента в слоте под `gns3`;
+- CephFS: владелец каталога студента (uid `gns3` слота), запись в `/srv/student` из слота;
 - настоящий Lab Slot и GNS3: длительность deploy, `readyz` после старта LXC, путь кода (DESIGN §11, В1);
 - шлюз консолей с реальными `GW_SLOTS`, systemd unit, preflight в LXC.

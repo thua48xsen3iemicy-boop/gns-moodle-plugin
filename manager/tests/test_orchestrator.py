@@ -28,7 +28,7 @@ def names(timeline):
 
 def new_orchestrator(env):
     sv = env.services
-    return Orchestrator(env.settings, sv.store, sv.pve, sv.agent, sv.slots, sv.catalog, sv.storage)
+    return Orchestrator(env.settings, sv.store, sv.pve, sv.agent, sv.slots, sv.catalog)
 
 
 async def test_full_cycle_order(tmp_path, dsn):
@@ -43,10 +43,9 @@ async def test_full_cycle_order(tmp_path, dsn):
         config = env.pve.cts[201]["config"]
         assert config["cores"] == "8" and config["memory"] == "16384"  # Sized to the lab
         assert config["mp1"] == "/mnt/pve/data/students/main-42,mp=/srv/student,ro=0,shared=1"
-        assert (env.settings.student_root / "main-42" / "results").is_dir()
         start_req = [r for r in env.agent.requests if r[2].endswith("/start")][0]
         assert start_req[3] == {"code_revision": None, "student_key": "main-42", "data_mode": "rw",
-                                "actions": ["start_slot_service"]}
+                                "actions": ["init_slot"]}
         slot = await env.services.store.slot(201)
         assert slot["state"] == "busy" and slot["session_id"] == sid
         nodes = s["topology"]["topology"]["nodes"]
@@ -282,6 +281,20 @@ async def test_agent_rejection_fails_session(tmp_path, dsn):
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "AGENT_REJECTED"
         assert "not marked as a lab slot" in s["status_message"]
+
+
+async def test_missing_student_dir_fails_session_but_frees_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.agent.missing_students = {"main-42"}
+        sid = await start(env)
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "STUDENT_DIR_MISSING"
+        assert env.pve.cts[201]["status"] == "stopped"
+        assert (await env.services.store.slot(201))["state"] == "free"  # The slot itself is fine
+        other = await start(env, user_id=7)
+        await env.run()
+        assert (await session(env, other))["status"] == "running"
 
 
 async def test_start_failure_on_node_fails_session(tmp_path, dsn):

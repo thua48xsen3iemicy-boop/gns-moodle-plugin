@@ -24,8 +24,6 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-# Student directories on RW CephFS (STUDENT_ROOT).
-ReadWritePaths=/srv/lab-students
 UMask=0027
 
 [Install]

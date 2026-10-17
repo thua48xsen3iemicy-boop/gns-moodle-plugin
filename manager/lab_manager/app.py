@@ -21,7 +21,7 @@ from .labs import Catalog, LabError, LabNotFound
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
-from .storage import StorageError, StudentStorage, student_key
+from .storage import StorageError, student_key
 from .store import Store
 
 log = logging.getLogger("lab_manager.api")
@@ -76,9 +76,8 @@ class Services:
         }
         self.gateway = GatewayClient(settings.gateway_internal_url, settings.gateway_internal_key,
                                      settings.gateway_public_url, transport=gateway_transport)
-        self.storage = StudentStorage(settings.student_root)
         self.orchestrator = Orchestrator(settings, self.store, self.pve, self.agent, self.slots,
-                                         self.catalog, self.storage)
+                                         self.catalog)
 
     async def leader_connection(self):
         from psycopg.rows import dict_row
@@ -195,10 +194,6 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             checks["labs"] = {"ok": settings.labs_dir.is_dir()}
         except OSError:
             checks["labs"] = {"ok": False}
-        try:
-            checks["students"] = {"ok": settings.student_root.is_dir()}
-        except OSError:
-            checks["students"] = {"ok": False}
         ready = all(c["ok"] for c in checks.values())
         return JSONResponse(status_code=200 if ready else 503,
                             content={"status": "ready" if ready else "not_ready", "version": VERSION,

@@ -56,8 +56,6 @@ def make_settings(tmp_path, dsn="postgresql:///unused", *, vmids=(201, 202), **o
     labs = tmp_path / "labs"
     if not labs.exists():
         shutil.copytree(ROOT / "examples" / "labs", labs)
-    students = tmp_path / "rw" / "students"
-    (students / "placeholder").mkdir(parents=True, exist_ok=True)
     values = dict(
         database_url=dsn,
         sites={SITE_URL: SiteConfig(url=SITE_URL, slug="main", secret=SITE_SECRET),
@@ -71,14 +69,12 @@ def make_settings(tmp_path, dsn="postgresql:///unused", *, vmids=(201, 202), **o
         pve_token_secret="pve-secret",
         pve_ca_file=tmp_path / "ca.pem",
         agent_url_template="https://{node}.agent:8443",
-        agent_ca_file=tmp_path / "agent-ca.pem",
+        agent_ca_file=tmp_path / "node-server-ca.crt",
         agent_cert_file=tmp_path / "manager.crt",
         agent_key_file=tmp_path / "manager.key",
-        student_root=students,
         gateway_internal_url="http://gateway.internal:8080",
         gateway_internal_key="gw-key",
         gateway_public_url="wss://gateway.example.edu",
-        agent_start_actions=("start_slot_service",),
         placeholder_student_key="placeholder",
         pve_retry_after=60,
         slot_ready_timeout=60,
@@ -108,7 +104,7 @@ async def make_env(tmp_path, dsn, *, vmids=(201, 202), nodes_of=None, **override
     env.pve = FakePve(env.timeline)
     for i, vmid in enumerate(vmids):
         env.pve.add_ct(vmid, node=(nodes_of or {}).get(vmid, env.pve.nodes[(i + 1) % 3]))
-    env.agent = FakeAgent(env.pve, env.settings.student_root)
+    env.agent = FakeAgent(env.pve)
     env.projects = {}
     env.slots = {vmid: FakeSlot(s.address, env.timeline, env.projects) for vmid, s in env.settings.slots.items()}
     env.gateway = FakeGateway()
