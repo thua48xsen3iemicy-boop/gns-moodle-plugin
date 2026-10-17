@@ -117,6 +117,7 @@ class Settings:
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
     default_max_duration: int = 180  # Minutes
+    max_duration_limit: int = 480  # Minutes; upper bound for options.max_duration from the plugin
     worker_interval: float = 2.0
 
     def site(self, url: str | None) -> SiteConfig | None:
@@ -223,5 +224,6 @@ def load(env=None, check_mode=True) -> Settings:
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),
+        max_duration_limit=_int(env, "MAX_DURATION_LIMIT", 480, 1, 7 * 24 * 60),
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),
     )

@@ -69,8 +69,10 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 ## 2. Плагин → менеджер
 
 Транспорт и авторизация — SPEC §3: `Authorization: Bearer <секрет сайта>`, `X-Moodle-Site: <wwwroot>`.
+Всё в этом разделе ✅ реализовано в менеджере 0.3, кроме помеченного 🆕. Ответы на просьбы плагина —
+`PLUGIN_REQUESTS.md`.
 
-### 2.1. 🆕 `GET /api/v1/info`
+### 2.1. ✅ `GET /api/v1/info`
 
 Плагин вызывает его при сохранении настроек и кеширует ответ (MUC, например на 5 минут).
 
@@ -86,17 +88,10 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 
 - `options` — какие ключи `options` из §2.2 менеджер принимает;
 - `features` — что плагину можно показывать: `consoles` (билеты консолей), `observer` (режим
-  наблюдателя), позже `facts` (live-state), `checks` (автопроверки), `reset` (начать заново).
+  наблюдателя), `resume` (следующий запуск продолжает проект студента; нет `resume` — работа не
+  сохраняется, плагин предупреждает), позже `facts` (live-state), `checks` (автопроверки), `reset`.
 
-### 2.2. `POST /api/v1/sessions`
-
-✅ Сейчас (SPEC §3):
-
-```json
-{"user_id": 42, "instance_id": 7, "lab_ref": "cisco-3x2", "course_id": 3}
-```
-
-🆕 Предлагается добавить необязательные `options` и `client`:
+### 2.2. ✅ `POST /api/v1/sessions`
 
 ```json
 {
@@ -118,71 +113,119 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 |---|---|---|---|
 | `user_id` | int > 0 | да | `user.id` в Moodle; вместе с сайтом даёт `student_key` |
 | `instance_id` | int > 0 | да | id записи `gns3lab` |
-| `course_id` | int ≥ 0 | нет | для журнала и будущих отчётов |
+| `course_id` | int ≥ 0 | нет | для журнала и подсказки при конфликте |
 | `lab_ref` | строка | да | эталонная лаба из `GET /api/v1/labs` |
-| `options` | объект | нет | параметры **этого запуска**; принимаются только ключи из `info.options` |
-| `options.max_duration` | int, минуты | нет | `maxduration` активности (SPEC §5.1); `0` или отсутствие — значение по умолчанию у менеджера; менеджер может ограничить сверху |
-| `client` | объект | нет | только для диагностики, на логику не влияет |
+| `options` | объект | нет | параметры **этого запуска**; только ключи из `info.options` |
+| `options.max_duration` | int, минуты | нет | `maxduration` активности (SPEC §5.1); `0` или отсутствие — `DEFAULT_MAX_DURATION` менеджера; сверху ограничено `MAX_DURATION_LIMIT` |
+| `client` | объект | нет | `plugin_version`, `moodle_release` (строки ≤ 64); только для журнала |
+
+Любое неизвестное поле на любом уровне — `400 unsupported_field` с именем поля.
 
 Кандидаты в `options` на будущее (каждый появится вместе с возможностью в `info.options`):
-- `mode`: `"practice"` | `"exam"` — режим экзамена (ограничения, другая длительность);
-- `reset`: `true` — начать лабу заново, не продолжая сохранённый проект.
+`reset: true` — начать лабу заново; `mode: "exam"` — пока не нужен.
 
-Поведение ✅: у студента одна живая лаба на сайте. При живой сессии той же активности и того же
-`lab_ref` — `200` с ней (идемпотентно); новая — `201`; пока жива лаба в другой активности или с
-другим `lab_ref` — `409 session_conflict` («У студента уже запущена другая лаба; сначала
-остановите её»). Плагину стоит показать это сообщение и не предлагать запуск.
-🆕 Если в повторном запросе другие `options`, вернётся та же живая сессия, а `options` не
-применяются. Новые параметры действуют со следующего запуска.
+Поведение: у студента одна живая лаба на сайте.
+- живая сессия той же активности и того же `lab_ref` — `200` с ней (идемпотентно), `options` не
+  применяются повторно;
+- новая — `201`; после `stopped`/`failed` новый запуск всегда создаёт новую сессию, и
+  `GET /sessions?user_id=&instance_id=` дальше отдаёт её;
+- пока жива лаба в другой активности или с другим `lab_ref` — `409 session_conflict`:
 
-### 2.3. Объект сессии (ответ)
+```json
+{"error": "session_conflict", "message": "У студента уже запущена другая лаба; сначала остановите её",
+ "conflict": {"instance_id": 5, "course_id": 3, "lab_ref": "ospf-1", "status": "running"}}
+```
 
-✅ Сейчас (SPEC §3): `session_id`, `status`, `status_message`, `started_at`, `expires_at`,
-`topology` и `nodes` (только при `running`).
-
-🆕 Добавляются поля. Старый плагин их проигнорирует, это допустимо по §1.2.
+### 2.3. ✅ Объект сессии (ответ)
 
 ```json
 {
   "schema": "gns3lab.session/1",
   "session_id": "s-3f9a1c0d2b4e5f60",
   "lab_ref": "cisco-3x2",
-  "status": "running",
-  "status_message": "Лаба запущена",
+  "status": "starting",
+  "stage": "lab_wait",
+  "progress": 40,
+  "status_message": "Проверка устройств… 40%",
   "error": null,
-  "started_at": "2026-10-17T10:00:00Z",
-  "expires_at": "2026-10-17T11:30:00Z",
+  "started_at": null,
+  "expires_at": null,
+  "features": []
+}
+```
+
+При `running` добавляются `topology`, `nodes` и, если нужно, `nodes_stale`:
+
+```json
+{
+  "status": "running",
+  "stage": "ready",
   "features": ["consoles"],
-  "topology": {
-    "name": "cisco-3x2-w17",
-    "topology": {"nodes": [], "links": [], "drawings": []}
-  },
-  "nodes": {
-    "6b1f3c2e-4a7d-4e5b-9c10-000000000002": {"status": "started", "console_type": "telnet"}
-  }
+  "topology": {"name": "cisco-3x2-s-3f9a1c0d2b4e5f60", "topology": {"nodes": [], "links": [], "drawings": []}},
+  "nodes": {"6b1f3c2e-4a7d-4e5b-9c10-000000000002": {"status": "started", "console_type": "telnet"}},
+  "nodes_stale": true
 }
 ```
 
 | Поле | Смысл |
 |---|---|
 | `status` | `queued` · `starting` · `running` · `stopping` · `stopped` · `failed` (SPEC §3). Новые статусы — только с новой версией `session` |
-| `status_message` | текст для студента; логика по нему не строится |
-| `error` | 🆕 при `failed`: `{"code": "SLOT_START_FAILED", "retryable": true}`. `retryable` — можно ли просто запустить заново (у студента всё ещё работает кнопка «Запустить») |
-| `features` | 🆕 что доступно в **этой** сессии (например, у лабы нет фактов — нет и `facts`) |
-| `topology` | формат `.gns3` с живыми `node_id`; у нод нет `properties` и номера консоли |
-| `nodes` | статусы нод; `console_type` — `telnet` · `vnc` · `none` |
+| `stage` | внутренний этап (DESIGN §6.4): `wait_slot`, `ct_prepare`, `student_dir`, `ct_start`, `slot_ready`, `lab_submit`, `lab_wait`, `ready`, `lab_stop`, `lab_stop_wait`, `ct_stop`, `ct_park`; у завершённых — `stopped`/`failed`. Список может расти: незнакомый этап плагин показывает как общий текст своего `status` |
+| `progress` | процент текущей операции слота, если известен; иначе поля нет |
+| `status_message` | текст для студента по-русски; логика по нему не строится |
+| `error` | при `failed`: `{"code", "retryable"}` (§2.5); иначе `null` |
+| `features` | что доступно в **этой** сессии: `consoles` при `running` |
+| `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона |
+| `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none` |
+| `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
-Остальные маршруты SPEC §3 (`GET /labs`, `topology`, `stop`, `console-tickets`) не меняются.
+### 2.4. ✅ Остальные маршруты
+
+| Запрос | Ответ |
+|---|---|
+| `GET /api/v1/sessions?user_id=&instance_id=` | живая сессия студента в активности, иначе последняя завершённая; `404 session_not_found`, если не было ни одной |
+| `GET /api/v1/sessions?instance_id=` | список для наблюдателя: по одной записи на студента активности (живая или последняя завершённая) — поля §2.3 без `topology`/`nodes`/`features` плюс `user_id`; `[]` — сессий нет |
+| `POST /api/v1/sessions/{id}/stop` | тело необязательно: `{"requested_by_user_id": 17}` — кто остановил (только журнал); если это не сам студент, причина «преподаватель» и текст «Лаба остановлена преподавателем». Ответ — сессия со `status: "stopping"` |
+| `POST /api/v1/sessions/{id}/console-tickets` | `{"node_id", "readonly", "issued_for_user_id"}` → `{"ticket", "gateway_url", "expires_in"}`. `gateway_url` есть всегда: `ws://` или `wss://` (в бою `wss://`), хост, порт, путь, **без `/` на конце**; плагин дописывает `/console/<node_id>?ticket=…`. К ноде, которая по живым статусам не `started`, — `409 node_not_running` (при `nodes_stale` билет выдаётся) |
+
 Будущие маршруты — `/sessions/{id}/state` (live-state.md §6) и `/sessions/{id}/checks` — появятся
 вместе с возможностями `facts` и `checks`.
 
-### 2.4. Коды ошибок менеджера
+### 2.5. Коды ошибок
 
-✅ `unauthorized` 401, `invalid_request` 400, `lab_not_found` 404, `session_not_found` 404,
-`node_not_found` 404, `session_not_running` 409, `session_conflict` 409, `lab_invalid` 409,
-`gateway_unavailable` 502, `storage_unavailable` 503.
-🆕 `unsupported_field` 400 (неизвестное поле или ключ `options`), `unsupported_lab` 409 (слоты не
-умеют того, что требует лаба, §4.3).
+**Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
+`unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
+`session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
+`session_conflict` 409, `lab_invalid` 409, `gateway_unavailable` 502, `storage_unavailable` 503.
+🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3).
+
+**Коды `error.code` у `failed`-сессии** (`lab_manager/errors.py`). `retryable: true` — можно просто
+нажать «Запустить» ещё раз: слот не привязан к студенту, следующая сессия возьмёт другой.
+`false` — без администратора повторится то же самое.
+
+| `code` | `retryable` | Что случилось |
+|---|---|---|
+| `SLOT_START_FAILED` | да | агент не смог запустить контейнер слота |
+| `SLOT_LAB_FAILED` | да | лаба в слоте перешла в FAILED (сбой ноды, рестарт службы слота) |
+| `SLOT_OPERATION_FAILED` | да | deploy в слоте завершился ошибкой |
+| `SLOT_OPERATION_UNKNOWN` | да | слот потерял операцию |
+| `SLOT_STOP_FAILED` | да | слот не смог остановить лабу |
+| `SLOT_PROJECT_UNKNOWN` | да | слот не знает проект при остановке |
+| `SLOT_REJECTED` | да | слот отклонил запрос (подробность в `status_message`) |
+| `SLOT_NOT_CONFIGURED` | да | слот есть в БД, но не в конфигурации менеджера |
+| `WRONG_STUDENT_MOUNT` | да | у слота неожиданные точки монтирования; слот выведен из работы |
+| `CT_SIZE_NOT_APPLIED` | да | Proxmox не применил ресурсы слота |
+| `TIMEOUT` | да | этап не уложился во время |
+| `INTERNAL` | да | внутренняя ошибка менеджера |
+| `PVE_REJECTED` | нет | Proxmox отклонил запрос (права, параметры) |
+| `AGENT_REJECTED` | нет | агент узла отклонил запрос (настройка узла или слота) |
+| `FILESYSTEM` | нет | ошибка файловой системы менеджера |
+| `STUDENT_DIR_MISSING` | нет | каталог студента на CephFS не найден |
+| `STUDENT_DIR_REJECTED` | нет | агент не создал каталог студента |
+| `LAB_UNAVAILABLE` | нет | лаба удалена из каталога или стала некорректной |
+| `SLOT_COLD_RESUME_UNSUPPORTED` | нет | проект нельзя продолжить в другом слоте (режим `resume` без `student-state`) |
+
+Неизвестный плагину код — считать `retryable: false` и показывать общий текст с кодом.
 
 ## 3. Каталог лаб → менеджер
 
@@ -354,6 +397,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `facts` | менеджер | 🆕 `/sessions/{id}/state` (live-state.md) |
 | `checks` | менеджер | 🆕 `/sessions/{id}/checks` |
 | `reset` | менеджер | 🆕 `options.reset` |
+| `resume` | менеджер | следующий запуск продолжает проект студента (`LAB_PERSISTENCE=resume`) |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `iol-cli` | слот | provisioning IOL через CLI (`cli_prompt`) |
@@ -368,10 +412,10 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | SPEC §3 (плагин) | `GET /api/v1/info`; `options` (`max_duration`), `client` в `POST /sessions`; новые поля сессии; передавать `maxduration` активности | плагин |
 | `slot/api/models.py` | `deploy/2`, `extra="forbid"`, `GET /v1/capabilities`, сравнение только `manifest`, `UNSUPPORTED_REQUIREMENT` | слот |
 | слот | `student-state` (состояние лабы рядом с проектами в каталоге студента) | слот |
-| менеджер | `info`, `options`/`client` со строгой проверкой, `error`/`features` в сессии, `lab_revision` в рабочей копии, выбор `deploy/1`/`deploy/2` по `capabilities` | менеджер |
+| менеджер | ✅ `info`, `options`/`client` со строгой проверкой, `stage`/`progress`/`error`/`features`/`nodes_stale` в сессии, список сессий активности, `node_not_running`; 🆕 `lab_revision` в рабочей копии, выбор `deploy/1`/`deploy/2` по `capabilities` | менеджер |
 
 Порядок, при котором ничего не ломается:
-1. Менеджер добавляет `GET /api/v1/info`, новые поля сессии и приём `options`. Старый плагин работает как раньше.
+1. ✅ Менеджер добавляет `GET /api/v1/info`, новые поля сессии и приём `options`. Старый плагин работает как раньше.
 2. Плагин начинает читать `info` и передавать `options.max_duration`.
 3. Слот добавляет `capabilities` и `deploy/2`, оставляя `deploy/1`. Менеджер переключается на `deploy/2` сам, по `capabilities`.
 4. Слот добавляет `student-state`. Менеджер включает `LAB_PERSISTENCE=resume`.

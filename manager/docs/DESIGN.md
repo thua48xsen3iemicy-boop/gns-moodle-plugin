@@ -319,24 +319,22 @@ Proxmox, тот же Idempotency-Key у слота, статус лабы пер
 
 ## 8. API для плагина
 
-Форматы и правила их расширения (версии, возможности, `deploy/2`) — `CONTRACTS.md`.
-
-Маршруты — ровно как в SPEC §3. Детали, которых в SPEC нет:
+Полный формат — `CONTRACTS.md` §2, ответы на просьбы плагина — `PLUGIN_REQUESTS.md`. Кратко:
+- маршруты SPEC §3 плюс `GET /api/v1/info` и список сессий активности `GET /sessions?instance_id=`;
 - авторизация: `Bearer` через `compare_digest` с секретом сайта из `X-Moodle-Site`
   (`wwwroot`, завершающий `/` отбрасывается);
-- ошибки `{"error","message"}`: `unauthorized` 401, `invalid_request` 400, `lab_not_found` 404,
-  `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `session_conflict` 409,
-  `lab_invalid` 409, `gateway_unavailable` 502, `storage_unavailable` 503;
-- `GET /sessions?user_id=&instance_id=`: живая сессия, а если её нет — последняя завершённая;
-  404 — только если сессий не было вовсе;
-- у студента одна живая лаба на сайт: `POST /sessions` для той же активности и `lab_ref` — `200` с
-  живой сессией; для другой активности или другого `lab_ref`, пока первая лаба живая, —
-  `409 session_conflict` («У студента уже запущена другая лаба»). `GET /sessions` остаётся
-  по активности;
-- `POST /stop` отвечает `status: "stopping"`;
-- `console-tickets`: сессия `running`, нода из её топологии. В шлюз уходит
-  `{"slot": адрес слота, "project_id", "nodes": [node_id], "readonly", "who": "<session_id>:owner|observer"}`.
-  `issued_for_user_id` пишется только в `events`.
+- строгие тела запросов: неизвестное поле — `400 unsupported_field`; `options.max_duration`
+  (ограничен `MAX_DURATION_LIMIT`), `client` — только в журнал;
+- у студента одна живая лаба на сайт: та же активность и `lab_ref` — `200` с живой сессией, иначе
+  `409 session_conflict` с `conflict {instance_id, course_id, lab_ref, status}`;
+- сессия: `schema`, `lab_ref`, `status`, `stage`, `progress`, `status_message`, `error {code, retryable}`
+  (коды — `errors.py`, CONTRACTS §2.5), `features`; при `running` — `topology`, `nodes` (кеш 3 с) и
+  `nodes_stale`, если слот не ответил;
+- `POST /stop` с необязательным `requested_by_user_id` (журнал, текст «остановлена преподавателем»);
+- `console-tickets`: сессия `running`, нода из её топологии и, по живым статусам, `started`
+  (иначе `409 node_not_running`). В шлюз уходит
+  `{"slot": адрес слота, "project_id", "nodes": [node_id], "readonly", "who": "<session_id>:owner|observer"}`;
+  `issued_for_user_id` и `requested_by_user_id` пишутся только в `events`.
 
 ## 9. Эксплуатация
 

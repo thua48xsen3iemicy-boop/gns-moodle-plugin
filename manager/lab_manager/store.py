@@ -15,7 +15,7 @@ LIVE = ("queued", "starting", "running", "stopping")
 TERMINAL = ("stopped", "failed")
 SESSION_FIELDS = {
     "status", "stage", "status_message", "error", "pve_upid", "stop_requested", "stop_reason",
-    "topology", "started_at", "expires_at", "finished_at",
+    "topology", "started_at", "expires_at", "finished_at", "progress",
 }
 
 
@@ -148,6 +148,16 @@ class Store:
                 (site, user_id, instance_id),
             )
             return await cur.fetchone()
+
+    async def activity_sessions(self, site, instance_id):
+        """Per student of an activity: the live session, otherwise the latest finished one."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT DISTINCT ON (user_id) * FROM sessions WHERE site = %s AND instance_id = %s"
+                " ORDER BY user_id, (status NOT IN ('stopped', 'failed')) DESC, created_at DESC",
+                (site, instance_id),
+            )
+            return await cur.fetchall()
 
     async def session(self, sid, site=None):
         async with self.pool.connection() as conn:

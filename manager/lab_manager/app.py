@@ -11,12 +11,13 @@ import psycopg
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import VERSION
-from .db import latest_version, make_pool, schema_version
 from .agent_client import AgentClient
+from .db import latest_version, make_pool, schema_version
+from .errors import public_error
 from .labs import Catalog, LabError, LabNotFound
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
@@ -28,21 +29,44 @@ log = logging.getLogger("lab_manager.api")
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, error: str, message: str):
-        self.status, self.error, self.message = status, error, message
+    def __init__(self, status: int, error: str, message: str, **extra):
+        self.status, self.error, self.message, self.extra = status, error, message, extra
 
 
-class SessionCreate(BaseModel):
+class Strict(BaseModel):
+    # Unknown fields are refused (CONTRACTS §1.2): the plugin learns it was not understood.
+    model_config = ConfigDict(extra="forbid")
+
+
+class SessionOptions(Strict):
+    max_duration: int | None = Field(default=None, ge=0, le=7 * 24 * 60)  # Minutes; 0 = default
+
+
+class ClientInfo(Strict):
+    plugin_version: str | None = Field(default=None, max_length=64)
+    moodle_release: str | None = Field(default=None, max_length=64)
+
+
+class SessionCreate(Strict):
     user_id: int = Field(gt=0)
     instance_id: int = Field(gt=0)
     lab_ref: str = Field(min_length=1, max_length=64)
     course_id: int | None = Field(default=None, ge=0)
+    options: SessionOptions | None = None
+    client: ClientInfo | None = None
 
 
-class TicketRequest(BaseModel):
+class TicketRequest(Strict):
     node_id: str = Field(min_length=1, max_length=64)
     readonly: bool = False
     issued_for_user_id: int | None = Field(default=None, gt=0)
+
+
+class StopRequest(Strict):
+    requested_by_user_id: int | None = Field(default=None, gt=0)  # Journal only (events)
+
+
+OPTIONS = ["max_duration"]
 
 
 def iso_or_none(value):
@@ -123,11 +147,17 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.exception_handler(ApiError)
     async def api_error(request, exc: ApiError):
-        return JSONResponse(status_code=exc.status, content={"error": exc.error, "message": exc.message})
+        return JSONResponse(status_code=exc.status,
+                            content={"error": exc.error, "message": exc.message, **exc.extra})
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
-        fields = ", ".join(".".join(map(str, e["loc"][1:])) for e in exc.errors()) or "body"
+        errors = exc.errors()
+        unknown = [".".join(map(str, e["loc"][1:])) for e in errors if e.get("type") == "extra_forbidden"]
+        if unknown:
+            return JSONResponse(status_code=400, content={"error": "unsupported_field",
+                                                          "message": f"Unsupported fields: {', '.join(unknown)}"})
+        fields = ", ".join(".".join(map(str, e["loc"][1:])) for e in errors) or "body"
         return JSONResponse(status_code=400, content={"error": "invalid_request",
                                                       "message": f"Invalid fields: {fields}"})
 
@@ -153,17 +183,30 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             raise ApiError(401, "unauthorized", "Invalid credentials or unknown X-Moodle-Site")
         return site
 
-    async def present(s):
+    def summary(s):
         body = {
+            "schema": "gns3lab.session/1",
             "session_id": s["id"],
+            "lab_ref": s["lab_ref"],
             "status": s["status"],
+            "stage": s["stage"],
             "status_message": s["status_message"],
+            "error": public_error(s["error"]) if s["status"] == "failed" else None,
             "started_at": iso_or_none(s["started_at"]),
             "expires_at": iso_or_none(s["expires_at"]),
         }
+        if s["progress"] is not None:
+            body["progress"] = s["progress"]
+        return body
+
+    async def present(s):
+        body = summary(s)
+        body["features"] = ["consoles"] if s["status"] == "running" else []
         if s["status"] == "running" and s["topology"]:
             body["topology"] = s["topology"]
-            body["nodes"] = await services.orchestrator.live_nodes(s)
+            body["nodes"], stale = await services.orchestrator.live_nodes(s)
+            if stale:
+                body["nodes_stale"] = True
         return body
 
     async def own_session(session_id, site):
@@ -201,6 +244,14 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                                      "checks": checks})
 
     # ------------------------------------------------------------------ SPEC §3
+    @app.get("/api/v1/info")
+    async def info(site=Depends(site_of)):
+        features = ["consoles", "observer"]
+        if settings.lab_persistence == "resume":
+            features.append("resume")  # The next session continues the student's project
+        return {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
+                "options": OPTIONS, "features": features}
+
     @app.get("/api/v1/labs")
     async def list_labs(site=Depends(site_of)):
         try:
@@ -219,7 +270,11 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         return lab.topology
 
     @app.get("/api/v1/sessions")
-    async def find_session(user_id: int, instance_id: int, site=Depends(site_of)):
+    async def find_session(instance_id: int, user_id: int | None = None, site=Depends(site_of)):
+        if user_id is None:
+            # Observer page: one entry per student of the activity, without topology (П1).
+            rows = await store.activity_sessions(site.slug, instance_id)
+            return [dict(summary(s), user_id=s["user_id"]) for s in rows]
         s = await store.latest_session(site.slug, user_id, instance_id)
         if not s:
             raise ApiError(404, "session_not_found", "No session for this user and instance")
@@ -230,13 +285,17 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         def same(s):
             return s["instance_id"] == body.instance_id and s["lab_ref"] == body.lab_ref
 
-        conflict = ApiError(409, "session_conflict",
-                            "У студента уже запущена другая лаба; сначала остановите её")
+        def conflict(s):
+            # The student's own other lab, so the plugin can link to it (П3).
+            return ApiError(409, "session_conflict", "У студента уже запущена другая лаба; сначала остановите её",
+                            conflict={"instance_id": s["instance_id"], "course_id": s["course_id"],
+                                      "lab_ref": s["lab_ref"], "status": s["status"]})
+
         existing = await store.live_session(site.slug, body.user_id)
         if existing:
             if not same(existing):
-                raise conflict
-            return JSONResponse(status_code=200, content=await present(existing))
+                raise conflict(existing)
+            return JSONResponse(status_code=200, content=await present(existing))  # options not re-applied
         try:
             lab = await asyncio.to_thread(services.catalog.get, body.lab_ref)
             key = student_key(site.slug, body.user_id)
@@ -246,13 +305,17 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             raise ApiError(409, "lab_invalid", str(exc)) from exc
         except StorageError as exc:
             raise ApiError(400, "invalid_request", str(exc)) from exc
+        requested = body.options.max_duration if body.options else None
+        max_duration = min(requested, settings.max_duration_limit) if requested else settings.default_max_duration
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
-            course_id=body.course_id, lab_ref=body.lab_ref, max_duration=settings.default_max_duration,
+            course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
             student_key=key, resources=lab.resources, persistence=settings.lab_persistence,
         )
         if not created and not same(s):
-            raise conflict  # A concurrent POST for another activity won
+            raise conflict(s)  # A concurrent POST for another activity won
+        if created and body.client:
+            await store.event(s["id"], None, "plugin_client", body.client.model_dump(exclude_none=True))
         services.orchestrator.wake()
         return JSONResponse(status_code=201 if created else 200, content=await present(s))
 
@@ -261,10 +324,14 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         return await present(await own_session(session_id, site))
 
     @app.post("/api/v1/sessions/{session_id}/stop")
-    async def stop_session(session_id: str, site=Depends(site_of)):
+    async def stop_session(session_id: str, body: StopRequest | None = None, site=Depends(site_of)):
         s = await own_session(session_id, site)
         if s["status"] not in ("stopped", "failed"):
-            await store.request_stop(s["id"], site.slug, "user")
+            by = body.requested_by_user_id if body else None
+            reason = "user" if by is None or by == s["user_id"] else "teacher"
+            await store.request_stop(s["id"], site.slug, reason)
+            if by is not None:
+                await store.event(s["id"], s["slot_vmid"], "stop_requested_by", {"user_id": by})
             services.orchestrator.wake()
             s = await own_session(session_id, site)
             if s["status"] not in ("stopped", "failed"):
@@ -284,6 +351,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         node_ids = {n["node_id"] for n in s["topology"]["topology"]["nodes"]}
         if body.node_id not in node_ids:
             raise ApiError(404, "node_not_found", "Node does not belong to this session")
+        nodes, stale = await services.orchestrator.live_nodes(s)
+        if not stale and nodes.get(body.node_id, {}).get("status") != "started":
+            # Saves the plugin a closed WebSocket and a session re-read (П5).
+            raise ApiError(409, "node_not_running", "Node is not started")
         slot = settings.slots.get(s["slot_vmid"])
         if slot is None:
             raise ApiError(503, "slot_unavailable", "Slot is not configured")

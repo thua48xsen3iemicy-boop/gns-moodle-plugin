@@ -248,6 +248,7 @@ class FakeSlot:
         self.requests = []
         self.reachable = True
         self.projects = projects if projects is not None else {}
+        self.stopped_nodes = set()  # Node names reported as stopped in the topology
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -343,7 +344,9 @@ class FakeSlot:
             ids = self.node_ids[m.group(1)]
             status = "started" if lab["state"] == "READY" else "stopped"
             nodes = [{"node_id": ids[n["name"]], "name": n["name"], "node_type": n["kind"], "x": 0, "y": 0,
-                      "console_type": "telnet", "status": status, "console": 5000,
+                      "console_type": "telnet", "console": 5000,
+                      "status": "stopped" if n["name"] in self.stopped_nodes else status,
+                      "ports": [{"name": "Ethernet0", "short_name": "e0", "adapter_number": 0, "port_number": 0}],
                       "properties": {"options": "-chardev socket,path=/opt/gns3/qga/x.sock"}}
                      for n in lab["ticket"]["nodes"]]
             return self._json(200, {"nodes": nodes, "links": []})

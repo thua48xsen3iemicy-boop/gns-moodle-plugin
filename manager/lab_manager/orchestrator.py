@@ -71,11 +71,12 @@ class Failure(Exception):
 
 
 class Wait(Exception):
-    """Nothing to do right now; try again on the next tick (with an optional message)."""
+    """Nothing to do right now; try again on the next tick (optional message and progress)."""
 
-    def __init__(self, message=None):
+    def __init__(self, message=None, progress=None):
         super().__init__(message or "")
         self.message = message
+        self.progress = progress
 
 
 def now():
@@ -196,8 +197,13 @@ class Orchestrator:
         except Wait as exc:
             if await self._check_stage_timeout(s):
                 return False
+            changes = {}
             if exc.message and exc.message != s["status_message"] and s["status"] != "queued":
-                await self.store.update_session(s, status_message=exc.message)
+                changes["status_message"] = exc.message
+            if exc.progress is not None and exc.progress != s["progress"]:
+                changes["progress"] = max(0, min(100, int(exc.progress)))
+            if changes:
+                await self.store.update_session(s, **changes)
             return False
         except PveApiError as exc:
             if 400 <= exc.status < 500:
@@ -217,7 +223,7 @@ class Orchestrator:
             await self._check_stage_timeout(s)
             return False
         except LabError as exc:
-            await self._fail(s, Failure(str(exc), type(exc).__name__))
+            await self._fail(s, Failure(f"Лаба недоступна: {exc}", "LAB_UNAVAILABLE"))
             return False
         except OSError as exc:
             await self._fail(s, Failure(f"Ошибка файловой системы: {type(exc).__name__}", "FILESYSTEM"))
@@ -262,7 +268,7 @@ class Orchestrator:
 
     async def _goto(self, s, stage, message, *, status=None, slot_state=None, **fields):
         await self.store.update_session(
-            s, stage=stage, status_message=message, new_stage=True,
+            s, stage=stage, status_message=message, new_stage=True, progress=None,
             **({"status": status} if status else {}), slot_state=slot_state,
             event=("stage", {"stage": stage}), **fields,
         )
@@ -514,7 +520,8 @@ class Orchestrator:
             return  # Transitional state: wait for it
         if exc.status == 404 and action == "stop":
             raise Failure("Слот не знает проект студента; нужен оператор", "SLOT_PROJECT_UNKNOWN")
-        raise Failure(f"Слот отклонил {action}: {exc.message or exc.code}", exc.code or f"HTTP_{exc.status}")
+        # The slot's own code goes to the message; the session code stays from the fixed list.
+        raise Failure(f"Слот отклонил {action}: {exc.code or exc.status}: {exc.message}"[:500], "SLOT_REJECTED")
 
     async def _ticket(self, s):
         """DeployTicket of this session. Resuming reuses the exact ticket of the first deploy."""
@@ -542,9 +549,10 @@ class Orchestrator:
             if op["status"] == "RUNNING":
                 lab = op.get("laboratory") or {}
                 msg = SLOT_STAGE_MESSAGES.get(lab.get("state"), "Запуск лабы…")
-                if op.get("progress"):
-                    msg = f"{msg} {op['progress']}%"
-                raise Wait(msg)
+                progress = op.get("progress")
+                if progress:
+                    msg = f"{msg} {progress}%"
+                raise Wait(msg, progress=progress if isinstance(progress, int) else None)
             if op["status"] != "SUCCEEDED":
                 await self.store.update_call(call["id"], status="failed", result={"error": op.get("error")})
                 err = op.get("error") or {}
@@ -669,24 +677,29 @@ class Orchestrator:
                                             slot_state=slot_state, slot_message=slot_message)
         else:
             reason = s["stop_reason"] or "user"
-            message = "Время лабы истекло" if reason == "maxduration" else "Лаба остановлена"
+            message = {"maxduration": "Время лабы истекло",
+                       "teacher": "Лаба остановлена преподавателем"}.get(reason, "Лаба остановлена")
             await self.store.finish_session(s, status="stopped", message=message,
                                             slot_state=slot_state, slot_message=slot_message)
         self._health_checked.pop(s["id"], None)
         return False
 
     # ------------------------------------------------------------------ reads for the API
-    async def live_nodes(self, s) -> dict:
-        """Node statuses of a running session (cached a few seconds; snapshot as fallback)."""
+    async def live_nodes(self, s) -> tuple[dict, bool]:
+        """Node statuses of a running session, cached a few seconds.
+
+        Returns (nodes, stale): stale is True when the slot did not answer and the snapshot from
+        the start of the session is returned instead (plugin request П6).
+        """
         cached = self._live_cache.get(s["id"])
         if cached and time.monotonic() - cached[0] < 3:
-            return cached[1]
-        nodes = node_states(s["topology"])
+            return cached[1], cached[2]
+        nodes, stale = node_states(s["topology"]), True
         try:
             raw = await self._slot(s).topology(str(s["project_id"]))
             live = node_states(session_topology(s["project_name"], raw))
-            nodes = {k: live.get(k, v) for k, v in nodes.items()}
+            nodes, stale = {k: live.get(k, v) for k, v in nodes.items()}, False
         except (SlotError, Failure):
             pass
-        self._live_cache[s["id"]] = (time.monotonic(), nodes)
-        return nodes
+        self._live_cache[s["id"]] = (time.monotonic(), nodes, stale)
+        return nodes, stale

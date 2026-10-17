@@ -1,4 +1,4 @@
-# Lab Manager — прототип 0.3
+# Lab Manager — прототип 0.4
 
 Сервис между Moodle (`plugin/`) и слотами Lab Slot (`slot/`). Принимает запросы плагина по
 контракту `plugin/docs/SPEC.md` §3, подбирает для лабы свободный слот на узле, где хватает
@@ -126,7 +126,7 @@ Uvicorn работает в один процесс: оркестратор жи
 | `LAB_PERSISTENCE` | `fresh` (новый проект в каждой сессии) или `resume` (тот же проект; когда слот научится переносить состояние лабы — `student-state`, DESIGN §6.1) |
 | `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении |
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
-| `DEFAULT_MAX_DURATION` | длительность сессии, минуты |
+| `DEFAULT_MAX_DURATION`, `MAX_DURATION_LIMIT` | длительность сессии по умолчанию и предел для `options.max_duration` от плагина, минуты |
 
 ## 5. Токен Proxmox
 
@@ -186,6 +186,7 @@ DATABASE_URL=postgresql:///lab_manager_test /tmp/lm-venv/bin/python -m pytest -q
 
 Proxmox, агент узла, Lab Slot и шлюз подменяются через `httpx.MockTransport` (`tests/fakes.py`).
 Ответы на ревью разработчика агента и что по ним исправлено — [`docs/AGENT_REVIEW_ANSWERS.md`](docs/AGENT_REVIEW_ANSWERS.md).
+Ответы разработчику плагина — [`docs/PLUGIN_REQUESTS.md`](docs/PLUGIN_REQUESTS.md).
 Что проверено тестами:
 - перебор нод Proxmox: первая не отвечает → вторая; последняя рабочая — первой; 4xx и 500 не
   переключают; 503 на GET переключает; изменяющий запрос с неизвестным исходом не повторяется;
@@ -210,6 +211,9 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
   чужой каталог в `mp1` у запущенного CT, агент занят и миграция CT, повтор deploy с тем же
   Idempotency-Key, `STALE_IDEMPOTENCY_KEY`, `OPERATION_IN_PROGRESS`, FAILED в слоте, тайм-аут
   этапа, Proxmox недоступен, maxduration, остановка до и во время старта;
+- просьбы плагина (`docs/PLUGIN_REQUESTS.md`): `info`, строгие тела и `unsupported_field`,
+  `options.max_duration` с ограничением, `stage`/`progress`, коды `error` с `retryable`, список сессий
+  активности, `conflict`, `node_not_running`, `nodes_stale`, остановка преподавателем;
 - контракт SPEC §3: авторизация (сайт ↔ секрет), коды и формат ошибок, идемпотентность,
   изоляция сайтов, формат сессии и `nodes`, билеты (живые `node_id`, `readonly`, тело запроса к шлюзу);
 - конфиг: fail closed, права 0600, секреты не попадают в сообщения об ошибках.
