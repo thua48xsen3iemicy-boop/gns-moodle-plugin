@@ -1,0 +1,32 @@
+{
+  "images": [
+    {
+      "id": "cisco-iou-l2",
+      "title": "Cisco IOU L2 (коммутатор)",
+      "kind": "iou",
+      "category": "switch",
+      "symbol": ":/symbols/multilayer_switch.svg",
+      "file": "x86_64_crb_linux_l2-adventerprisek9-ms.bin",
+      "ram_mb": {"default": 1024, "min": 512, "max": 2048},
+      "adapters": {"default": 1, "min": 1, "max": 4}
+    },
+    {
+      "id": "debian12",
+      "title": "Debian 12",
+      "kind": "qemu",
+      "category": "host",
+      "symbol": ":/symbols/computer.svg",
+      "file": "debian12.qcow2",
+      "ram_mb": {"default": 768, "min": 512, "max": 4096},
+      "cpus": {"default": 1, "min": 1, "max": 2},
+      "adapters": {"default": 1, "min": 1, "max": 4},
+      "slot": {"disk_interface": "virtio"}
+    },
+    {
+      "id": "vpcs",
+      "title": "VPCS",
+      "kind": "vpcs",
+      "category": "host"
+    }
+  ]
+}

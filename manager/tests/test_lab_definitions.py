@@ -1,0 +1,140 @@
+"""Labs defined in Moodle (plugin round 4): images, validate, sessions started from a definition."""
+
+import copy
+
+from conftest import SITE_SECRET, SITE_URL, make_env
+from test_labdef import IMAGES, LAB
+
+from lab_manager.config import SiteConfig, SiteLimits
+
+
+def limited_sites(**limits):
+    return {SITE_URL: SiteConfig(url=SITE_URL, slug="main", secret=SITE_SECRET, limits=SiteLimits(**limits))}
+
+
+async def start_def(env, lab=LAB, user_id=42, instance_id=1):
+    r = await env.client.post("/api/v1/sessions", json={"user_id": user_id, "instance_id": instance_id,
+                                                        "lab": lab, "course_id": 3})
+    return r
+
+
+async def test_disabled_without_image_catalog(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        info = (await env.client.get("/api/v1/info")).json()
+        assert "lab_definitions" not in info["features"] and "limits" not in info
+        assert (await env.client.get("/api/v1/images")).status_code == 404
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": LAB})
+        assert r.status_code == 400 and r.json()["error"] == "unsupported_field"
+        r = await start_def(env)
+        assert r.status_code == 400 and r.json()["error"] == "unsupported_field"
+
+
+async def test_info_images_and_site_limits(tmp_path, dsn):
+    sites = limited_sites(max_nodes=30, max_memory_mb=16384, max_cpus=8, images=["cisco-iou-l2", "debian12"])
+    async with make_env(tmp_path, dsn, images=IMAGES, sites=sites) as env:
+        info = (await env.client.get("/api/v1/info")).json()
+        assert {"images", "lab_definitions"} <= set(info["features"])
+        assert info["lab_formats"] == ["gns3lab.lab/1"]
+        assert info["limits"] == {"max_nodes": 30, "max_memory_mb": 16384, "max_cpus": 8,
+                                  "images": ["cisco-iou-l2", "debian12"]}
+        images = (await env.client.get("/api/v1/images")).json()["images"]
+        assert [i["id"] for i in images] == ["cisco-iou-l2", "debian12"]  # Only what the site may use
+        assert all("file" not in i and "slot" not in i for i in images)
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": LAB})  # PC2 is VPCS: not allowed
+        assert r.status_code == 422
+        assert {"path": "nodes[3].image", "code": "image_not_allowed", "message": "vpcs"} in r.json()["problems"]
+
+
+async def test_validate(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=IMAGES) as env:
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": LAB})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["lab_def"].startswith("sha256:") and body["warnings"] == []
+        assert body["resources"] == {"cores": 4, "memory_mb": 4608}
+        bad = copy.deepcopy(LAB)
+        bad["nodes"][2]["adapters"] = 9
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": bad})
+        assert r.status_code == 422 and r.json()["error"] == "lab_invalid"
+        assert r.json()["problems"] == [{"path": "nodes[2].adapters", "code": "out_of_range", "message": "1..4"}]
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": LAB, "x": 1})
+        assert r.status_code == 400 and r.json()["error"] == "unsupported_field"
+
+
+async def test_session_from_definition(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=IMAGES) as env:
+        lab_def = (await env.client.post("/api/v1/labs/validate", json={"lab": LAB})).json()["lab_def"]
+        r = await start_def(env)
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["lab_ref"] is None and body["lab_def"] == lab_def
+        await env.run()
+        r = await env.client.get(f"/api/v1/sessions/{body['session_id']}")
+        s = r.json()
+        assert s["status"] == "running", s["status_message"]
+        nodes = {n["name"]: n for n in s["topology"]["topology"]["nodes"]}
+        assert nodes["SW1"]["symbol"] == ":/symbols/multilayer_switch.svg"  # From the image catalog
+        assert nodes["PC2"]["symbol"] == ":/symbols/vpcs_guest.svg"
+        assert s["topology"]["topology"]["drawings"] == []  # Drawings stay in Moodle
+
+        ticket = next(iter(env.slots[201].labs.values()))["ticket"]
+        assert ticket["name"].startswith("lab-" + lab_def[7:15] + "-s-")
+        assert {n["name"]: n.get("image") for n in ticket["nodes"]} == {
+            "SW1": "x86_64_crb_linux_l2-adventerprisek9-ms.bin", "SW2": "x86_64_crb_linux_l2-adventerprisek9-ms.bin",
+            "PC1": "debian12.qcow2", "PC2": None}
+        config = env.pve.cts[201]["config"]
+        assert config["cores"] == "4" and config["memory"] == "4608"  # Sized from the definition
+
+        # Same definition again: the same live session; another one: a conflict naming lab_def.
+        again = await start_def(env)
+        assert again.status_code == 200 and again.json()["session_id"] == body["session_id"]
+        other = copy.deepcopy(LAB)
+        other["nodes"][0]["x"] = 0
+        r = await start_def(env, other)
+        assert r.status_code == 409 and r.json()["conflict"]["lab_def"] == lab_def
+        r = await env.client.get("/api/v1/sessions", params={"instance_id": 1})
+        assert r.json()[0]["lab_def"] == lab_def
+
+
+async def test_exactly_one_lab_and_invalid_definition(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=IMAGES) as env:
+        r = await env.client.post("/api/v1/sessions", json={"user_id": 42, "instance_id": 1, "lab": LAB,
+                                                            "lab_ref": "cisco-3x2"})
+        assert r.status_code == 400 and r.json()["error"] == "invalid_request"
+        r = await env.client.post("/api/v1/sessions", json={"user_id": 42, "instance_id": 1})
+        assert r.status_code == 400
+        bad = copy.deepcopy(LAB)
+        bad["nodes"][0]["image"] = "removed"
+        r = await start_def(env, bad)
+        assert r.status_code == 422 and r.json()["problems"][0]["code"] == "unknown_image"
+
+
+async def test_image_removed_after_start_fails_session(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=dict(IMAGES)) as env:
+        sid = (await start_def(env)).json()["session_id"]
+        del env.settings.images["debian12"]  # The administrator removed it meanwhile
+        await env.run()
+        s = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
+        assert s["status"] == "failed" and s["error"] == {"code": "LAB_UNAVAILABLE", "retryable": False}
+        assert (await env.services.store.session(sid))["slot_vmid"] is None  # No CT started for nothing
+
+
+async def test_resume_workspace_follows_lab_def(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,), images=IMAGES, lab_persistence="resume") as env:
+        first = (await start_def(env)).json()["session_id"]
+        await env.run()
+        await env.client.post(f"/api/v1/sessions/{first}/stop")
+        await env.run()
+        renamed = dict(copy.deepcopy(LAB), title="Новое имя")  # Same lab_def: same workspace
+        second = (await start_def(env, renamed)).json()["session_id"]
+        await env.run()
+        await env.client.post(f"/api/v1/sessions/{second}/stop")
+        await env.run()
+        moved = copy.deepcopy(LAB)
+        moved["nodes"][0]["x"] = 0  # A new version of the lab: a new workspace
+        third = (await start_def(env, moved)).json()["session_id"]
+        await env.run()
+        store = env.services.store
+        a, b, c = [await store.session(x) for x in (first, second, third)]
+        assert a["project_id"] == b["project_id"] != c["project_id"]
+        assert c["status"] == "running"

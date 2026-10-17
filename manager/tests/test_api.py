@@ -297,7 +297,7 @@ async def test_conflict_details(tmp_path, dsn):
                                   json={"user_id": 42, "instance_id": 2, "lab_ref": "cisco-3x2"})
         assert r.status_code == 409
         assert r.json()["conflict"] == {"instance_id": 1, "course_id": 3, "lab_ref": "cisco-3x2",
-                                        "status": "queued"}
+                                        "lab_def": None, "status": "queued"}
 
 
 async def test_ticket_to_stopped_node_and_stale_nodes(tmp_path, dsn):

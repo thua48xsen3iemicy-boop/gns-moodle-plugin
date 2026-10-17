@@ -49,6 +49,8 @@ def cmd_check_config(args):
         "slot_code_revision": s.slot_code_revision,
         "agent_start_actions": list(s.agent_start_actions),
         "labs_dir": str(s.labs_dir),
+        "images": sorted(s.images) if s.images is not None else None,
+        "site_limits": {x.slug: x.limits.public() for x in s.sites.values()},
     }, ensure_ascii=False))
 
 

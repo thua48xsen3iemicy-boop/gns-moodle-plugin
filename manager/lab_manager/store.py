@@ -83,12 +83,15 @@ class Store:
 
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
-                             student_key, resources, persistence):
+                             student_key, resources, persistence, lab_def=None, definition=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
 
+        The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
         persistence='resume': the session reuses the workspace project_id (same GNS3 project);
         'fresh': every session deploys a new project.
         """
+        lab_key = lab_ref or lab_def
+        label = lab_ref or "lab-" + lab_def.removeprefix("sha256:")[:8]  # Start of project names
         for _ in range(3):
             existing = await self.live_session(site, user_id)
             if existing:
@@ -96,38 +99,39 @@ class Store:
             try:
                 async with self.pool.connection() as conn, conn.transaction():
                     cur = await conn.execute(
-                        "INSERT INTO workspaces (site, user_id, instance_id, lab_ref, project_id, project_name)"
-                        " VALUES (%s, %s, %s, %s, %s, '')"
-                        " ON CONFLICT (site, user_id, instance_id, lab_ref) DO NOTHING RETURNING id",
-                        (site, user_id, instance_id, lab_ref, uuid.uuid4()),
+                        "INSERT INTO workspaces (site, user_id, instance_id, lab_ref, lab_def, definition, lab_key,"
+                        " project_id, project_name) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '')"
+                        " ON CONFLICT (site, user_id, instance_id, lab_key) DO NOTHING RETURNING id",
+                        (site, user_id, instance_id, lab_ref, lab_def,
+                         Jsonb(definition) if definition is not None else None, lab_key, uuid.uuid4()),
                     )
                     row = await cur.fetchone()
                     if row:
                         await conn.execute(
                             "UPDATE workspaces SET project_name = %s WHERE id = %s",
-                            (f"{lab_ref}-w{row['id']}"[:120], row["id"]),
+                            (f"{label}-w{row['id']}"[:120], row["id"]),
                         )
                     cur = await conn.execute(
                         "SELECT * FROM workspaces WHERE site = %s AND user_id = %s"
-                        " AND instance_id = %s AND lab_ref = %s",
-                        (site, user_id, instance_id, lab_ref),
+                        " AND instance_id = %s AND lab_key = %s",
+                        (site, user_id, instance_id, lab_key),
                     )
                     ws = await cur.fetchone()
                     sid = new_session_id()
                     if persistence == "resume":
                         project_id, name = ws["project_id"], ws["project_name"]
                     else:
-                        project_id, name = uuid.uuid4(), f"{lab_ref}-{sid}"[:120]
+                        project_id, name = uuid.uuid4(), f"{label}-{sid}"[:120]
                     await conn.execute(
-                        "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref,"
+                        "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref, lab_def,"
                         " workspace_id, student_key, project_id, project_name, resources,"
                         " status, stage, status_message, max_duration)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s)",
-                        (sid, site, user_id, instance_id, course_id, lab_ref, ws["id"], student_key,
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s)",
+                        (sid, site, user_id, instance_id, course_id, lab_ref, lab_def, ws["id"], student_key,
                          project_id, name, Jsonb(resources) if resources else None,
                          "Ожидание свободного слота…", max_duration),
                     )
-                    await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref})
+                    await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref, "lab_def": lab_def})
                 return await self.session(sid), True
             except psycopg.errors.UniqueViolation:
                 continue  # A concurrent POST won; return its session

@@ -43,6 +43,7 @@ import psycopg
 
 from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentRejected,
                            AgentSourceMissing, AgentUncertain, AgentWrongNode)
+from . import labdef
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotUnavailable
@@ -326,9 +327,13 @@ class Orchestrator:
         """Current Proxmox node of the slot CT (it may have migrated since allocation)."""
         return await self.pve.find_ct_node(s["slot_vmid"])
 
-    def _reference(self, lab_ref):
+    async def _reference(self, s):
+        """Reference topology of the session's lab: lab.gns3, or symbols from the image catalog."""
+        if s["lab_def"]:
+            ws = await self.store.workspace(s["workspace_id"])
+            return labdef.reference_topology(ws["definition"], self.settings.images or {})
         try:
-            return self.catalog.get(lab_ref).topology
+            return self.catalog.get(s["lab_ref"]).topology
         except LabError:
             return None
 
@@ -377,7 +382,13 @@ class Orchestrator:
         if s["stop_requested"]:
             await self.store.finish_session(s, status="stopped", message="Остановлено до запуска")
             return False
-        self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
+        if s["lab_ref"]:
+            self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
+        else:
+            ws = await self.store.workspace(s["workspace_id"])
+            missing = sorted({n["image"] for n in ws["definition"]["nodes"]} - set(self.settings.images or {}))
+            if missing:  # Removed by the administrator since the definition was checked
+                raise LabError(f"Образы убраны из каталога: {', '.join(missing)}")
         held = await self.store.slot_holding_student(s["student_key"])
         if held is not None:
             # An earlier session failed and its CT could not be confirmed stopped: the student's
@@ -419,9 +430,10 @@ class Orchestrator:
             # A free slot should be stopped; mounts change only on a stopped CT.
             await self.agent.stop(node, vmid, force=False)
             raise Wait("Остановка слота перед запуском…")
-        lab = self.catalog.get(s["lab_ref"])
-        if lab.resources:
-            await self._size_ct(s, lab.resources)
+        # A definition was sized when it was checked; a catalog lab follows its current meta.json.
+        resources = self.catalog.get(s["lab_ref"]).resources if s["lab_ref"] else s["resources"]
+        if resources:
+            await self._size_ct(s, resources)
         return await self._goto(s, "student_dir", "Подготовка каталога студента…")
 
     async def _stage_student_dir(self, s):
@@ -577,6 +589,12 @@ class Orchestrator:
         ws = await self.store.workspace(s["workspace_id"])
         if self.settings.lab_persistence == "resume" and ws["ticket"]:
             return ws["ticket"], ws
+        if s["lab_def"]:
+            try:
+                return labdef.deploy_ticket(ws["definition"], self.settings.images or {},
+                                            project_id=str(s["project_id"]), project_name=s["project_name"]), ws
+            except KeyError as exc:
+                raise LabError(f"Образ {exc} убран из каталога образов") from exc
         lab = self.catalog.get(s["lab_ref"])
         return deploy_ticket(lab, project_id=str(s["project_id"]), project_name=s["project_name"]), ws
 
@@ -613,7 +631,7 @@ class Orchestrator:
             await self.store.update_call(call["id"], status="succeeded")
         await self.store.mark_deployed(s["workspace_id"], call["body"])
         raw = await self._slot(s).topology(str(s["project_id"]))
-        topology = session_topology(s["project_name"], raw, self._reference(s["lab_ref"]))
+        topology = session_topology(s["project_name"], raw, await self._reference(s))
         if s["stop_requested"]:
             return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping",
                                     slot_state="releasing", topology=topology)

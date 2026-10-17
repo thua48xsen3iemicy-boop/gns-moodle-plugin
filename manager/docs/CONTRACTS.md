@@ -90,6 +90,10 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 - `features` — что плагину можно показывать: `consoles` (билеты консолей), `observer` (режим
   наблюдателя), `resume` (следующий запуск продолжает проект студента; нет `resume` — работа не
   сохраняется, плагин предупреждает), позже `facts` (live-state), `checks` (автопроверки), `reset`.
+- ✅ `images` и `lab_definitions` — есть каталог образов (§2.6) и запуск лабы по определению из
+  Moodle. Только вместе с ними в ответе есть `lab_formats: ["gns3lab.lab/1"]` и `limits` сайта:
+  `{"max_nodes": 30, "max_memory_mb": 16384, "max_cpus": 8, "images": "*"}` (`null` — без
+  ограничения; `images` — список `id` или `"*"`). Без них плагин работает только по `lab_ref`.
 
 ### 2.2. ✅ `POST /api/v1/sessions`
 
@@ -114,7 +118,8 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `user_id` | int > 0 | да | `user.id` в Moodle; вместе с сайтом даёт `student_key` |
 | `instance_id` | int > 0 | да | id записи `gns3lab` |
 | `course_id` | int ≥ 0 | нет | для журнала и подсказки при конфликте |
-| `lab_ref` | строка | да | эталонная лаба из `GET /api/v1/labs` |
+| `lab_ref` | строка | одно из двух | эталонная лаба из `GET /api/v1/labs` |
+| `lab` | объект | одно из двух | ✅ определение лабы из Moodle, `gns3lab.lab/1` (§2.6); только при `lab_definitions` в `info` |
 | `options` | объект | нет | параметры **этого запуска**; только ключи из `info.options` |
 | `options.max_duration` | int, минуты | нет | `maxduration` активности (SPEC §5.1); `0` или отсутствие — `DEFAULT_MAX_DURATION` менеджера; сверху ограничено `MAX_DURATION_LIMIT` |
 | `client` | объект | нет | `plugin_version`, `moodle_release` (строки ≤ 64); только для журнала |
@@ -124,16 +129,19 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 Кандидаты в `options` на будущее (каждый появится вместе с возможностью в `info.options`):
 `reset: true` — начать лабу заново; `mode: "exam"` — пока не нужен.
 
+Ровно одно из `lab_ref` и `lab`, иначе `400 invalid_request`. Неверное определение —
+`422 lab_invalid` с `problems`, как у `POST /labs/validate` (§2.6); проверка та же.
+
 Поведение: у студента одна живая лаба на сайте.
-- живая сессия той же активности и того же `lab_ref` — `200` с ней (идемпотентно), `options` не
-  применяются повторно;
+- живая сессия той же активности и той же лабы (`lab_ref`, или `lab_def` для определения) — `200`
+  с ней (идемпотентно), `options` не применяются повторно;
 - новая — `201`; после `stopped`/`failed` новый запуск всегда создаёт новую сессию, и
   `GET /sessions?user_id=&instance_id=` дальше отдаёт её;
 - пока жива лаба в другой активности или с другим `lab_ref` — `409 session_conflict`:
 
 ```json
 {"error": "session_conflict", "message": "У студента уже запущена другая лаба; сначала остановите её",
- "conflict": {"instance_id": 5, "course_id": 3, "lab_ref": "ospf-1", "status": "running"}}
+ "conflict": {"instance_id": 5, "course_id": 3, "lab_ref": "ospf-1", "lab_def": null, "status": "running"}}
 ```
 
 ### 2.3. ✅ Объект сессии (ответ)
@@ -143,6 +151,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
   "schema": "gns3lab.session/1",
   "session_id": "s-3f9a1c0d2b4e5f60",
   "lab_ref": "cisco-3x2",
+  "lab_def": null,
   "status": "starting",
   "stage": "lab_wait",
   "progress": 40,
@@ -169,13 +178,14 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 
 | Поле | Смысл |
 |---|---|
-| `status` | `queued` · `starting` · `running` · `stopping` · `stopped` · `failed` (SPEC §3). Новые статусы — только с новой версией `session` |
+| `lab_ref`, `lab_def` | какая лаба: эталонная (`lab_def: null`) или из Moodle (`lab_ref: null`, `lab_def` — `sha256:…` из `validate`) |
+| `status` | `queued` · `starting` · `running` · `stopping` · `stopped` · `failed` (SPEC §3). Новые статусы — только с новой версией `session`. После сбоя на этапах с запущенным CT сессия сначала проходит `stopping` (менеджер выключает слот), уже с `error`, затем `failed` |
 | `stage` | внутренний этап (DESIGN §6.4): `wait_slot`, `ct_prepare`, `student_dir`, `ct_start`, `slot_ready`, `lab_submit`, `lab_wait`, `ready`, `lab_stop`, `lab_stop_wait`, `ct_stop`, `ct_park`; у завершённых — `stopped`/`failed`. Список может расти: незнакомый этап плагин показывает как общий текст своего `status` |
 | `progress` | процент текущей операции слота, если известен; иначе поля нет |
 | `status_message` | текст для студента по-русски; логика по нему не строится |
 | `error` | при `failed`: `{"code", "retryable"}` (§2.5); иначе `null` |
 | `features` | что доступно в **этой** сессии: `consoles` при `running` |
-| `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона |
+| `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none` |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
@@ -191,12 +201,74 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 Будущие маршруты — `/sessions/{id}/state` (live-state.md §6) и `/sessions/{id}/checks` — появятся
 вместе с возможностями `facts` и `checks`.
 
+### 2.6. ✅ Лабы из Moodle: образы, определение, проверка
+
+Есть, только когда в `info.features` есть `images` и `lab_definitions` (у менеджера задан `IMAGES_FILE`).
+
+**`GET /api/v1/images`** — образы, которые разрешены сайту (`limits.images`); кешировать как `info`.
+
+```json
+{"images": [{"id": "debian12", "title": "Debian 12", "kind": "qemu", "category": "host",
+             "symbol": ":/symbols/computer.svg", "console_type": "telnet",
+             "ram_mb": {"default": 768, "min": 512, "max": 4096},
+             "cpus": {"default": 1, "min": 1, "max": 2},
+             "adapters": {"default": 1, "min": 1, "max": 4},
+             "port_name": "Ethernet{adapter}", "ports_per_adapter": 1}]}
+```
+
+`cpus` есть только у `qemu`; у `vpcs` `ram_mb`, `cpus`, `adapters` — `null` (один порт 0/0).
+`port_name` — как GNS3 2.2.61 называет порты нод слота: `iou` — `Ethernet{adapter}/{port}`
+(4 порта на адаптер), `qemu` — `Ethernet{adapter}`, `vpcs` — `Ethernet0`. Имени файла образа и
+параметров слота в ответе нет.
+
+**Определение `gns3lab.lab/1`:**
+
+```json
+{"format": "gns3lab.lab/1", "title": "OSPF, три зоны",
+ "nodes": [{"name": "R1", "image": "cisco-iou-l3", "x": -200, "y": 0, "ram_mb": 1024, "adapters": 2},
+           {"name": "PC1", "image": "debian12", "x": -200, "y": 160}],
+ "links": [{"a": {"node": "R1", "adapter": 1, "port": 0}, "b": {"node": "PC1", "adapter": 0, "port": 0}}]}
+```
+
+| Поле | Правило |
+|---|---|
+| `format` | ровно `gns3lab.lab/1` |
+| `title` | строка до 200 символов, необязательно; в `lab_def` не входит |
+| `nodes[]` | 1…`min(100, limits.max_nodes)`. `name` — `^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$`, уникально; `image` — `id` из каталога, разрешённый сайту; `x`, `y` — целые ±100000 (по умолчанию 0); `ram_mb`, `cpus`, `adapters` — необязательные целые в пределах образа (нет — `default` образа; у образа без параметра — `unknown_field`) |
+| `links[]` | до 1000. Концы — `{node, adapter, port}` (`adapter`/`port` по умолчанию 0); порт существует у ноды (`adapter < adapters`, `port < ports_per_adapter`), занят не больше одним линком; нода не соединяется сама с собой |
+| прочее | неизвестное поле на любом уровне — `unknown_field`; весь документ — до 256 КБ |
+
+**`POST /api/v1/labs/validate`**, тело `{"lab": {…}}`, ничего не сохраняет:
+
+```json
+200 {"lab_def": "sha256:9c1f…", "resources": {"cores": 4, "memory_mb": 4608}, "warnings": []}
+422 {"error": "lab_invalid", "message": "…",
+     "problems": [{"path": "nodes[2].adapters", "code": "out_of_range", "message": "1..4"}]}
+```
+
+- `problems` — все найденные сразу. `path` — `nodes[i]`, `nodes[i].<поле>`, `links[i]`,
+  `links[i].a|b`, `links[i].a.node`, `nodes`, `format`, `""` (весь документ). `code`: `required`,
+  `unknown_field`, `bad_type`, `bad_format`, `bad_name`, `duplicate_name`, `unknown_image`,
+  `image_not_allowed`, `out_of_range`, `unknown_node`, `bad_port`, `port_in_use`, `self_link`,
+  `too_many_nodes`, `limit_exceeded` (память или ядра CT сверх `limits`), `too_large`. `message` —
+  для отладки. Новые коды могут появиться: незнакомый показывайте общим текстом.
+- `lab_def` — `sha256` канонического JSON нормализованного определения **без `title`**: переименование
+  лабы не меняет `lab_def` и не заводит новую рабочую копию. Считает его только менеджер.
+- `resources` — размер CT: память нод + 10 % + `LAB_MEMORY_OVERHEAD_MB` (1024), с округлением вверх до
+  256 МиБ; ядра — vCPU QEMU + одно на два IOL + одно на восемь VPCS, не меньше 2.
+
+**Запуск** — `POST /sessions` с `lab` вместо `lab_ref` (§2.2). Определение передаётся целиком при
+каждом запуске и проверяется заново. Рабочая копия (`LAB_PERSISTENCE=resume`) привязана к
+`lab_def`: новая версия лабы — новая рабочая копия. Имя проекта — `lab-<8 символов хэша>-<суффикс>`.
+Если администратор убрал образ после запуска, сессия `failed` с `LAB_UNAVAILABLE`.
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, `lab_invalid` 409, `gateway_unavailable` 502, `storage_unavailable` 503.
+`session_conflict` 409, `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3).
 
 **Коды `error.code` у `failed`-сессии** (`lab_manager/errors.py`). `retryable: true` — можно просто
@@ -401,6 +473,8 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `checks` | менеджер | 🆕 `/sessions/{id}/checks` |
 | `reset` | менеджер | 🆕 `options.reset` |
 | `resume` | менеджер | следующий запуск продолжает проект студента (`LAB_PERSISTENCE=resume`) |
+| `images` | менеджер | `GET /api/v1/images` (§2.6) |
+| `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `iol-cli` | слот | provisioning IOL через CLI (`cli_prompt`) |

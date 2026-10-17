@@ -112,9 +112,12 @@ Uvicorn работает в один процесс: оркестратор жи
 | Переменная | Смысл |
 |---|---|
 | `DATABASE_URL` | `postgresql:///lab_manager` (сокет, peer) |
-| `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`; **после появления данных не меняется**: новый slug — это новые каталоги студентов), `secret` (Bearer) |
-| `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token` |
+| `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`; **после появления данных не меняется**: новый slug — это новые каталоги студентов), `secret` (Bearer), необязательные `limits` для лаб из Moodle: `max_nodes` (≤ 100), `max_memory_mb`, `max_cpus`, `images` (список `id` или `"*"`) |
+| `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token`. Токены у всех слотов разные (каждый клон CT со своим `slot.env`), иначе менеджер не стартует |
 | `LABS_DIR` | каталог лаб; `meta.json` может задавать `resources: {cores, memory_mb}` |
+| `IMAGES_FILE` | каталог образов для лаб, которые преподаватели собирают в Moodle (пример — `examples/images.json`). Не задан — лабы только из `LABS_DIR`. Формат и проверки — `lab_manager/images.py` |
+| `LAB_MEMORY_OVERHEAD_MB` | запас памяти CT для лабы из Moodle: память нод + 10 % + это значение (по умолчанию 1024) |
+| `QUEUE_TIMEOUT` | сколько секунд сессия ждёт слот, потом `failed` с `QUEUE_TIMEOUT`; `0` — без ограничения (по умолчанию 600) |
 | `PVE_NODES`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_FILE` | точки входа API, токен, CA кластера |
 | `AGENT_URL_TEMPLATE` | `https://{node}.lab.local:8443`; `{node}` — имя узла Proxmox, хост — как в SAN сертификата агента |
 | `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | `node-server-ca.crt`, `manager.crt`, `manager.key` |
@@ -179,6 +182,10 @@ $ADM slot-maintenance 2001
 выключит CT и не сделает `slot-enable`, этот студент получает `STUDENT_DIR_BUSY`: его каталог не
 монтируется во второй слот.
 
+При обновлении до схемы 3 (`admin migrate`) у каждого слота не в `free` ставится `student_key`
+его последней сессии: про такие слоты менеджер не знает, выключен ли CT. Проверьте их и сделайте
+`slot-enable`, иначе их последние студенты будут получать `STUDENT_DIR_BUSY`.
+
 ## 7. Тесты
 
 ```sh
@@ -193,6 +200,7 @@ DATABASE_URL=postgresql:///lab_manager_test /tmp/lm-venv/bin/python -m pytest -q
 Proxmox, агент узла, Lab Slot и шлюз подменяются через `httpx.MockTransport` (`tests/fakes.py`).
 Ответы на ревью разработчика агента и что по ним исправлено — [`docs/AGENT_REVIEW_ANSWERS.md`](docs/AGENT_REVIEW_ANSWERS.md).
 Ответы разработчику плагина — [`docs/PLUGIN_REQUESTS.md`](docs/PLUGIN_REQUESTS.md).
+Ответы разработчику слота (на `slot/docs/ALIGNMENT.md`) — [`docs/SLOT_REQUESTS.md`](docs/SLOT_REQUESTS.md).
 Что проверено тестами:
 - перебор нод Proxmox: первая не отвечает → вторая; последняя рабочая — первой; 4xx и 500 не
   переключают; 503 на GET переключает; изменяющий запрос с неизвестным исходом не повторяется;

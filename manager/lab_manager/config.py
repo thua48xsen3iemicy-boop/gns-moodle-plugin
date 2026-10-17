@@ -11,7 +11,9 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from .images import IMAGE_ID_RE, ImageError, load_images
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # One path component, as the node agent requires
@@ -23,12 +25,42 @@ class ConfigError(RuntimeError):
     pass
 
 
+class SiteLimits(BaseModel):
+    """What labs defined in this site's Moodle may use (plugin request П13)."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_nodes: int = Field(default=100, ge=1, le=100)
+    max_memory_mb: int | None = Field(default=None, ge=256)
+    max_cpus: int | None = Field(default=None, ge=1)
+    images: list[str] | None = None  # Allowed image ids; None (or "*" in the file) = all
+
+    @field_validator("images", mode="before")
+    @classmethod
+    def star_means_all(cls, value):
+        return None if value == "*" else value
+
+    @field_validator("images")
+    @classmethod
+    def image_ids(cls, value):
+        if value is not None and not all(re.fullmatch(IMAGE_ID_RE, i) for i in value):
+            raise ValueError("images must be image ids or \"*\"")
+        return value
+
+    def allows(self, image_id: str) -> bool:
+        return self.images is None or image_id in self.images
+
+    def public(self) -> dict:
+        return {"max_nodes": self.max_nodes, "max_memory_mb": self.max_memory_mb, "max_cpus": self.max_cpus,
+                "images": "*" if self.images is None else list(self.images)}
+
+
 class SiteConfig(BaseModel):
     """One Moodle site allowed to call the manager."""
 
     url: str = Field(min_length=1, max_length=255)  # Exactly $CFG->wwwroot, sent as X-Moodle-Site
     slug: str  # Short, path-safe name used for the student directory tree
     secret: str = Field(min_length=32, repr=False)
+    limits: SiteLimits = Field(default_factory=SiteLimits)
 
     @field_validator("url")
     @classmethod
@@ -117,6 +149,8 @@ class Settings:
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
     queue_timeout: float = 600.0  # Seconds a session may wait for a slot; 0 = no limit
+    images: dict | None = None  # Image catalog by id (IMAGES_FILE); None: no labs from Moodle
+    lab_memory_overhead_mb: int = 1024  # Added to node memory when sizing a CT for a lab definition
     default_max_duration: int = 180  # Minutes
     max_duration_limit: int = 480  # Minutes; upper bound for options.max_duration from the plugin
     worker_interval: float = 2.0
@@ -192,6 +226,17 @@ def load(env=None, check_mode=True) -> Settings:
     if persistence not in PERSISTENCE:
         raise ConfigError(f"LAB_PERSISTENCE must be one of {PERSISTENCE}")
 
+    images = None
+    if env.get("IMAGES_FILE", "").strip():
+        try:
+            images = load_images(Path(env["IMAGES_FILE"].strip()))
+        except ImageError as exc:
+            raise ConfigError(str(exc)) from exc
+        for site in sites:
+            unknown = sorted(set(site.limits.images or ()) - set(images))
+            if unknown:
+                raise ConfigError(f"Site {site.slug}: limits.images lists unknown images {unknown}")
+
     gateway_public = required("GATEWAY_PUBLIC_URL").rstrip("/")
     if not gateway_public.startswith(("wss://", "ws://")):
         raise ConfigError("GATEWAY_PUBLIC_URL must be a ws:// or wss:// URL")
@@ -229,6 +274,8 @@ def load(env=None, check_mode=True) -> Settings:
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),
         queue_timeout=_int(env, "QUEUE_TIMEOUT", 600, 0, 86400),
+        images=images,
+        lab_memory_overhead_mb=_int(env, "LAB_MEMORY_OVERHEAD_MB", 1024, 0, 65536),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),
         max_duration_limit=_int(env, "MAX_DURATION_LIMIT", 480, 1, 7 * 24 * 60),
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),

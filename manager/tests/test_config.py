@@ -90,3 +90,29 @@ def test_slot_tokens_must_be_unique(env, tmp_path):
     with pytest.raises(ConfigError, match="unique") as exc:
         load(env)
     assert SECRET not in str(exc.value)
+
+
+def test_images_file_and_site_limits(env, tmp_path):
+    from pathlib import Path
+
+    env["IMAGES_FILE"] = str(Path(__file__).resolve().parents[1] / "examples" / "images.json")
+    env["MANAGER_SITES_FILE"] = write(tmp_path / "sites2.json", [
+        {"url": "https://m.example/", "slug": "main", "secret": SECRET,
+         "limits": {"max_nodes": 30, "max_memory_mb": 16384, "images": ["debian12"]}}])
+    s = load(env)
+    assert sorted(s.images) == ["cisco-iou-l2", "debian12", "vpcs"]
+    limits = s.site("https://m.example").limits
+    assert limits.allows("debian12") and not limits.allows("vpcs") and limits.max_cpus is None
+
+    env["MANAGER_SITES_FILE"] = write(tmp_path / "sites3.json", [
+        {"url": "https://m.example/", "slug": "main", "secret": SECRET, "limits": {"images": ["cisco-asa"]}}])
+    with pytest.raises(ConfigError, match="unknown images"):
+        load(env)
+    env["IMAGES_FILE"] = str(tmp_path / "missing.json")
+    with pytest.raises(ConfigError):
+        load(env)
+
+
+def test_sites_without_images_file_keep_working(env):
+    s = load(env)
+    assert s.images is None and s.site("https://m.example").limits.allows("anything")
