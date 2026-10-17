@@ -227,10 +227,15 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.post("/api/v1/sessions")
     async def create_session(body: SessionCreate, site=Depends(site_of)):
-        existing = await store.live_session(site.slug, body.user_id, body.instance_id)
+        def same(s):
+            return s["instance_id"] == body.instance_id and s["lab_ref"] == body.lab_ref
+
+        conflict = ApiError(409, "session_conflict",
+                            "У студента уже запущена другая лаба; сначала остановите её")
+        existing = await store.live_session(site.slug, body.user_id)
         if existing:
-            if existing["lab_ref"] != body.lab_ref:
-                raise ApiError(409, "session_conflict", "A live session with another lab_ref exists")
+            if not same(existing):
+                raise conflict
             return JSONResponse(status_code=200, content=await present(existing))
         try:
             lab = await asyncio.to_thread(services.catalog.get, body.lab_ref)
@@ -246,8 +251,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=settings.default_max_duration,
             student_key=key, resources=lab.resources, persistence=settings.lab_persistence,
         )
-        if not created and s["lab_ref"] != body.lab_ref:
-            raise ApiError(409, "session_conflict", "A live session with another lab_ref exists")
+        if not created and not same(s):
+            raise conflict  # A concurrent POST for another activity won
         services.orchestrator.wake()
         return JSONResponse(status_code=201 if created else 200, content=await present(s))
 

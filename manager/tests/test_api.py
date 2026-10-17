@@ -151,3 +151,36 @@ async def test_health_endpoints(tmp_path, dsn):
             assert r.status_code == 503
             assert r.json()["checks"]["database"]["ok"] is True
             assert r.json()["checks"]["orchestrator"]["ok"] is False
+
+
+async def test_one_live_lab_per_student(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        first = {"user_id": 42, "instance_id": 1, "lab_ref": "cisco-3x2"}
+        r = await env.client.post("/api/v1/sessions", json=first)
+        assert r.status_code == 201
+        sid = r.json()["session_id"]
+        # Another activity of the same student while the first lab is live: refused.
+        r = await env.client.post("/api/v1/sessions", json={**first, "instance_id": 2})
+        assert r.status_code == 409 and r.json()["error"] == "session_conflict"
+        r = await env.client.get("/api/v1/sessions", params={"user_id": 42, "instance_id": 2})
+        assert r.status_code == 404  # Lookups stay per activity
+        # Another student is not affected.
+        r = await env.client.post("/api/v1/sessions", json={**first, "user_id": 7, "instance_id": 2})
+        assert r.status_code == 201
+        # After the first lab stops, the other activity can start.
+        await env.client.post(f"/api/v1/sessions/{sid}/stop")
+        await env.run()
+        r = await env.client.post("/api/v1/sessions", json={**first, "instance_id": 2})
+        assert r.status_code == 201
+
+
+async def test_concurrent_starts_in_two_activities_give_one_lab(tmp_path, dsn):
+    import asyncio
+
+    async with make_env(tmp_path, dsn) as env:
+        bodies = [{"user_id": 42, "instance_id": i % 2 + 1, "lab_ref": "cisco-3x2"} for i in range(6)]
+        results = await asyncio.gather(*(env.client.post("/api/v1/sessions", json=b) for b in bodies))
+        codes = sorted(r.status_code for r in results)
+        assert codes.count(201) == 1 and set(codes) <= {200, 201, 409}
+        ids = {r.json()["session_id"] for r in results if r.status_code in (200, 201)}
+        assert len(ids) == 1

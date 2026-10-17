@@ -66,8 +66,8 @@ CREATE TABLE sessions (
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
--- One live session per student and activity; one live session per slot.
-CREATE UNIQUE INDEX sessions_one_live_per_user ON sessions (site, user_id, instance_id)
+-- One live lab per student on a site (whatever the activity); one live session per slot.
+CREATE UNIQUE INDEX sessions_one_live_per_user ON sessions (site, user_id)
     WHERE status NOT IN ('stopped', 'failed');
 CREATE UNIQUE INDEX sessions_one_live_per_slot ON sessions (slot_vmid)
     WHERE slot_vmid IS NOT NULL AND status NOT IN ('stopped', 'failed');

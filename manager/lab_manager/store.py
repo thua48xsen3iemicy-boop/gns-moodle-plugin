@@ -87,9 +87,9 @@ class Store:
         'fresh': every session deploys a new project.
         """
         for _ in range(3):
-            existing = await self.live_session(site, user_id, instance_id)
+            existing = await self.live_session(site, user_id)
             if existing:
-                return existing, False
+                return existing, False  # The caller checks it is the same activity and lab
             try:
                 async with self.pool.connection() as conn, conn.transaction():
                     cur = await conn.execute(
@@ -130,12 +130,13 @@ class Store:
                 continue  # A concurrent POST won; return its session
         raise RuntimeError("Could not create or find the session")
 
-    async def live_session(self, site, user_id, instance_id):
+    async def live_session(self, site, user_id):
+        """A student has at most one live lab on a site, in any activity."""
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT * FROM sessions WHERE site = %s AND user_id = %s AND instance_id = %s"
+                "SELECT * FROM sessions WHERE site = %s AND user_id = %s"
                 " AND status NOT IN ('stopped', 'failed')",
-                (site, user_id, instance_id),
+                (site, user_id),
             )
             return await cur.fetchone()
 
