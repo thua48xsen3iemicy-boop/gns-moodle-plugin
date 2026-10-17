@@ -1,0 +1,431 @@
+{
+  "name": "cisco-3x2",
+  "project_id": "186e1871-1e14-5032-9642-5003cb3d21e1",
+  "revision": 9,
+  "type": "topology",
+  "version": "2.2.61",
+  "scene_width": 2000,
+  "scene_height": 1000,
+  "topology": {
+    "computes": [],
+    "nodes": [
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "SW1",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "SW1",
+        "node_id": "13f76b29-cd3b-5362-b0b8-36c0bd2c52af",
+        "node_type": "iou",
+        "properties": {},
+        "symbol": ":/symbols/multilayer_switch.svg",
+        "x": -280,
+        "y": -100,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "SW2",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "SW2",
+        "node_id": "fc8ebb1b-238f-5900-9897-8a00ef446040",
+        "node_type": "iou",
+        "properties": {},
+        "symbol": ":/symbols/multilayer_switch.svg",
+        "x": 0,
+        "y": -160,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "SW3",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "SW3",
+        "node_id": "abd1213f-7563-5d62-92bb-a5bc1223b815",
+        "node_type": "iou",
+        "properties": {},
+        "symbol": ":/symbols/multilayer_switch.svg",
+        "x": 280,
+        "y": -100,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "D1",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "D1",
+        "node_id": "803b4566-0210-5b49-93bd-7b060e57cdb2",
+        "node_type": "qemu",
+        "properties": {},
+        "symbol": ":/symbols/computer.svg",
+        "x": -400,
+        "y": 130,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "D2",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "D2",
+        "node_id": "5cadf507-8cbd-5248-8756-6caef6aebb8a",
+        "node_type": "qemu",
+        "properties": {},
+        "symbol": ":/symbols/computer.svg",
+        "x": -280,
+        "y": 130,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "D3",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "D3",
+        "node_id": "3253b23d-f3a5-5853-a7ac-134966c15646",
+        "node_type": "qemu",
+        "properties": {},
+        "symbol": ":/symbols/computer.svg",
+        "x": -80,
+        "y": 130,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "D4",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "D4",
+        "node_id": "278cc8ff-fbe9-5a42-a078-4d06b69f4b5e",
+        "node_type": "qemu",
+        "properties": {},
+        "symbol": ":/symbols/computer.svg",
+        "x": 80,
+        "y": 130,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "D5",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "D5",
+        "node_id": "8507a2d8-0e89-5ddd-890e-2929cc27cdf3",
+        "node_type": "qemu",
+        "properties": {},
+        "symbol": ":/symbols/computer.svg",
+        "x": 280,
+        "y": 130,
+        "z": 1
+      },
+      {
+        "compute_id": "local",
+        "console": null,
+        "console_type": "telnet",
+        "height": 45,
+        "width": 66,
+        "label": {
+          "text": "D6",
+          "x": 10,
+          "y": -25,
+          "rotation": 0,
+          "style": "font-size: 10;"
+        },
+        "name": "D6",
+        "node_id": "275eb7fb-3942-5fe4-996f-c756109374a5",
+        "node_type": "qemu",
+        "properties": {},
+        "symbol": ":/symbols/computer.svg",
+        "x": 400,
+        "y": 130,
+        "z": 1
+      }
+    ],
+    "links": [
+      {
+        "filters": {},
+        "link_id": "8431d30f-a5ee-540b-88a6-1867fb22ffc0",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "13f76b29-cd3b-5362-b0b8-36c0bd2c52af",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "fc8ebb1b-238f-5900-9897-8a00ef446040",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "c7999301-e73b-5a16-94ff-13bf209b7b49",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "fc8ebb1b-238f-5900-9897-8a00ef446040",
+            "adapter_number": 0,
+            "port_number": 1,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "abd1213f-7563-5d62-92bb-a5bc1223b815",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "1a8fea9b-e3a7-5f64-8fff-fcf35d159e20",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "abd1213f-7563-5d62-92bb-a5bc1223b815",
+            "adapter_number": 0,
+            "port_number": 1,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "13f76b29-cd3b-5362-b0b8-36c0bd2c52af",
+            "adapter_number": 0,
+            "port_number": 1,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "7d853b60-e4ba-58b5-a6cf-0cc6c98ef05b",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "13f76b29-cd3b-5362-b0b8-36c0bd2c52af",
+            "adapter_number": 0,
+            "port_number": 2,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "803b4566-0210-5b49-93bd-7b060e57cdb2",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "0cf9ca0f-2128-5c14-a1ac-473be563172d",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "13f76b29-cd3b-5362-b0b8-36c0bd2c52af",
+            "adapter_number": 0,
+            "port_number": 3,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "5cadf507-8cbd-5248-8756-6caef6aebb8a",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "fd3d42f6-ea9c-52c2-843f-3ca10bb5c483",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "fc8ebb1b-238f-5900-9897-8a00ef446040",
+            "adapter_number": 0,
+            "port_number": 2,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "3253b23d-f3a5-5853-a7ac-134966c15646",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "bf4723ac-6c2e-545c-89fe-1737fbd65191",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "fc8ebb1b-238f-5900-9897-8a00ef446040",
+            "adapter_number": 0,
+            "port_number": 3,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "278cc8ff-fbe9-5a42-a078-4d06b69f4b5e",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "d9651e75-fc33-54c0-8300-0720e5f5be1e",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "abd1213f-7563-5d62-92bb-a5bc1223b815",
+            "adapter_number": 0,
+            "port_number": 2,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "8507a2d8-0e89-5ddd-890e-2929cc27cdf3",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "filters": {},
+        "link_id": "db46d619-9eae-58c4-ba9b-5249e2c01378",
+        "link_type": "ethernet",
+        "suspend": false,
+        "nodes": [
+          {
+            "node_id": "abd1213f-7563-5d62-92bb-a5bc1223b815",
+            "adapter_number": 0,
+            "port_number": 3,
+            "label": {
+              "text": ""
+            }
+          },
+          {
+            "node_id": "275eb7fb-3942-5fe4-996f-c756109374a5",
+            "adapter_number": 0,
+            "port_number": 0,
+            "label": {
+              "text": ""
+            }
+          }
+        ]
+      }
+    ],
+    "drawings": []
+  }
+}

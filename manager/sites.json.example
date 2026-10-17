@@ -1,0 +1,7 @@
+[
+  {
+    "url": "https://moodle.example.edu",
+    "slug": "main",
+    "secret": "REPLACE_WITH_openssl_rand_hex_32"
+  }
+]

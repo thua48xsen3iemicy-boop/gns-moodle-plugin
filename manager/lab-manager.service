@@ -1,0 +1,30 @@
+[Unit]
+Description=Lab Manager (Moodle -> Proxmox LXC Lab Slots)
+Documentation=file:///srv/gns3-ro/manager/README.md
+Wants=network-online.target
+Requires=postgresql.service
+After=network-online.target postgresql.service
+ConditionPathExists=/srv/gns3-ro/manager/run.py
+# Secrets live only here; without the file the unit does not start (fail closed).
+ConditionPathExists=/etc/lab-manager/manager.env
+
+[Service]
+Type=exec
+User=lab-manager
+Group=lab-manager
+WorkingDirectory=/srv/gns3-ro/manager
+EnvironmentFile=/etc/lab-manager/manager.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/srv/gns3-ro/manager/venv/bin/python -m lab_manager.preflight
+ExecStart=/srv/gns3-ro/manager/venv/bin/python /srv/gns3-ro/manager/run.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
