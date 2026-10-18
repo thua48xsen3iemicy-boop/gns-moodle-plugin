@@ -1,0 +1,666 @@
+#!/usr/bin/env bash
+# Semi-manual provisioning of one Proxmox node: secrets, node agent, slot and manager LXCs.
+# Runs as root on the node. Every change inside an LXC goes through pct (push/exec), so the
+# components keep reading their secrets from the same local paths as before.
+#
+#   install/lab-provision <step> [args]      settings: ${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
+#
+# Steps, in order (install/README.md): secrets, venv slot, slot, agent, venv manager, manager,
+# moodle, check, enable. Every step can be repeated: existing secrets are never regenerated.
+# Guest scripts are single-quoted on purpose: they expand inside the CT.
+# shellcheck disable=SC2016
+set -euo pipefail
+umask 077
+
+CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
+ID_OFFSET=100000  # Standard unprivileged mapping: guest uid N is host uid N + 100000
+
+log() { printf '==> %s\n' "$*"; }
+warn() { printf 'WARNING: %s\n' "$*" >&2; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: lab-provision <step> [args]
+  secrets           generate CAs, certificates, tokens and config files into SECRETS_DIR
+  venv slot|manager build the Python venv of the slot or manager code on CephFS
+  slot [VMID...]    tag a stopped slot LXC and push slot.env, lab-slot-init, lab-slot.service
+  agent             prepare CephFS directories and install the node agent on this node
+  manager           mounts, packages, configs and services of the manager LXC (with nginx)
+  moodle            give Moodle the web CA and print the plugin settings
+  check             agent, slots and manager checks
+  enable            make the slots available in the manager (slot-enable)
+EOF
+}
+
+load_conf() {
+  [[ $EUID == 0 ]] || die "run as root on the Proxmox node"
+  command -v pct >/dev/null || die "pct not found: run on a Proxmox node"
+  [[ -f $CONF ]] || die "no $CONF: copy install/lab.conf.example there and edit it"
+  # shellcheck source=/dev/null
+  . "$CONF"
+  local v
+  for v in CEPH_ROOT REPO_DIR STUDENTS_DIR SECRETS_DIR NODE_IP AGENT_DOMAIN MANAGER_VMID SLOTS \
+           PUBLIC_NAME MOODLE_URL MOODLE_IP SITE_SLUG; do
+    [[ -n ${!v:-} ]] || die "$v is not set in $CONF"
+  done
+  CEPH_ROOT=${CEPH_ROOT%/} REPO_DIR=${REPO_DIR%/} MOODLE_URL=${MOODLE_URL%/} STUDENTS_DIR=${STUDENTS_DIR%/}
+  [[ $REPO_DIR == "$CEPH_ROOT"/* ]] || die "REPO_DIR must be below CEPH_ROOT"
+  CODE_DIR=${REPO_DIR#"$CEPH_ROOT"/}/slot  # LAB_CODE_DIR of the agent and the manager
+  NODE=$(hostname)
+  NODE_FQDN=$NODE.$AGENT_DOMAIN
+  S=$SECRETS_DIR
+  read -ra SLOT_IDS <<<"$SLOTS"
+  local id
+  for id in "$MANAGER_VMID" "${SLOT_IDS[@]}" ${MOODLE_VMID:-}; do
+    [[ $id =~ ^[0-9]+$ ]] || die "invalid VMID: $id"
+  done
+  VMID_MIN=$(printf '%s\n' "${SLOT_IDS[@]}" | sort -n | head -1)
+  VMID_MAX=$(printf '%s\n' "${SLOT_IDS[@]}" | sort -n | tail -1)
+  ((MANAGER_VMID < VMID_MIN || MANAGER_VMID > VMID_MAX)) || die "MANAGER_VMID is inside the slot VMID range"
+}
+
+# ------------------------------------------------------------------ LXC helpers
+
+ct_local() { [[ -f /etc/pve/lxc/$1.conf ]] || die "CT $1 is not on this node ($NODE)"; }
+ct_state() { pct status "$1" | awk '{print $2}'; }
+ct_ip() {
+  local ip
+  ip=$(pct config "$1" | sed -n 's/^net0: .*,ip=\([0-9.]*\)\/.*/\1/p')
+  [[ -n $ip ]] || die "CT $1: net0 needs a static ip=... ($(pct config "$1" | grep '^net0' || echo 'no net0'))"
+  echo "$ip"
+}
+ct_checked() {  # Unprivileged with the standard mapping: host uid = guest uid + ID_OFFSET
+  ct_local "$1"
+  pct config "$1" | grep -q '^unprivileged: 1' || die "CT $1 must be unprivileged"
+  ! pct config "$1" | grep -q '^lxc.idmap' || die "CT $1 has its own lxc.idmap; this script expects the standard one"
+}
+ct_up() {
+  [[ $(ct_state "$1") == running ]] || pct start "$1"
+  local i
+  for i in $(seq 1 60); do
+    pct exec "$1" -- true 2>/dev/null && return 0
+    sleep 1
+  done
+  die "CT $1 did not start"
+}
+ct_down() { [[ $(ct_state "$1") == stopped ]] || pct shutdown "$1" --timeout 90; }
+# ct_sh <vmid> <script> [NAME=value...]: bash inside the CT as root; values go in as environment.
+ct_sh() {
+  local id=$1 script=$2
+  shift 2
+  pct exec "$id" -- env "$@" bash -c "umask 022; set -euo pipefail; $script"
+}
+# ct_push <vmid> <file> <path in CT> <mode> <uid> <gid> (ids inside the CT)
+ct_push() { pct push "$1" "$2" "$3" --perms "$4" --user "$5" --group "$6"; }
+
+mp_find() {  # index of the mount point whose guest path is $2
+  pct config "$1" | sed -n "s#^mp\([0-9]\{1,3\}\): .*mp=$2\(,.*\)\{0,1\}\$#\1#p" | head -1
+}
+mp_free() {  # mp_free <vmid> [first index]
+  local i
+  for i in $(seq "${2:-0}" 255); do
+    pct config "$1" | grep -q "^mp$i:" || { echo "$i"; return; }
+  done
+  die "CT $1 has no free mount point index"
+}
+mp_ok() {  # mp_ok <vmid> <host path> <guest path> <ro 0|1>: that mount is configured exactly
+  local i line
+  i=$(mp_find "$1" "$3")
+  [[ -n $i ]] || return 1
+  line=$(pct config "$1" | sed -n "s/^mp$i: //p")
+  [[ $line == "$2,mp=$3"* ]] || return 1
+  if [[ $4 == 1 ]]; then [[ $line == *,ro=1* ]]; else [[ $line != *,ro=1* ]]; fi
+}
+mp_set() {  # mp_set <vmid> <host path> <guest path> <ro 0|1> [first index]; the CT must be stopped
+  mp_ok "$1" "$2" "$3" "$4" && return 0
+  local i
+  i=$(mp_find "$1" "$3")
+  [[ -n $i ]] || i=$(mp_free "$1" "${5:-0}")
+  log "CT $1: mp$i $2 -> $3 (ro=$4)"
+  pct set "$1" "-mp$i" "$2,mp=$3,ro=$4,shared=1"
+}
+mp_drop() {
+  local i
+  i=$(mp_find "$1" "$2")
+  [[ -z $i ]] || pct set "$1" --delete "mp$i"
+}
+
+# ------------------------------------------------------------------ secrets
+
+rand_into() {  # Create a random token file once; never overwrite
+  [[ -s $1 ]] || { openssl rand -hex 32 >"$1.tmp" && mv "$1.tmp" "$1"; }
+}
+
+make_ca() {  # make_ca <name>: self-signed CA in $S/ca (test mode: the CA keys stay here)
+  [[ -s $S/ca/$1.key && -s $S/ca/$1.crt ]] && return 0
+  log "CA $1"
+  openssl req -new -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 \
+    -keyout "$S/ca/$1.key" -out "$S/ca/$1.crt" -subj "/CN=Lab $1" \
+    -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign' 2>/dev/null
+}
+
+issue() {  # issue <ca> <dir> <base> <CN> <x509 extensions>; kept once issued
+  local ca=$1 dir=$2 base=$3 cn=$4 ext=$5
+  [[ -s $dir/$base.key && -s $dir/$base.crt ]] && return 0
+  log "certificate $dir/$base.crt (CN=$cn)"
+  openssl req -new -newkey rsa:3072 -nodes -sha256 -keyout "$dir/$base.key" -out "$dir/$base.csr" \
+    -subj "/CN=$cn" 2>/dev/null
+  openssl x509 -req -sha256 -days 397 -in "$dir/$base.csr" -CA "$S/ca/$ca.crt" -CAkey "$S/ca/$ca.key" \
+    -set_serial "0x$(openssl rand -hex 16)" -extfile <(printf '%s\n' "$ext") -out "$dir/$base.crt" 2>/dev/null
+  rm -f "$dir/$base.csr"
+}
+
+san_has() {  # Warn when a kept certificate no longer matches lab.conf
+  openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | grep -q "$2" ||
+    warn "$1 has no $2 in its SAN: delete it and its .key, then run secrets again"
+}
+
+pve_token() {
+  local f=$S/manager/pve-token-secret tid='lab-manager@pve!manager'
+  log "Proxmox token $tid, pool lab-slots"
+  pveum role add LabManager -privs "VM.Audit VM.Config.CPU VM.Config.Memory" 2>/dev/null ||
+    pveum role modify LabManager -privs "VM.Audit VM.Config.CPU VM.Config.Memory"
+  pveum role add LabManagerNodes -privs "Sys.Audit" 2>/dev/null || true
+  pveum user add lab-manager@pve 2>/dev/null || true
+  pveum pool add lab-slots 2>/dev/null || true
+  local out
+  # A repeat may report the slots as members already; a slot in another pool lacks the token's rights.
+  out=$(pveum pool modify lab-slots -vms "$(IFS=,; echo "${SLOT_IDS[*]}")" 2>&1) ||
+    warn "pool lab-slots: $out (the slots must be members of lab-slots)"
+  if [[ ! -s $f ]]; then
+    # The secret is shown only once: without the file the token is recreated.
+    pveum user token remove lab-manager@pve manager 2>/dev/null || true
+    pveum user token add lab-manager@pve manager --privsep 1 --output-format json |
+      python3 -c 'import json, sys; print(json.load(sys.stdin)["value"])' >"$f.tmp"
+    mv "$f.tmp" "$f"
+  fi
+  pveum acl modify /pool/lab-slots -token "$tid" -role LabManager
+  pveum acl modify /nodes -token "$tid" -role LabManagerNodes
+}
+
+render_manager_env() {
+  local f=$S/manager/manager.env
+  {
+    echo "# Generated by install/lab-provision from $CONF; local additions: manager.env.local"
+    cat <<EOF
+DATABASE_URL=postgresql:///lab_manager
+MANAGER_SITES_FILE=/etc/lab-manager/sites.json
+MANAGER_SLOTS_FILE=/etc/lab-manager/slots.json
+MANAGER_LISTEN_HOST=127.0.0.1
+MANAGER_LISTEN_PORT=8090
+LABS_DIR=/srv/gns3-ro/labs
+PVE_NODES=$NODE:8006
+PVE_TOKEN_ID=lab-manager@pve!manager
+PVE_TOKEN_SECRET=$(cat "$S/manager/pve-token-secret")
+PVE_CA_FILE=/etc/lab-manager/pve-root-ca.pem
+AGENT_URL_TEMPLATE=https://{node}.$AGENT_DOMAIN:8443
+AGENT_CA_FILE=/etc/lab-manager/node-server-ca.crt
+AGENT_CERT_FILE=/etc/lab-manager/manager.crt
+AGENT_KEY_FILE=/etc/lab-manager/manager.key
+LAB_CEPH_ROOT=$CEPH_ROOT
+LAB_CODE_DIR=$CODE_DIR
+LAB_STUDENTS_DIR=$STUDENTS_DIR
+AGENT_START_ACTIONS=init_slot
+SLOT_CODE_REVISION=
+PLACEHOLDER_STUDENT_KEY=placeholder
+GATEWAY_INTERNAL_URL=http://127.0.0.1:8080
+GATEWAY_INTERNAL_KEY=$(cat "$S/manager/gateway-key")
+GATEWAY_PUBLIC_URL=wss://$PUBLIC_NAME
+EOF
+    [[ ! -s $S/manager/images.json ]] || echo "IMAGES_FILE=/etc/lab-manager/images.json"
+    [[ ! -s $S/manager/manager.env.local ]] || cat "$S/manager/manager.env.local"
+  } >"$f.tmp"
+  mv "$f.tmp" "$f"
+}
+
+render_json() {  # sites.json and slots.json; JSON is written by Python, never by string splicing
+  local pairs=() id
+  for id in "${SLOT_IDS[@]}"; do pairs+=("$id=$(ct_ip "$id")"); done
+  python3 - "$S" "$MOODLE_URL" "$SITE_SLUG" "${pairs[@]}" <<'PY'
+import json, os, sys
+s, url, slug, *pairs = sys.argv[1:]
+read = lambda *p: open(os.path.join(s, *p)).read().strip()
+def write(name, data):
+    path = os.path.join(s, "manager", name)
+    with open(path + ".tmp", "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(path + ".tmp", path)
+write("sites.json", [{"url": url, "slug": slug, "secret": read("manager", "site-secret")}])
+write("slots.json", [{"vmid": int(vmid), "address": ip, "port": 8080,
+                      "api_token": read("slots", vmid, "api-token"),
+                      "console_token": read("slots", vmid, "console-token")}
+                     for vmid, ip in (p.split("=", 1) for p in pairs)])
+PY
+}
+
+render_slot_env() {  # From the slot's own example, so new settings keep their defaults
+  local id=$1 f=$S/slots/$1/slot.env
+  sed -e "s|^SLOT_API_TOKEN=.*|SLOT_API_TOKEN=$(cat "$S/slots/$id/api-token")|" \
+      -e "s|^SLOT_CONSOLE_TOKEN=.*|SLOT_CONSOLE_TOKEN=$(cat "$S/slots/$id/console-token")|" \
+      -e "s|^SLOT_LISTEN_HOST=.*|SLOT_LISTEN_HOST=$(ct_ip "$id")|" \
+      "$REPO_DIR/slot/slot.env.example" >"$f.tmp"
+  grep -q "^SLOT_LISTEN_HOST=$(ct_ip "$id")\$" "$f.tmp" || die "slot.env.example has no SLOT_LISTEN_HOST"
+  mv "$f.tmp" "$f"
+}
+
+cmd_secrets() {
+  [[ -f $REPO_DIR/slot/slot.env.example ]] || die "REPO_DIR $REPO_DIR is not a checkout of the repository"
+  local id d
+  install -d -m 0700 "$S" "$S/ca" "$S/nodes" "$S/nodes/$NODE" "$S/manager" "$S/manager/nginx" \
+    "$S/slots" "$S/moodle"
+  make_ca manager-client-ca
+  make_ca node-server-ca
+  make_ca web-ca
+
+  d=$S/nodes/$NODE
+  issue node-server-ca "$d" server "$NODE_FQDN" "basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:$NODE_FQDN,IP:$NODE_IP"
+  san_has "$d/server.crt" "DNS:$NODE_FQDN"
+  san_has "$d/server.crt" "IP Address:$NODE_IP"
+  cp "$S/ca/manager-client-ca.crt" "$d/manager-ca.crt"
+
+  issue manager-client-ca "$S/manager" manager lab-manager "basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=clientAuth"
+  cp "$S/ca/node-server-ca.crt" "$S/manager/node-server-ca.crt"
+  cp /etc/pve/pve-root-ca.pem "$S/manager/pve-root-ca.pem"
+
+  issue web-ca "$S/manager/nginx" gw "$PUBLIC_NAME" "basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:$PUBLIC_NAME"
+  san_has "$S/manager/nginx/gw.crt" "DNS:$PUBLIC_NAME"
+  cp "$S/ca/web-ca.crt" "$S/moodle/web-ca.crt"
+
+  rand_into "$S/manager/site-secret"
+  rand_into "$S/manager/gateway-key"
+  for id in "${SLOT_IDS[@]}"; do
+    ct_local "$id"
+    install -d -m 0700 "$S/slots/$id"
+    rand_into "$S/slots/$id/api-token"
+    rand_into "$S/slots/$id/console-token"
+    render_slot_env "$id"
+  done
+  pve_token
+  render_manager_env
+  render_json
+  chmod -R go-rwx "$S"
+  log "secrets ready in $S"
+  warn "test mode: the CA keys are in $S/ca; before production move them offline and re-issue everything"
+}
+
+need_secrets() { [[ -s $S/manager/manager.env ]] || die "run 'lab-provision secrets' first"; }
+
+# ------------------------------------------------------------------ venv
+
+VENV_SCRIPT='
+export DEBIAN_FRONTEND=noninteractive PYTHONDONTWRITEBYTECODE=1
+dpkg -s python3.12-venv >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq python3.12-venv; }
+cd "$CODE"
+python3.12 -m venv --clear venv
+venv/bin/python -m pip install -q --disable-pip-version-check $REQS
+venv/bin/python -m pip check
+'
+
+cmd_venv() {
+  local id name src dst reqs
+  case ${1:-} in
+    slot) id=${SLOT_IDS[0]} name=slot dst=/srv/gns3-ro/slot reqs="-r requirements.txt" ;;
+    manager) id=$MANAGER_VMID name=manager dst=/srv/gns3-ro/manager
+             reqs="-r requirements.txt -r gateway/requirements.txt" ;;
+    *) die "usage: lab-provision venv slot|manager" ;;
+  esac
+  src=$REPO_DIR/$name
+  [[ -f $src/requirements.txt ]] || die "$src is not the $name code"
+  ct_checked "$id"
+  if [[ $name == slot ]]; then
+    [[ $(ct_state "$id") == stopped ]] || die "slot $id must be stopped (it builds the slot venv)"
+  fi
+  log "venv for $name, built in CT $id at $dst/venv"
+  # The CT's root may write only into venv/, and only while it is built.
+  install -d -m 0755 "$src/venv"
+  chown -R "$ID_OFFSET:$ID_OFFSET" "$src/venv"
+  ct_down "$id"
+  if [[ $name == manager ]]; then manager_mounts; else mp_set "$id" "$src" "$dst" 1; fi
+  mp_set "$id" "$src/venv" "$dst/venv" 0 2  # Never mp0/mp1: the agent owns them on slots
+  ct_up "$id"
+  ct_sh "$id" "$VENV_SCRIPT" CODE="$dst" REQS="$reqs"
+  if [[ $name == slot ]]; then
+    ct_sh "$id" 'runuser -u gns3 -- /srv/gns3-ro/slot/venv/bin/python /srv/gns3-ro/slot/release.py check'
+  fi
+  ct_down "$id"
+  mp_drop "$id" "$dst/venv"
+  [[ $name == manager ]] || mp_drop "$id" "$dst"  # The agent mounts the slot code itself
+  chown -R root:root "$src/venv"
+  chmod -R u+rwX,go+rX,go-w "$src/venv"
+  [[ $name == slot ]] || ct_up "$id"
+  log "venv $src/venv ready"
+}
+
+# ------------------------------------------------------------------ slot
+
+SLOT_SCRIPT='
+systemctl daemon-reload
+. /etc/os-release
+[ "$VERSION_ID" = 24.04 ] || echo "WARNING: Ubuntu $VERSION_ID, Lab Slot expects 24.04"
+python3 -c "import sys; sys.exit(sys.version_info[:2] != (3, 12))" || echo "WARNING: python3 is not 3.12"
+for p in /opt/gns3/images/QEMU /opt/gns3/images/IOU /opt/gns3/qga /dev/kvm /dev/net/tun; do
+  [ -e "$p" ] || echo "WARNING: $p is missing"
+done
+systemctl is-enabled gns3.service >/dev/null 2>&1 || echo "WARNING: gns3.service is not enabled"
+v=""
+for _ in $(seq 1 30); do
+  v=$(python3 -c "import urllib.request; print(urllib.request.urlopen(\"http://127.0.0.1:3080/v2/version\", timeout=2).read().decode())" 2>/dev/null) && break
+  sleep 2
+done
+case $v in *2.2.61*) echo "GNS3: $v" ;; *) echo "WARNING: GNS3 2.2.61 does not answer on 127.0.0.1:3080 ($v)" ;; esac
+[ "$(id -u gns3)" != 0 ] || { echo "ERROR: gns3 must not be root"; exit 1; }
+echo "gns3-ids $(id -u gns3):$(id -g gns3)"
+'
+
+cmd_slot() {
+  need_secrets
+  local ids=("$@") id tags i out
+  ((${#ids[@]})) || ids=("${SLOT_IDS[@]}")
+  for id in "${ids[@]}"; do
+    [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || die "$id is not in SLOTS of $CONF"
+    ct_checked "$id"
+    [[ $(ct_state "$id") == stopped ]] ||
+      die "slot $id is running: put it into maintenance in the manager and shut it down first"
+    log "slot $id"
+    tags=$(pct config "$id" | sed -n 's/^tags: //p')
+    [[ ";$tags;" == *";labslot;"* ]] || pct set "$id" --tags "${tags:+$tags;}labslot"
+    pct set "$id" --onboot 0
+    # The agent sets mp0/mp1 itself on every start; drop them, so the CT boots without them now.
+    for i in 0 1; do
+      if pct config "$id" | grep -q "^mp$i:"; then
+        pct config "$id" | grep -qE "^mp$i: .*mp=(/srv/gns3-ro/slot|/opt/gns3/projects)(,|\$)" ||
+          die "slot $id: mp$i is used for something else, but the agent owns mp0 and mp1 (move it to mp2+)"
+        pct set "$id" --delete "mp$i"
+      fi
+    done
+    ct_up "$id"
+    ct_sh "$id" 'install -d -m 0700 /etc/lab-slot; install -d -m 0755 /usr/local/sbin'
+    ct_push "$id" "$S/slots/$id/slot.env" /etc/lab-slot/slot.env 0600 0 0
+    ct_push "$id" "$REPO_DIR/agent/guest/lab-slot-init" /usr/local/sbin/lab-slot-init 0755 0 0
+    ct_push "$id" "$REPO_DIR/slot/lab-slot.service" /etc/systemd/system/lab-slot.service 0644 0 0
+    out=$(ct_sh "$id" "$SLOT_SCRIPT")
+    grep -v '^gns3-ids ' <<<"$out" || true
+    grep '^gns3-ids ' <<<"$out" | cut -d' ' -f2 >"$S/slots/$id/gns3-ids"
+    [[ -s $S/slots/$id/gns3-ids ]] || die "slot $id: cannot read the gns3 uid/gid"
+    ct_down "$id"
+    log "slot $id ready ($(ct_ip "$id"), gns3 $(cat "$S/slots/$id/gns3-ids"))"
+  done
+}
+
+# ------------------------------------------------------------------ agent
+
+cmd_agent() {
+  need_secrets
+  local d=$S/nodes/$NODE ids id uid gid p rel path
+  [[ -s $d/server.key ]] || die "no certificate for node $NODE: run secrets on this node"
+  ids=$(cat "$S/slots/${SLOT_IDS[0]}/gns3-ids" 2>/dev/null) || die "run 'lab-provision slot' first (gns3 uid/gid)"
+  for id in "${SLOT_IDS[@]}"; do
+    [[ $(cat "$S/slots/$id/gns3-ids" 2>/dev/null) == "$ids" ]] ||
+      die "slot $id: gns3 uid/gid differs from slot ${SLOT_IDS[0]} or is unknown (run slot $id)"
+  done
+  uid=$((${ids%:*} + ID_OFFSET)) gid=$((${ids#*:} + ID_OFFSET))
+
+  log "CephFS layout"
+  case $(findmnt --mountpoint "$CEPH_ROOT" -n -o FSTYPE) in
+    ceph | fuse.ceph | fuse.ceph-fuse) ;;
+    *) die "$CEPH_ROOT is not a CephFS mount point" ;;
+  esac
+  [[ -f $CEPH_ROOT/$CODE_DIR/run.py ]] || die "no slot code at $CEPH_ROOT/$CODE_DIR"
+  path=$CEPH_ROOT
+  IFS=/ read -ra rel <<<"$STUDENTS_DIR/placeholder"
+  for p in "${rel[@]}"; do
+    path=$path/$p
+    [[ -d $path ]] || install -d -o root -g root -m 0755 "$path"
+  done
+  # The agent refuses mounts below non-root or group/other-writable ancestors.
+  local checked=() up=$CEPH_ROOT
+  while [[ $up != / ]]; do checked+=("$up"); up=$(dirname "$up"); done
+  checked+=("$REPO_DIR" "$CEPH_ROOT/$CODE_DIR" "$CEPH_ROOT/$STUDENTS_DIR")
+  path=$CEPH_ROOT/$STUDENTS_DIR
+  while [[ $path != "$CEPH_ROOT" ]]; do checked+=("$path"); path=$(dirname "$path"); done
+  for p in "${checked[@]}"; do
+    [[ $(stat -c '%u' "$p") == 0 && $(( 0$(stat -c '%a' "$p") & 022 )) == 0 ]] ||
+      die "$p must be owned by root and not writable by group/others ($(stat -c '%U:%G %a' "$p"))"
+  done
+
+  log "agent certificates and settings"
+  install -d -m 0700 /etc/lab-node-agent
+  install -m 0600 "$d/server.key" /etc/lab-node-agent/server.key
+  install -m 0644 "$d/server.crt" /etc/lab-node-agent/server.crt
+  install -m 0644 "$d/manager-ca.crt" /etc/lab-node-agent/manager-ca.crt
+  install -d -m 0755 /etc/systemd/system/lab-node-agent.service.d
+  cat >/etc/systemd/system/lab-node-agent.service.d/override.conf <<EOF
+# Generated by install/lab-provision
+[Service]
+Environment=LAB_CEPH_ROOT=$CEPH_ROOT
+Environment=LAB_CODE_DIR=$CODE_DIR
+Environment=LAB_STUDENTS_DIR=$STUDENTS_DIR
+Environment=LAB_VMID_MIN=$VMID_MIN
+Environment=LAB_VMID_MAX=$VMID_MAX
+Environment=LAB_STUDENT_HOST_UID=$uid
+Environment=LAB_STUDENT_HOST_GID=$gid
+EOF
+  chmod 0644 /etc/systemd/system/lab-node-agent.service.d/override.conf
+  log "agent install (agent/install-node.sh)"
+  (cd "$REPO_DIR/agent" && umask 022 && ./install-node.sh)
+  sleep 2
+  agent_check
+  log "firewall: allow TCP 8443 only from the manager, e.g.:"
+  echo "  iptables -I INPUT -p tcp --dport 8443 -j DROP"
+  echo "  iptables -I INPUT -p tcp --dport 8443 -s $(ct_ip "$MANAGER_VMID") -j ACCEPT"
+  echo "  iptables -I INPUT -i lo -p tcp --dport 8443 -j ACCEPT"
+}
+
+agent_curl() {  # mTLS with the manager's certificate, to this node's agent via loopback
+  curl -sS --max-time 15 --noproxy '*' --resolve "$NODE_FQDN:8443:127.0.0.1" --cert "$S/manager/manager.crt" \
+    --key "$S/manager/manager.key" --cacert "$S/manager/node-server-ca.crt" "$@"
+}
+
+agent_check() {
+  local id
+  log "agent https://$NODE_FQDN:8443"
+  echo "health: $(agent_curl "https://$NODE_FQDN:8443/health" 2>&1 || echo ' FAILED')"
+  for id in "${SLOT_IDS[@]}"; do
+    echo "slot $id: $(agent_curl "https://$NODE_FQDN:8443/slots/$id/status" 2>&1 || echo ' FAILED')"
+  done
+}
+
+# ------------------------------------------------------------------ manager
+
+manager_mounts() {  # Code and labs, read-only. The CT must be stopped when they change.
+  local id=$MANAGER_VMID
+  if ! mp_ok "$id" "$REPO_DIR/manager" /srv/gns3-ro/manager 1 || ! mp_ok "$id" "$REPO_DIR/labs" /srv/gns3-ro/labs 1; then
+    ct_down "$id"
+    mp_set "$id" "$REPO_DIR/manager" /srv/gns3-ro/manager 1
+    mp_set "$id" "$REPO_DIR/labs" /srv/gns3-ro/labs 1
+  fi
+}
+
+MANAGER_PREPARE='
+export DEBIAN_FRONTEND=noninteractive
+missing=""
+for p in postgresql nginx curl python3.12; do dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"; done
+[ -z "$missing" ] || { apt-get update -qq; apt-get install -y -qq $missing; }
+id lab-manager >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin lab-manager
+systemctl enable --now postgresql >/dev/null
+runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '"'"'lab-manager'"'"'" | grep -q 1 ||
+  runuser -u postgres -- createuser lab-manager
+runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'lab_manager'"'"'" | grep -q 1 ||
+  runuser -u postgres -- createdb -O lab-manager lab_manager
+grep -q " $NODE_FQDN " /etc/hosts || echo "$NODE_IP $NODE_FQDN $NODE" >>/etc/hosts
+install -d -o root -g lab-manager -m 0750 /etc/lab-manager
+install -d -m 0750 /etc/nginx/ssl
+echo "ids $(id -u lab-manager) $(id -g lab-manager)"
+'
+
+MANAGER_START='
+ADM="runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin"
+$ADM migrate
+$ADM check-config
+$ADM gateway-env | install -m 0600 /dev/stdin /etc/lab-manager/gateway.env
+cp /srv/gns3-ro/manager/lab-manager.service /srv/gns3-ro/manager/gateway/lab-console-gateway.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable lab-manager lab-console-gateway >/dev/null 2>&1
+systemctl restart lab-manager lab-console-gateway
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/lab.conf /etc/nginx/sites-enabled/lab.conf
+nginx -t
+systemctl reload-or-restart nginx
+for _ in $(seq 1 30); do curl -fsS 127.0.0.1:8090/readyz >/dev/null 2>&1 && break; sleep 2; done
+echo "readyz: $(curl -sS 127.0.0.1:8090/readyz)"
+'
+
+render_nginx() {
+  local f=$S/manager/nginx/lab.conf
+  {
+    cat <<EOF
+# Generated by install/lab-provision
+server {
+    listen 443 ssl;
+    server_name $PUBLIC_NAME;
+    ssl_certificate     /etc/nginx/ssl/gw.crt;
+    ssl_certificate_key /etc/nginx/ssl/gw.key;
+
+    # Moodle server -> manager API
+    location /api/ {
+        allow $MOODLE_IP;
+        deny all;
+        proxy_pass http://127.0.0.1:8090;
+        proxy_set_header Host \$host;
+        proxy_read_timeout 60s;
+    }
+
+    # Browsers -> console gateway (manager/gateway/nginx-console.conf)
+EOF
+    grep -v '^#' "$REPO_DIR/manager/gateway/nginx-console.conf" | sed 's/^\(.\)/    \1/'
+    echo "}"
+  } >"$f.tmp"
+  mv "$f.tmp" "$f"
+}
+
+cmd_manager() {
+  need_secrets
+  local id=$MANAGER_VMID m=$S/manager out uid gid f
+  ct_checked "$id"
+  [[ -x $REPO_DIR/manager/venv/bin/python ]] || die "no $REPO_DIR/manager/venv: run 'lab-provision venv manager'"
+  if [[ ! -d $REPO_DIR/labs ]]; then
+    log "lab catalog $REPO_DIR/labs from manager/examples/labs"
+    install -d -m 0755 "$REPO_DIR/labs"
+    cp -a "$REPO_DIR/manager/examples/labs/." "$REPO_DIR/labs/"
+    chmod -R u+rwX,go+rX,go-w "$REPO_DIR/labs"
+  fi
+  manager_mounts
+  ct_up "$id"
+  log "manager CT $id: packages, user, database"
+  out=$(ct_sh "$id" "$MANAGER_PREPARE" NODE="$NODE" NODE_FQDN="$NODE_FQDN" NODE_IP="$NODE_IP")
+  read -r _ uid gid < <(grep '^ids ' <<<"$out")
+  [[ -n ${gid:-} ]] || die "cannot read the lab-manager uid/gid in CT $id"
+
+  log "manager CT $id: secrets and configs"
+  ct_push "$id" "$m/manager.env" /etc/lab-manager/manager.env 0640 0 "$gid"
+  for f in sites.json slots.json manager.key; do
+    ct_push "$id" "$m/$f" "/etc/lab-manager/$f" 0600 "$uid" "$gid"
+  done
+  for f in manager.crt node-server-ca.crt pve-root-ca.pem; do
+    ct_push "$id" "$m/$f" "/etc/lab-manager/$f" 0644 0 0
+  done
+  [[ ! -s $m/images.json ]] || ct_push "$id" "$m/images.json" /etc/lab-manager/images.json 0640 0 "$gid"
+  render_nginx
+  ct_push "$id" "$m/nginx/gw.crt" /etc/nginx/ssl/gw.crt 0644 0 0
+  ct_push "$id" "$m/nginx/gw.key" /etc/nginx/ssl/gw.key 0600 0 0
+  ct_push "$id" "$m/nginx/lab.conf" /etc/nginx/sites-available/lab.conf 0644 0 0
+
+  log "manager CT $id: migrate, gateway-env, services"
+  ct_sh "$id" "$MANAGER_START"
+}
+
+# ------------------------------------------------------------------ moodle
+
+MOODLE_SCRIPT='
+update-ca-certificates >/dev/null
+getent hosts "$PUBLIC_NAME" >/dev/null || echo "$MANAGER_IP $PUBLIC_NAME" >>/etc/hosts
+code=$(curl -sS --noproxy "*" -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $SECRET" -H "X-Moodle-Site: $MOODLE_URL" \
+  "https://$PUBLIC_NAME/api/v1/info") || code="TLS or network error"
+echo "Moodle -> https://$PUBLIC_NAME/api/v1/info: $code (expected 200)"
+'
+
+cmd_moodle() {
+  need_secrets
+  local secret mgr_ip
+  secret=$(cat "$S/manager/site-secret")
+  mgr_ip=$(ct_ip "$MANAGER_VMID")
+  if [[ -n ${MOODLE_VMID:-} ]]; then
+    ct_local "$MOODLE_VMID"
+    [[ $(ct_state "$MOODLE_VMID") == running ]] || die "Moodle CT $MOODLE_VMID is not running"
+    log "Moodle CT $MOODLE_VMID: web CA into the system trust store"
+    ct_push "$MOODLE_VMID" "$S/moodle/web-ca.crt" /usr/local/share/ca-certificates/lab-web-ca.crt 0644 0 0
+    ct_sh "$MOODLE_VMID" "$MOODLE_SCRIPT" PUBLIC_NAME="$PUBLIC_NAME" MANAGER_IP="$mgr_ip" \
+      SECRET="$secret" MOODLE_URL="$MOODLE_URL"
+  else
+    log "Moodle is not an LXC here: copy $S/moodle/web-ca.crt to its /usr/local/share/ca-certificates/"
+    echo "  and run update-ca-certificates; $PUBLIC_NAME must resolve to $mgr_ip there"
+  fi
+  cat >"$S/moodle/plugin.txt" <<EOF
+Manager URL:  https://$PUBLIC_NAME
+Site secret:  $secret
+Site address: $MOODLE_URL (must equal \$CFG->wwwroot)
+EOF
+  log "plugin settings ($S/moodle/plugin.txt):"
+  cat "$S/moodle/plugin.txt"
+  warn "browsers open wss://$PUBLIC_NAME/console/: they must trust $S/moodle/web-ca.crt too"
+}
+
+# ------------------------------------------------------------------ check, enable
+
+MANAGER_CHECK='
+. /etc/lab-manager/manager.env
+echo "readyz: $(curl -sS 127.0.0.1:8090/readyz)"
+echo "agent:  $(curl -sS --max-time 15 --noproxy "*" --cert "$AGENT_CERT_FILE" --key "$AGENT_KEY_FILE" --cacert "$AGENT_CA_FILE" "https://$NODE_FQDN:8443/health")"
+echo "proxmox: $(curl -sS -o /dev/null -w "%{http_code}" --cacert "$PVE_CA_FILE" -H "Authorization: PVEAPIToken=$PVE_TOKEN_ID=$PVE_TOKEN_SECRET" "https://${PVE_NODES%%,*}/api2/json/cluster/resources?type=vm") (expected 200)"
+echo "services: $(systemctl is-active lab-manager lab-console-gateway nginx | paste -sd " ")"
+runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slots
+'
+
+cmd_check() {
+  need_secrets
+  agent_check
+  log "manager CT $MANAGER_VMID"
+  ct_sh "$MANAGER_VMID" "$MANAGER_CHECK" NODE_FQDN="$NODE_FQDN"
+}
+
+cmd_enable() {
+  local id
+  for id in "${SLOT_IDS[@]}"; do
+    ct_sh "$MANAGER_VMID" 'runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slot-enable "$VMID"' VMID="$id"
+  done
+}
+
+main() {
+  local step=${1:-}
+  [[ -n $step && $step != -h && $step != --help ]] || { usage; exit 0; }
+  shift
+  load_conf
+  case $step in
+    secrets) cmd_secrets ;;
+    venv) cmd_venv "$@" ;;
+    slot) cmd_slot "$@" ;;
+    agent) cmd_agent ;;
+    manager) cmd_manager ;;
+    moodle) cmd_moodle ;;
+    check) cmd_check ;;
+    enable) cmd_enable ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+main "$@"
