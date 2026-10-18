@@ -47,6 +47,16 @@ def test_valid_config(env):
     assert SECRET not in repr(s)
 
 
+def test_ceph_layout(env):
+    s = load(env)
+    assert (s.agent_ceph_root, s.agent_code_dir, s.agent_students_dir) == (
+        "/mnt/pve/cfs", "gns3-ro/slot", "gns3-rw/students")
+    env.update(LAB_CEPH_ROOT="/mnt/pve/data/", LAB_CODE_DIR="/slot/", LAB_STUDENTS_DIR="students")
+    s = load(env)
+    assert (s.agent_ceph_root, s.agent_code_dir, s.agent_students_dir) == (
+        "/mnt/pve/data", "slot", "students")
+
+
 @pytest.mark.parametrize("name", ["DATABASE_URL", "PVE_TOKEN_SECRET", "GATEWAY_INTERNAL_KEY",
                                   "MANAGER_SITES_FILE", "PVE_NODES", "AGENT_URL_TEMPLATE",
                                   "AGENT_CERT_FILE", "AGENT_KEY_FILE", "AGENT_CA_FILE"])
@@ -75,7 +85,9 @@ def test_short_secret_rejected_without_leaking_it(env, tmp_path):
                                        ("AGENT_URL_TEMPLATE", "https://agent:8443"),
                                        ("AGENT_START_ACTIONS", "rm_rf"), ("SLOT_CODE_REVISION", "../x"),
                                        ("PLACEHOLDER_STUDENT_KEY", "a/b"), ("LAB_PERSISTENCE", "fresh"),
-                                       ("LAB_CEPH_ROOT", "/mnt/../etc"), ("AGENT_START_TIMEOUT", "330")])
+                                       ("LAB_CEPH_ROOT", "/mnt/../etc"), ("AGENT_START_TIMEOUT", "330"),
+                                       ("LAB_CODE_DIR", "../slot"), ("LAB_CODE_DIR", "a//b"),
+                                       ("LAB_STUDENTS_DIR", ""), ("LAB_STUDENTS_DIR", ".hidden/students")])
 def test_invalid_values(env, key, value):
     env[key] = value
     with pytest.raises(ConfigError):

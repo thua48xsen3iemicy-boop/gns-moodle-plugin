@@ -26,8 +26,8 @@ def env(tmp_path, monkeypatch):
     conf.mkdir()
     (conf / "2201.conf").write_text("unprivileged: 1\ntags: training;labslot\n")
     ceph = tmp_path / "ceph"
-    (ceph / "slot").mkdir(parents=True)
-    (ceph / "students" / "student42").mkdir(parents=True)
+    (ceph / agent.CODE_DIR).mkdir(parents=True)
+    (ceph / agent.STUDENTS_DIR / "student42").mkdir(parents=True)
     lock = tmp_path / "locks"
     monkeypatch.setattr(agent, "CEPH_ROOT", ceph)
     monkeypatch.setattr(agent, "CONF_DIR", conf)
@@ -61,8 +61,8 @@ def test_start_with_bind_and_allowlisted_guest_action(env):
     assert response.status_code == 200, response.text
     assert response.json()["state"] == "running"
     assert [agent.PCT, "set", "2201",
-            "--mp0", f"{ceph}/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
-            "--mp1", f"{ceph}/students/student42,mp=/opt/gns3/projects,ro=0,shared=1"] in calls
+            "--mp0", f"{ceph}/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+            "--mp1", f"{ceph}/gns3-rw/students/student42,mp=/opt/gns3/projects,ro=0,shared=1"] in calls
     assert [agent.PCT, "exec", "2201", "--", "/usr/bin/systemctl", "daemon-reload"] in calls
 
 
@@ -101,7 +101,7 @@ def test_stopped_required_for_changes(env):
 
 def test_no_symlinks(env):
     client, calls, _, _, ceph = env
-    (ceph / "students" / "evil").symlink_to("/etc")
+    (ceph / agent.STUDENTS_DIR / "evil").symlink_to("/etc")
     r = client.post("/slots/2201/start", json={"student_key": "evil"})
     assert r.status_code == 422
     assert not any(x[:2] == [agent.PCT, "set"] for x in calls)
@@ -138,7 +138,7 @@ def test_mount_mode_and_repeat(env, mode, ro):
     client, calls, _, _, ceph = env
     for _ in range(2):
         assert client.put('/slots/2201/mounts', json={'student_key': 'student42', 'data_mode': mode}).status_code == 200
-    assert f'{ceph}/students/student42,mp=/opt/gns3/projects,ro={ro},shared=1' in calls[-1]
+    assert f'{ceph}/{agent.STUDENTS_DIR}/student42,mp=/opt/gns3/projects,ro={ro},shared=1' in calls[-1]
 
 
 def test_repeated_start_and_stop(env):
@@ -154,9 +154,9 @@ def test_repeated_start_and_stop(env):
 
 def test_unsafe_parent_and_missing_source(env):
     client, calls, _, _, ceph = env
-    (ceph / 'students').chmod(0o777)
+    (ceph / agent.STUDENTS_DIR).chmod(0o777)
     assert client.post('/slots/2201/start', json={'student_key': 'student42'}).status_code == 422
-    (ceph / 'students').chmod(0o755)
+    (ceph / agent.STUDENTS_DIR).chmod(0o755)
     assert client.post('/slots/2201/start', json={'student_key': 'missing'}).status_code == 422
     assert not any(c[:2] == [agent.PCT, 'set'] for c in calls)
 
@@ -233,6 +233,17 @@ def test_real_ceph_mount_validation(tmp_path, monkeypatch):
     assert err.value.status_code == 503
 
 
+def test_ceph_subdirs(monkeypatch):
+    assert agent.CODE_DIR == Path('gns3-ro/slot')
+    assert agent.STUDENTS_DIR == Path('gns3-rw/students')
+    monkeypatch.setenv('LAB_CODE_DIR', '/code/slot/')
+    assert agent.ceph_subdir('LAB_CODE_DIR', 'x') == Path('code/slot')
+    for value in ('', '..', 'a/../b', 'a//b', '.hidden', 'a b', '/'):
+        monkeypatch.setenv('LAB_CODE_DIR', value)
+        with pytest.raises(SystemExit):
+            agent.ceph_subdir('LAB_CODE_DIR', 'x')
+
+
 @pytest.fixture
 def student_env(env, monkeypatch):
     monkeypatch.setattr(agent, 'STUDENT_UID', str(os.getuid()))
@@ -252,14 +263,14 @@ def test_create_student_idempotently(student_env):
         r = client.put('/students/new_student')
         assert r.status_code == 200, r.text
         assert r.json() == {'student_key': 'new_student', 'ready': True}
-    assert (ceph / 'students/new_student').stat().st_mode & 0o777 == 0o700
+    assert (ceph / agent.STUDENTS_DIR / 'new_student').stat().st_mode & 0o777 == 0o700
     assert len(chowns) == 1
     assert not any(c[0] == agent.PCT for c in calls)
 
 
 def test_existing_student_contents_untouched(student_env):
     (client, _, _, _, ceph), chowns = student_env
-    marker = ceph / 'students/student42/data'
+    marker = ceph / agent.STUDENTS_DIR / 'student42/data'
     marker.write_text('keep')
     assert client.put('/students/student42').status_code == 200
     assert marker.read_text() == 'keep'
@@ -283,11 +294,11 @@ def test_student_invalid_key(student_env, key):
 
 def test_student_symlink_and_unsafe_parent(student_env):
     (client, calls, _, _, ceph), chowns = student_env
-    (ceph / 'students/evil').symlink_to(ceph / 'slot')
+    (ceph / agent.STUDENTS_DIR / 'evil').symlink_to(ceph / agent.CODE_DIR)
     assert client.put('/students/evil').status_code == 422
-    (ceph / 'students').chmod(0o777)
+    (ceph / agent.STUDENTS_DIR).chmod(0o777)
     assert client.put('/students/new').status_code == 422
-    assert not (ceph / 'students/new').exists()
+    assert not (ceph / agent.STUDENTS_DIR / 'new').exists()
     assert chowns == []
 
 
@@ -308,7 +319,7 @@ def test_student_nested_mount_rejected(student_env, monkeypatch):
     (client, _, _, _, ceph), chowns = student_env
     monkeypatch.setattr(agent, 'run_cmd', lambda *a, **kw: '/elsewhere')
     assert client.put('/students/new').status_code == 422
-    assert not (ceph / 'students/new').exists()
+    assert not (ceph / agent.STUDENTS_DIR / 'new').exists()
     assert chowns == []
 
 
@@ -318,15 +329,15 @@ def test_student_chown_failure_fails_closed(student_env, monkeypatch):
         raise PermissionError('Ceph denied ownership change')
     monkeypatch.setattr(agent.os, 'fchown', denied)
     assert client.put('/students/new').status_code == 503
-    assert (ceph / 'students/new').is_dir()
-    assert not list((ceph / 'students/new').iterdir())
+    assert (ceph / agent.STUDENTS_DIR / 'new').is_dir()
+    assert not list((ceph / agent.STUDENTS_DIR / 'new').iterdir())
 
 
 def test_student_parent_acl_rejected(student_env, monkeypatch):
     (client, _, _, _, ceph), chowns = student_env
     monkeypatch.setattr(agent.os, 'getxattr', lambda *args: b'acl')
     assert client.put('/students/new').status_code == 422
-    assert not (ceph / 'students/new').exists()
+    assert not (ceph / agent.STUDENTS_DIR / 'new').exists()
     assert chowns == []
 
 
@@ -354,13 +365,13 @@ def test_mount_destinations_match_repository_slot(env):
 
 def test_revision_mounted_at_same_slot_destination(env):
     client, calls, _, _, ceph = env
-    (ceph / 'slot' / 'release1').mkdir()
+    (ceph / agent.CODE_DIR / 'release1').mkdir()
     result = client.post('/slots/2201/start', json={
         'student_key': 'student42', 'code_revision': 'release1', 'data_mode': 'ro'})
     assert result.status_code == 200, result.text
     command = next(c for c in calls if c[:2] == [agent.PCT, 'set'])
-    assert f'{ceph}/slot/release1,mp=/srv/gns3-ro/slot,ro=1,shared=1' in command
-    assert f'{ceph}/students/student42,mp=/opt/gns3/projects,ro=1,shared=1' in command
+    assert f'{ceph}/{agent.CODE_DIR}/release1,mp=/srv/gns3-ro/slot,ro=1,shared=1' in command
+    assert f'{ceph}/{agent.STUDENTS_DIR}/student42,mp=/opt/gns3/projects,ro=1,shared=1' in command
 
 
 @pytest.mark.parametrize('url,body,status,code', [
@@ -424,7 +435,7 @@ def test_membership_and_state_error_codes(env):
 
 def test_source_unsafe_code(env):
     client, _, _, _, ceph = env
-    (ceph / 'students/evil').symlink_to('/etc')
+    (ceph / agent.STUDENTS_DIR / 'evil').symlink_to('/etc')
     result = client.post('/slots/2201/start', json={'student_key': 'evil'})
     assert result.status_code == 422
     assert result.json()['detail']['code'] == 'SOURCE_UNSAFE'

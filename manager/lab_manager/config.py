@@ -128,8 +128,10 @@ class Settings:
     gateway_internal_url: str
     gateway_internal_key: str = field(repr=False)
     gateway_public_url: str
-    agent_ceph_root: str = "/mnt/pve/data"  # LAB_CEPH_ROOT of the agents: expected mount sources
-    slot_code_revision: str | None = None  # None: shared <ceph>/slot, else <ceph>/slot/<revision>
+    agent_ceph_root: str = "/mnt/pve/cfs"  # LAB_CEPH_ROOT of the agents: expected mount sources
+    agent_code_dir: str = "gns3-ro/slot"  # LAB_CODE_DIR of the agents, relative to the root
+    agent_students_dir: str = "gns3-rw/students"  # LAB_STUDENTS_DIR of the agents, relative to the root
+    slot_code_revision: str | None = None  # None: shared <ceph>/<code dir>, else <code dir>/<revision>
     agent_start_actions: tuple[str, ...] = ("init_slot",)
     placeholder_student_key: str | None = None  # Mounted read-only into a released slot
     node_memory_reserve_mb: int = 2048
@@ -165,10 +167,18 @@ def _key(env, name, default=""):
 
 
 def _ceph_root(env):
-    value = env.get("LAB_CEPH_ROOT", "/mnt/pve/data").strip().rstrip("/")
+    value = env.get("LAB_CEPH_ROOT", "/mnt/pve/cfs").strip().rstrip("/")
     if not re.fullmatch(r"(/[A-Za-z0-9_.-]+)+", value) or "/../" in value + "/" or "/./" in value + "/":
         raise ConfigError("LAB_CEPH_ROOT must be an absolute path without '..'")
     return value
+
+
+def _ceph_subdir(env, name, default):
+    """Same rule as the agent's ceph_subdir: relative path of safe directory names."""
+    parts = env.get(name, default).strip().strip("/").split("/")
+    if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", part) for part in parts):
+        raise ConfigError(f"{name} must be a relative path of safe directory names")
+    return "/".join(parts)
 
 
 def load(env=None, check_mode=True) -> Settings:
@@ -250,6 +260,8 @@ def load(env=None, check_mode=True) -> Settings:
         pve_ca_file=Path(required("PVE_CA_FILE")),
         agent_url_template=template,
         agent_ceph_root=_ceph_root(env),
+        agent_code_dir=_ceph_subdir(env, "LAB_CODE_DIR", "gns3-ro/slot"),
+        agent_students_dir=_ceph_subdir(env, "LAB_STUDENTS_DIR", "gns3-rw/students"),
         agent_ca_file=Path(required("AGENT_CA_FILE")),
         agent_cert_file=Path(required("AGENT_CERT_FILE")),
         agent_key_file=Path(required("AGENT_KEY_FILE")),

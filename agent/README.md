@@ -6,7 +6,7 @@ This helper intentionally accepts **no shell commands, absolute source paths, de
 
 ## Node installation
 
-Requires Proxmox VE, Python 3.10+ with `python3-venv`, working CephFS mounted exactly at `/mnt/pve/data` on every node, `findmnt`, and outbound access to install `fastapi`, `pydantic`, `uvicorn` into a local venv (or use an internal PyPI mirror).
+Requires Proxmox VE, Python 3.10+ with `python3-venv`, working CephFS mounted exactly at `/mnt/pve/cfs` (`LAB_CEPH_ROOT`) on every node, `findmnt`, and outbound access to install `fastapi`, `pydantic`, `uvicorn` into a local venv (or use an internal PyPI mirror).
 
 1. **On a secure admin system**, create a test PKI:
 
@@ -53,7 +53,7 @@ Requires Proxmox VE, Python 3.10+ with `python3-venv`, working CephFS mounted ex
 7. On CephFS pre-create the expected dirs with correct UID/GID/ACL policy; `agent.py` will NOT create arbitrary source folders; the student leaf may instead be provisioned with the endpoint below:
 
    ```bash
-   mkdir -p /mnt/pve/data/slot /mnt/pve/data/students/student42
+   mkdir -p /mnt/pve/cfs/gns3-ro/slot /mnt/pve/cfs/gns3-rw/students/student42
    ```
 
    `students` parent must be admin-controlled: a student must NOT be allowed to replace/rename their directory or inject symlinks into the path. Ensure correct container UID mappings for writable data.
@@ -84,10 +84,17 @@ The request body for `POST /slots/2201/start`:
 
 Mounts always have host path → guest path mapping:
 
-- `mp0`: `/mnt/pve/data/slot` (or `/slot/<code_revision>`) → `/srv/gns3-ro/slot`, always **read-only**.
-- `mp1`: `/mnt/pve/data/students/<student_key>` → `/opt/gns3/projects`, **read-only** when `data_mode=ro`, or **read-write** when `data_mode=rw`.
+- `mp0`: `/mnt/pve/cfs/gns3-ro/slot` (or `.../slot/<code_revision>`) → `/srv/gns3-ro/slot`, always **read-only**.
+- `mp1`: `/mnt/pve/cfs/gns3-rw/students/<student_key>` → `/opt/gns3/projects`, **read-only** when `data_mode=ro`, or **read-write** when `data_mode=rw`.
 
-Only one safe path component may be supplied for `student_key` and `code_revision`: letters, numbers, `_` or `-`, up to 64 chars. The mount roots, guest paths, mount indices, and CephFS mount check are built into the agent. To add other approved directory classes, extend the server's explicit policy, not an arbitrary `source` field.
+Host sources are `$LAB_CEPH_ROOT/$LAB_CODE_DIR` and `$LAB_CEPH_ROOT/$LAB_STUDENTS_DIR`
+(unit defaults `/mnt/pve/cfs`, `gns3-ro/slot`, `gns3-rw/students`): the repository checkout
+lives in `gns3-ro/` (its `slot/` is the code), student data in the separate `gns3-rw/` tree,
+both on the one CephFS mounted at `LAB_CEPH_ROOT`. Both directories are relative paths of safe
+names; an invalid value stops the service at startup. The Manager's `LAB_CEPH_ROOT`,
+`LAB_CODE_DIR`, `LAB_STUDENTS_DIR` must be the same.
+
+Only one safe path component may be supplied for `student_key` and `code_revision`: letters, numbers, `_` or `-`, up to 64 chars. The mount roots come from the administrator's unit (below), guest paths, mount indices, and the CephFS mount check are built into the agent. To add other approved directory classes, extend the server's explicit policy, not an arbitrary `source` field.
 
 `PUT /slots/{vmid}/mounts` accepts the same fields except `actions`.
 
@@ -221,7 +228,7 @@ Concurrent creation may temporarily return 409 until the creator assigns ownersh
 retry safely. Failed provisioning can leave a root-owned empty directory requiring
 administrator inspection; the agent never repairs it by recursively chowning.
 
-The administrator creates and protects `/mnt/pve/data/students` and configures:
+The administrator creates and protects `/mnt/pve/cfs/gns3-rw/students` and configures:
 
 ```ini
 # systemctl edit lab-node-agent
@@ -253,8 +260,8 @@ project lock directory:
 
 | Host source | LXC destination | Access |
 |---|---|---|
-| `/mnt/pve/data/slot` or `/mnt/pve/data/slot/<code_revision>` | `/srv/gns3-ro/slot` | RO |
-| `/mnt/pve/data/students/<student_key>` | `/opt/gns3/projects` | `data_mode` RO/RW |
+| `/mnt/pve/cfs/gns3-ro/slot` or `/mnt/pve/cfs/gns3-ro/slot/<code_revision>` | `/srv/gns3-ro/slot` | RO |
+| `/mnt/pve/cfs/gns3-rw/students/<student_key>` | `/opt/gns3/projects` | `data_mode` RO/RW |
 
 The code source must contain `run.py`, `release.py`, `main.py` and `venv/`
 directly. Build the venv at `/srv/gns3-ro/slot/venv` in an environment compatible

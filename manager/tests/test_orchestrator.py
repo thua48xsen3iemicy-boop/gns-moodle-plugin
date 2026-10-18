@@ -45,8 +45,8 @@ async def test_full_cycle_order(tmp_path, dsn):
         assert ("agent:student", "main-42") in env.timeline
         config = env.pve.cts[201]["config"]
         assert config["cores"] == "8" and config["memory"] == "16384"  # Sized to the lab
-        assert config["mp1"] == "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"
-        assert config["mp0"] == "/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1"
+        assert config["mp1"] == "/mnt/pve/cfs/gns3-rw/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"
+        assert config["mp0"] == "/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1"
         start_req = [r for r in env.agent.requests if r[2].endswith("/start")][0]
         assert start_req[3] == {"code_revision": None, "student_key": "main-42", "data_mode": "rw",
                                 "actions": ["init_slot"]}
@@ -280,22 +280,22 @@ async def test_restart_of_manager_mid_start(tmp_path, dsn):
 
 @pytest.mark.parametrize("mp0,mp1", [
     # Another student's directory.
-    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
-     "/mnt/pve/data/students/main-7,mp=/opt/gns3/projects,ro=0,shared=1"),
+    ("/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/pve/cfs/gns3-rw/students/main-7,mp=/opt/gns3/projects,ro=0,shared=1"),
     # Right suffix under a foreign root.
-    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+    ("/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
      "/mnt/other/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
     # Right source, wrong destination.
-    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
-     "/mnt/pve/data/students/main-42,mp=/srv/student,ro=0,shared=1"),
+    ("/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/pve/cfs/gns3-rw/students/main-42,mp=/srv/student,ro=0,shared=1"),
     # Read-only student directory.
-    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
-     "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=1,shared=1"),
+    ("/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1,shared=1",
+     "/mnt/pve/cfs/gns3-rw/students/main-42,mp=/opt/gns3/projects,ro=1,shared=1"),
     # Code at the old /opt/slot, or writable code.
-    ("/mnt/pve/data/slot,mp=/opt/slot,ro=1,shared=1",
-     "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
-    ("/mnt/pve/data/slot,mp=/srv/gns3-ro/slot,ro=0,shared=1",
-     "/mnt/pve/data/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
+    ("/mnt/pve/cfs/gns3-ro/slot,mp=/opt/slot,ro=1,shared=1",
+     "/mnt/pve/cfs/gns3-rw/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
+    ("/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=0,shared=1",
+     "/mnt/pve/cfs/gns3-rw/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"),
 ])
 async def test_running_ct_with_unexpected_mounts_is_never_used(tmp_path, dsn, mp0, mp1):
     async with make_env(tmp_path, dsn) as env:
@@ -310,6 +310,18 @@ async def test_running_ct_with_unexpected_mounts_is_never_used(tmp_path, dsn, mp
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "WRONG_STUDENT_MOUNT"
         assert env.slots[201].labs == {}
+
+
+async def test_custom_ceph_layout_follows_agent(tmp_path, dsn):
+    layout = dict(agent_ceph_root="/mnt/pve/data", agent_code_dir="code/slot", agent_students_dir="rw/students")
+    async with make_env(tmp_path, dsn, slot_code_revision="r1", **layout) as env:
+        env.agent.ceph_root, env.agent.code_dir, env.agent.students_dir = layout.values()
+        sid = await start(env)
+        await env.run()
+        assert (await session(env, sid))["status"] == "running"
+        config = env.pve.cts[201]["config"]
+        assert config["mp0"] == "/mnt/pve/data/code/slot/r1,mp=/srv/gns3-ro/slot,ro=1,shared=1"
+        assert config["mp1"] == "/mnt/pve/data/rw/students/main-42,mp=/opt/gns3/projects,ro=0,shared=1"
 
 
 async def test_agent_busy_and_migration_are_waited_out(tmp_path, dsn):

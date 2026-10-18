@@ -124,7 +124,8 @@ class FakePve:
 class FakeAgent:
     """Lab Node Agent semantics (status/mounts/start/stop) on top of FakePve's CTs."""
 
-    def __init__(self, pve: FakePve, ceph_root="/mnt/pve/data"):
+    def __init__(self, pve: FakePve, ceph_root="/mnt/pve/cfs", code_dir="gns3-ro/slot",
+                 students_dir="gns3-rw/students"):
         self.pve = pve
         self.timeline = pve.timeline
         self.students = {"placeholder"}  # Existing students/<key> directories
@@ -133,6 +134,8 @@ class FakeAgent:
         self.student_ids_configured = True
         self.error_codes = False  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
         self.ceph_root = ceph_root
+        self.code_dir = code_dir
+        self.students_dir = students_dir
         self.requests = []
         self.busy = False
         self.untagged = set()
@@ -154,10 +157,10 @@ class FakeAgent:
             if self.error_codes:
                 return self._err(422, {"code": "SOURCE_MISSING", "message": "Student directory missing"})
             return self._err(422, "Required CephFS directory does not exist")
-        code = f"{self.ceph_root}/slot" + (f"/{body['code_revision']}" if body.get("code_revision") else "")
+        code = f"{self.ceph_root}/{self.code_dir}" + (f"/{body['code_revision']}" if body.get("code_revision") else "")
         ro = 1 if body.get("data_mode") == "ro" else 0
         ct["config"]["mp0"] = f"{code},mp=/srv/gns3-ro/slot,ro=1,shared=1"  # agent 6a735df
-        ct["config"]["mp1"] = f"{self.ceph_root}/students/{key},mp=/opt/gns3/projects,ro={ro},shared=1"
+        ct["config"]["mp1"] = f"{self.ceph_root}/{self.students_dir}/{key},mp=/opt/gns3/projects,ro={ro},shared=1"
         return None
 
     def handle(self, request: httpx.Request):

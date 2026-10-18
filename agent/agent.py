@@ -24,7 +24,7 @@ ADMIN_UIDS = (0,)
 
 PCT = "/usr/sbin/pct"
 FINDMNT = "/usr/bin/findmnt"
-CEPH_ROOT = Path(os.environ.get("LAB_CEPH_ROOT", "/mnt/pve/data"))
+CEPH_ROOT = Path(os.environ.get("LAB_CEPH_ROOT", "/mnt/pve/cfs"))
 CONF_DIR = Path("/etc/pve/lxc")
 LOCK_DIR = Path("/run/lab-node-agent")
 VMID_MIN = int(os.environ.get("LAB_VMID_MIN", "2000"))
@@ -34,6 +34,20 @@ REQUIRED_TAG = "labslot"
 STUDENT_UID = os.environ.get("LAB_STUDENT_HOST_UID")
 STUDENT_GID = os.environ.get("LAB_STUDENT_HOST_GID")
 ALLOWED_FS = frozenset(("ceph", "fuse.ceph", "fuse.ceph-fuse"))
+
+
+def ceph_subdir(name: str, default: str) -> Path:
+    """Administrator-defined directory below CEPH_ROOT, on the same CephFS mount."""
+    parts = os.environ.get(name, default).strip().strip("/").split("/")
+    # Leading '.' is not a safe first character, so '.' and '..' are rejected too.
+    if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", part) for part in parts):
+        raise SystemExit(f"{name} must be a relative path of safe directory names")
+    return Path(*parts)
+
+
+# Slot code (git checkout, RO) and student data (RW) are separate trees on one CephFS.
+CODE_DIR = ceph_subdir("LAB_CODE_DIR", "gns3-ro/slot")
+STUDENTS_DIR = ceph_subdir("LAB_STUDENTS_DIR", "gns3-rw/students")
 
 # Each action runs as root INSIDE the container, not in the host namespace.
 # Do not expose client-provided executable names, shell strings or argument lists.
@@ -52,7 +66,7 @@ VMID = Annotated[int, ApiPath(ge=100, le=999999999)]
 
 class Mounts(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    # None = shared /mnt/pve/data/slot directory; otherwise /slot/<revision>.
+    # None = shared <CEPH_ROOT>/<CODE_DIR> directory; otherwise <CODE_DIR>/<revision>.
     code_revision: Key | None = None
     student_key: Key
     data_mode: Literal["ro", "rw"] = "rw"
@@ -184,10 +198,10 @@ def validate_cephfs() -> None:
 
 def source_paths(spec: Mounts) -> tuple[Path, Path]:
     validate_cephfs()
-    code_path = CEPH_ROOT / "slot"
+    code_path = CEPH_ROOT / CODE_DIR
     if spec.code_revision is not None:
         code_path = code_path / spec.code_revision
-    data_path = CEPH_ROOT / "students" / spec.student_key
+    data_path = CEPH_ROOT / STUDENTS_DIR / spec.student_key
     for p in (code_path, data_path):
         validate_no_symlinks(p)
         if not p.is_relative_to(CEPH_ROOT):
@@ -302,7 +316,7 @@ def ensure_student(student_key: Key):
     except (TypeError, ValueError):
         raise api_error(503, "STUDENT_IDS_NOT_CONFIGURED", "Configure mapped gns3 host UID/GID first")
     validate_cephfs()
-    parent = CEPH_ROOT / "students"
+    parent = CEPH_ROOT / STUDENTS_DIR
     validate_no_symlinks(parent)
     if run_cmd([FINDMNT, "-T", str(parent), "-n", "-o", "TARGET"], timeout=10) != str(CEPH_ROOT):
         raise api_error(422, "SOURCE_UNSAFE", "Students parent is not on expected CephFS mount")
