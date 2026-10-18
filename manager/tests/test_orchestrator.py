@@ -155,24 +155,58 @@ async def test_project_continues_on_the_same_slot(tmp_path, dsn):
         assert list(env.slots[201].labs) == [str(pid)]  # The same GNS3 project, not a new one
 
 
-async def test_placement_best_fit_packs_nodes(tmp_path, dsn):
-    vmids = (201, 202, 203)
-    nodes = {201: "pve1", 202: "pve2", 203: "pve3"}
-    async with make_env(tmp_path, dsn, vmids=vmids, nodes_of=nodes, node_memory_reserve_mb=0) as env:
-        env.pve.node_mem["pve1"]["mem"] = 64 * GIB - 40 * GIB  # 40 GiB free
-        env.pve.node_mem["pve2"]["mem"] = 64 * GIB - 20 * GIB  # 20 GiB free: best fit for 16 GiB
-        env.pve.node_mem["pve3"]["mem"] = 64 * GIB - 10 * GIB  # 10 GiB free: does not fit
-        a = await start(env, user_id=1)
+async def test_placement_spreads_labs_round_the_nodes(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve2", 204: "pve2", 205: "pve3", 206: "pve3"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes) as env:
+        got = []
+        for user in range(1, 5):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append((await session(env, sid))["slot_vmid"])
+        # The first slot of every node, then the second slot of the first node.
+        assert got == [201, 203, 205, 202]
+
+
+async def test_placement_skips_a_node_without_room_in_its_turn(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve2"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes, node_memory_reserve_mb=0) as env:
+        env.pve.node_mem["pve2"]["mem"] = 64 * GIB - 10 * GIB  # 10 GiB free: a 16 GiB lab does not fit
+        a, b = await start(env, user_id=1), await start(env, user_id=2)
         await env.run(1)
-        assert (await session(env, a))["slot_vmid"] == 202
-        # 202's CT is not running yet: its 16 GiB are reserved, so pve2 has 4 GiB left.
-        b = await start(env, user_id=2)
+        assert {(await session(env, a))["slot_vmid"], (await session(env, b))["slot_vmid"]} == {201, 202}
+
+
+async def test_node_guest_memory_limit_keeps_room_for_the_host(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve2"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes,
+                        node_guest_memory_mb=40 * 1024) as env:
+        # A running VM that is not a slot (Moodle) counts with its memory limit: 30 + 16 > 40 GiB.
+        env.pve.vms[900] = {"node": "pve2", "status": "running", "maxmem": 30 * GIB, "maxcpu": 4}
+        got = []
+        for user in (1, 2, 3):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append(await session(env, sid))
+        assert [s["slot_vmid"] for s in got[:2]] == [201, 202]  # pve1: 16 + 16 <= 40 GiB
+        # pve1 still has live room (56 - 32 GiB) but 48 GiB of guests would cross its limit.
+        assert got[2]["status"] == "queued" and got[2]["status_message"] == "Недостаточно ресурсов на узлах, ожидание…"
+
+
+async def test_node_cpu_overcommit_limits_vcpus(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve1", 204: "pve2"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes, node_cpu_overcommit=1) as env:
+        env.pve.add_ct(900, node="pve2", status="running", config={"cores": 12, "memory": 4096})  # Not a slot
+        got = []
+        for user in (1, 2, 3):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append(await session(env, sid))
+        # 16 CPUs x 1: pve1 takes two 8-core labs, pve2 has 12 cores in use already.
+        assert [s["slot_vmid"] for s in got[:2]] == [201, 202]
+        assert got[2]["status"] == "queued"
+        env.pve.cts[900]["status"] = "stopped"  # Its cores are free again: the queued lab fits pve2
         await env.run(1)
-        assert (await session(env, b))["slot_vmid"] == 201
-        c = await start(env, user_id=3)
-        await env.run(2)
-        s = await session(env, c)
-        assert s["status"] == "queued" and s["status_message"] == "Недостаточно ресурсов на узлах, ожидание…"
+        assert (await session(env, got[2]["id"]))["slot_vmid"] == 204
 
 
 async def test_offline_node_is_skipped(tmp_path, dsn):
@@ -551,8 +585,8 @@ async def test_proxmox_unavailable_keeps_session_queued(tmp_path, dsn):
 async def test_running_slot_keeps_its_unused_promised_memory_reserved(tmp_path, dsn):
     nodes = {201: "pve2", 202: "pve2", 203: "pve1"}
     async with make_env(tmp_path, dsn, vmids=(201, 202, 203), nodes_of=nodes, node_memory_reserve_mb=0) as env:
-        env.pve.node_mem["pve1"]["mem"] = 64 * GIB - 40 * GIB  # 40 GiB free
-        env.pve.node_mem["pve2"]["mem"] = 64 * GIB - 30 * GIB  # 30 GiB free: best fit for the first lab
+        env.pve.node_mem["pve1"]["mem"] = 64 * GIB - 10 * GIB  # 10 GiB free: never fits
+        env.pve.node_mem["pve2"]["mem"] = 64 * GIB - 30 * GIB  # 30 GiB free
         a = await start(env, user_id=1)
         await env.run()
         assert (await session(env, a))["slot_vmid"] in (201, 202)
@@ -563,7 +597,8 @@ async def test_running_slot_keeps_its_unused_promised_memory_reserved(tmp_path, 
         b = await start(env, user_id=2)
         await env.run(1)
         # pve2: 28 GiB free minus 14 GiB still promised to the first lab -> 14 GiB < 16 GiB.
-        assert (await session(env, b))["slot_vmid"] == 203
+        s = await session(env, b)
+        assert s["slot_vmid"] is None and s["status"] == "queued"
 
 
 async def _backdate_stage(env, sid, interval="1 hour"):

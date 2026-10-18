@@ -171,7 +171,9 @@ Uvicorn работает в один процесс: оркестратор жи
 | `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
 | `SLOT_CODE_REVISION` | пусто: общий `<ceph>/<LAB_CODE_DIR>`; иначе `<ceph>/<LAB_CODE_DIR>/<revision>` |
 | `PLACEHOLDER_STUDENT_KEY` | что монтировать RO в освобождённый слот (`placeholder`; пусто — не перемонтировать) |
-| `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении |
+| `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении (по текущему использованию) |
+| `NODE_GUEST_MEMORY_MB` | предел суммы лимитов памяти гостей узла, MiB; остальное — хосту и Ceph (0 — без предела) |
+| `NODE_CPU_OVERCOMMIT` | предел vCPU гостей узла на один CPU узла, например `2` (0 — без предела) |
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
 | `DEFAULT_MAX_DURATION`, `MAX_DURATION_LIMIT` | длительность сессии по умолчанию и предел для `options.max_duration` от плагина, минуты |
 
@@ -266,7 +268,8 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 - порядок `stop (если CT запущен) → cores/memory → агент start (mounts + pct start) → readyz → deploy`
   и `slot stop → агент shutdown → заглушка RO`; shutdown завис → `force`;
 - слоты не привязаны: тот же студент идёт в другой слот, слот — к другому студенту;
-- размещение best fit по памяти узлов, резерв ещё не запущенных слотов, offline-узел, нехватка ресурсов;
+- размещение по кругу узлов, пропуск узла без места, лимиты памяти гостей и vCPU узла, резерв ещё не
+  запущенных слотов, offline-узел, нехватка ресурсов;
 - следующая сессия продолжает тот же проект и в том же, и в другом слоте (слот 0.4.0); со слотом
   0.3 в другом слоте — понятная ошибка `SLOT_COLD_RESUME_UNSUPPORTED`;
 - `student_key`: только безопасный компонент пути по правилам агента;

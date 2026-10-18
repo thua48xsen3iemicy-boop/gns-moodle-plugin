@@ -20,9 +20,10 @@ class FakePve:
 
     def __init__(self, timeline=None, nodes=("pve1", "pve2", "pve3")):
         self.nodes = list(nodes)
-        self.node_mem = {n: {"maxmem": 64 * GIB, "mem": 8 * GIB, "status": "online"} for n in nodes}
+        self.node_mem = {n: {"maxmem": 64 * GIB, "mem": 8 * GIB, "maxcpu": 16, "status": "online"} for n in nodes}
         self.timeline = timeline if timeline is not None else []
         self.cts = {}
+        self.vms = {}  # QEMU guests, only seen in /cluster/resources: {vmid: {node, status, maxmem, maxcpu}}
         self.tasks = {}
         self.down_hosts = set()  # Entry points refusing connections
         self.task_node_down = set()  # Nodes whose tasks cannot be read (595)
@@ -59,8 +60,10 @@ class FakePve:
                 return httpx.Response(status, json=body)
         if path == "/cluster/resources":
             data = [{"vmid": v, "type": "lxc", "node": ct["node"], "status": ct["status"], "maxmem": ct["maxmem"],
+                     "maxcpu": int(ct["config"].get("cores", 2)),
                      "mem": ct.get("mem", 0) if ct["status"] == "running" else 0}
                     for v, ct in self.cts.items()]
+            data += [{"vmid": v, "type": "qemu", **vm} for v, vm in self.vms.items()]
             if request.url.params.get("type") != "vm":
                 data += [{"type": "node", "node": n, **m} for n, m in self.node_mem.items()]
             return httpx.Response(200, json={"data": data})
