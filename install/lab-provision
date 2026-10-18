@@ -452,6 +452,7 @@ cmd_slot() {
     done
     ct_up "$id"
     ct_sh "$id" 'install -d -m 0700 /etc/lab-slot; install -d -m 0755 /usr/local/sbin'
+    render_slot_env "$id"  # The CT's current net0 IP, not the one it had at 'secrets' (e.g. a fresh clone)
     ct_push "$id" "$S/slots/$id/slot.env" /etc/lab-slot/slot.env 0600 0 0
     ct_push "$id" "$REPO_DIR/agent/guest/lab-slot-init" /usr/local/sbin/lab-slot-init 0755 0 0
     ct_push "$id" "$REPO_DIR/slot/lab-slot.service" /etc/systemd/system/lab-slot.service 0644 0 0
@@ -655,6 +656,8 @@ cmd_manager() {
   [[ -n ${gid:-} ]] || die "cannot read the lab-manager uid/gid in CT $id"
 
   log "manager CT $id: secrets and configs"
+  render_manager_env  # From lab.conf and the CTs' current IPs, as README promises
+  render_json
   ct_push "$id" "$m/manager.env" /etc/lab-manager/manager.env 0640 0 "$gid"
   for f in sites.json slots.json manager.key; do
     ct_push "$id" "$m/$f" "/etc/lab-manager/$f" 0600 "$uid" "$gid"
