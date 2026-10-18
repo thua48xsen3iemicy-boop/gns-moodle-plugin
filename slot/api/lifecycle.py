@@ -32,6 +32,80 @@ TRANSITIONS = {
 router = APIRouter(prefix="/v1/operations", tags=["operations"])
 
 
+class LabError(RuntimeError):
+    """Operation failure with a stable error.code; the manager decides by the code, not the text."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+LAB_STATE_DIR = "/opt/gns3/projects/.lab-slot"
+
+
+class LabStore:
+    """Lab records in the student's directory, so a project continues in any slot.
+
+    Operations and idempotency keys stay in the slot's SQLite: they live for one session.
+    """
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def path(self, pid):
+        return self.root / (pid + ".json")
+
+    @staticmethod
+    def decode(data):
+        try:
+            return json.loads(data)
+        except ValueError as exc:
+            raise OSError("Corrupt lab record") from exc
+
+    def get(self, pid):
+        try:
+            return self.decode(self.path(pid).read_bytes())
+        except FileNotFoundError:
+            return None
+
+    def all(self):
+        try:
+            paths = sorted(self.root.iterdir())
+        except FileNotFoundError:
+            return []
+        return [
+            self.decode(p.read_bytes())
+            for p in paths
+            if p.suffix == ".json" and not p.name.startswith(".")
+        ]
+
+    def write(self, pid, obj):
+        # Atomic replace: a power loss leaves the old or the new record, never a mix.
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = self.root / f".{pid}.{uuid4().hex}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(json.dumps(obj).encode())
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.path(pid))
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        self.sync()
+
+    def delete(self, pid):
+        self.path(pid).unlink(missing_ok=True)
+        self.sync()
+
+    def sync(self):
+        fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
 @router.get("/{operation_id}")
 async def operation(request: Request, operation_id: str):
     return get_lifecycle(request).operation(operation_id)
@@ -57,6 +131,13 @@ class Lifecycle:
             )
             self.tasks = set()
             self.project_locks = {}
+            self.labs = LabStore(
+                Path(os.getenv("SLOT_LAB_STATE_DIR", LAB_STATE_DIR)) / "labs"
+            )
+            try:
+                self.labs.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except OSError:
+                pass  # Reported by /v1/readyz as LAB_STATE_UNAVAILABLE
             for op in self.all("operation"):
                 if op["status"] == "RUNNING":
                     op.update(
@@ -89,12 +170,16 @@ class Lifecycle:
             raise
 
     def get(self, kind, ident):
+        if kind == "lab":
+            return self.labs.get(ident)
         row = self.db.execute(
             "SELECT data FROM records WHERE kind=? AND id=?", (kind, ident)
         ).fetchone()
         return json.loads(row[0]) if row else None
 
     def all(self, kind):
+        if kind == "lab":
+            return self.labs.all()
         return [
             json.loads(r[0])
             for r in self.db.execute("SELECT data FROM records WHERE kind=?", (kind,))
@@ -102,6 +187,9 @@ class Lifecycle:
 
     def save(self, kind, ident, obj):
         obj["updated_at"] = time.time()
+        if kind == "lab":
+            self.labs.write(ident, obj)
+            return
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO records VALUES (?,?,?)",
@@ -208,10 +296,22 @@ class Lifecycle:
             )
         pid = pid or str(ticket.project_id or uuid4())
         lab = self.get("lab", pid)
+        # Ownership is the project lock held by this process. After a restart no lock is held:
+        # labs left FAILED by an earlier run (often another student's mount) do not block the
+        # slot, and run() still refuses to start while another GNS3 project has started nodes.
         for other in self.all("lab"):
-            if other["project_id"] != pid and other["state"] != "STOPPED":
+            if (
+                other["project_id"] != pid
+                and other["state"] != "STOPPED"
+                and other["project_id"] in self.project_locks
+            ):
                 raise HTTPException(
-                    409, "Another laboratory owns this slot; stop it first"
+                    409,
+                    {
+                        "code": "SLOT_OCCUPIED",
+                        "message": "Another laboratory owns this slot; stop it first",
+                        "project_id": other["project_id"],
+                    },
                 )
         if action != "deploy" and not lab:
             raise HTTPException(404, "Unknown managed laboratory")
@@ -257,7 +357,13 @@ class Lifecycle:
             except OSError as exc:
                 handle.close()
                 if isinstance(exc, BlockingIOError):
-                    raise HTTPException(409, "Project locked by another slot") from exc
+                    raise HTTPException(
+                        409,
+                        {
+                            "code": "PROJECT_LOCKED",
+                            "message": "Project locked by another slot",
+                        },
+                    ) from exc
                 raise
             self.project_locks[pid] = handle
         previous_state = lab.get("state", "FAILED")
@@ -275,16 +381,23 @@ class Lifecycle:
             "previous_state": previous_state,
         }
         op["updated_at"] = time.time()
+        # The lab record goes first: a crash before the operation is stored leaves a
+        # non-final state, which the next start turns into FAILED / SERVICE_RESTART.
         try:
-            with self.db:
-                for kind, ident, data in (
-                    ("lab", pid, lab),
-                    ("operation", op["operation_id"], op),
-                ):
+            previous = self.get("lab", pid)
+            self.labs.write(pid, lab)
+            try:
+                with self.db:
                     self.db.execute(
                         "INSERT OR REPLACE INTO records VALUES (?,?,?)",
-                        (kind, ident, json.dumps(data)),
+                        ("operation", op["operation_id"], json.dumps(op)),
                     )
+            except BaseException:
+                if previous is None:
+                    self.labs.delete(pid)
+                else:
+                    self.labs.write(pid, previous)
+                raise
         except BaseException:
             if newly_locked:
                 self.project_locks.pop(pid).close()
@@ -440,8 +553,9 @@ class Lifecycle:
                 if (
                     op["action"] == "resume" or lab.get("creation_complete")
                 ) and not any(p["project_id"] == pid for p in projects):
-                    raise RuntimeError(
-                        "Saved project is missing; refusing to recreate student disks"
+                    raise LabError(
+                        "PROJECT_MISSING",
+                        "Saved project is missing; refusing to recreate student disks",
                     )
                 for project in projects:
                     if (
@@ -463,8 +577,9 @@ class Lifecycle:
                     lab["creation_complete"] = True
                     self.save("lab", pid, lab)
                 if not initial and not lab.get("provisioned"):
-                    raise RuntimeError(
-                        "Provisioning completion is unknown; refusing to skip or replay commands. Operator reconciliation required"
+                    raise LabError(
+                        "PROVISIONING_UNKNOWN",
+                        "Provisioning completion is unknown; refusing to skip or replay commands. Operator reconciliation required",
                     )
                 await self.validate_topology(lab)
                 self.update(lab, "STARTING", "start_devices", progress=20)
@@ -491,7 +606,8 @@ class Lifecycle:
                 self.update(lab, "READY", "ready", progress=100, active_node_id=None)
             op["status"] = "SUCCEEDED"
         except Exception as exc:  # noqa: BLE001 - persist failures at the background-task boundary.
-            error = {"code": type(exc).__name__, "message": str(exc)}
+            code = exc.code if isinstance(exc, LabError) else type(exc).__name__
+            error = {"code": code, "message": str(exc)}
             self.update(lab, "FAILED", "operation_failed", error=error)
             op.update(status="FAILED", error=error)
         finally:

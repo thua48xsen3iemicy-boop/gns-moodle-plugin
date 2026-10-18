@@ -293,3 +293,61 @@ def test_new_routes_on_old_main_fail_with_diagnostic():
         response = client.post("/v1/labs/deploy", json=payload())
         assert response.status_code == 503
         assert response.json()["detail"]["code"] == "SERVICE_NOT_INITIALIZED"
+
+
+def test_failed_lab_of_earlier_run_does_not_own_slot(mock_server):
+    """The manager reuses a slot for another student after the operator restarted its CT."""
+    client, projects, _ = mock_server
+    first = payload()
+    response = client.post("/v1/labs/deploy", json=first, headers=HEADERS)
+    assert wait(client, response)["status"] == "SUCCEEDED"
+    lifecycle = app.state.lifecycle
+    pid = first["project_id"]
+
+    def fail():  # SQLite belongs to the event loop thread of the TestClient
+        lab = lifecycle.get("lab", pid)
+        lifecycle.update(lab, "FAILED", "monitor", error={"code": "X", "message": "x"})
+
+    client.portal.call(fail)
+    # While this process holds the project lock, a FAILED lab keeps the slot.
+    busy = client.post("/v1/labs/deploy", json=payload(), headers=HEADERS)
+    assert busy.status_code == 409
+    assert busy.json()["detail"]["code"] == "SLOT_OCCUPIED"
+    assert busy.json()["detail"]["project_id"] == pid
+    # Restart: no lock is held, and another student's directory is mounted.
+    client.portal.call(lambda: lifecycle.project_locks.pop(pid).close())
+    projects.clear()
+    second = client.post("/v1/labs/deploy", json=payload(), headers=HEADERS)
+    assert wait(client, second)["status"] == "SUCCEEDED"
+    status = client.get(f"/v1/labs/{pid}/status", headers=HEADERS)
+    assert status.json()["state"] == "FAILED"
+
+
+def test_failed_lab_of_earlier_run_still_blocks_running_project(mock_server):
+    """Without the lock, the running-project check of run() still protects the slot."""
+    client, _, _ = mock_server
+    first = payload()
+    response = client.post("/v1/labs/deploy", json=first, headers=HEADERS)
+    assert wait(client, response)["status"] == "SUCCEEDED"
+    lifecycle = app.state.lifecycle
+    pid = first["project_id"]
+
+    def restart():  # what Lifecycle() does to a READY lab after a service restart
+        lifecycle.update(lifecycle.get("lab", pid), "FAILED", "restart_requires_resume")
+        lifecycle.project_locks.pop(pid).close()
+
+    client.portal.call(restart)
+    other = dict(payload(), name="other")
+    op = wait(client, client.post("/v1/labs/deploy", json=other, headers=HEADERS))
+    assert op["status"] == "FAILED"
+    assert "Another GNS3 project is running" in op["error"]["message"]
+
+
+def test_capabilities(mock_server):
+    client, _, _ = mock_server
+    assert client.get("/v1/capabilities").status_code == 401
+    body = client.get("/v1/capabilities", headers=HEADERS).json()
+    assert body["schema"] == "gns3lab.capabilities/1"
+    assert body["slot_version"] == release.VERSION
+    assert body["deploy_schemas"] == ["gns3lab.deploy/1"]
+    assert set(body["features"]) == {"qemu", "iou", "vpcs", "qga", "iol-cli", "student-state"}
