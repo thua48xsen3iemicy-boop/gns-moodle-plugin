@@ -11,16 +11,46 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from .images import IMAGE_ID_RE, ImageError, load_images
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # One path component, as the node agent requires
-PERSISTENCE = ("fresh", "resume")
 GUEST_ACTIONS = ("init_slot", "daemon_reload", "start_slot_service", "restart_slot_service")
 
 
 class ConfigError(RuntimeError):
     pass
+
+
+class SiteLimits(BaseModel):
+    """What labs defined in this site's Moodle may use (plugin request П13)."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_nodes: int = Field(default=100, ge=1, le=100)
+    max_memory_mb: int | None = Field(default=None, ge=256)
+    max_cpus: int | None = Field(default=None, ge=1)
+    images: list[str] | None = None  # Allowed image ids; None (or "*" in the file) = all
+
+    @field_validator("images", mode="before")
+    @classmethod
+    def star_means_all(cls, value):
+        return None if value == "*" else value
+
+    @field_validator("images")
+    @classmethod
+    def image_ids(cls, value):
+        if value is not None and not all(re.fullmatch(IMAGE_ID_RE, i) for i in value):
+            raise ValueError("images must be image ids or \"*\"")
+        return value
+
+    def allows(self, image_id: str) -> bool:
+        return self.images is None or image_id in self.images
+
+    def public(self) -> dict:
+        return {"max_nodes": self.max_nodes, "max_memory_mb": self.max_memory_mb, "max_cpus": self.max_cpus,
+                "images": "*" if self.images is None else list(self.images)}
 
 
 class SiteConfig(BaseModel):
@@ -29,6 +59,7 @@ class SiteConfig(BaseModel):
     url: str = Field(min_length=1, max_length=255)  # Exactly $CFG->wwwroot, sent as X-Moodle-Site
     slug: str  # Short, path-safe name used for the student directory tree
     secret: str = Field(min_length=32, repr=False)
+    limits: SiteLimits = Field(default_factory=SiteLimits)
 
     @field_validator("url")
     @classmethod
@@ -101,7 +132,6 @@ class Settings:
     slot_code_revision: str | None = None  # None: shared <ceph>/slot, else <ceph>/slot/<revision>
     agent_start_actions: tuple[str, ...] = ("init_slot",)
     placeholder_student_key: str | None = None  # Mounted read-only into a released slot
-    lab_persistence: str = "fresh"
     node_memory_reserve_mb: int = 2048
     listen_host: str = "127.0.0.1"
     listen_port: int = 8090
@@ -116,6 +146,9 @@ class Settings:
     slot_timeout: float = 10.0
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
+    queue_timeout: float = 600.0  # Seconds a session may wait for a slot; 0 = no limit
+    images: dict | None = None  # Image catalog by id (IMAGES_FILE); None: no labs from Moodle
+    lab_memory_overhead_mb: int = 1024  # Added to node memory when sizing a CT for a lab definition
     default_max_duration: int = 180  # Minutes
     max_duration_limit: int = 480  # Minutes; upper bound for options.max_duration from the plugin
     worker_interval: float = 2.0
@@ -167,6 +200,10 @@ def load(env=None, check_mode=True) -> Settings:
         raise ConfigError("Duplicate site url or slug")
     if len({s.vmid for s in slots}) != len(slots) or len({s.address for s in slots}) != len(slots):
         raise ConfigError("Duplicate slot vmid or address")
+    # Every CT clone needs its own slot.env (agent AGENT_REQUESTS §5); the slot cannot see this.
+    tokens = [s.api_token for s in slots] + [s.console_token for s in slots if s.console_token]
+    if len(set(tokens)) != len(tokens):
+        raise ConfigError("Slot tokens must be unique per slot and differ between API and console")
 
     nodes = tuple(n.strip() for n in required("PVE_NODES").split(",") if n.strip())
     for node in nodes:
@@ -183,9 +220,21 @@ def load(env=None, check_mode=True) -> Settings:
     actions = tuple(a.strip() for a in env.get("AGENT_START_ACTIONS", "init_slot").split(",") if a.strip())
     if any(a not in GUEST_ACTIONS for a in actions) or len(actions) > 3:
         raise ConfigError(f"AGENT_START_ACTIONS: up to three of {GUEST_ACTIONS}")
-    persistence = env.get("LAB_PERSISTENCE", "fresh").strip()
-    if persistence not in PERSISTENCE:
-        raise ConfigError(f"LAB_PERSISTENCE must be one of {PERSISTENCE}")
+    # Every session continues the student's project (Lab Slot >= 0.4.0 keeps its lab record in the
+    # student directory). The old fresh mode is gone; a leftover setting must not be silently ignored.
+    if env.get("LAB_PERSISTENCE", "resume").strip() != "resume":
+        raise ConfigError("LAB_PERSISTENCE was removed: a student's project always continues; delete the line")
+
+    images = None
+    if env.get("IMAGES_FILE", "").strip():
+        try:
+            images = load_images(Path(env["IMAGES_FILE"].strip()))
+        except ImageError as exc:
+            raise ConfigError(str(exc)) from exc
+        for site in sites:
+            unknown = sorted(set(site.limits.images or ()) - set(images))
+            if unknown:
+                raise ConfigError(f"Site {site.slug}: limits.images lists unknown images {unknown}")
 
     gateway_public = required("GATEWAY_PUBLIC_URL").rstrip("/")
     if not gateway_public.startswith(("wss://", "ws://")):
@@ -210,7 +259,6 @@ def load(env=None, check_mode=True) -> Settings:
         slot_code_revision=_key(env, "SLOT_CODE_REVISION"),
         agent_start_actions=actions,
         placeholder_student_key=_key(env, "PLACEHOLDER_STUDENT_KEY", "placeholder"),
-        lab_persistence=persistence,
         node_memory_reserve_mb=_int(env, "NODE_MEMORY_RESERVE_MB", 2048, 0, 10**7),
         listen_host=env.get("MANAGER_LISTEN_HOST", "127.0.0.1"),
         listen_port=_int(env, "MANAGER_LISTEN_PORT", 8090, 1, 65535),
@@ -223,6 +271,9 @@ def load(env=None, check_mode=True) -> Settings:
         slot_timeout=_int(env, "SLOT_TIMEOUT", 10, 1, 300),
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),
+        queue_timeout=_int(env, "QUEUE_TIMEOUT", 600, 0, 86400),
+        images=images,
+        lab_memory_overhead_mb=_int(env, "LAB_MEMORY_OVERHEAD_MB", 1024, 0, 65536),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),
         max_duration_limit=_int(env, "MAX_DURATION_LIMIT", 480, 1, 7 * 24 * 60),
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),

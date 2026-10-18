@@ -6,11 +6,10 @@ from conftest import make_env
 from lab_manager.store import Fenced
 
 
-async def new_session(store, user_id, instance_id=1, lab_ref="cisco-3x2", persistence="fresh"):
+async def new_session(store, user_id, instance_id=1, lab_ref="cisco-3x2"):
     return await store.create_session(
         site="main", user_id=user_id, instance_id=instance_id, course_id=5, lab_ref=lab_ref,
-        max_duration=60, student_key=f"main-{user_id}", resources={"memory_mb": 1024},
-        persistence=persistence)
+        max_duration=60, student_key=f"main-{user_id}", resources={"memory_mb": 1024})
 
 
 def cand(*vmids):
@@ -25,20 +24,17 @@ async def test_create_session_is_idempotent_under_concurrency(tmp_path, dsn):
         assert sum(created for _, created in results) == 1
 
 
-async def test_project_identity_per_persistence_mode(tmp_path, dsn):
+async def test_one_project_per_workspace(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         store = env.services.store
-        a, _ = await new_session(store, 1, persistence="fresh")
+        a, _ = await new_session(store, 1)
         await store.finish_session(a, status="stopped", message="x")
-        b, _ = await new_session(store, 1, persistence="fresh")
-        assert a["project_id"] != b["project_id"]  # Fresh: a new GNS3 project every time
-        assert b["project_name"] == f"cisco-3x2-{b['id']}"
+        b, _ = await new_session(store, 1)
+        assert a["project_id"] == b["project_id"]  # The next session continues the same project
+        assert b["project_name"] == f"cisco-3x2-w{b['workspace_id']}"
         await store.finish_session(b, status="stopped", message="x")
-        c, _ = await new_session(store, 1, persistence="resume")
-        await store.finish_session(c, status="stopped", message="x")
-        d, _ = await new_session(store, 1, persistence="resume")
-        assert c["project_id"] == d["project_id"]  # Resume: the workspace project
-        assert d["project_name"] == f"cisco-3x2-w{d['workspace_id']}"
+        c, _ = await new_session(store, 1, instance_id=2)
+        assert c["project_id"] != a["project_id"]  # Another activity: another workspace
 
 
 async def test_concurrent_allocation_gives_distinct_slots(tmp_path, dsn):

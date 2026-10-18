@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import VERSION
+from . import VERSION, labdef
 from .agent_client import AgentClient
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
@@ -50,10 +50,15 @@ class ClientInfo(Strict):
 class SessionCreate(Strict):
     user_id: int = Field(gt=0)
     instance_id: int = Field(gt=0)
-    lab_ref: str = Field(min_length=1, max_length=64)
+    lab_ref: str | None = Field(default=None, min_length=1, max_length=64)
+    lab: dict | None = None  # gns3lab.lab/1 from Moodle, checked by labdef.check (exactly one of the two)
     course_id: int | None = Field(default=None, ge=0)
     options: SessionOptions | None = None
     client: ClientInfo | None = None
+
+
+class LabValidate(Strict):
+    lab: dict
 
 
 class TicketRequest(Strict):
@@ -188,6 +193,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             "schema": "gns3lab.session/1",
             "session_id": s["id"],
             "lab_ref": s["lab_ref"],
+            "lab_def": s["lab_def"],
             "status": s["status"],
             "stage": s["stage"],
             "status_message": s["status_message"],
@@ -244,13 +250,38 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                                      "checks": checks})
 
     # ------------------------------------------------------------------ SPEC §3
+    def site_images(site):
+        return {k: v for k, v in (settings.images or {}).items() if site.limits.allows(k)}
+
+    def check_lab(lab, site):
+        if settings.images is None:
+            raise ApiError(400, "unsupported_field", "Lab definitions are not enabled (no image catalog)")
+        try:
+            return labdef.check(lab, settings.images, site.limits, overhead_mb=settings.lab_memory_overhead_mb)
+        except labdef.LabInvalid as exc:
+            raise ApiError(422, "lab_invalid", "The lab definition is invalid", problems=exc.problems) from exc
+
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
-        features = ["consoles", "observer"]
-        if settings.lab_persistence == "resume":
-            features.append("resume")  # The next session continues the student's project
-        return {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
+        features = ["consoles", "observer", "resume"]  # The next session continues the student's project
+        body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": OPTIONS, "features": features}
+        if settings.images is not None:
+            features += ["images", "lab_definitions"]
+            body["lab_formats"] = [labdef.FORMAT]
+            body["limits"] = site.limits.public()
+        return body
+
+    @app.get("/api/v1/images")
+    async def images(site=Depends(site_of)):
+        if settings.images is None:
+            raise ApiError(404, "not_found", "No image catalog")
+        return {"images": [image.public() for image in site_images(site).values()]}
+
+    @app.post("/api/v1/labs/validate")
+    async def validate_lab(body: LabValidate, site=Depends(site_of)):
+        checked = check_lab(body.lab, site)
+        return {"lab_def": checked.lab_def, "resources": checked.resources, "warnings": []}
 
     @app.get("/api/v1/labs")
     async def list_labs(site=Depends(site_of)):
@@ -282,14 +313,20 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.post("/api/v1/sessions")
     async def create_session(body: SessionCreate, site=Depends(site_of)):
+        if (body.lab_ref is None) == (body.lab is None):
+            raise ApiError(400, "invalid_request", "Exactly one of lab_ref and lab is required")
+        # A definition is checked (and hashed) even for a repeated POST: lab_def identifies the lab.
+        checked = check_lab(body.lab, site) if body.lab is not None else None
+        lab_def = checked.lab_def if checked else None
+
         def same(s):
-            return s["instance_id"] == body.instance_id and s["lab_ref"] == body.lab_ref
+            return s["instance_id"] == body.instance_id and s["lab_ref"] == body.lab_ref and s["lab_def"] == lab_def
 
         def conflict(s):
             # The student's own other lab, so the plugin can link to it (П3).
             return ApiError(409, "session_conflict", "У студента уже запущена другая лаба; сначала остановите её",
                             conflict={"instance_id": s["instance_id"], "course_id": s["course_id"],
-                                      "lab_ref": s["lab_ref"], "status": s["status"]})
+                                      "lab_ref": s["lab_ref"], "lab_def": s["lab_def"], "status": s["status"]})
 
         existing = await store.live_session(site.slug, body.user_id)
         if existing:
@@ -297,7 +334,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 raise conflict(existing)
             return JSONResponse(status_code=200, content=await present(existing))  # options not re-applied
         try:
-            lab = await asyncio.to_thread(services.catalog.get, body.lab_ref)
+            resources = checked.resources if checked else (
+                await asyncio.to_thread(services.catalog.get, body.lab_ref)).resources
             key = student_key(site.slug, body.user_id)
         except LabNotFound as exc:
             raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
@@ -310,7 +348,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
-            student_key=key, resources=lab.resources, persistence=settings.lab_persistence,
+            student_key=key, resources=resources,
+            lab_def=lab_def, definition=checked.definition if checked else None,
         )
         if not created and not same(s):
             raise conflict(s)  # A concurrent POST for another activity won

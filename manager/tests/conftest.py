@@ -89,7 +89,7 @@ class Env:
 
 
 @asynccontextmanager
-async def make_env(tmp_path, dsn, *, vmids=(201, 202), nodes_of=None, **overrides):
+async def make_env(tmp_path, dsn, *, vmids=(201, 202), nodes_of=None, student_state=True, **overrides):
     """Services wired to fakes, pool opened, slots synced and enabled.
 
     nodes_of: {vmid: node}; by default slots are spread over pve2, pve3, pve1, ...
@@ -106,7 +106,8 @@ async def make_env(tmp_path, dsn, *, vmids=(201, 202), nodes_of=None, **override
         env.pve.add_ct(vmid, node=(nodes_of or {}).get(vmid, env.pve.nodes[(i + 1) % 3]))
     env.agent = FakeAgent(env.pve)
     env.projects = {}
-    env.slots = {vmid: FakeSlot(s.address, env.timeline, env.projects) for vmid, s in env.settings.slots.items()}
+    env.slots = {vmid: FakeSlot(s.address, env.timeline, env.projects, student_state=student_state)
+                 for vmid, s in env.settings.slots.items()}
     env.gateway = FakeGateway()
     env.services = Services(
         env.settings, pve_transport=env.pve.transport(), agent_transport=env.agent.transport(),

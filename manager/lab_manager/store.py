@@ -76,16 +76,21 @@ class Store:
             )
             if not await cur.fetchone():
                 raise ValueError("Slot is in use or unknown")
+            if state == "free":
+                # `slot-enable` confirmed the CT is stopped: no student directory is writable there.
+                await conn.execute("UPDATE slots SET student_key = NULL WHERE vmid = %s", (vmid,))
             await self._event(conn, None, vmid, "slot_admin_state", {"state": state})
 
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
-                             student_key, resources, persistence):
+                             student_key, resources, lab_def=None, definition=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
 
-        persistence='resume': the session reuses the workspace project_id (same GNS3 project);
-        'fresh': every session deploys a new project.
+        The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
+        Every session of a workspace runs its one GNS3 project (same project_id, on any slot).
         """
+        lab_key = lab_ref or lab_def
+        label = lab_ref or "lab-" + lab_def.removeprefix("sha256:")[:8]  # Start of project names
         for _ in range(3):
             existing = await self.live_session(site, user_id)
             if existing:
@@ -93,38 +98,36 @@ class Store:
             try:
                 async with self.pool.connection() as conn, conn.transaction():
                     cur = await conn.execute(
-                        "INSERT INTO workspaces (site, user_id, instance_id, lab_ref, project_id, project_name)"
-                        " VALUES (%s, %s, %s, %s, %s, '')"
-                        " ON CONFLICT (site, user_id, instance_id, lab_ref) DO NOTHING RETURNING id",
-                        (site, user_id, instance_id, lab_ref, uuid.uuid4()),
+                        "INSERT INTO workspaces (site, user_id, instance_id, lab_ref, lab_def, definition, lab_key,"
+                        " project_id, project_name) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '')"
+                        " ON CONFLICT (site, user_id, instance_id, lab_key) DO NOTHING RETURNING id",
+                        (site, user_id, instance_id, lab_ref, lab_def,
+                         Jsonb(definition) if definition is not None else None, lab_key, uuid.uuid4()),
                     )
                     row = await cur.fetchone()
                     if row:
                         await conn.execute(
                             "UPDATE workspaces SET project_name = %s WHERE id = %s",
-                            (f"{lab_ref}-w{row['id']}"[:120], row["id"]),
+                            (f"{label}-w{row['id']}"[:120], row["id"]),
                         )
                     cur = await conn.execute(
                         "SELECT * FROM workspaces WHERE site = %s AND user_id = %s"
-                        " AND instance_id = %s AND lab_ref = %s",
-                        (site, user_id, instance_id, lab_ref),
+                        " AND instance_id = %s AND lab_key = %s",
+                        (site, user_id, instance_id, lab_key),
                     )
                     ws = await cur.fetchone()
                     sid = new_session_id()
-                    if persistence == "resume":
-                        project_id, name = ws["project_id"], ws["project_name"]
-                    else:
-                        project_id, name = uuid.uuid4(), f"{lab_ref}-{sid}"[:120]
+                    project_id, name = ws["project_id"], ws["project_name"]
                     await conn.execute(
-                        "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref,"
+                        "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref, lab_def,"
                         " workspace_id, student_key, project_id, project_name, resources,"
                         " status, stage, status_message, max_duration)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s)",
-                        (sid, site, user_id, instance_id, course_id, lab_ref, ws["id"], student_key,
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s)",
+                        (sid, site, user_id, instance_id, course_id, lab_ref, lab_def, ws["id"], student_key,
                          project_id, name, Jsonb(resources) if resources else None,
                          "Ожидание свободного слота…", max_duration),
                     )
-                    await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref})
+                    await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref, "lab_def": lab_def})
                 return await self.session(sid), True
             except psycopg.errors.UniqueViolation:
                 continue  # A concurrent POST won; return its session
@@ -231,6 +234,34 @@ class Store:
             await self._event(conn, session["id"], vmid, "slot_allocated",
                               {"generation": generation, "node": nodes[vmid]})
             return vmid
+
+    async def usable_slots(self):
+        """Slots that can be handed out now or later without the operator (П8 of the plugin)."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT vmid FROM slots WHERE in_config AND state NOT IN ('failed', 'maintenance')"
+            )
+            return [r["vmid"] for r in await cur.fetchall()]
+
+    async def slot_holding_student(self, student_key):
+        """A slot whose CT may still have this student's directory mounted read-write."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT vmid FROM slots WHERE student_key = %s ORDER BY vmid LIMIT 1", (student_key,)
+            )
+            row = await cur.fetchone()
+            return row["vmid"] if row else None
+
+    async def set_slot_student(self, session, student_key):
+        """Fenced: record (or clear, with None) the student mounted in the session's slot."""
+        async with self.pool.connection() as conn, conn.transaction():
+            cur = await conn.execute(
+                "UPDATE slots SET student_key = %s, updated_at = now() WHERE vmid = %s AND generation = %s"
+                " RETURNING vmid",
+                (student_key, session["slot_vmid"], session["slot_generation"]),
+            )
+            if not await cur.fetchone():
+                raise Fenced(f"Slot {session['slot_vmid']} generation changed")
 
     async def free_slots(self):
         async with self.pool.connection() as conn:

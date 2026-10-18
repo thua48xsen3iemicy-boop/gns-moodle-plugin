@@ -19,6 +19,7 @@
 | Конфиг и секреты | `/etc/lab-manager/` (`manager.env`, `sites.json`, `slots.json`, `pve-root-ca.pem`, `node-server-ca.crt`, `manager.crt`, `manager.key`) — не в Git и не на CephFS |
 | PostgreSQL | локально в этом LXC, данные — `/var/lib/postgresql` на rootfs (RBD), не на CephFS |
 | Каталог лаб | `/srv/gns3-ro/labs/<lab_ref>/` (RO CephFS) |
+| Шлюз консолей | в **этом же LXC**, код менеджера (решение владельца): `gateway/console_gateway.py`, отдельный процесс, один на все слоты (§1.1) |
 
 Обновление кода: остановить сервис → заменить `/srv/gns3-ro/manager` → `admin migrate`, если
 есть новые миграции → запустить сервис.
@@ -33,7 +34,46 @@ pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
 
 Каталоги студентов менеджеру не нужны: монтирует их агент, а создаёт сторона Proxmox (п. 2).
 Нужен сетевой доступ к API Proxmox (8006), к агентам узлов (8443, firewall агента пускает
-только менеджер), к слотам (8080) и к внутреннему API шлюза.
+только менеджер) и к слотам (8080): к REST слота ходит менеджер, к консолям — шлюз.
+
+### 1.1. Шлюз консолей в этом LXC
+
+Браузеры подключают консоли к шлюзу, а не к менеджеру; сам менеджер наружу не открыт (к нему ходит
+только сервер Moodle). Шлюз — отдельный процесс в том же LXC. Код, тест, unit и nginx — в
+`gateway/` (перешёл от плагина, шлюз 0.4.5). Договорённости с браузерной частью плагина (адрес,
+билет, кадры, коды закрытия 4000/4001) — `plugin/docs/MANAGER_REQUESTS.md` §12; менять их только
+через `docs/PLUGIN_REQUESTS.md`.
+
+```
+браузер ──wss──> nginx :443  /console/  ──ws──> шлюз 127.0.0.1:8080 ──ws──> слот :8080 /v1/console/…
+сервер Moodle ──https──> nginx ──> менеджер 127.0.0.1:8090 ──http──> шлюз 127.0.0.1:8080/internal/tickets
+```
+
+- Шлюз слушает только `127.0.0.1` (`GW_HOST=127.0.0.1`, `GW_PORT=8080`). Наружу nginx публикует
+  **только** `/console/` (с `Upgrade`/`Connection` для WebSocket и `proxy_read_timeout` больше 25 с:
+  шлюз шлёт ping каждые 25 с). `/internal/tickets` наружу не публикуется.
+- Менеджер: `GATEWAY_INTERNAL_URL=http://127.0.0.1:8080`, `GATEWAY_INTERNAL_KEY` = `GW_INTERNAL_KEY`
+  шлюза, `GATEWAY_PUBLIC_URL=wss://<публичное имя>` (без `/` на конце).
+- Шлюз: переменные `GW_*` не пишутся руками, их генерирует менеджер из своего конфига
+  (`GW_SLOTS` — адреса и `console_token` из `slots.json`, `GW_ALLOWED_ORIGINS` — origin сайтов из
+  `sites.json`, `GW_INTERNAL_KEY` = `GATEWAY_INTERNAL_KEY`, порт — из `GATEWAY_INTERNAL_URL`).
+  После любого изменения `slots.json` или `sites.json` файл нужно сгенерировать заново и перезапустить шлюз.
+- Шлюз работает под своим временным пользователем (`DynamicUser`), секретов менеджера (токен
+  Proxmox, API-токены слотов) он не видит.
+- Шлюз один на все слоты: билеты живут в его памяти, и менеджер рассчитан на один шлюз.
+
+Установка (после §3):
+
+```sh
+cd /srv/gns3-ro/manager
+venv/bin/python -m pip install -r gateway/requirements.txt          # aiohttp, в тот же venv
+sudo -u lab-manager ./lab-manager-admin gateway-env | install -m 600 /dev/stdin /etc/lab-manager/gateway.env
+cp gateway/lab-console-gateway.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now lab-console-gateway
+# nginx: блок из gateway/nginx-console.conf внутрь server {} с TLS для имени из GATEWAY_PUBLIC_URL
+```
+
+Проверка без слотов: `venv/bin/python gateway/tests/check_gateway.py` → `ALL OK` (поддельный слот).
 
 ## 2. Сторона Proxmox: агент, слоты, каталоги
 
@@ -112,9 +152,12 @@ Uvicorn работает в один процесс: оркестратор жи
 | Переменная | Смысл |
 |---|---|
 | `DATABASE_URL` | `postgresql:///lab_manager` (сокет, peer) |
-| `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`; **после появления данных не меняется**: новый slug — это новые каталоги студентов), `secret` (Bearer) |
-| `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token` |
+| `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`; **после появления данных не меняется**: новый slug — это новые каталоги студентов), `secret` (Bearer), необязательные `limits` для лаб из Moodle: `max_nodes` (≤ 100), `max_memory_mb`, `max_cpus`, `images` (список `id` или `"*"`) |
+| `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token`. Токены у всех слотов разные (каждый клон CT со своим `slot.env`), иначе менеджер не стартует |
 | `LABS_DIR` | каталог лаб; `meta.json` может задавать `resources: {cores, memory_mb}` |
+| `IMAGES_FILE` | каталог образов для лаб, которые преподаватели собирают в Moodle (пример — `examples/images.json`). Не задан — лабы только из `LABS_DIR`. Формат и проверки — `lab_manager/images.py` |
+| `LAB_MEMORY_OVERHEAD_MB` | запас памяти CT для лабы из Moodle: память нод + 10 % + это значение (по умолчанию 1024) |
+| `QUEUE_TIMEOUT` | сколько секунд сессия ждёт слот, потом `failed` с `QUEUE_TIMEOUT`; `0` — без ограничения (по умолчанию 600) |
 | `PVE_NODES`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_FILE` | точки входа API, токен, CA кластера |
 | `AGENT_URL_TEMPLATE` | `https://{node}.lab.local:8443`; `{node}` — имя узла Proxmox, хост — как в SAN сертификата агента |
 | `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | `node-server-ca.crt`, `manager.crt`, `manager.key` |
@@ -123,7 +166,6 @@ Uvicorn работает в один процесс: оркестратор жи
 | `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
 | `SLOT_CODE_REVISION` | пусто: общий `<ceph>/slot`; иначе `<ceph>/slot/<revision>` |
 | `PLACEHOLDER_STUDENT_KEY` | что монтировать RO в освобождённый слот (`placeholder`; пусто — не перемонтировать) |
-| `LAB_PERSISTENCE` | `fresh` (новый проект в каждой сессии) или `resume` (тот же проект; когда слот научится переносить состояние лабы — `student-state`, DESIGN §6.1) |
 | `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении |
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
 | `DEFAULT_MAX_DURATION`, `MAX_DURATION_LIMIT` | длительность сессии по умолчанию и предел для `options.max_duration` от плагина, минуты |
@@ -169,9 +211,25 @@ $ADM slot-maintenance 2001
 ```
 
 Новый слот из `slots.json` появляется в состоянии `maintenance`, пока оператор его не включит.
-После `failed` менеджер ничего не делает сам. Оператор разбирается со слотом (статус лабы,
-`GET /v1/operations/…`), при необходимости останавливает лабу в слоте и CT (через агента или
-`pct`) и включает слот (`slot-enable`). Студент тем временем может запустить лабу на любом другом слоте.
+При сбое сессии менеджер сам останавливает лабу в слоте (если она могла там появиться) и CT и
+монтирует заглушку: каталог студента не остаётся подключённым к работающему CT (DESIGN §6.4).
+Слот при этом остаётся `failed`. Оператор разбирается (журнал слота, `GET /v1/operations/…`,
+`events` менеджера) и включает слот (`slot-enable`). Студент тем временем может запустить лабу на
+любом другом слоте.
+
+Если CT остановить не удалось, `slots` показывает у слота `student_key`. Пока оператор не
+выключит CT и не сделает `slot-enable`, этот студент получает `STUDENT_DIR_BUSY`: его каталог не
+монтируется во второй слот.
+
+**Нужен Lab Slot 0.4.0 или новее.** Следующая сессия студента всегда продолжает его проект
+(DESIGN §6.1), в каком бы слоте она ни запустилась; настройки `LAB_PERSISTENCE` больше нет (если она
+осталась в `manager.env` со значением, отличным от `resume`, менеджер не стартует). Проекты, которые
+создал слот 0.3 в старом режиме `fresh` (по проекту на сессию), продолжаться не будут: это просто
+старые каталоги в `students/<key>/`, их можно удалить вручную.
+
+При обновлении до схемы 3 (`admin migrate`) у каждого слота не в `free` ставится `student_key`
+его последней сессии: про такие слоты менеджер не знает, выключен ли CT. Проверьте их и сделайте
+`slot-enable`, иначе их последние студенты будут получать `STUDENT_DIR_BUSY`.
 
 ## 7. Тесты
 
@@ -187,6 +245,7 @@ DATABASE_URL=postgresql:///lab_manager_test /tmp/lm-venv/bin/python -m pytest -q
 Proxmox, агент узла, Lab Slot и шлюз подменяются через `httpx.MockTransport` (`tests/fakes.py`).
 Ответы на ревью разработчика агента и что по ним исправлено — [`docs/AGENT_REVIEW_ANSWERS.md`](docs/AGENT_REVIEW_ANSWERS.md).
 Ответы разработчику плагина — [`docs/PLUGIN_REQUESTS.md`](docs/PLUGIN_REQUESTS.md).
+Ответы разработчику слота (на `slot/docs/ALIGNMENT.md`) — [`docs/SLOT_REQUESTS.md`](docs/SLOT_REQUESTS.md).
 Что проверено тестами:
 - перебор нод Proxmox: первая не отвечает → вторая; последняя рабочая — первой; 4xx и 500 не
   переключают; 503 на GET переключает; изменяющий запрос с неизвестным исходом не повторяется;
@@ -203,8 +262,8 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
   и `slot stop → агент shutdown → заглушка RO`; shutdown завис → `force`;
 - слоты не привязаны: тот же студент идёт в другой слот, слот — к другому студенту;
 - размещение best fit по памяти узлов, резерв ещё не запущенных слотов, offline-узел, нехватка ресурсов;
-- режимы `fresh`/`resume`: новый проект в каждой сессии; тот же проект в том же слоте;
-  понятная ошибка `SLOT_COLD_RESUME_UNSUPPORTED` в другом слоте;
+- следующая сессия продолжает тот же проект и в том же, и в другом слоте (слот 0.4.0); со слотом
+  0.3 в другом слоте — понятная ошибка `SLOT_COLD_RESUME_UNSUPPORTED`;
 - `student_key`: только безопасный компонент пути по правилам агента;
 - выдача: конкурентная (8 студентов на 5 слотов), порядок кандидатов, fencing, идемпотентный `POST /sessions`;
 - восстановление: потерян ответ на старт (второго старта нет), рестарт менеджера посреди deploy,
@@ -223,4 +282,5 @@ Proxmox, агент узла, Lab Slot и шлюз подменяются чер
 - реальный PVE: права токена из §5, `/cluster/resources` с узлами, применение `cores`/`memory`;
 - CephFS: владелец каталога студента (uid `gns3` слота), запись в `/opt/gns3/projects` из слота; `.slot-locks` в каталоге студента (DESIGN §5);
 - настоящий Lab Slot и GNS3: длительность deploy, `readyz` после старта LXC, путь кода (DESIGN §11, В1);
-- шлюз консолей с реальными `GW_SLOTS`, systemd unit, preflight в LXC.
+- шлюз консолей в LXC менеджера (§1.1): unit, nginx и `gateway-env` на настоящем systemd и с настоящими
+  слотами.
