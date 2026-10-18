@@ -86,6 +86,9 @@ Mounts always have host path → guest path mapping:
 
 - `mp0`: `/mnt/pve/cfs/gns3-ro/slot` (or `.../slot/<code_revision>`) → `/srv/gns3-ro/slot`, always **read-only**.
 - `mp1`: `/mnt/pve/cfs/gns3-rw/students/<student_key>` → `/opt/gns3/projects`, **read-only** when `data_mode=ro`, or **read-write** when `data_mode=rw`.
+- `mp2` (only when `LAB_IMAGES_DIR` is set): `$LAB_CEPH_ROOT/$LAB_IMAGES_DIR` → `/opt/gns3/images`,
+  always **read-only**: the GNS3 images shared by all slots (`QEMU/`, `IOU/`, firmware). Unset,
+  `mp2` is left alone (images in the slot's rootfs or on an administrator's mount point).
 
 Host sources are `$LAB_CEPH_ROOT/$LAB_CODE_DIR` and `$LAB_CEPH_ROOT/$LAB_STUDENTS_DIR`
 (unit defaults `/mnt/pve/cfs`, `gns3-ro/slot`, `gns3-rw/students`): the repository checkout
@@ -262,6 +265,7 @@ project lock directory:
 |---|---|---|
 | `/mnt/pve/cfs/gns3-ro/slot` or `/mnt/pve/cfs/gns3-ro/slot/<code_revision>` | `/srv/gns3-ro/slot` | RO |
 | `/mnt/pve/cfs/gns3-rw/students/<student_key>` | `/opt/gns3/projects` | `data_mode` RO/RW |
+| `/mnt/pve/cfs/<LAB_IMAGES_DIR>` (optional) | `/opt/gns3/images` | RO |
 
 The code source must contain `run.py`, `release.py`, `main.py` and `venv/`
 directly. Build the venv at `/srv/gns3-ro/slot/venv` in an environment compatible
@@ -270,11 +274,20 @@ absolute path must be rebuilt. Normal GNS3 project creation needs `data_mode=rw`
 RO is supported for mounting but does not permit writable lab operations.
 
 The LXC template must configure GNS3's project directory to
-`/opt/gns3/projects`, provide shared read-only images under `/opt/gns3/images`
-(including `QEMU/` and `IOU/`), and provision `/opt/gns3/qga` with appropriate
-permissions. This agent manages only mp0 and mp1; it does not provision those
-image/QGA paths, change GNS3 configuration, install the guest service or token,
-or move persistent Slot state from `/var/lib/lab-slot`.
+`/opt/gns3/projects`, have its images under `/opt/gns3/images` (including `QEMU/`
+and `IOU/`; with `LAB_IMAGES_DIR` the agent mounts them there), and provision
+`/opt/gns3/qga` with appropriate permissions. This agent manages only mp0, mp1
+and, with `LAB_IMAGES_DIR`, mp2; it does not provision the QGA path, change GNS3
+configuration, install the guest service or token, or move persistent Slot state
+from `/var/lib/lab-slot`.
+
+The images directory gets the same source checks as the others (on the CephFS mount, no symbolic
+links, root-owned ancestors without group/other write). Inside the unprivileged CT its files show
+as `nobody`, so they must be readable by others (`chmod -R go-w,o+rX`), IOL binaries executable
+(`chmod 0755 IOU/*.bin`): GNS3 cannot fix modes on a read-only mount. GNS3 also writes
+`<image>.md5sum` next to an image it reads; on a read-only mount it logs an error and hashes the
+image again every time, so create those files on CephFS once:
+`find . -type f ! -name '*.md5sum' -exec sh -c 'md5sum "$1" | cut -d" " -f1 >"$1.md5sum"' _ {} \;`
 
 For previously configured containers: stop the LXC, update the agent, then
 reapply mounts or call start. mp0/mp1 destinations are replaced; no student data

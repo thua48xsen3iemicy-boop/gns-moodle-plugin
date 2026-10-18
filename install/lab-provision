@@ -47,6 +47,9 @@ load_conf() {
     [[ -n ${!v:-} ]] || die "$v is not set in $CONF"
   done
   CEPH_ROOT=${CEPH_ROOT%/} REPO_DIR=${REPO_DIR%/} MOODLE_URL=${MOODLE_URL%/} STUDENTS_DIR=${STUDENTS_DIR%/}
+  IMAGES_DIR=${IMAGES_DIR:-} IMAGES_DIR=${IMAGES_DIR#/} IMAGES_DIR=${IMAGES_DIR%/}
+  [[ -z $IMAGES_DIR || $IMAGES_DIR =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] ||
+    die "IMAGES_DIR must be a relative path below CEPH_ROOT of plain directory names"
   [[ $REPO_DIR == "$CEPH_ROOT"/* ]] || die "REPO_DIR must be below CEPH_ROOT"
   CODE_DIR=${REPO_DIR#"$CEPH_ROOT"/}/slot  # LAB_CODE_DIR of the agent and the manager
   NODE=$(hostname)
@@ -450,6 +453,12 @@ cmd_slot() {
         pct set "$id" --delete "mp$i"
       fi
     done
+    # With IMAGES_DIR the agent also owns mp2 (images); set it now, so the checks below see the images.
+    if [[ -n $IMAGES_DIR ]]; then
+      ! pct config "$id" | grep -q '^mp2:' || pct config "$id" | grep -qE '^mp2: .*mp=/opt/gns3/images(,|$)' ||
+        die "slot $id: mp2 is used for something else, but with IMAGES_DIR the agent owns it (move it to mp3+)"
+      pct set "$id" -mp2 "$CEPH_ROOT/$IMAGES_DIR,mp=/opt/gns3/images,ro=1,shared=1"
+    fi
     ct_up "$id"
     ct_sh "$id" 'install -d -m 0700 /etc/lab-slot; install -d -m 0755 /usr/local/sbin'
     render_slot_env "$id"  # The CT's current net0 IP, not the one it had at 'secrets' (e.g. a fresh clone)
@@ -467,10 +476,19 @@ cmd_slot() {
 
 # ------------------------------------------------------------------ agent
 
+ceph_dirs() {  # ceph_dirs <path below CEPH_ROOT>: missing directories, root 0755 each
+  local path=$CEPH_ROOT p rel
+  IFS=/ read -ra rel <<<"$1"
+  for p in "${rel[@]}"; do
+    path=$path/$p
+    [[ -d $path ]] || install -d -o root -g root -m 0755 "$path"
+  done
+}
+
 cmd_agent() {
   need_secrets
   need_node
-  local d=$S/nodes/$NODE ids id f uid gid p rel path vmid_min vmid_max
+  local d=$S/nodes/$NODE ids id f uid gid p path vmid_min vmid_max
   [[ -s $d/server.key ]] || die "no certificate for node $NODE: run secrets after adding it to NODES"
   ((${#LOCAL_SLOTS[@]})) || die "no slot of SLOTS on this node ($NODE)"
   read -r vmid_min vmid_max < <(node_range "$NODE")
@@ -494,16 +512,21 @@ cmd_agent() {
     *) die "$CEPH_ROOT is not a CephFS mount point" ;;
   esac
   [[ -f $CEPH_ROOT/$CODE_DIR/run.py ]] || die "no slot code at $CEPH_ROOT/$CODE_DIR"
-  path=$CEPH_ROOT
-  IFS=/ read -ra rel <<<"$STUDENTS_DIR/placeholder"
-  for p in "${rel[@]}"; do
-    path=$path/$p
-    [[ -d $path ]] || install -d -o root -g root -m 0755 "$path"
-  done
+  ceph_dirs "$STUDENTS_DIR/placeholder"
+  if [[ -n $IMAGES_DIR ]]; then
+    ceph_dirs "$IMAGES_DIR/QEMU"
+    ceph_dirs "$IMAGES_DIR/IOU"
+    [[ -n $(find "$CEPH_ROOT/$IMAGES_DIR" -type f -print -quit) ]] ||
+      warn "$CEPH_ROOT/$IMAGES_DIR has no images yet (QEMU/, IOU/ as in /opt/gns3/images of a slot)"
+  fi
   # The agent refuses mounts below non-root or group/other-writable ancestors.
   local checked=() up=$CEPH_ROOT
   while [[ $up != / ]]; do checked+=("$up"); up=$(dirname "$up"); done
   checked+=("$REPO_DIR" "$CEPH_ROOT/$CODE_DIR" "$CEPH_ROOT/$STUDENTS_DIR")
+  if [[ -n $IMAGES_DIR ]]; then
+    path=$CEPH_ROOT/$IMAGES_DIR
+    while [[ $path != "$CEPH_ROOT" ]]; do checked+=("$path"); path=$(dirname "$path"); done
+  fi
   path=$CEPH_ROOT/$STUDENTS_DIR
   while [[ $path != "$CEPH_ROOT" ]]; do checked+=("$path"); path=$(dirname "$path"); done
   for p in "${checked[@]}"; do
@@ -523,6 +546,7 @@ cmd_agent() {
 Environment=LAB_CEPH_ROOT=$CEPH_ROOT
 Environment=LAB_CODE_DIR=$CODE_DIR
 Environment=LAB_STUDENTS_DIR=$STUDENTS_DIR
+Environment=LAB_IMAGES_DIR=$IMAGES_DIR
 Environment=LAB_VMID_MIN=$vmid_min
 Environment=LAB_VMID_MAX=$vmid_max
 Environment=LAB_STUDENT_HOST_UID=$uid
