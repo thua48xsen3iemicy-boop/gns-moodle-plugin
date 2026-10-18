@@ -29,6 +29,7 @@
 │   ├── slot/    (+ venv/)          → слот: /srv/gns3-ro/slot (RO, ставит агент)
 │   └── labs/                       → LXC менеджера: /srv/gns3-ro/labs (RO)
 ├── gns3-rw/students/               каталоги студентов → слот: /opt/gns3/projects (ставит агент)
+├── gns3-images/                    IMAGES_DIR: QEMU/, IOU/, прошивки → слот: /opt/gns3/images (RO, ставит агент)
 └── secrets/                        root 0700, никуда не монтируется
     ├── lab.conf                    настройки стенда (из install/lab.conf.example)
     ├── ca/                         CA: manager-client, node-server, web (тест: ключи здесь)
@@ -54,7 +55,24 @@
 - LXC слотов создаёте вы сами (клоны одного шаблона) на тех нодах, где они нужны: непривилегированные,
   стандартный idmap, статический IP в `net0`, Ubuntu 24.04 и GNS3 2.2.61 внутри. uid/gid `gns3`
   должны совпадать во всех слотах всех нод: каталоги студентов общие. Точки `mp0`/`mp1` слота
-  принадлежат агенту, образы GNS3 — на `mp2` и дальше или в rootfs.
+  принадлежат агенту; с `IMAGES_DIR` и `mp2` тоже (образы), без него образы — в rootfs слота.
+
+### Образы GNS3 на CephFS (`IMAGES_DIR`)
+
+Один каталог на всех: агент монтирует `<CEPH_ROOT>/<IMAGES_DIR>` в `/opt/gns3/images` каждого слота
+только на чтение. Структура — как в `/opt/gns3/images` слота (`QEMU/`, `IOU/`, прошивки рядом).
+Внутри непривилегированного CT файлы видны как `nobody`, поэтому:
+
+```sh
+I=/mnt/pve/cfs/gns3-images
+cp -a /путь/к/образам/. $I/                       # или rsync из /opt/gns3/images эталонного слота
+chown -R root:root $I && chmod -R go-w,o+rX $I && chmod 0755 $I/IOU/*.bin
+cd $I && find . -type f ! -name '*.md5sum' -exec sh -c 'md5sum "$1" | cut -d" " -f1 >"$1.md5sum"' _ {} \;
+```
+
+`.md5sum` GNS3 пишет сам рядом с образом; на RO-монтировании не может и считает хеш при каждом
+использовании, поэтому их кладём заранее (повторить для новых образов). Новый образ появляется во
+всех слотах сразу, без перезапуска; заменять существующий — без активных сессий.
 - LXC менеджера: непривилегированный Ubuntu 24.04, статический IP. Пакеты (`postgresql`,
   `nginx`, `python3.12-venv`) и пользователя `lab-manager` скрипт поставит сам.
 - Доступ в интернет (или зеркало) для `apt` и `pip` из LXC и с ноды.
@@ -115,11 +133,12 @@ $P enable 2101 2102 # на ноде менеджера: только новые 
   монтирование снимается, а `venv/` возвращается root. Повторять только при изменении
   `requirements.txt`.
 - **slot** — работает только с выключенным слотом: снимает `mp0`/`mp1` (их ставит агент при каждом
-  старте), временно запускает слот, кладёт файлы через `pct push`, проверяет Ubuntu, Python,
+  старте), с `IMAGES_DIR` ставит `mp2` с образами, пересобирает `slot.env` по текущему IP в `net0`,
+  временно запускает слот, кладёт файлы через `pct push`, проверяет Ubuntu, Python,
   GNS3, образы, `/dev/kvm`, читает uid/gid `gns3` и выключает слот.
-- **agent** — создаёт `gns3-rw/students/placeholder`, проверяет права предков, кладёт
+- **agent** — создаёт `gns3-rw/students/placeholder` (и `IMAGES_DIR` с `QEMU/`, `IOU/`), проверяет права предков, кладёт
   сертификаты ноды в `/etc/lab-node-agent`, сверяет uid/gid `gns3` со слотами других нод, пишет
-  override (`LAB_CEPH_ROOT`, `LAB_CODE_DIR`, `LAB_STUDENTS_DIR`, диапазон VMID — от меньшего до
+  override (`LAB_CEPH_ROOT`, `LAB_CODE_DIR`, `LAB_STUDENTS_DIR`, `LAB_IMAGES_DIR`, диапазон VMID — от меньшего до
   большего VMID слотов этой ноды, uid/gid `gns3` + 100000) и запускает
   `agent/install-node.sh`. Firewall для 8443 скрипт только подсказывает.
 - **manager** — монтирует `gns3-ro/manager` и `gns3-ro/labs` (RO; если `labs/` нет, берёт пример

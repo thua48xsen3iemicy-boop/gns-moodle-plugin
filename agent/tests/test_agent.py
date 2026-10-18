@@ -66,6 +66,25 @@ def test_start_with_bind_and_allowlisted_guest_action(env):
     assert [agent.PCT, "exec", "2201", "--", "/usr/bin/systemctl", "daemon-reload"] in calls
 
 
+def test_images_mounted_read_only_as_mp2_when_configured(env, monkeypatch):
+    client, calls, _, _, ceph = env
+    assert client.put("/slots/2201/mounts", json={"student_key": "student42"}).status_code == 200
+    assert "--mp2" not in next(c for c in calls if c[:2] == [agent.PCT, "set"])  # Unset: mp2 untouched
+    calls.clear()
+    monkeypatch.setattr(agent, "IMAGES_DIR", Path("gns3-images"))
+    assert client.put("/slots/2201/mounts", json={"student_key": "student42"}).json()["detail"]["code"] == "SOURCE_MISSING"
+    (ceph / "gns3-images").mkdir()
+    response = client.post("/slots/2201/start", json={"student_key": "student42", "data_mode": "rw"})
+    assert response.status_code == 200, response.text
+    command = next(c for c in calls if c[:2] == [agent.PCT, "set"])
+    assert command[command.index("--mp2") + 1] == f"{ceph}/gns3-images,mp=/opt/gns3/images,ro=1,shared=1"
+
+
+def test_images_dir_setting(monkeypatch):
+    monkeypatch.setenv("LAB_IMAGES_DIR", "gns3-images/")
+    assert agent.ceph_subdir("LAB_IMAGES_DIR", "") == Path("gns3-images")
+
+
 def test_reject_traversal_and_arbitrary_guest_command(env):
     client, calls, *_ = env
     for body in (

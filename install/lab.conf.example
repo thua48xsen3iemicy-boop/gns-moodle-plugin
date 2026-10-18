@@ -6,6 +6,9 @@
 CEPH_ROOT=/mnt/pve/cfs
 REPO_DIR=/mnt/pve/cfs/gns3-ro
 STUDENTS_DIR=gns3-rw/students
+# GNS3 images shared by all slots (QEMU/, IOU/, firmware), below CEPH_ROOT: the agent mounts it
+# read-only at /opt/gns3/images of every slot (mp2). Empty: images stay in each slot's rootfs.
+IMAGES_DIR=gns3-images
 SECRETS_DIR=/mnt/pve/cfs/secrets
 
 # Proxmox nodes with slots, <node name>=<IP on the management network>. The agent of each node is
