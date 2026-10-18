@@ -189,6 +189,9 @@ pveum user add lab-manager@pve
 pveum pool add lab-slots
 pveum pool modify lab-slots -vms 2001,2002,2003
 pveum user token add lab-manager@pve manager --privsep 1     # секрет показывается один раз
+# Токен с --privsep 1 получает пересечение своих прав и прав пользователя: роли нужны обоим.
+pveum acl modify /pool/lab-slots -user lab-manager@pve -role LabManager
+pveum acl modify /nodes -user lab-manager@pve -role LabManagerNodes
 pveum acl modify /pool/lab-slots -token 'lab-manager@pve!manager' -role LabManager
 pveum acl modify /nodes -token 'lab-manager@pve!manager' -role LabManagerNodes
 ```
