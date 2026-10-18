@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Semi-manual provisioning of one Proxmox node: secrets, node agent, slot and manager LXCs.
-# Runs as root on the node. Every change inside an LXC goes through pct (push/exec), so the
-# components keep reading their secrets from the same local paths as before.
+# Semi-manual provisioning of Proxmox nodes: secrets, node agents, slot and manager LXCs.
+# Runs as root on a cluster node. Every change inside an LXC goes through pct (push/exec), so the
+# components keep reading their secrets from the same local paths as before. pct only reaches the
+# CTs of its own node: slot and agent run on every node with slots, manager/check/enable on the
+# manager's node. Nodes and IPs of the CTs are read from /etc/pve/nodes, which every node sees.
 #
 #   install/lab-provision <step> [args]      settings: ${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
 #
@@ -22,14 +24,14 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage: lab-provision <step> [args]
-  secrets           generate CAs, certificates, tokens and config files into SECRETS_DIR
+  secrets           generate CAs, certificates, tokens and config files into SECRETS_DIR (any node)
   venv slot|manager build the Python venv of the slot or manager code on CephFS
-  slot [VMID...]    tag a stopped slot LXC and push slot.env, lab-slot-init, lab-slot.service
+  slot [VMID...]    tag a stopped slot LXC of this node and push slot.env, lab-slot-init, lab-slot.service
   agent             prepare CephFS directories and install the node agent on this node
   manager           mounts, packages, configs and services of the manager LXC (with nginx)
   moodle            give Moodle the web CA and print the plugin settings
-  check             agent, slots and manager checks
-  enable            make the slots available in the manager (slot-enable)
+  check             this node's agent and slots; on the manager's node also the manager and all agents
+  enable [VMID...]  make the slots available in the manager (slot-enable), all of SLOTS by default
 EOF
 }
 
@@ -40,7 +42,7 @@ load_conf() {
   # shellcheck source=/dev/null
   . "$CONF"
   local v
-  for v in CEPH_ROOT REPO_DIR STUDENTS_DIR SECRETS_DIR NODE_IP AGENT_DOMAIN MANAGER_VMID SLOTS \
+  for v in CEPH_ROOT REPO_DIR STUDENTS_DIR SECRETS_DIR AGENT_DOMAIN MANAGER_VMID SLOTS \
            PUBLIC_NAME MOODLE_URL MOODLE_IP SITE_SLUG; do
     [[ -n ${!v:-} ]] || die "$v is not set in $CONF"
   done
@@ -50,24 +52,82 @@ load_conf() {
   NODE=$(hostname)
   NODE_FQDN=$NODE.$AGENT_DOMAIN
   S=$SECRETS_DIR
+
+  # NODES="pve1=10.10.12.9 pve2=10.10.12.10"; a one-node lab.conf has NODE_IP for this node instead.
+  if [[ -z ${NODES:-} ]]; then
+    [[ -n ${NODE_IP:-} ]] || die "NODES is not set in $CONF"
+    NODES="$NODE=$NODE_IP"
+  fi
+  declare -gA NODE_IPS=() SLOT_NODE=()
+  NODE_NAMES=()
+  local pair n
+  for pair in $NODES; do
+    n=${pair%%=*}
+    [[ $pair =~ ^[A-Za-z0-9][A-Za-z0-9-]*=[0-9]+(\.[0-9]+){3}$ ]] || die "invalid NODES entry: $pair (expected <node>=<IP>)"
+    [[ -z ${NODE_IPS[$n]:-} ]] || die "node $n is twice in NODES"
+    [[ -d /etc/pve/nodes/$n ]] || die "NODES: $n is not a node of this cluster"
+    NODE_IPS[$n]=${pair#*=}
+    NODE_NAMES+=("$n")
+  done
+
   read -ra SLOT_IDS <<<"$SLOTS"
-  local id
+  local id lo hi
   for id in "$MANAGER_VMID" "${SLOT_IDS[@]}" ${MOODLE_VMID:-}; do
     [[ $id =~ ^[0-9]+$ ]] || die "invalid VMID: $id"
   done
-  VMID_MIN=$(printf '%s\n' "${SLOT_IDS[@]}" | sort -n | head -1)
-  VMID_MAX=$(printf '%s\n' "${SLOT_IDS[@]}" | sort -n | tail -1)
-  ((MANAGER_VMID < VMID_MIN || MANAGER_VMID > VMID_MAX)) || die "MANAGER_VMID is inside the slot VMID range"
+  LOCAL_SLOTS=()
+  for id in "${SLOT_IDS[@]}"; do
+    [[ -z ${SLOT_NODE[$id]:-} ]] || die "slot $id is twice in SLOTS"
+    n=$(ct_node "$id") || die "slot $id from SLOTS is not a CT of this cluster"
+    [[ -n ${NODE_IPS[$n]:-} ]] || die "slot $id is on node $n, which is not in NODES"
+    SLOT_NODE[$id]=$n
+    [[ $n != "$NODE" ]] || LOCAL_SLOTS+=("$id")
+  done
+  MANAGER_NODE=$(ct_node "$MANAGER_VMID") || die "MANAGER_VMID $MANAGER_VMID is not a CT of this cluster"
+  # Each agent accepts the VMID range of its own node's slots, so the manager must stay outside its node's.
+  if read -r lo hi < <(node_range "$MANAGER_NODE"); then
+    ((MANAGER_VMID < lo || MANAGER_VMID > hi)) ||
+      die "MANAGER_VMID is inside the slot VMID range of node $MANAGER_NODE ($lo-$hi)"
+  fi
+}
+
+need_node() { [[ -n ${NODE_IPS[$NODE]:-} ]] || die "this node ($NODE) is not in NODES of $CONF"; }
+
+node_range() {  # node_range <node>: "min max" VMID of the slots on that node; fails if it has none
+  local id ids=()
+  for id in "${SLOT_IDS[@]}"; do [[ ${SLOT_NODE[$id]} != "$1" ]] || ids+=("$id"); done
+  ((${#ids[@]})) || return 1
+  printf '%s\n' "${ids[@]}" | sort -n | sed -n '1p;$p' | paste -sd' '
 }
 
 # ------------------------------------------------------------------ LXC helpers
 
-ct_local() { [[ -f /etc/pve/lxc/$1.conf ]] || die "CT $1 is not on this node ($NODE)"; }
+ct_node() {  # Node that hosts CT $1: the cluster filesystem has the configs of every node
+  local f
+  for f in /etc/pve/nodes/*/lxc/"$1".conf; do
+    [[ -f $f ]] || continue
+    f=${f#/etc/pve/nodes/}
+    echo "${f%%/*}"
+    return 0
+  done
+  return 1
+}
+ct_conf() {  # Current config of CT $1 on any node, without its snapshot sections
+  local n
+  n=$(ct_node "$1") || die "CT $1 is not a CT of this cluster"
+  awk '/^\[/ {exit} {print}' "/etc/pve/nodes/$n/lxc/$1.conf"
+}
+ct_local() {
+  [[ -f /etc/pve/lxc/$1.conf ]] && return 0
+  local n
+  n=$(ct_node "$1") || die "CT $1 is not a CT of this cluster"
+  die "CT $1 is on node $n: run this step there (this is $NODE)"
+}
 ct_state() { pct status "$1" | awk '{print $2}'; }
 ct_ip() {
   local ip
-  ip=$(pct config "$1" | sed -n 's/^net0: .*,ip=\([0-9.]*\)\/.*/\1/p')
-  [[ -n $ip ]] || die "CT $1: net0 needs a static ip=... ($(pct config "$1" | grep '^net0' || echo 'no net0'))"
+  ip=$(ct_conf "$1" | sed -n 's/^net0: .*,ip=\([0-9.]*\)\/.*/\1/p')
+  [[ -n $ip ]] || die "CT $1: net0 needs a static ip=... ($(ct_conf "$1" | grep '^net0' || echo 'no net0'))"
   echo "$ip"
 }
 ct_checked() {  # Unprivileged with the standard mapping: host uid = guest uid + ID_OFFSET
@@ -190,7 +250,7 @@ MANAGER_SLOTS_FILE=/etc/lab-manager/slots.json
 MANAGER_LISTEN_HOST=127.0.0.1
 MANAGER_LISTEN_PORT=8090
 LABS_DIR=/srv/gns3-ro/labs
-PVE_NODES=$NODE:8006
+PVE_NODES=$(for n in "${NODE_NAMES[@]}"; do echo "$n:8006"; done | paste -sd,)
 PVE_TOKEN_ID=lab-manager@pve!manager
 PVE_TOKEN_SECRET=$(cat "$S/manager/pve-token-secret")
 PVE_CA_FILE=/etc/lab-manager/pve-root-ca.pem
@@ -245,23 +305,27 @@ render_slot_env() {  # From the slot's own example, so new settings keep their d
   mv "$f.tmp" "$f"
 }
 
+node_cert() {  # node_cert <node>: the agent's server certificate in $S/nodes/<node>
+  local d=$S/nodes/$1 fqdn=$1.$AGENT_DOMAIN ip=${NODE_IPS[$1]}
+  install -d -m 0700 "$d"
+  issue node-server-ca "$d" server "$fqdn" "basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:$fqdn,IP:$ip"
+  san_has "$d/server.crt" "DNS:$fqdn"
+  san_has "$d/server.crt" "IP Address:$ip"
+  cp "$S/ca/manager-client-ca.crt" "$d/manager-ca.crt"
+}
+
 cmd_secrets() {
   [[ -f $REPO_DIR/slot/slot.env.example ]] || die "REPO_DIR $REPO_DIR is not a checkout of the repository"
-  local id d
-  install -d -m 0700 "$S" "$S/ca" "$S/nodes" "$S/nodes/$NODE" "$S/manager" "$S/manager/nginx" \
-    "$S/slots" "$S/moodle"
+  local id n
+  install -d -m 0700 "$S" "$S/ca" "$S/nodes" "$S/manager" "$S/manager/nginx" "$S/slots" "$S/moodle"
   make_ca manager-client-ca
   make_ca node-server-ca
   make_ca web-ca
 
-  d=$S/nodes/$NODE
-  issue node-server-ca "$d" server "$NODE_FQDN" "basicConstraints=critical,CA:FALSE
-keyUsage=critical,digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=DNS:$NODE_FQDN,IP:$NODE_IP"
-  san_has "$d/server.crt" "DNS:$NODE_FQDN"
-  san_has "$d/server.crt" "IP Address:$NODE_IP"
-  cp "$S/ca/manager-client-ca.crt" "$d/manager-ca.crt"
+  for n in "${NODE_NAMES[@]}"; do node_cert "$n"; done
 
   issue manager-client-ca "$S/manager" manager lab-manager "basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature
@@ -279,7 +343,6 @@ subjectAltName=DNS:$PUBLIC_NAME"
   rand_into "$S/manager/site-secret"
   rand_into "$S/manager/gateway-key"
   for id in "${SLOT_IDS[@]}"; do
-    ct_local "$id"
     install -d -m 0700 "$S/slots/$id"
     rand_into "$S/slots/$id/api-token"
     rand_into "$S/slots/$id/console-token"
@@ -309,7 +372,8 @@ venv/bin/python -m pip check
 cmd_venv() {
   local id name src dst reqs
   case ${1:-} in
-    slot) id=${SLOT_IDS[0]} name=slot dst=/srv/gns3-ro/slot reqs="-r requirements.txt" ;;
+    slot) id=${LOCAL_SLOTS[0]:-} name=slot dst=/srv/gns3-ro/slot reqs="-r requirements.txt"
+          [[ -n $id ]] || die "no slot of SLOTS on this node ($NODE): run on a node with slots" ;;
     manager) id=$MANAGER_VMID name=manager dst=/srv/gns3-ro/manager
              reqs="-r requirements.txt -r gateway/requirements.txt" ;;
     *) die "usage: lab-provision venv slot|manager" ;;
@@ -365,7 +429,8 @@ echo "gns3-ids $(id -u gns3):$(id -g gns3)"
 cmd_slot() {
   need_secrets
   local ids=("$@") id tags i out
-  ((${#ids[@]})) || ids=("${SLOT_IDS[@]}")
+  ((${#ids[@]})) || ids=("${LOCAL_SLOTS[@]}")
+  ((${#ids[@]})) || die "no slot of SLOTS on this node ($NODE)"
   for id in "${ids[@]}"; do
     [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || die "$id is not in SLOTS of $CONF"
     ct_checked "$id"
@@ -401,12 +466,22 @@ cmd_slot() {
 
 cmd_agent() {
   need_secrets
-  local d=$S/nodes/$NODE ids id uid gid p rel path
-  [[ -s $d/server.key ]] || die "no certificate for node $NODE: run secrets on this node"
-  ids=$(cat "$S/slots/${SLOT_IDS[0]}/gns3-ids" 2>/dev/null) || die "run 'lab-provision slot' first (gns3 uid/gid)"
-  for id in "${SLOT_IDS[@]}"; do
+  need_node
+  local d=$S/nodes/$NODE ids id f uid gid p rel path vmid_min vmid_max
+  [[ -s $d/server.key ]] || die "no certificate for node $NODE: run secrets after adding it to NODES"
+  ((${#LOCAL_SLOTS[@]})) || die "no slot of SLOTS on this node ($NODE)"
+  read -r vmid_min vmid_max < <(node_range "$NODE")
+  ids=$(cat "$S/slots/${LOCAL_SLOTS[0]}/gns3-ids" 2>/dev/null) ||
+    die "run 'lab-provision slot' on this node first (gns3 uid/gid)"
+  for id in "${LOCAL_SLOTS[@]}"; do
     [[ $(cat "$S/slots/$id/gns3-ids" 2>/dev/null) == "$ids" ]] ||
-      die "slot $id: gns3 uid/gid differs from slot ${SLOT_IDS[0]} or is unknown (run slot $id)"
+      die "slot $id: gns3 uid/gid differs from slot ${LOCAL_SLOTS[0]} or is unknown (run slot $id)"
+  done
+  # Student directories are shared by all nodes, so every slot must map gns3 the same way.
+  for id in "${SLOT_IDS[@]}"; do
+    f=$S/slots/$id/gns3-ids
+    [[ ! -s $f || $(cat "$f") == "$ids" ]] ||
+      die "slot $id on ${SLOT_NODE[$id]} has gns3 $(cat "$f"), the slots here $ids: they share student directories"
   done
   uid=$((${ids%:*} + ID_OFFSET)) gid=$((${ids#*:} + ID_OFFSET))
 
@@ -445,8 +520,8 @@ cmd_agent() {
 Environment=LAB_CEPH_ROOT=$CEPH_ROOT
 Environment=LAB_CODE_DIR=$CODE_DIR
 Environment=LAB_STUDENTS_DIR=$STUDENTS_DIR
-Environment=LAB_VMID_MIN=$VMID_MIN
-Environment=LAB_VMID_MAX=$VMID_MAX
+Environment=LAB_VMID_MIN=$vmid_min
+Environment=LAB_VMID_MAX=$vmid_max
 Environment=LAB_STUDENT_HOST_UID=$uid
 Environment=LAB_STUDENT_HOST_GID=$gid
 EOF
@@ -470,7 +545,7 @@ agent_check() {
   local id
   log "agent https://$NODE_FQDN:8443"
   echo "health: $(agent_curl "https://$NODE_FQDN:8443/health" 2>&1 || echo ' FAILED')"
-  for id in "${SLOT_IDS[@]}"; do
+  for id in "${LOCAL_SLOTS[@]}"; do
     echo "slot $id: $(agent_curl "https://$NODE_FQDN:8443/slots/$id/status" 2>&1 || echo ' FAILED')"
   done
 }
@@ -497,7 +572,11 @@ runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '"'"'la
   runuser -u postgres -- createuser lab-manager
 runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'lab_manager'"'"'" | grep -q 1 ||
   runuser -u postgres -- createdb -O lab-manager lab_manager
-grep -q " $NODE_FQDN " /etc/hosts || echo "$NODE_IP $NODE_FQDN $NODE" >>/etc/hosts
+printf "%s\n" "$HOSTS" | while read -r ip fqdn name; do
+  if ! grep -qF " $fqdn " /etc/hosts; then echo "$ip $fqdn $name" >>/etc/hosts
+  elif ! grep -qxF "$ip $fqdn $name" /etc/hosts; then echo "WARNING: /etc/hosts has another entry for $fqdn (expected $ip)"
+  fi
+done
 install -d -o root -g lab-manager -m 0750 /etc/lab-manager
 install -d -m 0750 /etc/nginx/ssl
 echo "ids $(id -u lab-manager) $(id -g lab-manager)"
@@ -519,6 +598,11 @@ systemctl reload-or-restart nginx
 for _ in $(seq 1 30); do curl -fsS 127.0.0.1:8090/readyz >/dev/null 2>&1 && break; sleep 2; done
 echo "readyz: $(curl -sS 127.0.0.1:8090/readyz)"
 '
+
+agent_hosts() {  # "<ip> <fqdn> <node>" of every node: the manager reaches agents and Proxmox by name
+  local n
+  for n in "${NODE_NAMES[@]}"; do echo "${NODE_IPS[$n]} $n.$AGENT_DOMAIN $n"; done
+}
 
 render_nginx() {
   local f=$S/manager/nginx/lab.conf
@@ -563,7 +647,8 @@ cmd_manager() {
   manager_mounts
   ct_up "$id"
   log "manager CT $id: packages, user, database"
-  out=$(ct_sh "$id" "$MANAGER_PREPARE" NODE="$NODE" NODE_FQDN="$NODE_FQDN" NODE_IP="$NODE_IP")
+  out=$(ct_sh "$id" "$MANAGER_PREPARE" HOSTS="$(agent_hosts)")
+  grep -v '^ids ' <<<"$out" || true
   read -r _ uid gid < <(grep '^ids ' <<<"$out")
   [[ -n ${gid:-} ]] || die "cannot read the lab-manager uid/gid in CT $id"
 
@@ -625,23 +710,39 @@ EOF
 
 MANAGER_CHECK='
 . /etc/lab-manager/manager.env
+agent() { curl -sS --max-time 15 --noproxy "*" --cert "$AGENT_CERT_FILE" --key "$AGENT_KEY_FILE" --cacert "$AGENT_CA_FILE" "https://$1:8443$2" 2>&1 || echo " FAILED"; }
 echo "readyz: $(curl -sS 127.0.0.1:8090/readyz)"
-echo "agent:  $(curl -sS --max-time 15 --noproxy "*" --cert "$AGENT_CERT_FILE" --key "$AGENT_KEY_FILE" --cacert "$AGENT_CA_FILE" "https://$NODE_FQDN:8443/health")"
-echo "proxmox: $(curl -sS -o /dev/null -w "%{http_code}" --cacert "$PVE_CA_FILE" -H "Authorization: PVEAPIToken=$PVE_TOKEN_ID=$PVE_TOKEN_SECRET" "https://${PVE_NODES%%,*}/api2/json/cluster/resources?type=vm") (expected 200)"
+for a in $AGENTS; do echo "agent $a: $(agent "$a" /health)"; done
+for p in $SLOT_AGENTS; do echo "slot ${p%%=*} via ${p#*=}: $(agent "${p#*=}" "/slots/${p%%=*}/status")"; done
+for n in $(echo "$PVE_NODES" | tr , " "); do
+  echo "proxmox $n: $(curl -sS -o /dev/null -w "%{http_code}" --cacert "$PVE_CA_FILE" -H "Authorization: PVEAPIToken=$PVE_TOKEN_ID=$PVE_TOKEN_SECRET" "https://$n/api2/json/cluster/resources?type=vm") (expected 200)"
+done
 echo "services: $(systemctl is-active lab-manager lab-console-gateway nginx | paste -sd " ")"
 runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slots
 '
 
 cmd_check() {
   need_secrets
-  agent_check
+  local n id agents=() slot_agents=()
+  [[ ${#LOCAL_SLOTS[@]} -gt 0 || $MANAGER_NODE == "$NODE" ]] ||
+    die "neither slots nor the manager are on this node ($NODE)"
+  ((${#LOCAL_SLOTS[@]} == 0)) || { need_node; agent_check; }
+  if [[ $MANAGER_NODE != "$NODE" ]]; then
+    log "manager CT $MANAGER_VMID is on $MANAGER_NODE: run check there for the manager and all agents"
+    return 0
+  fi
+  for n in "${NODE_NAMES[@]}"; do agents+=("$n.$AGENT_DOMAIN"); done
+  for id in "${SLOT_IDS[@]}"; do slot_agents+=("$id=${SLOT_NODE[$id]}.$AGENT_DOMAIN"); done
   log "manager CT $MANAGER_VMID"
-  ct_sh "$MANAGER_VMID" "$MANAGER_CHECK" NODE_FQDN="$NODE_FQDN"
+  ct_sh "$MANAGER_VMID" "$MANAGER_CHECK" AGENTS="${agents[*]}" SLOT_AGENTS="${slot_agents[*]}"
 }
 
 cmd_enable() {
-  local id
-  for id in "${SLOT_IDS[@]}"; do
+  local ids=("$@") id
+  ((${#ids[@]})) || ids=("${SLOT_IDS[@]}")
+  ct_local "$MANAGER_VMID"
+  for id in "${ids[@]}"; do
+    [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || die "$id is not in SLOTS of $CONF"
     ct_sh "$MANAGER_VMID" 'runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slot-enable "$VMID"' VMID="$id"
   done
 }
@@ -659,7 +760,7 @@ main() {
     manager) cmd_manager ;;
     moodle) cmd_moodle ;;
     check) cmd_check ;;
-    enable) cmd_enable ;;
+    enable) cmd_enable "$@" ;;
     *) usage; exit 2 ;;
   esac
 }

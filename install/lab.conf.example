@@ -1,6 +1,6 @@
 # Settings of install/lab-provision. Copy to /mnt/pve/cfs/secrets/lab.conf (root, 0600) and edit.
-# No secrets here: the script generates them into SECRETS_DIR. Everything runs on one Proxmox node:
-# the node agent, the manager LXC and the slot LXCs live on the node where the script is started.
+# No secrets here: the script generates them into SECRETS_DIR. One file for the whole cluster: every
+# node with slots runs a node agent, the manager LXC lives on one of them.
 
 # CephFS: the repository checkout (gns3-ro), student data (gns3-rw) and secrets, one filesystem.
 CEPH_ROOT=/mnt/pve/cfs
@@ -8,12 +8,15 @@ REPO_DIR=/mnt/pve/cfs/gns3-ro
 STUDENTS_DIR=gns3-rw/students
 SECRETS_DIR=/mnt/pve/cfs/secrets
 
-# This node on the management network. The agent is reached as https://<hostname>.<AGENT_DOMAIN>:8443,
-# its certificate is issued for that name and NODE_IP.
-NODE_IP=10.10.12.9
+# Proxmox nodes with slots, <node name>=<IP on the management network>. The agent of each node is
+# reached as https://<node>.<AGENT_DOMAIN>:8443, its certificate is issued for that name and IP.
+# (An older one-node lab.conf with NODE_IP=<IP> instead of NODES still works.)
+NODES="pve1=10.10.12.9"
 AGENT_DOMAIN=lab.local
 
-# LXC VMIDs on this node. Slots: unprivileged, static IP in net0; their VMIDs form the agent's range.
+# LXC VMIDs in the cluster. The script finds each CT's node and net0 IP in /etc/pve/nodes itself.
+# Slots: unprivileged, static IP in net0, all from one template (same gns3 uid/gid). The VMIDs of a
+# node's slots form its agent's range (min..max), so blocks per node are handy: 20xx, 21xx.
 MANAGER_VMID=1900
 SLOTS="2001"
 
