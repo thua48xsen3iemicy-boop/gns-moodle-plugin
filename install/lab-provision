@@ -552,7 +552,8 @@ cmd_manager() {
   need_secrets
   local id=$MANAGER_VMID m=$S/manager out uid gid f
   ct_checked "$id"
-  [[ -x $REPO_DIR/manager/venv/bin/python ]] || die "no $REPO_DIR/manager/venv: run 'lab-provision venv manager'"
+  # venv/bin/python links to the CT's /usr/bin/python3.12, which the host may lack: test pyvenv.cfg.
+  [[ -f $REPO_DIR/manager/venv/pyvenv.cfg ]] || die "no $REPO_DIR/manager/venv: run 'lab-provision venv manager'"
   if [[ ! -d $REPO_DIR/labs ]]; then
     log "lab catalog $REPO_DIR/labs from manager/examples/labs"
     install -d -m 0755 "$REPO_DIR/labs"
