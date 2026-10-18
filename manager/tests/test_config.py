@@ -42,6 +42,9 @@ def test_valid_config(env):
     assert s.pve_nodes == ("pve1:8006", "pve2:8006")
     assert s.placeholder_student_key == "placeholder"
     assert s.agent_start_actions == ("init_slot",)
+    assert s.node_guest_memory_mb == 0 and s.node_cpu_overcommit == 0  # No node limits by default
+    env.update(NODE_GUEST_MEMORY_MB="118784", NODE_CPU_OVERCOMMIT="1.5")
+    assert (load(env).node_guest_memory_mb, load(env).node_cpu_overcommit) == (118784, 1.5)
     env["AGENT_START_ACTIONS"] = ""
     assert load(env).agent_start_actions == ()
     assert SECRET not in repr(s)
@@ -87,7 +90,9 @@ def test_short_secret_rejected_without_leaking_it(env, tmp_path):
                                        ("PLACEHOLDER_STUDENT_KEY", "a/b"), ("LAB_PERSISTENCE", "fresh"),
                                        ("LAB_CEPH_ROOT", "/mnt/../etc"), ("AGENT_START_TIMEOUT", "330"),
                                        ("LAB_CODE_DIR", "../slot"), ("LAB_CODE_DIR", "a//b"),
-                                       ("LAB_STUDENTS_DIR", ""), ("LAB_STUDENTS_DIR", ".hidden/students")])
+                                       ("LAB_STUDENTS_DIR", ""), ("LAB_STUDENTS_DIR", ".hidden/students"),
+                                       ("NODE_GUEST_MEMORY_MB", "116G"), ("NODE_CPU_OVERCOMMIT", "-1"),
+                                       ("NODE_CPU_OVERCOMMIT", "two")])
 def test_invalid_values(env, key, value):
     env[key] = value
     with pytest.raises(ConfigError):

@@ -98,6 +98,17 @@ def _int(env, name, default, low=1, high=10**9):
     return value
 
 
+def _float(env, name, default, low, high):
+    raw = env.get(name, str(default)).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a number") from exc
+    if not low <= value <= high:
+        raise ConfigError(f"{name} must be in [{low}, {high}]")
+    return value
+
+
 def _read_secret_json(path: Path, check_mode: bool):
     try:
         st = path.stat()
@@ -135,6 +146,8 @@ class Settings:
     agent_start_actions: tuple[str, ...] = ("init_slot",)
     placeholder_student_key: str | None = None  # Mounted read-only into a released slot
     node_memory_reserve_mb: int = 2048
+    node_guest_memory_mb: int = 0  # Memory limits of all guests of a node, MiB; 0: no limit
+    node_cpu_overcommit: float = 0.0  # vCPUs of all guests of a node per node CPU; 0: no limit
     listen_host: str = "127.0.0.1"
     listen_port: int = 8090
     pve_timeout: float = 10.0
@@ -272,6 +285,8 @@ def load(env=None, check_mode=True) -> Settings:
         agent_start_actions=actions,
         placeholder_student_key=_key(env, "PLACEHOLDER_STUDENT_KEY", "placeholder"),
         node_memory_reserve_mb=_int(env, "NODE_MEMORY_RESERVE_MB", 2048, 0, 10**7),
+        node_guest_memory_mb=_int(env, "NODE_GUEST_MEMORY_MB", 0, 0, 10**8),
+        node_cpu_overcommit=_float(env, "NODE_CPU_OVERCOMMIT", 0, 0, 64),
         listen_host=env.get("MANAGER_LISTEN_HOST", "127.0.0.1"),
         listen_port=_int(env, "MANAGER_LISTEN_PORT", 8090, 1, 65535),
         pve_timeout=_int(env, "PVE_TIMEOUT", 10, 1, 300),

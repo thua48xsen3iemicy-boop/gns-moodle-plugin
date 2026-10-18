@@ -268,6 +268,8 @@ GATEWAY_INTERNAL_URL=http://127.0.0.1:8080
 GATEWAY_INTERNAL_KEY=$(cat "$S/manager/gateway-key")
 GATEWAY_PUBLIC_URL=wss://$PUBLIC_NAME
 EOF
+    [[ -z ${NODE_GUEST_MEMORY_MB:-} ]] || echo "NODE_GUEST_MEMORY_MB=$NODE_GUEST_MEMORY_MB"
+    [[ -z ${NODE_CPU_OVERCOMMIT:-} ]] || echo "NODE_CPU_OVERCOMMIT=$NODE_CPU_OVERCOMMIT"
     [[ ! -s $S/manager/images.json ]] || echo "IMAGES_FILE=/etc/lab-manager/images.json"
     [[ ! -s $S/manager/manager.env.local ]] || cat "$S/manager/manager.env.local"
   } >"$f.tmp"

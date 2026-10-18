@@ -20,6 +20,12 @@ AGENT_DOMAIN=lab.local
 MANAGER_VMID=1900
 SLOTS="2001"
 
+# Placement limits per node (manager/docs/DESIGN.md §6.2). Hyperconverged nodes: the guests may hold
+# at most this much memory, MiB (116 GiB of 128), the rest is the host's and Ceph's; and at most
+# this many vCPUs per node CPU (Proxmox counts threads). Empty: no limit.
+NODE_GUEST_MEMORY_MB=118784
+NODE_CPU_OVERCOMMIT=2
+
 # nginx in the manager LXC: https://<PUBLIC_NAME>/api/ for the Moodle server,
 # wss://<PUBLIC_NAME>/console/ for browsers. The certificate is issued by the web CA (secrets/ca/web-ca.crt).
 PUBLIC_NAME=labs.example.edu

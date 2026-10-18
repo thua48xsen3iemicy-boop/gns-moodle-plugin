@@ -1,15 +1,15 @@
 """Session state machine: placement, CT preparation, start via the node agent, deploy, stop.
 
 Slots are interchangeable executors. A session gets any free slot whose Proxmox node has
-room for the lab (best fit, so slots pack densely onto nodes); the next session of the same
-student may run on another slot and another node.
+room for the lab (memory and CPU limits of the node; labs spread over the nodes, the least
+busy node first); the next session of the same student may run on another slot and another node.
 
 Every stage is re-entrant: it first reads the real state (node agent, Proxmox config, Lab
 Slot) and only then acts, so after a manager restart the loop continues from the stage
 stored in the database. Nothing is deleted or recreated "just in case".
 
     plugin status  stage            what happens
-    queued         wait_slot        placement over free slots and node memory, allocation
+    queued         wait_slot        placement over free slots and node memory/CPU, allocation
     starting       ct_prepare       CT stopped (agent), sized to the lab (Proxmox config)
     starting       student_dir      agent: PUT /students/<key> (idempotent, mapped gns3 owner)
     starting       ct_start         agent: mounts (code mp0, student mp1) + pct start + guest actions;
@@ -341,13 +341,26 @@ class Orchestrator:
     def _need_mb(resources):
         return int((resources or {}).get("memory_mb") or 0)
 
+    @staticmethod
+    def _need_cores(resources):
+        return int((resources or {}).get("cores") or 0)
+
     # ------------------------------------------------------------------ placement
     async def placement(self, s) -> list[tuple[int, str]]:
-        """Free slots that fit the lab, best fit first (least memory left on the node).
+        """Free slots that fit the lab, spread over the nodes: the node with the fewest labs first.
 
-        Node usage comes from /cluster/resources. For every slot already handed out, the part of
-        its promised memory that the CT does not use yet is subtracted too, otherwise two labs
-        could be placed on the same room while the first one is still starting.
+        A node takes the lab only if all of its limits hold (from one /cluster/resources call):
+          * live memory: maxmem - mem - NODE_MEMORY_RESERVE_MB, minus the memory promised to the
+            slots already handed out that their CTs do not use yet (a starting GNS3 grows to its
+            limit later, so two labs never take the same room);
+          * NODE_GUEST_MEMORY_MB: memory limits of the running guests (any CT or VM, but not free
+            slots: whoever takes one stops and resizes it first) plus the labs promised to
+            handed-out slots. On a hyperconverged node the rest belongs to the host and Ceph,
+            whatever the guests do;
+          * NODE_CPU_OVERCOMMIT: vCPUs of the same guests and labs <= node CPUs x the ratio.
+        Order: fewest handed-out slots on the node, then least promised memory, then VMID. With a
+        VMID block per node, lab 1 goes to the first slot of node 1, lab 2 to the first slot of
+        node 2, and so on round the nodes; a lab that does not fit its turn goes to the next node.
         """
         free = await self.store.free_slots()
         if not free:
@@ -355,27 +368,48 @@ class Orchestrator:
         resources = await self.pve.cluster_resources()
         nodes = {r["node"]: r for r in resources if r.get("type") == "node" and r.get("status") == "online"}
         cts = {r["vmid"]: r for r in resources if r.get("type") == "lxc"}
-        reserved = defaultdict(int)
+        unused = defaultdict(int)  # Promised to handed-out slots, not in use yet
+        mem = defaultdict(int)  # Memory limits of running guests and promised labs
+        cpu = defaultdict(int)  # The same in vCPUs
+        labs = defaultdict(int)
+        skip = set(free)  # Free slots and the handed-out ones counted below: not running guests
         for r in await self.store.reservations():
             ct = cts.get(r["slot_vmid"])
             if ct:
-                # Promised memory not yet in use: a starting GNS3 grows to its limit later.
                 promised = self._need_mb(r["resources"]) * MIB or int(ct.get("maxmem") or 0)
-                reserved[ct["node"]] += max(0, promised - int(ct.get("mem") or 0))
+                unused[ct["node"]] += max(0, promised - int(ct.get("mem") or 0))
+                mem[ct["node"]] += promised
+                cpu[ct["node"]] += self._need_cores(r["resources"]) or int(ct.get("maxcpu") or 0)
+                labs[ct["node"]] += 1
+                skip.add(r["slot_vmid"])
+        for r in resources:
+            if r.get("type") in ("lxc", "qemu") and r.get("status") == "running" and r.get("vmid") not in skip:
+                mem[r["node"]] += int(r.get("maxmem") or 0)
+                cpu[r["node"]] += int(r.get("maxcpu") or 0)
         need = self._need_mb(s["resources"]) * MIB
+        cores = self._need_cores(s["resources"])
         reserve = self.settings.node_memory_reserve_mb * MIB
+        budget = self.settings.node_guest_memory_mb * MIB
+        ratio = self.settings.node_cpu_overcommit
         fitting = []
         for vmid in free:
             ct = cts.get(vmid)
             node = nodes.get(ct["node"]) if ct else None
             if node is None:
                 continue  # CT unknown to the cluster or its node is offline
+            name = ct["node"]
             want = need or int(ct.get("maxmem") or 0)
-            room = int(node.get("maxmem", 0)) - int(node.get("mem", 0)) - reserved[ct["node"]] - reserve
-            if room >= want:
-                fitting.append((room - want, vmid, ct["node"]))
+            want_cpu = cores or int(ct.get("maxcpu") or 0)
+            room = int(node.get("maxmem", 0)) - int(node.get("mem", 0)) - unused[name] - reserve
+            if room < want:
+                continue
+            if budget and mem[name] + want > budget:
+                continue
+            if ratio and cpu[name] + want_cpu > int(node.get("maxcpu") or 0) * ratio:
+                continue
+            fitting.append((labs[name], mem[name], vmid, name))
         fitting.sort()
-        return [(vmid, node) for _, vmid, node in fitting]
+        return [(vmid, name) for _, _, vmid, name in fitting]
 
     # ------------------------------------------------------------------ queued
     async def _stage_wait_slot(self, s):
