@@ -479,13 +479,14 @@ class Orchestrator:
         """Exact agent mount contract: code at /srv/gns3-ro/slot RO, student dir at
         /opt/gns3/projects. A matching suffix under another root is not accepted."""
         root = self.settings.agent_ceph_root
+        code_root = f"{root}/{self.settings.agent_code_dir}"
         rev = self.settings.slot_code_revision
         code_src, code = self._mount(config, "mp0")
         data_src, data = self._mount(config, "mp1")
         ro = "1" if read_only else "0"
-        return (code_src == (f"{root}/slot/{rev}" if rev else f"{root}/slot")
+        return (code_src == (f"{code_root}/{rev}" if rev else code_root)
                 and code.get("mp") == "/srv/gns3-ro/slot" and code.get("ro") == "1"
-                and data_src == f"{root}/students/{student_key}"
+                and data_src == f"{root}/{self.settings.agent_students_dir}/{student_key}"
                 and data.get("mp") == "/opt/gns3/projects" and data.get("ro", "0") == ro)
 
     async def _stage_ct_start(self, s):

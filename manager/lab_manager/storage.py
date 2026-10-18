@@ -1,6 +1,6 @@
 """Student identity on the CephFS side.
 
-The node agent mounts <LAB_CEPH_ROOT>/students/<student_key> into the slot as
+The node agent mounts <LAB_CEPH_ROOT>/<LAB_STUDENTS_DIR>/<student_key> into the slot as
 /opt/gns3/projects (mp1), the GNS3 project directory of Lab Slot. It requires every ancestor of that path to be owned by host root and not writable by
 group/others, so the manager (an unprivileged LXC) can neither create nor own student
 directories: they are provisioned on the Proxmox side (docs/DESIGN.md, "Каталог студента").

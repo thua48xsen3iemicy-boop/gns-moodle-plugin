@@ -26,13 +26,17 @@
 
 ## 1. LXC менеджера (на узле PVE, root)
 
-Непривилегированный CT с Ubuntu 24.04. RO CephFS с кодом и лабами задаёт администратор:
+Непривилегированный CT с Ubuntu 24.04. Раскладка CephFS (`LAB_CEPH_ROOT=/mnt/pve/cfs`):
+`gns3-ro/` — git checkout репозитория (`agent/ manager/ plugin/ slot/ labs/`, venv в `manager/venv`
+и `slot/venv`, не в git), `gns3-rw/students/` — каталоги студентов. Менеджеру администратор
+монтирует только его код и лабы, RO:
 
 ```sh
-pct set <MGR_VMID> -mp0 /mnt/pve/cephfs/gns3-ro,mp=/srv/gns3-ro,ro=1
+pct set <MGR_VMID> -mp0 /mnt/pve/cfs/gns3-ro/manager,mp=/srv/gns3-ro/manager,ro=1 \
+                   -mp1 /mnt/pve/cfs/gns3-ro/labs,mp=/srv/gns3-ro/labs,ro=1
 ```
 
-Каталоги студентов менеджеру не нужны: монтирует их агент, а создаёт сторона Proxmox (п. 2).
+Каталоги студентов (`gns3-rw`) менеджеру не нужны: монтирует их агент, а создаёт сторона Proxmox (п. 2).
 Нужен сетевой доступ к API Proxmox (8006), к агентам узлов (8443, firewall агента пускает
 только менеджер) и к слотам (8080): к REST слота ходит менеджер, к консолям — шлюз.
 
@@ -80,19 +84,20 @@ systemctl daemon-reload && systemctl enable --now lab-console-gateway
 1. Агент на каждый узел — по `agent/README.md` (ветка `feature/proxmox-node-agent`):
    `make-demo-pki.sh` (или своя PKI), `install-node.sh`, `LAB_VMID_MIN/MAX`, firewall.
    Менеджеру из PKI нужны `manager.crt`, `manager.key` и `node-server-ca.crt`.
-   Код слота агент должен монтировать в `/srv/gns3-ro/slot`; в ветке пока `/opt/slot`, это
-   исправляет разработчик агента. Все запросы к агенту — в [`docs/AGENT_REQUESTS.md`](docs/AGENT_REQUESTS.md).
+   Агент монтирует в слот `<LAB_CEPH_ROOT>/<LAB_CODE_DIR>` (код, `gns3-ro/slot`) в `/srv/gns3-ro/slot`
+   и `<LAB_CEPH_ROOT>/<LAB_STUDENTS_DIR>/<key>` (`gns3-rw/students/<key>`) в `/opt/gns3/projects`.
+   Все запросы к агенту — в [`docs/AGENT_REQUESTS.md`](docs/AGENT_REQUESTS.md).
 2. Слоты: CT из диапазона `LAB_VMID_MIN..MAX`, `unprivileged: 1`, `pct set <vmid> --tags labslot`,
    внутри — Lab Slot по `slot/README.md` и `/usr/local/sbin/lab-slot-init` из `agent/guest/`.
 3. Каталоги на CephFS (агент требует, чтобы предки принадлежали root и не были доступны на
    запись группе и остальным):
 
    ```sh
-   CEPH=/mnt/pve/data
-   install -d -o root -g root -m 0755 $CEPH/students $CEPH/students/placeholder
+   CEPH=/mnt/pve/cfs
+   install -d -o root -g root -m 0755 $CEPH/gns3-rw $CEPH/gns3-rw/students $CEPH/gns3-rw/students/placeholder
    ```
 
-   Каталоги студентов `students/<slug сайта>-<user_id>` создаёт агент по запросу менеджера
+   Каталоги студентов `gns3-rw/students/<slug сайта>-<user_id>` создаёт агент по запросу менеджера
    перед каждым стартом. Для этого на каждом узле задаётся владелец — `gns3` слота на хосте
    (uid/gid в слоте + 100000, см. `agent/README.md`, «Student directory provisioning»):
 
@@ -161,10 +166,10 @@ Uvicorn работает в один процесс: оркестратор жи
 | `PVE_NODES`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_FILE` | точки входа API, токен, CA кластера |
 | `AGENT_URL_TEMPLATE` | `https://{node}.lab.local:8443`; `{node}` — имя узла Proxmox, хост — как в SAN сертификата агента |
 | `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | `node-server-ca.crt`, `manager.crt`, `manager.key` |
-| `LAB_CEPH_ROOT` | тот же, что у агентов (`/mnt/pve/data`): по нему менеджер точно сверяет источники `mp0`/`mp1` |
+| `LAB_CEPH_ROOT`, `LAB_CODE_DIR`, `LAB_STUDENTS_DIR` | те же, что у агентов (`/mnt/pve/cfs`, `gns3-ro/slot`, `gns3-rw/students`): по ним менеджер точно сверяет источники `mp0`/`mp1` |
 | `AGENT_START_TIMEOUT`, `AGENT_MOUNTS_TIMEOUT`, `AGENT_STOP_TIMEOUT` | 420/120/130 с — больше сумм таймаутов внутри агента |
 | `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
-| `SLOT_CODE_REVISION` | пусто: общий `<ceph>/slot`; иначе `<ceph>/slot/<revision>` |
+| `SLOT_CODE_REVISION` | пусто: общий `<ceph>/<LAB_CODE_DIR>`; иначе `<ceph>/<LAB_CODE_DIR>/<revision>` |
 | `PLACEHOLDER_STUDENT_KEY` | что монтировать RO в освобождённый слот (`placeholder`; пусто — не перемонтировать) |
 | `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении |
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
@@ -225,7 +230,7 @@ $ADM slot-maintenance 2001
 (DESIGN §6.1), в каком бы слоте она ни запустилась; настройки `LAB_PERSISTENCE` больше нет (если она
 осталась в `manager.env` со значением, отличным от `resume`, менеджер не стартует). Проекты, которые
 создал слот 0.3 в старом режиме `fresh` (по проекту на сессию), продолжаться не будут: это просто
-старые каталоги в `students/<key>/`, их можно удалить вручную.
+старые каталоги в `gns3-rw/students/<key>/`, их можно удалить вручную.
 
 При обновлении до схемы 3 (`admin migrate`) у каждого слота не в `free` ставится `student_key`
 его последней сессии: про такие слоты менеджер не знает, выключен ли CT. Проверьте их и сделайте

@@ -9,7 +9,9 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/lab-node-agent
-Environment=LAB_CEPH_ROOT=/mnt/pve/data
+Environment=LAB_CEPH_ROOT=/mnt/pve/cfs
+Environment=LAB_CODE_DIR=gns3-ro/slot
+Environment=LAB_STUDENTS_DIR=gns3-rw/students
 Environment=LAB_VMID_MIN=2000
 Environment=LAB_VMID_MAX=2999
 ExecStart=/opt/lab-node-agent/venv/bin/uvicorn agent:app --host 0.0.0.0 --port 8443 --workers 1 --ssl-certfile /etc/lab-node-agent/server.crt --ssl-keyfile /etc/lab-node-agent/server.key --ssl-ca-certs /etc/lab-node-agent/manager-ca.crt --ssl-cert-reqs 2 --no-proxy-headers
