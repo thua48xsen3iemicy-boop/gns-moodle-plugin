@@ -1,0 +1,29 @@
+# Settings of install/lab-provision. Copy to /mnt/pve/cfs/secrets/lab.conf (root, 0600) and edit.
+# No secrets here: the script generates them into SECRETS_DIR. Everything runs on one Proxmox node:
+# the node agent, the manager LXC and the slot LXCs live on the node where the script is started.
+
+# CephFS: the repository checkout (gns3-ro), student data (gns3-rw) and secrets, one filesystem.
+CEPH_ROOT=/mnt/pve/cfs
+REPO_DIR=/mnt/pve/cfs/gns3-ro
+STUDENTS_DIR=gns3-rw/students
+SECRETS_DIR=/mnt/pve/cfs/secrets
+
+# This node on the management network. The agent is reached as https://<hostname>.<AGENT_DOMAIN>:8443,
+# its certificate is issued for that name and NODE_IP.
+NODE_IP=10.10.12.9
+AGENT_DOMAIN=lab.local
+
+# LXC VMIDs on this node. Slots: unprivileged, static IP in net0; their VMIDs form the agent's range.
+MANAGER_VMID=1900
+SLOTS="2001"
+
+# nginx in the manager LXC: https://<PUBLIC_NAME>/api/ for the Moodle server,
+# wss://<PUBLIC_NAME>/console/ for browsers. The certificate is issued by the web CA (secrets/ca/web-ca.crt).
+PUBLIC_NAME=labs.example.edu
+
+# Moodle: exactly $CFG->wwwroot, the address its server uses to reach PUBLIC_NAME,
+# and (optional) its LXC on this node, which then gets the web CA and a hosts entry.
+MOODLE_URL=https://moodle.example.edu
+MOODLE_IP=10.10.12.60
+MOODLE_VMID=
+SITE_SLUG=main
