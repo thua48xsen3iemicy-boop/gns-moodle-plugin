@@ -352,6 +352,12 @@ body.gns3lab-fullscreen {
     stroke: var(--accent);
     stroke-dasharray: 4 3;
 }
+.gns3lab-app .nname-g {
+    cursor: pointer;
+}
+.gns3lab-app .nname-g.ghost {
+    opacity: .32;
+}
 .gns3lab-app .nname {
     font: 600 13px var(--display);
     fill: var(--fg);
@@ -1204,14 +1210,171 @@ body.gns3lab-fullscreen {
     opacity: .4;
     cursor: not-allowed;
 }
-.gns3lab-consoles .k.snip {
+/* console keyboard: input line, port chips and the command panel */
+.gns3lab-consoles .cinput {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--t-bar);
+    border-top: 1px solid var(--t-line);
+}
+.gns3lab-consoles .cinput[hidden],
+.gns3lab-consoles .ctoggle[hidden] {
+    display: none;
+}
+.gns3lab-consoles .cline {
+    flex: 1;
+    min-width: 0;
+    height: 38px;
+    padding: 0 14px;
+    border: 1px solid var(--t-line);
+    border-radius: 19px;
+    background: var(--t-bg);
+    color: var(--t-fg);
+    font: 14px var(--mono);
+    outline: none;
+}
+.gns3lab-consoles .cline::placeholder {
+    color: var(--t-dim);
+}
+.gns3lab-consoles .cline:focus {
+    border-color: var(--t-accent);
+}
+.gns3lab-consoles .ctoggle,
+.gns3lab-consoles .csend {
+    min-width: 38px;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 17px;
+}
+.gns3lab-consoles .ctoggle.on,
+.gns3lab-consoles .csend {
+    background: var(--t-accent);
+    border-color: var(--t-accent);
+    color: var(--t-bg);
+}
+.gns3lab-consoles .cmode {
+    flex: none;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 9px;
+    border: 1px solid currentcolor;
+    border-radius: 11px;
+    font: 600 12px var(--mono);
+    color: var(--t-dim);
+}
+.gns3lab-consoles .cmode[data-mode="priv"] {
+    color: #3cc47a;
+}
+.gns3lab-consoles .cmode[data-mode="config"],
+.gns3lab-consoles .cmode[data-mode="sub"] {
+    color: #e0b13a;
+}
+.gns3lab-consoles .cmode[data-mode="if"],
+.gns3lab-consoles .cmode[data-mode="router"] {
+    color: #c792ea;
+}
+.gns3lab-consoles .csuggest[hidden],
+.gns3lab-consoles .cmdpad[hidden] {
+    display: none;
+}
+.gns3lab-consoles .cport {
+    flex: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
     height: 32px;
+    padding: 0 12px;
+    border: 1px dashed var(--t-line);
+    border-radius: 16px;
     background: transparent;
+    color: var(--t-fg);
+    font: 13px var(--mono);
+    line-height: 30px;
+    cursor: pointer;
+}
+.gns3lab-consoles .cport.linked {
+    border-style: solid;
+    border-color: var(--t-accent);
+}
+.gns3lab-consoles .cport span {
+    color: var(--t-dim);
+    font-size: 12px;
+}
+.gns3lab-consoles .cmdpad {
+    flex: none;
+    max-height: 230px;
+    display: flex;
+    flex-direction: column;
+    background: var(--t-bar);
+    border-top: 1px solid var(--t-line);
+}
+.gns3lab-consoles .cgroups {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 8px 10px 4px;
+    scrollbar-width: none;
+}
+.gns3lab-consoles .cgroup {
+    flex: none;
+    height: 30px;
+    padding: 0 13px;
+    border: 0;
+    border-radius: 15px;
+    background: var(--t-key);
+    color: var(--t-dim);
+    font: 600 12.5px var(--display);
+    cursor: pointer;
+}
+.gns3lab-consoles .cgroup[aria-selected="true"] {
+    background: var(--t-accent);
+    color: var(--t-bg);
+}
+.gns3lab-consoles .cgrid {
+    display: grid;
+    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+    grid-template-columns: repeat(auto-fill, minmax(min(190px, 46%), 1fr));
+    gap: 6px;
+    padding: 6px 10px 10px;
+    overflow-y: auto;
+}
+.gns3lab-consoles .kcmd {
+    min-height: 40px;
+    padding: 6px 10px;
+    border: 1px solid var(--t-line);
+    border-radius: 8px;
+    background: var(--t-key);
+    color: var(--t-fg);
+    font: 12.5px/1.25 var(--mono);
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.gns3lab-consoles .kcmd:hover,
+.gns3lab-consoles .cport:hover {
+    background: var(--t-keyhi);
+}
+.gns3lab-consoles .kcmd:active {
+    background: var(--t-accent);
+    color: var(--t-bg);
+}
+.gns3lab-consoles .kcmd.partial {
     border-style: dashed;
     color: var(--t-accent);
-    font-size: 12.5px;
 }
 .gns3lab-consoles .k:focus-visible,
+.gns3lab-consoles .kcmd:focus-visible,
+.gns3lab-consoles .cgroup:focus-visible,
+.gns3lab-consoles .cport:focus-visible,
 .gns3lab-consoles .ctab-name:focus-visible,
 .gns3lab-consoles .ctab-x:focus-visible {
     outline: 2px solid var(--t-accent);
@@ -1225,6 +1388,22 @@ body.gns3lab-fullscreen {
     /* The collapsed details sheet hangs below the stage; it must not cover the console tabs. */
     .gns3lab-app.has-consoles .stage {
         overflow: hidden;
+    }
+    /* Typing or the command panel: the consoles take the whole screen, like a messenger. */
+    .gns3lab-app.kb-open .bar,
+    .gns3lab-app.kb-open .ctl,
+    .gns3lab-app.kb-open .stage {
+        display: none;
+    }
+    .gns3lab-app.kb-open .gns3lab-consoles {
+        flex: 1 1 auto;
+    }
+    /* 16px keeps iOS from zooming into the line. */
+    .gns3lab-consoles .cline {
+        font-size: 16px;
+    }
+    .gns3lab-consoles .cmdpad {
+        max-height: 44%;
     }
 }
 
@@ -1396,4 +1575,150 @@ body.gns3lab-fullscreen {
 .gns3lab-consoles .xterm-decoration-top {
     z-index: 2;
     position: relative;
+}
+
+/* lab editor: image palette on the left, canvas, properties on the right; on phones palette on top, properties below */
+.gns3lab-editor .ed-palette {
+    width: 196px;
+    flex: none;
+    overflow: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gns3lab-editor .ed-img {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: none;
+    color: var(--fg);
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.25;
+    cursor: grab;
+}
+.gns3lab-editor .ed-img:hover,
+.gns3lab-editor .ed-img:focus-visible {
+    border-color: var(--line);
+    background: var(--chip);
+}
+.gns3lab-editor .ed-img svg {
+    width: 30px;
+    height: 30px;
+    flex: none;
+}
+.gns3lab-editor .ed-note {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+}
+.gns3lab-editor .ed-field {
+    display: grid;
+    grid-template-columns: 8em 1fr;
+    align-items: center;
+    gap: 2px 8px;
+    margin: 0;
+    font-size: 13px;
+}
+.gns3lab-editor .ed-field small {
+    grid-column: 2;
+    color: var(--muted);
+}
+.gns3lab-editor .ed-error {
+    color: var(--bad);
+    font-size: 13px;
+    margin: 0;
+}
+.gns3lab-editor .ed-ok {
+    color: var(--ok);
+    margin: 0;
+}
+.gns3lab-editor .ed-ports {
+    width: 100%;
+    font-size: 13px;
+}
+.gns3lab-editor .ed-ports td {
+    padding: 2px 4px;
+    vertical-align: top;
+}
+.gns3lab-editor .ed-problems {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gns3lab-editor .ed-problems .rowbtn {
+    border-left: 3px solid var(--bad);
+}
+.gns3lab-editor .muted {
+    color: var(--muted);
+}
+.gns3lab-editor .gns3lab-svg.linking .node {
+    cursor: crosshair;
+}
+.gns3lab-editor .node.from .halo {
+    stroke: var(--accent);
+    stroke-dasharray: 5 4;
+}
+.gns3lab-editor .node.bad .halo {
+    stroke: var(--bad);
+    fill: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+.gns3lab-editor .node.unknown use {
+    opacity: .45;
+}
+.gns3lab-editor .link.bad .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 6 4;
+}
+.gns3lab-editor .plabel {
+    pointer-events: none;
+}
+.gns3lab-editor .gtoast.ok {
+    border-color: var(--accent);
+}
+.gns3lab-editor .tools .gbtn.primary {
+    width: auto;
+    height: 32px;
+}
+
+@media (max-width: 760px) {
+    .gns3lab-editor .stage {
+        flex-direction: column;
+    }
+    .gns3lab-editor .ed-palette {
+        width: auto;
+        flex-direction: row;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 6px 8px;
+    }
+    .gns3lab-editor .ed-palette .eyebrow {
+        display: none;
+    }
+    .gns3lab-editor .ed-img {
+        width: auto;
+        flex: none;
+        white-space: nowrap;
+    }
+    .gns3lab-editor .hint {
+        display: none;
+    }
+    .gns3lab-editor .panel.ed-props {
+        position: static;
+        max-height: 40%;
+        transform: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding-top: 12px;
+    }
 }

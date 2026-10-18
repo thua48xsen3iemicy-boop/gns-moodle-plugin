@@ -55,7 +55,8 @@ function gns3lab_add_instance(stdClass $data, $mform = null): int {
 
     $data->timecreated = time();
     $data->timemodified = $data->timecreated;
-    $data->labref = trim($data->labref ?? '');
+    $data->labversionid = (int) ($data->labversionid ?? 0);
+    $data->labref = $data->labversionid ? '' : trim($data->labref ?? '');
     $data->maxduration = (int) ($data->maxduration ?? 0);
     return $DB->insert_record('gns3lab', $data);
 }
@@ -72,7 +73,8 @@ function gns3lab_update_instance(stdClass $data, $mform = null): bool {
 
     $data->id = $data->instance;
     $data->timemodified = time();
-    $data->labref = trim($data->labref ?? '');
+    $data->labversionid = (int) ($data->labversionid ?? 0);
+    $data->labref = $data->labversionid ? '' : trim($data->labref ?? '');
     $data->maxduration = (int) ($data->maxduration ?? 0);
     return $DB->update_record('gns3lab', $data);
 }

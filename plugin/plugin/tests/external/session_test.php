@@ -17,6 +17,8 @@
 namespace mod_gns3lab\external;
 
 use core_external\external_api;
+use mod_gns3lab\local\lab_definition;
+use mod_gns3lab\local\lab_library;
 use mod_gns3lab\tests\fake_manager;
 
 /**
@@ -103,6 +105,52 @@ final class session_test extends \advanced_testcase {
             'lab_ref' => 'cisco-3x2',
             'course_id' => (int) $this->course->id,
         ], $request['body']);
+    }
+
+    public function test_start_sends_the_library_lab(): void {
+        $this->setAdminUser();
+        $this->manager->with_lab_definitions();
+        $labid = lab_library::create_lab((object) ['name' => 'OSPF']);
+        $version = lab_library::publish($labid, lab_definition::from_json(json_encode(fake_manager::lab()), 'OSPF'));
+        $lab = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id, 'labversionid' => $version->id]);
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+        $this->setUser($this->student);
+
+        $state = get_state::execute($lab->cmid);
+        start_session::execute($lab->cmid);
+
+        $this->assertTrue($state['labready']);
+        [$request] = $this->manager->requests_to('POST', '/api/v1/sessions');
+        $this->assertArrayNotHasKey('lab_ref', $request['body']);
+        $this->assertSame('OSPF', $request['body']['lab']['title']);
+        $this->assertSame(['R1', 'R2'], array_column($request['body']['lab']['nodes'], 'name'));
+    }
+
+    public function test_library_lab_refused_by_the_manager(): void {
+        $this->setAdminUser();
+        $this->manager->with_lab_definitions();
+        $labid = lab_library::create_lab((object) ['name' => 'OSPF']);
+        $version = lab_library::publish($labid, lab_definition::from_json(json_encode(fake_manager::lab()), 'OSPF'));
+        $lab = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id, 'labversionid' => $version->id]);
+        $this->manager->on('POST', '/api/v1/sessions', 422, [
+            'error' => 'lab_invalid',
+            'message' => 'The lab definition is invalid',
+            'problems' => [['path' => 'nodes[0].image', 'code' => 'image_not_allowed', 'message' => 'cisco-iou-l3']],
+        ]);
+        $this->setUser($this->student);
+        $sink = $this->redirectEvents();
+
+        try {
+            start_session::execute($lab->cmid);
+            $this->fail('No exception');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('labdefrejected', $e->errorcode);
+        }
+
+        $events = array_values(array_filter($sink->get_events(), fn($ev) => $ev instanceof \mod_gns3lab\event\lab_rejected));
+        $this->assertCount(1, $events);
+        $this->assertSame('nodes[0].image: image_not_allowed', $events[0]->other['problems']);
+        $this->assertEquals($this->student->id, $events[0]->userid);
     }
 
     public function test_start_reports_a_conflict(): void {

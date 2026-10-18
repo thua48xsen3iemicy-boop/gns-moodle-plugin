@@ -29,8 +29,8 @@ require_once($CFG->dirroot . '/course/moodleform_mod.php');
 /**
  * Activity settings form.
  *
- * Until the lab manager is connected the reference lab is a free text field;
- * an empty value shows the bundled demo topology.
+ * The lab is a published version from the site lab library or, for labs kept on the lab manager,
+ * a reference lab (free text lab_ref); with neither the bundled demo topology is shown.
  */
 class mod_gns3lab_mod_form extends moodleform_mod {
     /**
@@ -48,7 +48,17 @@ class mod_gns3lab_mod_form extends moodleform_mod {
 
         $mform->addElement('header', 'labsettings', get_string('labsettings', 'gns3lab'));
         $mform->setExpanded('labsettings');
+        $menu = [0 => get_string('labfrommanager', 'gns3lab')] + \mod_gns3lab\local\lab_library::published_menu();
+        $mform->addElement('select', 'labversionid', get_string('librarylab', 'gns3lab'), $menu);
+        $mform->setDefault('labversionid', 0);
+        $mform->addHelpButton('labversionid', 'librarylab', 'gns3lab');
+        if (has_capability('mod/gns3lab:managelabs', context_system::instance())) {
+            $link = html_writer::link(new \core\url('/mod/gns3lab/library.php'), get_string('library', 'gns3lab'));
+            $mform->addElement('static', 'librarylink', '', $link);
+        }
+
         $mform->addElement('text', 'labref', get_string('labref', 'gns3lab'), ['size' => '48']);
+        $mform->hideIf('labref', 'labversionid', 'neq', 0);
         $mform->setType('labref', PARAM_TEXT);
         $mform->addRule('labref', get_string('maximumchars', '', 255), 'maxlength', 255, 'client');
         $mform->addHelpButton('labref', 'labref', 'gns3lab');
@@ -71,6 +81,10 @@ class mod_gns3lab_mod_form extends moodleform_mod {
      */
     public function validation($data, $files): array {
         $errors = parent::validation($data, $files);
+        $versionid = (int) ($data['labversionid'] ?? 0);
+        if ($versionid && !array_key_exists($versionid, \mod_gns3lab\local\lab_library::published_menu())) {
+            $errors['labversionid'] = get_string('labversionmissing', 'gns3lab');
+        }
         if (isset($data['maxduration']) && (int) $data['maxduration'] < 0) {
             $errors['maxduration'] = get_string('maxdurationinvalid', 'gns3lab');
         }

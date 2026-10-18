@@ -2,7 +2,9 @@
 
 Ведёт себя как настоящий менеджер 0.3 (manager/ в ветке менеджера, CONTRACTS §2) там, где это видит плагин:
 - авторизация Bearer + X-Moodle-Site, ошибки {"error", "message"};
-- GET /api/v1/info: options ["max_duration"], features ["consoles", "observer"] (+ "resume" при MOCK_RESUME=1);
+- GET /api/v1/info: options ["max_duration"], features ["consoles", "observer", "resume", …] (MOCK_RESUME=0 убирает
+  "resume" — так вёл себя менеджер до 0.5.1);
+- один проект на студента × активность × лабу: имя проекта постоянное (<лаба>-w<номер>), node_id те же;
 - неизвестное поле в теле запроса на любом уровне — 400 unsupported_field;
 - у студента одна живая лаба на сайт: та же активность и lab_ref — 200 с ней, другая — 409 session_conflict
   с объектом conflict;
@@ -11,14 +13,20 @@
 - сессия идёт queued → starting → running за ~5 с, со stage и progress; stop — stopping → stopped за ~2 с;
   options.max_duration задаёт expires_at; у failed-сессии error {"code", "retryable"};
 - у запущенной сессии topology (properties нод пустые), nodes со статусами и nodes_stale, если включено;
-- билеты консолей выдаёт настоящий шлюз (gateway/console_gateway.py) через /internal/tickets;
+- билеты консолей выдаёт настоящий шлюз (manager/gateway/console_gateway.py в ветке менеджера) через /internal/tickets;
   к остановленной ноде — 409 node_not_running (если статусы не устарели).
+
+Лабы из Moodle (CONTRACTS §2.6 менеджера 0.5, ветка claude/determined-brown-lfgnxy):
+- GET /api/v1/images — каталог образов IMAGES; info: features "images", "lab_definitions", lab_formats, limits;
+- POST /api/v1/labs/validate {"lab"} — 200 {lab_def, resources, warnings} или 422 lab_invalid с problems;
+- POST /api/v1/sessions с "lab" вместо "lab_ref": сессия по определению, в ней lab_def и lab_ref null.
 
 Эталонные лабы — fixtures/*.gns3 (lab_ref = имя файла без .gns3), статусы нод — fixtures/<lab>.live.json.
 
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
-консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль.
+консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль. Режимы IOS (enable, configure terminal,
+interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашение — для клавиатуры консоли.
 
 Управление для ручных проверок:
     curl -X POST localhost:8090/mock/nodes/<node_id>/stop    # нода остановлена: консоль закроется
@@ -30,9 +38,12 @@
 Запуск — devtools/README.md.
 """
 import asyncio
+import hashlib
 import json
 import logging
+import math
 import os
+import re
 import secrets
 import time
 import uuid
@@ -50,7 +61,7 @@ CONSOLE_TOKEN = os.environ.get("MOCK_CONSOLE_TOKEN", "dev-console-token")
 GW_INTERNAL_URL = os.environ.get("GW_INTERNAL_URL", "http://127.0.0.1:8080")
 GW_INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "dev-internal-key")
 GW_PUBLIC_URL = os.environ.get("GW_PUBLIC_URL", "ws://127.0.0.1:8080")
-RESUME = os.environ.get("MOCK_RESUME") == "1"
+RESUME = os.environ.get("MOCK_RESUME", "1") != "0"  # менеджер 0.5.1: работа сохраняется всегда
 QUEUED_FOR, STARTING_FOR, STOPPING_FOR = 1.0, 4.0, 2.0
 DEFAULT_MAX_DURATION, MAX_DURATION_LIMIT = 90, 480  # minutes
 
@@ -87,8 +98,223 @@ def check_fields(body, allowed, where=""):
             check_fields(value, allowed[key], f"{where}{key}.")
 
 
-SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "lab_ref": 1, "course_id": 1,
+SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "lab_ref": 1, "lab": 1, "course_id": 1,
                   "options": {"max_duration": 1}, "client": {"plugin_version": 1, "moodle_release": 1}}
+
+
+# Каталог образов (CONTRACTS §2.6 менеджера 0.5): у настоящего менеджера ещё файл образа, cli_prompt, qga и т. п.
+# Имена портов — как у GNS3 2.2.61: iou Ethernet{adapter}/{port}, qemu Ethernet{adapter}, vpcs Ethernet0.
+IMAGES = [
+    {"id": "cisco-iou-l3", "title": "Cisco IOU L3 (маршрутизатор)", "kind": "iou", "category": "router",
+     "symbol": ":/symbols/router.svg", "console_type": "telnet",
+     "ram_mb": {"default": 1024, "min": 512, "max": 2048}, "cpus": None,
+     "adapters": {"default": 2, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}/{port}", "ports_per_adapter": 4},
+    {"id": "cisco-iou-l2", "title": "Cisco IOU L2 (коммутатор)", "kind": "iou", "category": "switch",
+     "symbol": ":/symbols/multilayer_switch.svg", "console_type": "telnet",
+     "ram_mb": {"default": 1024, "min": 512, "max": 2048}, "cpus": None,
+     "adapters": {"default": 1, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}/{port}", "ports_per_adapter": 4},
+    {"id": "debian12", "title": "Debian 12", "kind": "qemu", "category": "host",
+     "symbol": ":/symbols/computer.svg", "console_type": "telnet",
+     "ram_mb": {"default": 768, "min": 512, "max": 4096}, "cpus": {"default": 1, "min": 1, "max": 2},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
+    {"id": "debian12-server", "title": "Debian 12 (сервер)", "kind": "qemu", "category": "server",
+     "symbol": ":/symbols/server.svg", "console_type": "telnet",
+     "ram_mb": {"default": 2048, "min": 1024, "max": 8192}, "cpus": {"default": 2, "min": 1, "max": 4},
+     "adapters": {"default": 2, "min": 1, "max": 8}, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
+    {"id": "vpcs", "title": "VPCS", "kind": "vpcs", "category": "host",
+     "symbol": ":/symbols/vpcs_guest.svg", "console_type": "telnet",
+     "ram_mb": None, "cpus": None, "adapters": None, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
+]
+LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "images": "*"}
+LAB_FORMAT = "gns3lab.lab/1"
+# Проверка определения — перенос manager/lab_manager/labdef.py (ветка менеджера claude/determined-brown-lfgnxy):
+# те же правила, коды и пути замечаний, хэш без title, тот же размер CT.
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+MAX_LAB_BYTES, MAX_NODES, MAX_LINKS, COORD = 256 * 1024, 100, 1000, 100_000
+VPCS_MEMORY_MB, OVERHEAD_MB = 32, 1024
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def is_int(value):
+    return type(value) is int
+
+
+def effective(node, image):
+    rng = lambda key, fallback: node.get(key, image[key]["default"]) if image[key] else fallback  # noqa: E731
+    return {"ram_mb": rng("ram_mb", VPCS_MEMORY_MB), "cpus": rng("cpus", 1), "adapters": rng("adapters", 1)}
+
+
+def resources_of(nodes, images):
+    memory = cores_qemu = iou = vpcs = 0
+    for node in nodes:
+        image = images[node["image"]]
+        values = effective(node, image)
+        memory += values["ram_mb"]
+        if image["kind"] == "qemu":
+            cores_qemu += values["cpus"]
+        elif image["kind"] == "iou":
+            iou += 1
+        else:
+            vpcs += 1
+    return {"cores": max(2, cores_qemu + math.ceil(iou / 2) + math.ceil(vpcs / 8)),
+            "memory_mb": math.ceil((memory * 1.1 + OVERHEAD_MB) / 256) * 256}
+
+
+def lab_problems(lab):
+    """Checks a definition like the manager. Returns (problems, normalised definition with _resources)."""
+    problems = []
+    images = {i["id"]: i for i in IMAGES if LIMITS["images"] == "*" or i["id"] in LIMITS["images"]}
+
+    def bad(path, code, message=""):
+        problems.append({"path": path, "code": code, "message": message})
+
+    def unknown(obj, allowed, path):
+        for key in sorted(set(obj) - allowed):
+            bad(f"{path}.{key}" if path else key, "unknown_field")
+
+    if not isinstance(lab, dict):
+        return [{"path": "", "code": "bad_type", "message": "object expected"}], None
+    if len(canonical(lab).encode()) > MAX_LAB_BYTES:
+        return [{"path": "", "code": "too_large", "message": f"max {MAX_LAB_BYTES} bytes"}], None
+    unknown(lab, {"format", "title", "nodes", "links"}, "")
+    if lab.get("format") != LAB_FORMAT:
+        bad("format", "required" if "format" not in lab else "bad_format", LAB_FORMAT)
+    title = lab.get("title", "")
+    if not isinstance(title, str) or len(title) > 200:
+        bad("title", "bad_type", "string up to 200 characters")
+    nodes, links = lab.get("nodes"), lab.get("links", [])
+    if not isinstance(nodes, list) or not nodes:
+        bad("nodes", "required" if nodes is None else "bad_type", "non-empty list")
+        return problems, None
+    if not isinstance(links, list):
+        bad("links", "bad_type", "list")
+        links = []
+    max_nodes = min(MAX_NODES, LIMITS["max_nodes"])
+    if len(nodes) > max_nodes:
+        bad("nodes", "too_many_nodes", f"max {max_nodes}")
+    if len(links) > MAX_LINKS:
+        bad("links", "too_large", f"max {MAX_LINKS} links")
+    out_nodes, by_name = [], {}
+    for i, node in enumerate(nodes[:MAX_NODES]):
+        path = f"nodes[{i}]"
+        if not isinstance(node, dict):
+            bad(path, "bad_type", "object expected")
+            continue
+        unknown(node, {"name", "image", "x", "y", "ram_mb", "cpus", "adapters"}, path)
+        out, ok = {}, True
+        name = node.get("name")
+        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
+            bad(f"{path}.name", "required" if name is None else "bad_name", NAME_RE.pattern)
+            ok = False
+        elif name in by_name:
+            bad(f"{path}.name", "duplicate_name", name)
+            ok = False
+        image_id = node.get("image")
+        image = images.get(image_id) if isinstance(image_id, str) else None
+        if image_id is None:
+            bad(f"{path}.image", "required")
+        elif image is None:
+            known = any(i["id"] == image_id for i in IMAGES)
+            bad(f"{path}.image", "image_not_allowed" if known else "unknown_image", str(image_id)[:64])
+        for axis in ("x", "y"):
+            value = node.get(axis, 0)
+            if not is_int(value) or not -COORD <= value <= COORD:
+                bad(f"{path}.{axis}", "out_of_range", f"integer -{COORD}..{COORD}")
+            else:
+                out[axis] = value
+        if image is not None:
+            for key in ("ram_mb", "cpus", "adapters"):
+                if key not in node:
+                    continue
+                rng, value = image[key], node[key]
+                if rng is None:
+                    bad(f"{path}.{key}", "unknown_field", f"{image['id']} has no {key}")
+                elif not is_int(value) or not rng["min"] <= value <= rng["max"]:
+                    bad(f"{path}.{key}", "out_of_range", f"{rng['min']}..{rng['max']}")
+                else:
+                    out[key] = value
+        if ok and image is not None:
+            out = {"name": name, "image": image["id"], **out}
+            by_name[name] = out
+            out_nodes.append(out)
+    out_links, used = [], set()
+    for i, link in enumerate(links[:MAX_LINKS]):
+        path = f"links[{i}]"
+        if not isinstance(link, dict):
+            bad(path, "bad_type", "object expected")
+            continue
+        unknown(link, {"a", "b"}, path)
+        ends = []
+        for side in ("a", "b"):
+            ep, epath = link.get(side), f"{path}.{side}"
+            if not isinstance(ep, dict):
+                bad(epath, "required" if ep is None else "bad_type")
+                continue
+            unknown(ep, {"node", "adapter", "port"}, epath)
+            node_name, adapter, port = ep.get("node"), ep.get("adapter", 0), ep.get("port", 0)
+            target = by_name.get(node_name) if isinstance(node_name, str) else None
+            if target is None:
+                if not any(isinstance(n, dict) and n.get("name") == node_name for n in nodes):
+                    bad(f"{epath}.node", "unknown_node", str(node_name)[:80])
+                continue
+            image = images[target["image"]]
+            adapters, per = effective(target, image)["adapters"], image["ports_per_adapter"]
+            if not (is_int(adapter) and is_int(port) and 0 <= adapter < adapters and 0 <= port < per):
+                bad(epath, "bad_port", f"adapter 0..{adapters - 1}, port 0..{per - 1}")
+                continue
+            key = (node_name, adapter, port)
+            if key in used:
+                bad(epath, "port_in_use", f"{node_name} {adapter}/{port}")
+                continue
+            used.add(key)
+            ends.append({"node": node_name, "adapter": adapter, "port": port})
+        if len(ends) == 2:
+            if ends[0]["node"] == ends[1]["node"]:
+                bad(path, "self_link", ends[0]["node"])
+            else:
+                out_links.append({"a": ends[0], "b": ends[1]})
+    if problems:
+        return problems, None
+    resources = resources_of(out_nodes, images)
+    if LIMITS["max_memory_mb"] is not None and resources["memory_mb"] > LIMITS["max_memory_mb"]:
+        bad("nodes", "limit_exceeded", f"memory {resources['memory_mb']} > {LIMITS['max_memory_mb']} MiB")
+    if LIMITS["max_cpus"] is not None and resources["cores"] > LIMITS["max_cpus"]:
+        bad("nodes", "limit_exceeded", f"cores {resources['cores']} > {LIMITS['max_cpus']}")
+    if problems:
+        return problems, None
+    return [], {"format": LAB_FORMAT, "title": title, "nodes": out_nodes, "links": out_links, "_resources": resources}
+
+
+def lab_hash(normal):
+    """sha256 of the normalised definition without its title and without the mock's own fields."""
+    body = {k: v for k, v in normal.items() if k != "title" and not k.startswith("_")}
+    return "sha256:" + hashlib.sha256(canonical(body).encode()).hexdigest()
+
+
+def lab_document(normal, lab_def):
+    """The .gns3-like document the slot would report for a lab built from a definition."""
+    images = {i["id"]: i for i in IMAGES}
+    ids = {n["name"]: str(uuid.uuid5(uuid.NAMESPACE_URL, lab_def + "/" + n["name"])) for n in normal["nodes"]}
+    nodes = []
+    for n in normal["nodes"]:
+        image = images[n["image"]]
+        ports = []
+        for adapter in range(effective(n, image)["adapters"]):
+            for port in range(image["ports_per_adapter"]):
+                name = image["port_name"].replace("{adapter}", str(adapter)).replace("{port}", str(port))
+                short = "e" + name[8:] if name.startswith("Ethernet") else name
+                ports.append({"adapter_number": adapter, "port_number": port, "name": name, "short_name": short})
+        nodes.append({"node_id": ids[n["name"]], "name": n["name"], "node_type": image["kind"],
+                      "symbol": image["symbol"], "console_type": image["console_type"], "x": n["x"], "y": n["y"],
+                      "width": 60, "height": 45, "ports": ports, "properties": {}})
+    links = [{"link_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{lab_def}/link/{i}")),
+              "nodes": [{"node_id": ids[e["node"]], "adapter_number": e["adapter"], "port_number": e["port"]}
+                        for e in (link["a"], link["b"])]}
+             for i, link in enumerate(normal["links"])]
+    return {"name": normal["title"], "topology": {"nodes": nodes, "links": links, "drawings": []}}
 
 
 def load_labs():
@@ -102,9 +328,12 @@ def load_labs():
 
 
 class Session:
-    def __init__(self, site, user_id, instance_id, lab_ref, course_id, max_duration, fail=None):
+    def __init__(self, site, user_id, instance_id, lab_ref, course_id, max_duration, fail=None, lab_def=None):
         self.id = "s-" + secrets.token_hex(8)
         self.site, self.user_id, self.instance_id, self.lab_ref = site, user_id, instance_id, lab_ref
+        self.lab_def = lab_def  # sha256:… for a lab from Moodle, then lab_ref is None
+        self.key = lab_def or lab_ref  # key in Manager.labs
+        self.workspace = 0  # number of the student's project, set by the manager
         self.course_id = course_id
         self.max_duration = max_duration * 60
         self.fail = fail  # {"code", "retryable"}: the session fails half way through starting
@@ -148,6 +377,7 @@ class Manager:
     def __init__(self):
         self.labs = load_labs()
         self.sessions: list[Session] = []
+        self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
         self.stale = False
@@ -174,6 +404,7 @@ class Manager:
             "schema": "gns3lab.session/1",
             "session_id": s.id,
             "lab_ref": s.lab_ref,
+            "lab_def": s.lab_def,
             "status": status,
             "stage": stage,
             "status_message": message + (f" {progress}%" if progress is not None else ""),
@@ -190,9 +421,9 @@ class Manager:
         status = body["status"]
         body["features"] = ["consoles"] if status == "running" else []
         if status == "running":
-            lab = self.labs[s.lab_ref]
+            lab = self.labs[s.key]
             doc = json.loads(json.dumps(lab["doc"]))
-            doc["name"] = f"{s.lab_ref}-{s.id}"
+            doc["name"] = f"{s.lab_ref or 'lab-' + s.lab_def[7:15]}-w{s.workspace}"
             for n in doc["topology"]["nodes"]:
                 n["properties"] = {}  # как у настоящего менеджера: внутреннее слота не уходит наружу
                 n.pop("console", None)
@@ -226,10 +457,30 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer"] + (["resume"] if RESUME else [])
-    return web.json_response({"schema": "gns3lab.info/1", "version": "0.3.0-mock",
+    features = ["consoles", "observer", "images", "lab_definitions"] + (["resume"] if RESUME else [])
+    return web.json_response({"schema": "gns3lab.info/1", "version": "0.5.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
-                              "features": features})
+                              "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
+
+
+async def images(request):
+    site_of(request)
+    allowed = LIMITS["images"]
+    return web.json_response({"images": [i for i in IMAGES if allowed == "*" or i["id"] in allowed]})
+
+
+async def validate_lab(request):
+    site_of(request)
+    try:
+        body = await read_body(request, {"lab": 1})
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    except json.JSONDecodeError:
+        return error(400, "invalid_request", "Body is not JSON")
+    problems, normal = lab_problems(body.get("lab"))
+    if problems:
+        return error(422, "lab_invalid", f"{len(problems)} problem(s) in the lab", problems=problems)
+    return web.json_response({"lab_def": lab_hash(normal), "resources": normal["_resources"], "warnings": []})
 
 
 async def read_body(request, allowed):
@@ -244,12 +495,13 @@ async def list_labs(request):
     site_of(request)
     m: Manager = request.app["m"]
     return web.json_response([{"lab_ref": ref, "title": lab["doc"].get("name", ref), "description": ""}
-                              for ref, lab in m.labs.items()])
+                              for ref, lab in m.labs.items() if not ref.startswith("sha256:")])
 
 
 async def lab_topology(request):
     site_of(request)
-    lab = request.app["m"].labs.get(request.match_info["ref"])
+    ref = request.match_info["ref"]
+    lab = None if ref.startswith("sha256:") else request.app["m"].labs.get(ref)
     return web.json_response(lab["doc"]) if lab else error(404, "lab_not_found", "Unknown lab_ref")
 
 
@@ -278,26 +530,37 @@ async def create_session(request):
     m: Manager = request.app["m"]
     try:
         body = await read_body(request, SESSION_FIELDS)
-        user_id, instance_id, lab_ref = int(body["user_id"]), int(body["instance_id"]), str(body["lab_ref"])
+        user_id, instance_id = int(body["user_id"]), int(body["instance_id"])
+        if ("lab_ref" in body) == ("lab" in body):
+            raise KeyError("lab_ref or lab")
+        lab_ref = str(body["lab_ref"]) if "lab_ref" in body else None
     except Unsupported as exc:
         return error(400, "unsupported_field", f"Unsupported field: {exc}")
     except (KeyError, ValueError, TypeError, json.JSONDecodeError):
-        return error(400, "invalid_request", "Invalid fields: user_id, instance_id, lab_ref")
+        return error(400, "invalid_request", "Invalid fields: user_id, instance_id, lab_ref or lab")
+    lab_def = None
+    if lab_ref is None:
+        problems, normal = lab_problems(body["lab"])
+        if problems:
+            return error(422, "lab_invalid", f"{len(problems)} problem(s) in the lab", problems=problems)
+        lab_def = lab_hash(normal)
+        m.labs.setdefault(lab_def, {"doc": lab_document(normal, lab_def), "statuses": {}})
     live = m.live(site, user_id)
     if live:
-        if (live.instance_id, live.lab_ref) != (instance_id, lab_ref):
+        if (live.instance_id, live.key) != (instance_id, lab_def or lab_ref):
             return error(409, "session_conflict", "У студента уже запущена другая лаба; сначала остановите её",
                          conflict={"instance_id": live.instance_id, "course_id": live.course_id,
-                                   "lab_ref": live.lab_ref, "status": live.status()})
+                                   "lab_ref": live.lab_ref, "lab_def": live.lab_def, "status": live.status()})
         return web.json_response(m.present(live), status=200)
-    if lab_ref not in m.labs:
+    if lab_ref is not None and lab_ref not in m.labs:
         return error(404, "lab_not_found", "Unknown lab_ref")
     requested = (body.get("options") or {}).get("max_duration") or 0
     max_duration = min(int(requested), MAX_DURATION_LIMIT) if requested else DEFAULT_MAX_DURATION
-    s = Session(site, user_id, instance_id, lab_ref, body.get("course_id"), max_duration, m.fail_next)
+    s = Session(site, user_id, instance_id, lab_ref, body.get("course_id"), max_duration, m.fail_next, lab_def)
     m.fail_next = None
+    s.workspace = m.workspaces.setdefault((site, user_id, instance_id, s.key), len(m.workspaces) + 1)
     m.sessions.append(s)
-    log.info("session %s: user %s, activity %s, lab %s, %s min, client %s", s.id, user_id, instance_id, lab_ref,
+    log.info("session %s: user %s, activity %s, lab %s, %s min, client %s", s.id, user_id, instance_id, s.key,
              max_duration, body.get("client"))
     return web.json_response(m.present(s), status=201)
 
@@ -337,7 +600,7 @@ async def console_ticket(request):
     if s.status() != "running":
         return error(409, "session_not_running", "Session is not running")
     node_id = body.get("node_id")
-    if node_id not in {n["node_id"] for n in m.labs[s.lab_ref]["doc"]["topology"]["nodes"]}:
+    if node_id not in {n["node_id"] for n in m.labs[s.key]["doc"]["topology"]["nodes"]}:
         return error(404, "node_not_found", "Node does not belong to this session")
     if not m.stale and node_id in m.stopped_nodes:
         return error(409, "node_not_running", "Node is not running")
@@ -392,9 +655,38 @@ async def slot_console(request):
     ws = web.WebSocketResponse(protocols=("lab-slot",))
     await ws.prepare(request)
     request.app["consoles"].setdefault(node_id, set()).add(ws)
-    prompt = f"{name}#".encode()
+    # Режимы IOS настолько, насколько их видит клавиатура консоли: приглашение меняется, команды — эхо.
+    modes = [""]  # "", "config", "config-if", "config-router"...
+    priv = [True]
+
+    def prompt():
+        mode = f"({modes[-1]})" if modes[-1] else ""
+        return f"{name}{mode}{'#' if priv[0] else '>'}".encode()
+
+    def run(cmd):
+        word = cmd.split()[0].lower() if cmd else ""
+        if word == "enable":
+            priv[0] = True
+        elif word == "disable":
+            priv[0], modes[:] = False, [""]
+        elif cmd.lower() in ("configure terminal", "conf t") and priv[0] and not modes[-1]:
+            modes.append("config")
+        elif word in ("interface", "int") and modes[-1].startswith("config"):
+            modes[1:] = ["config", "config-if"]
+        elif word == "router" and modes[-1].startswith("config"):
+            modes[1:] = ["config", "config-router"]
+        elif word == "exit" and len(modes) > 1:
+            modes.pop()
+        elif word == "end":
+            modes[:] = [""]
+        elif cmd.lower() in ("write memory", "write", "wr", "copy running-config startup-config") and priv[0]:
+            return "\r\nBuilding configuration...\r\n[OK]"
+        elif cmd:
+            return f"\r\n% mock {name}: {cmd}"
+        return ""
+
     line = ""
-    await ws.send_bytes(b"\r\n" + prompt)
+    await ws.send_bytes(b"\r\n" + prompt())
     try:
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
@@ -405,15 +697,18 @@ async def slot_console(request):
                     if cmd == "reload":
                         await ws.close()
                         return ws
-                    out = f"\r\n% mock {name}: {cmd}" if cmd else ""
-                    await ws.send_bytes(out.encode() + b"\r\n" + prompt)
+                    await ws.send_bytes(run(cmd).encode() + b"\r\n" + prompt())
                 elif ch in "\x7f\b":
                     if line:
                         line = line[:-1]
                         await ws.send_bytes(b"\b \b")
+                elif ch == "\x15":
+                    await ws.send_bytes(b"\b \b" * len(line))
+                    line = ""
                 elif ch == "\x1a":
                     line = ""
-                    await ws.send_bytes(b"^Z\r\n" + prompt)
+                    modes[:] = [""]
+                    await ws.send_bytes(b"^Z\r\n" + prompt())
                 elif ch >= " ":
                     line += ch
                     await ws.send_bytes(ch.encode())
@@ -429,6 +724,8 @@ def make_apps():
     api["m"], api["consoles"] = manager, consoles
     api.router.add_get("/api/v1/info", info)
     api.router.add_get("/api/v1/labs", list_labs)
+    api.router.add_get("/api/v1/images", images)
+    api.router.add_post("/api/v1/labs/validate", validate_lab)
     api.router.add_get("/api/v1/labs/{ref}/topology", lab_topology)
     api.router.add_get("/api/v1/sessions", find_session)
     api.router.add_post("/api/v1/sessions", create_session)

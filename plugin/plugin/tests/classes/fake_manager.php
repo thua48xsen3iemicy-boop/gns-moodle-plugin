@@ -126,15 +126,73 @@ class fake_manager {
      * Answers GET /api/v1/info like manager 0.3 (CONTRACTS §2.1).
      *
      * @param array $features features to announce
+     * @param array $extra more fields of the answer
      */
-    public function with_info(array $features = ['consoles', 'observer']): void {
+    public function with_info(array $features = ['consoles', 'observer'], array $extra = []): void {
         $this->on('GET', '/api/v1/info', 200, [
             'schema' => 'gns3lab.info/1',
             'version' => '0.3.0',
             'session_schemas' => ['gns3lab.session/1'],
             'options' => ['max_duration'],
             'features' => $features,
+        ] + $extra);
+    }
+
+    /**
+     * Answers like manager 0.5 that takes labs from Moodle (CONTRACTS §2.6): info, images and validate.
+     *
+     * @param string $labdef hash that validate returns
+     */
+    public function with_lab_definitions(string $labdef = 'sha256:aaaa'): void {
+        $this->with_info(['consoles', 'observer', 'images', 'lab_definitions'], [
+            'lab_formats' => ['gns3lab.lab/1'],
+            'limits' => ['max_nodes' => 30, 'max_memory_mb' => 16384, 'max_cpus' => 8, 'images' => '*'],
         ]);
+        $this->on('GET', '/api/v1/images', 200, ['images' => [self::image()]]);
+        $this->on('POST', '/api/v1/labs/validate', 200, [
+            'lab_def' => $labdef,
+            'resources' => ['cores' => 2, 'memory_mb' => 3072],
+            'warnings' => [],
+        ]);
+    }
+
+    /**
+     * An image of the catalog: Cisco IOU L3.
+     *
+     * @return array
+     */
+    public static function image(): array {
+        return [
+            'id' => 'cisco-iou-l3',
+            'title' => 'Cisco IOU L3',
+            'kind' => 'iou',
+            'category' => 'router',
+            'symbol' => ':/symbols/classic/router.svg',
+            'console_type' => 'telnet',
+            'ram_mb' => ['default' => 1024, 'min' => 512, 'max' => 2048],
+            'cpus' => null,
+            'adapters' => ['default' => 2, 'min' => 1, 'max' => 4],
+            'port_name' => 'Ethernet{adapter}/{port}',
+            'ports_per_adapter' => 4,
+        ];
+    }
+
+    /**
+     * A lab definition of two routers and a link, as the editor sends it.
+     *
+     * @return array
+     */
+    public static function lab(): array {
+        return [
+            'format' => 'gns3lab.lab/1',
+            'nodes' => [
+                ['name' => 'R1', 'image' => 'cisco-iou-l3', 'x' => -100, 'y' => 0, 'adapters' => 2],
+                ['name' => 'R2', 'image' => 'cisco-iou-l3', 'x' => 100, 'y' => 0, 'adapters' => 2, 'ram_mb' => 512],
+            ],
+            'links' => [
+                ['a' => ['node' => 'R1', 'adapter' => 0, 'port' => 1], 'b' => ['node' => 'R2', 'adapter' => 1, 'port' => 0]],
+            ],
+        ];
     }
 
     /**

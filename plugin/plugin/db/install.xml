@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/gns3lab/db" VERSION="20261016" COMMENT="XMLDB file for Moodle mod_gns3lab"
+<XMLDB PATH="mod/gns3lab/db" VERSION="20261019" COMMENT="XMLDB file for Moodle mod_gns3lab"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
 >
@@ -13,13 +13,56 @@
         <FIELD NAME="introformat" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="labref" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Reference lab on the manager (lab_ref); empty means demo topology"/>
         <FIELD NAME="maxduration" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Session limit in minutes, 0 means the manager default"/>
+        <FIELD NAME="labversionid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Published lab version from the site lab library; 0 means labref is used"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
         <KEY NAME="course" TYPE="foreign" FIELDS="course" REFTABLE="course" REFFIELDS="id"/>
+        <KEY NAME="labversionid" TYPE="foreign" FIELDS="labversionid" REFTABLE="gns3lab_lab_versions" REFFIELDS="id"/>
       </KEYS>
+    </TABLE>
+    <TABLE NAME="gns3lab_labs" COMMENT="Site lab library: labs prepared by lab authors and chosen in activities">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="description" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="descriptionformat" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="usercreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usercreated" TYPE="foreign" FIELDS="usercreated" REFTABLE="user" REFFIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="gns3lab_lab_versions" COMMENT="Versions of a library lab: one editable draft and frozen published versions">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="version" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Number of the version; a draft has the number it gets when published"/>
+        <FIELD NAME="status" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="draft" SEQUENCE="false" COMMENT="draft or published"/>
+        <FIELD NAME="definition" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Lab definition gns3lab.lab/1 as JSON, sent to the lab manager"/>
+        <FIELD NAME="labdef" TYPE="char" LENGTH="80" NOTNULL="false" SEQUENCE="false" COMMENT="Hash of the definition given by the lab manager when the version was published"/>
+        <FIELD NAME="memorymb" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Memory the lab needs, from the lab manager"/>
+        <FIELD NAME="cores" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="CPU cores the lab needs, from the lab manager"/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timepublished" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="labid" TYPE="foreign" FIELDS="labid" REFTABLE="gns3lab_labs" REFFIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="labid_version" UNIQUE="true" FIELDS="labid, version"/>
+      </INDEXES>
     </TABLE>
   </TABLES>
 </XMLDB>

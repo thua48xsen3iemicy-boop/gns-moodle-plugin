@@ -8,7 +8,7 @@
 
 1. Прочитай `CLAUDE.md` и `docs/SPEC.md` целиком.
 2. Изучи прототипы `prototypes/topology-viewer.html` и `prototypes/console.html` (открой их и прочитай код),
-   шлюз `gateway/console_gateway.py` с тестом и фикстуры в `fixtures/`. Запусти `python3 gateway/tests/test_gateway.py`.
+   фикстуры в `fixtures/`. Шлюз консолей с тестом теперь ведёт менеджер (`manager/gateway/`, MANAGER_REQUESTS §12).
 3. Прежде чем писать код, пришли мне:
    - план этапов 0 и 1 по файлам (что создаёшь и зачем);
    - список вопросов, если в SPEC чего-то не хватает или есть противоречия;

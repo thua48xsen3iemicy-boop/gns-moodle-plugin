@@ -53,4 +53,25 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_save_lab_draft' => [
+        'classname' => \mod_gns3lab\external\save_lab_draft::class,
+        'description' => 'Saves the draft of a library lab from the lab editor.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_validate_lab' => [
+        'classname' => \mod_gns3lab\external\validate_lab::class,
+        'description' => 'Asks the lab manager to check a lab definition.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_publish_lab' => [
+        'classname' => \mod_gns3lab\external\publish_lab::class,
+        'description' => 'Publishes a new version of a library lab.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
 ];

@@ -17,7 +17,6 @@ Moodle-плагин (модуль активности) для лаборато�
 
 ```
 plugin/        корень плагина mod_gns3lab (монтируется в public/mod/gns3lab dev-Moodle)
-gateway/       шлюз консолей (готов, Python/aiohttp) + тест против поддельного Lab Slot
 devtools/      mock-менеджер, docker-compose для dev-окружения, скрипты (создать на этапе 0)
 prototypes/    рабочие прототипы UI — эталон поведения, НЕ код для копирования как есть
 fixtures/      пример .gns3 (11 нод, все типы линков) и демо «живых» данных
@@ -52,8 +51,8 @@ docs/          SPEC.md и прочая документация
 - `prototypes/console.html` — xterm.js с полоской мобильных клавиш, сниппетами, кликабельными именами портов,
   режимом наблюдателя, подгонкой под экранную клавиатуру (`visualViewport`). Имитатор IOS внутри — только для демо,
   в плагин его не переносить: в плагине терминал подключается к шлюзу (см. SPEC, «Контракт шлюза»).
-- `gateway/console_gateway.py` — готовый шлюз. Менять его можно, но контракт (билеты, кадры, коды закрытия) —
-  только синхронно с SPEC и тестом `gateway/tests/test_gateway.py`.
+- Шлюз консолей ведёт менеджер: `manager/gateway/` в ветке `claude/determined-brown-lfgnxy` (MANAGER_REQUESTS §12). Контракт
+  браузер ↔ шлюз (билеты, кадры, коды закрытия) меняется только по договорённости с менеджером.
 
 ## Dev-окружение
 
@@ -63,8 +62,7 @@ docs/          SPEC.md и прочая документация
 - Настоящий менеджер — в ветке `claude/epic-feynman-54aj67` (`manager/`, нужен Proxmox). Для разработки плагина —
   mock `devtools/mock-manager` (`devtools/README.md`): то же поведение API и поддельная консоль Lab Slot.
   Договорённости с менеджером — `docs/MANAGER_REQUESTS.md` (наши) и `manager/docs/PLUGIN_REQUESTS.md` (его ответы).
-- Проверки перед коммитом: `moodle-plugin-ci phpcs` (стандарт moodle), `phplint`, `phpdoc`, PHPUnit и Behat плагина,
-  `python3 gateway/tests/test_gateway.py`.
+- Проверки перед коммитом: `moodle-plugin-ci phpcs` (стандарт moodle), `phplint`, `phpdoc`, PHPUnit и Behat плагина.
 - Режим разработчика Moodle включён, после правок — сброс кэшей (`admin/cli/purge_caches.php`).
 
 ## Как работать

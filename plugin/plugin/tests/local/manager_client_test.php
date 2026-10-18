@@ -215,4 +215,16 @@ final class manager_client_test extends \advanced_testcase {
         [$request] = $this->manager->requests_to('GET', '/api/v1/sessions');
         $this->assertSame('instance_id=7', $request['query']);
     }
+
+    public function test_lab_definitions_need_the_format(): void {
+        $this->manager->with_info(['consoles', 'images', 'lab_definitions']);
+        $this->assertTrue($this->client->has_feature('lab_definitions'));
+        $this->assertFalse($this->client->supports_lab_definitions());
+
+        \cache::make('mod_gns3lab', 'info')->purge();
+        $this->manager->with_lab_definitions();
+        $this->assertTrue($this->client->supports_lab_definitions());
+        $this->assertSame(30, $this->client->get_info()->limits->max_nodes);
+        $this->assertSame('cisco-iou-l3', $this->client->get_images()[0]->id);
+    }
 }
