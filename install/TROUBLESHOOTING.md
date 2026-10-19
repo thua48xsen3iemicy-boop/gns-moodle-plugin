@@ -100,27 +100,34 @@ pct exec $MGR -- $SQL -c "SELECT id, slot_vmid, slot_node, student_key, project_
 - `stage = lab_submit`/`lab_wait`/`lab_stop`, «Лаба в слоте в состоянии FAILED, нужен оператор» —
   лаба была `FAILED` уже на момент запуска или остановки.
 
-Полная ошибка слота лежит в каталоге студента на CephFS, её видно с любой ноды без запуска CT:
+Текст ошибки слота менеджер не сохраняет, а запись лабы в каталоге студента
+(`<students>/<student_key>/.lab-slot/labs/<project_id>.json`) после сбоя перезаписывается: менеджер
+сразу останавливает лабу, и там уже `STOPPED stopped None`. Причину видно только в журнале GNS3
+**до** остановки. Конец журнала — это уборка менеджера (`POST …/nodes/stop`, `Stopping lab-slot`,
+`Stopping gns3`), смотреть нужно то, что было раньше.
 
-```sh
-F=/mnt/pve/cfs/gns3-rw/students/<student_key>/.lab-slot/labs/<project_id>.json
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], d.get("stage"), d.get("error"))' "$F"
-```
-
-Журналы слота — из rootfs выключенного CT, тоже без запуска (на ноде слота):
+Журналы слота — из rootfs выключенного CT, без запуска (на ноде слота). Время в начале строки —
+часовой пояс CT, время внутри строк `gns3server` — UTC, как в БД менеджера:
 
 ```sh
 pct mount 701
 R=/var/lib/lxc/701/rootfs
-journalctl -D $R/var/log/journal -u lab-slot -u gns3 --since "-1d" --no-pager | tail -200
+# От готовности лабы (started_at) до уборки (finished_at); --since/--until — во времени хоста
+journalctl -D $R/var/log/journal -u lab-slot -u gns3 --since "<started_at> UTC" --until "<finished_at> UTC" --no-pager \
+  | grep -vE '"GET /v2/|"GET /v1/'
 journalctl -D $R/var/log/journal -k --since "-1d" --no-pager | grep -iE "oom|killed process"
-# Операции слота (deploy/stop) с ошибками:
-python3 -c 'import sqlite3,sys; [print(r[0]) for r in sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True).execute("SELECT data FROM records WHERE kind = '"'"'operation'"'"'")]' $R/var/lib/lab-slot/state.sqlite3 | tail -5
 pct unmount 701
 ```
 
-Если в `/var/log/journal` пусто, журнал в CT не сохраняется между запусками: тогда остаются файл
-лабы и SQLite.
+Что искать:
+
+- `QEMU process has stopped, return code: <не 0>`, `IOU … has stopped`, `Traceback` — нода упала сама;
+- нода, которую уборка **не** останавливает (`Stopping QEMU VM "<имя>"` есть не для всех): она
+  остановилась раньше, ищите её имя выше;
+- `Started`/`Stopping` `gns3.service` или `lab-slot.service` посреди сессии — причина `SERVICE_RESTART`;
+  кто перезапустил — соседние строки `systemd` и журнал хоста (`lab-provision`, `git pull`).
+
+Если в `/var/log/journal` пусто, журнал в CT не сохраняется между запусками.
 
 Сразу несколько слотов в `SLOT_LAB_FAILED` примерно в одно время — ищите общую причину:
 `git pull` или `lab-provision slot` во время сессий, нехватка памяти на ноде, общий образ в `mp2`.
