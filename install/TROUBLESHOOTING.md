@@ -6,7 +6,7 @@
 ```sh
 MGR=1900    # MANAGER_VMID из secrets/lab.conf
 ADM="runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin"
-SQL="runuser -u lab-manager -- psql -X lab_manager"
+SQL="runuser -u lab-manager -- env LC_ALL=C.UTF-8 psql -X -P pager=off lab_manager"   # без C.UTF-8 кириллица выходит байтами <D0><9B>
 P=/mnt/pve/cfs/gns3-ro/install/lab-provision
 ```
 
