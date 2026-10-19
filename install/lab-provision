@@ -238,6 +238,9 @@ pve_token() {
       python3 -c 'import json, sys; print(json.load(sys.stdin)["value"])' >"$f.tmp"
     mv "$f.tmp" "$f"
   fi
+  # A privilege-separated token gets the intersection of its own and its user's rights: grant both.
+  pveum acl modify /pool/lab-slots -user lab-manager@pve -role LabManager
+  pveum acl modify /nodes -user lab-manager@pve -role LabManagerNodes
   pveum acl modify /pool/lab-slots -token "$tid" -role LabManager
   pveum acl modify /nodes -token "$tid" -role LabManagerNodes
 }
