@@ -1,3 +1,5 @@
+<!doctype html>
+<meta charset="utf-8">
 <title>Лаба студента</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -93,14 +95,21 @@ button{font-family:inherit}
 .dots{fill:var(--grid)}
 .dtext{font-family:var(--display)}
 .wire{stroke:var(--wire);stroke-width:2;fill:none;stroke-linecap:round}
+.link{cursor:pointer}
+.link:focus{outline:none}
+.hit{stroke:transparent;stroke-width:calc(18px * var(--inv,1));fill:none;pointer-events:stroke}
 .link.down .wire{stroke:var(--bad);stroke-dasharray:5 5}
+.link.sel .wire,.link:focus-visible .wire{stroke:var(--accent);stroke-width:calc(3.5px * min(1, var(--inv,1) * 1.6))}
+.link.sel.down .wire{stroke:var(--bad)}
+.link.sel .l1,.link.sel .l2{opacity:1;visibility:visible}
+.link.sel .plabel,.link.sel .pip{fill:var(--fg);font-weight:600}
 .link.suspended .wire{stroke-dasharray:2 6;opacity:.6}
 .filt{fill:var(--canvas);stroke:var(--warn);stroke-width:1.6}
 .filt-t{font:600 8px var(--mono);fill:var(--warn);text-anchor:middle}
 .pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5}
 .pdot.down{fill:var(--bad)}
-.plabel{font:500 9px var(--mono);font-size:min(9px,calc(12px * var(--inv,1)));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
-.pip{font:500 7.5px var(--mono);font-size:min(7.5px,calc(11.5px * var(--inv,1)));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.plabel{font:500 9px var(--mono);font-size:clamp(calc(9.5px * var(--inv,1)),9px,calc(12px * var(--inv,1)));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.pip{font:500 7.5px var(--mono);font-size:clamp(calc(9px * var(--inv,1)),7.5px,calc(11.5px * var(--inv,1)));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
 .node{cursor:pointer;-webkit-touch-callout:none}
 .node:focus{outline:none}
 .halo{fill:transparent;stroke:transparent;stroke-width:2}
@@ -312,6 +321,7 @@ button{font-family:inherit}
           <symbol id="act-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M7 6.5a7.5 7.5 0 1 0 10 0"/></symbol>
           <symbol id="act-play" viewBox="0 0 24 24"><path d="M8 5.5l11 6.5-11 6.5z"/></symbol>
           <symbol id="act-reload" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4v4.5H15"/></symbol>
+          <symbol id="act-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
           <symbol id="act-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
         </defs>
         <rect width="100%" height="100%" fill="url(#dots)" id="bg"/>
@@ -371,12 +381,14 @@ button{font-family:inherit}
           <dt>Удержать узел</dt><dd>Колесо действий. Не отпуская, ведите к действию и отпустите. Отпустили сразу — колесо остаётся, выберите действие тапом.</dd>
           <dt>Щипок</dt><dd>Масштаб и уровни. Приблизьте узел до конца и отпустите — откроется его консоль.</dd>
           <dt>Двойной тап</dt><dd>Приблизить узел.</dd>
+          <dt>Тап по соединению</dt><dd>Сведения о нём: порты, адреса, подсеть, фильтры. Удержание — колесо.</dd>
           <dt>В консоли</dt><dd>Щипок или «Схема» — назад. Чипы сверху — другие консоли.</dd>
         </dl></div>
         <div><h3>Компьютер</h3><dl>
           <dt>Правый клик</dt><dd>Колесо действий. Можно зажать правую кнопку, повести к действию и отпустить.</dd>
           <dt>Колесо мыши</dt><dd>Масштаб и уровни.</dd>
           <dt>Двойной клик</dt><dd>Открыть консоль узла.</dd>
+          <dt>Клик по соединению</dt><dd>Сведения о нём. Правый клик — колесо.</dd>
           <dt>Панель / Сетка / Окна</dt><dd>Как показывать консоли. Окно можно свернуть в его узел.</dd>
           <dt>Клавиши</dt><dd>Tab — по узлам, Enter — консоль, Shift+F10 — колесо, 0 — вся схема.</dd>
         </dl></div>
@@ -440,6 +452,12 @@ const links = T.links.map(l => ({
   ends: l.nodes.map(e => ({ node: byId.get(e.node_id), adapter: e.adapter_number, port: e.port_number,
     label: (e.label && e.label.text) || (e.adapter_number + "/" + e.port_number) }))
 }));
+const linkById = new Map(links.map(l => [l.id, l]));
+links.forEach(l => {
+  const [a, b] = l.ends;
+  l.isLink = true; l.cx = (a.node.cx + b.node.cx) / 2; l.cy = (a.node.cy + b.node.cy) / 2;
+  l.name = `${a.node.name} ${a.label} — ${b.node.name} ${b.label}`;
+});
 function ifaceAt(n, adapter, port){
   const f = n.facts; if (!f || !f.interfaces) return null;
   return f.interfaces.find(i => i.port && i.port.adapter === adapter && i.port.port === port) || null;
@@ -495,8 +513,11 @@ function renderLinks(){
   for (const l of links) {
     const [a, b] = l.ends;
     const ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
-    const down = (ia && ia.oper === "down") || (ib && ib.oper === "down");
-    const g = el("g", { class: "link" + (l.suspend ? " suspended" : "") + (down ? " down" : "") }, L.links);
+    const down = l.down = !!((ia && ia.oper === "down") || (ib && ib.oper === "down"));
+    const g = el("g", { class: "link" + (l.suspend ? " suspended" : "") + (down ? " down" : "") + (selectedLink === l ? " sel" : ""),
+      "data-id": l.id, tabindex: "0", role: "button", "aria-label": "Соединение " + l.name }, L.links);
+    l.g = g;
+    el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "hit" }, g);
     el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "wire" }, g);
     if (l.filters && Object.keys(l.filters).length) {
       const mx = (a.node.cx + b.node.cx) / 2, my = (a.node.cy + b.node.cy) / 2;
@@ -514,6 +535,7 @@ function renderLinks(){
       if (ifc && ifc.ipv4 && ifc.ipv4.length) el("text", { x: px, y: py + 3, dy: "1.35em", class: "pip l2" }, g).textContent = ifc.ipv4[0];
     }
   }
+  if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
 }
 function renderNodes(){
   L.nodes.textContent = "";
@@ -611,15 +633,19 @@ function nodeNear(sx, sy, maxPx){
 /* ---------------- gestures on the topology ---------------- */
 const ptrs = new Map();
 let gest = null, pinch = null, lpTimer = null, lastTap = null, diveCand = null;
+function targetOf(t){
+  const n = t.closest && t.closest(".node"); if (n) return byId.get(n.dataset.id);
+  const l = t.closest && t.closest(".link"); return l ? linkById.get(l.dataset.id) : null;
+}
 const relPt = e => { const r = svg.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 function clearLp(){ if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
 svg.addEventListener("contextmenu", e => e.preventDefault());
 svg.addEventListener("pointerdown", e => {
   if (radial.tracking) return;
   stopAnim(); hideHint();
-  const nodeEl = e.target.closest(".node");
+  const tgt = targetOf(e.target);
   if (e.pointerType === "mouse" && e.button === 2) {
-    if (nodeEl) { const p = relPt(e); openRadial(byId.get(nodeEl.dataset.id), { x: p.x, y: p.y }, e.pointerId, "mouse"); }
+    if (tgt) openRadial(tgt, relPt(e), e.pointerId, "mouse");
     return;
   }
   if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -628,15 +654,15 @@ svg.addEventListener("pointerdown", e => {
   if (ptrs.size === 1) {
     const p = relPt(e), t0 = performance.now();
     gest = { sx: p.x, sy: p.y, moved: false, pinched: false, target: e.target, samples: [{ t: t0, x: p.x, y: p.y }] };
-    if (nodeEl && e.pointerType !== "mouse") {
-      const id = nodeEl.dataset.id, pid = e.pointerId;
+    if (tgt && e.pointerType !== "mouse") {
+      const pid = e.pointerId;
       lpTimer = setTimeout(() => {
         lpTimer = null;
         if (!gest || gest.moved || ptrs.size !== 1) return;
         const at = ptrs.get(pid) || p;
         gest = null; ptrs.clear();
         try { svg.releasePointerCapture(pid); } catch (err) { /* ignore */ }
-        openRadial(byId.get(id), at, pid, "touch");
+        openRadial(tgt, at, pid, "touch");
       }, 430);
     }
   } else {
@@ -711,11 +737,18 @@ function onTap(e, g){
     if (diving && cons.has(n.id)) { switchDive(cons.get(n.id)); return; }
     select(n); return;
   }
+  const linkEl = g.target.closest && g.target.closest(".link");
+  if (linkEl) {
+    const l = linkById.get(linkEl.dataset.id);
+    if (dbl) { zoomToLink(l); return; }
+    select(null); showLinkDetails(l); return;
+  }
   select(null); hideDetails();
   if (dbl) { const r = 2, k = clamp(view.k * r, KMIN, KMAX), q = k / view.k; animateTo({ k, tx: p.x - (p.x - view.tx) * q, ty: p.y - (p.y - view.ty) * q }, 260); }
 }
 let selected = null, chipT = null;
 function select(n){
+  if (n) selectLink(null);
   if (selected && selected.g) selected.g.classList.remove("sel");
   selected = n;
   const chip = $("chip");
@@ -726,8 +759,10 @@ function select(n){
 }
 svg.addEventListener("keydown", e => {
   const nodeEl = document.activeElement && document.activeElement.closest && document.activeElement.closest(".node");
-  const n = nodeEl ? byId.get(nodeEl.dataset.id) : selected;
-  if (e.key === "Enter" && n) { e.preventDefault(); openConsole(n); }
+  const linkEl = !nodeEl && document.activeElement && document.activeElement.closest && document.activeElement.closest(".link");
+  const n = nodeEl ? byId.get(nodeEl.dataset.id) : linkEl ? linkById.get(linkEl.dataset.id) : selected;
+  if (e.key === "Enter" && n && n.isLink) { e.preventDefault(); showLinkDetails(n); }
+  else if (e.key === "Enter" && n) { e.preventDefault(); openConsole(n); }
   else if ((e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) && n) { e.preventDefault(); const p = toScreen(n.cx, n.cy); openRadial(n, p, null, "key"); }
   else if (e.key === "+" || e.key === "=") zoomBy(1.6);
   else if (e.key === "-") zoomBy(1 / 1.6);
@@ -735,6 +770,17 @@ svg.addEventListener("keydown", e => {
   else if (e.key === "Escape") { closeRadial(); hideDetails(); select(null); }
 });
 svg.addEventListener("focusin", e => { const nodeEl = e.target.closest && e.target.closest(".node"); if (nodeEl) select(byId.get(nodeEl.dataset.id)); });
+let selectedLink = null;
+function selectLink(l){
+  if (selectedLink && selectedLink.g) selectedLink.g.classList.remove("sel");
+  selectedLink = l || null;
+  if (l && l.g) { l.g.classList.add("sel"); L.links.appendChild(l.g); }
+}
+function zoomToLink(l){
+  const r = wrap.getBoundingClientRect(), [a, b] = l.ends;
+  const k = clamp(Math.min(r.width / (Math.abs(a.node.cx - b.node.cx) + 160), r.height / (Math.abs(a.node.cy - b.node.cy) + 160)), KMIN, 3);
+  animateTo({ k, tx: r.width / 2 - k * l.cx, ty: r.height / 2 - k * l.cy }, 360);
+}
 $("zoomIn").onclick = () => zoomBy(1.6);
 $("zoomOut").onclick = () => zoomBy(1 / 1.6);
 $("zoomFit").onclick = () => animateTo(fitTarget());
@@ -761,7 +807,20 @@ function finishPinch(){
 /* ---------------- action wheel ---------------- */
 const radial = { el: $("radial"), node: null, tracking: false, pid: null, kind: null, items: [], hi: -1, at: null, moved: false };
 const R0 = 34, R1 = 108;
+function linkActions(l){
+  const a = [{ id: "linfo", label: "Сведения", full: "Сведения о соединении", icon: "info" },
+    { id: "lzoom", label: "Ближе", full: "Приблизить соединение", icon: "zoom" },
+    l.suspend ? { id: "resume", label: "Включить", full: "Возобновить соединение", icon: "play" }
+              : { id: "suspend", label: "Пауза", full: "Приостановить соединение", icon: "pause" }];
+  l.ends.forEach((e, i) => {
+    if (e.node.console === "none") return;
+    const why = !canConsole(e.node) ? (e.node.console !== "telnet" ? "VNC-консоль прототип не показывает" : `${e.node.name} ${STATUS[e.node.status]}`) : "";
+    a.push({ id: i ? "conb" : "cona", label: e.node.name, full: `Консоль ${e.node.name}`, icon: "term", off: !!why, why });
+  });
+  return a;
+}
 function actionsFor(n){
+  if (n.isLink) return linkActions(n);
   const a = [], con = cons.get(n.id);
   if (n.console !== "none") {
     const why = n.console !== "telnet" ? "VNC-консоль прототип не показывает" : n.status !== "started" ? `${n.name} ${STATUS[n.status]}` : "";
@@ -787,6 +846,8 @@ function openRadial(n, at, pid, kind){
   closeRadial(); select(null); buzz();
   radial.node = n; radial.items = actionsFor(n); radial.pid = pid; radial.kind = kind; radial.hi = -1; radial.moved = false;
   radial.tracking = kind === "touch" || kind === "mouse";
+  radial.pos = n.isLink && kind !== "key" ? { x: (at.x - view.tx) / view.k, y: (at.y - view.ty) / view.k } : { x: n.cx, y: n.cy };
+  if (n.isLink) selectLink(n);
   radial.anchor = at;
   const box = radial.el; box.textContent = ""; box.hidden = false;
   box.classList.toggle("pinned", !radial.tracking);
@@ -806,7 +867,7 @@ function openRadial(n, at, pid, kind){
     g.addEventListener("pointerleave", () => { if (!radial.tracking) setHi(-1); });
   });
   el("circle", { cx: 118, cy: 118, r: R0 - 5, class: "hub" }, s);
-  el("text", { x: 118, y: 119, class: "hubt" }, s).textContent = n.name;
+  el("text", { x: 118, y: 119, class: "hubt" }, s).textContent = n.isLink ? "линк" : n.name;
   radial.cap = hel("div", "rcap", box); radial.cap.hidden = true;
   positionRadial();
   if (!radial.tracking) setTimeout(() => { const w = box.querySelector(".wedge:not(.off)"); if (w && kind === "key") { w.setAttribute("tabindex", "0"); } }, 0);
@@ -823,7 +884,7 @@ function setHi(i){
 function positionRadial(){
   if (!radial.node) return;
   const r = wrap.getBoundingClientRect();
-  let p = toScreen(radial.node.cx, radial.node.cy);
+  const p = toScreen(radial.pos.x, radial.pos.y);
   const m = 118 + 8;
   const x = clamp(p.x, m, Math.max(m, r.width - m)), y = clamp(p.y, m + 34, Math.max(m + 34, r.height - m));
   radial.cx = x; radial.cy = y;
@@ -831,19 +892,30 @@ function positionRadial(){
 }
 function closeRadial(){ radial.node = null; radial.tracking = false; radial.el.hidden = true; radial.el.textContent = ""; radial.cap = null; }
 function runAction(i){
-  const it = radial.items[i], n = radial.node;
-  if (!it || !n) return;
+  const it = radial.items[i], t = radial.node;
+  if (!it || !t) return;
   if (it.off) { toast(it.why); return; }
   closeRadial();
   ({
-    console: () => openConsole(n),
-    info: () => showDetails(n),
-    zoom: () => zoomToNode(n, Math.max(2.4, view.k)),
-    stop: () => setPower(n, "stopped"),
-    start: () => setPower(n, "started"),
-    reload: () => { const c = cons.get(n.id); if (c) { c.sim.reload(); openConsole(n); } else toast(`${n.name} перезагружается (демо)`); },
-    close: () => closeConsole(n)
+    console: () => openConsole(t),
+    info: () => showDetails(t),
+    zoom: () => zoomToNode(t, Math.max(2.4, view.k)),
+    stop: () => setPower(t, "stopped"),
+    start: () => setPower(t, "started"),
+    reload: () => { const c = cons.get(t.id); if (c) { c.sim.reload(); openConsole(t); } else toast(`${t.name} перезагружается (демо)`); },
+    close: () => closeConsole(t),
+    linfo: () => showLinkDetails(t),
+    lzoom: () => zoomToLink(t),
+    suspend: () => setSuspend(t, true),
+    resume: () => setSuspend(t, false),
+    cona: () => openConsole(t.ends[0].node),
+    conb: () => openConsole(t.ends[1].node)
   })[it.id]();
+}
+function setSuspend(l, on){
+  l.suspend = on; renderLinks();
+  toast(on ? "Соединение приостановлено (демо): трафик по нему не идёт" : "Соединение возобновлено (демо)");
+  if (!$("details").hidden && $("details").dataset.link === l.id) showLinkDetails(l);
 }
 window.addEventListener("pointermove", e => {
   if (!radial.tracking || (radial.pid != null && e.pointerId !== radial.pid)) return;
@@ -879,6 +951,7 @@ function setPower(n, st){
 
 /* ---------------- details ---------------- */
 function showDetails(n){
+  selectLink(null); revealAbove(n.cx, n.cy);
   const d = $("details"), f = n.facts || {};
   const ifs = (f.interfaces || []).map(i => `<tr><td class="m">${esc(i.name)}</td><td class="m">${esc((i.ipv4 || []).join(" ") || (i.switchport ? (i.switchport.mode === "access" ? "VLAN " + i.switchport.vlan : "trunk") : "—"))}</td>`
     + `<td class="${i.oper === "down" ? "dn" : ""}">${i.admin === "down" ? "выкл." : esc(i.oper || "—")}</td><td class="m">${i.ospf ? "area " + esc(i.ospf.area) : ""}</td></tr>`).join("");
@@ -892,11 +965,59 @@ function showDetails(n){
     + (guests ? `<p class="eyebrow">Гости Proxmox</p><div class="tblwrap"><table class="tbl"><thead><tr><th>ID</th><th>Имя</th><th>Тип</th><th>Сост.</th></tr></thead><tbody>${guests}</tbody></table></div>` : "")
     + (!ifs && !adj && !guests ? `<p class="dnote">Нет данных об устройстве: узел ${esc(STATUS[n.status])}.</p>` : "")
     + (canConsole(n) ? `<div class="dacts"><button class="btn" type="button" data-con>${cons.has(n.id) ? "Перейти к консоли" : "Открыть консоль"}</button></div>` : "");
+  delete d.dataset.link;
   d.hidden = false;
   d.querySelector("[data-close]").onclick = hideDetails;
   const b = d.querySelector("[data-con]"); if (b) b.onclick = () => { hideDetails(); openConsole(n); };
 }
-function hideDetails(){ $("details").hidden = true; }
+const FILTERS = {
+  delay: v => `задержка ${v[0]} мс` + (v[1] ? ` ± ${v[1]} мс` : ""),
+  packet_loss: v => `потеря ${v[0]} % пакетов`,
+  corrupt: v => `искажение ${v[0]} % пакетов`,
+  frequency_drop: v => `отбрасывается каждый ${v[0]}-й пакет`,
+  bpf: () => "BPF-фильтр"
+};
+function endAddr(i){
+  if (!i) return "—";
+  if (i.ipv4 && i.ipv4.length) return i.ipv4.join(" ");
+  if (i.switchport) return i.switchport.mode === "access" ? "access, VLAN " + i.switchport.vlan : "trunk" + (Array.isArray(i.switchport.allowed) ? ", VLAN " + i.switchport.allowed.join(", ") : "");
+  return "—";
+}
+function revealAbove(x, y){
+  if (!mobile) return;
+  const r = wrap.getBoundingClientRect(), p = toScreen(x, y), want = r.height * 0.24;
+  if (Math.abs(p.y - want) > 30 || p.x < 20 || p.x > r.width - 20) animateTo({ k: view.k, tx: view.tx + (r.width / 2 - p.x), ty: view.ty + (want - p.y) }, 300);
+}
+function showLinkDetails(l){
+  selectLink(l); revealAbove(l.cx, l.cy);
+  const d = $("details"), [a, b] = l.ends, ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
+  const state = l.suspend ? ["suspended", "приостановлено"] : l.down ? ["stopped", "нет связи"] : ["started", "работает"];
+  let net = "", area = "";
+  if (ia && ib && ia.ipv4 && ib.ipv4) {
+    const [ipa, len] = ia.ipv4[0].split("/"), ipb = ipOnly(ib.ipv4[0]), m = maskOf(+len);
+    if (((ip2n(ipa) & m) >>> 0) === ((ip2n(ipb) & m) >>> 0)) net = `${n2ip((ip2n(ipa) & m) >>> 0)}/${len}`;
+  }
+  if (ia && ib && ia.ospf && ib.ospf) area = ia.ospf.area === ib.ospf.area ? ia.ospf.area : `${ia.ospf.area} / ${ib.ospf.area}`;
+  const why = l.suspend ? "Соединение приостановлено: кадры по нему не проходят." : l.down
+    ? `Порт выключен: ${[[a, ia], [b, ib]].filter(([, i]) => i && i.oper === "down").map(([e, i]) => `${e.node.name} ${e.label}${i.admin === "down" ? " (shutdown)" : ""}`).join(", ")}.` : "";
+  const row = (e, i) => `<tr><td><span class="st ${esc(e.node.status)}" title="${esc(STATUS[e.node.status])}"></span> ${esc(e.node.name)}</td><td class="m">${esc(e.label)}</td>`
+    + `<td class="m">${esc(endAddr(i))}</td><td class="${i && i.oper === "down" ? "dn" : ""}">${!i ? "—" : i.admin === "down" ? "выкл." : esc(i.oper || "—")}</td></tr>`;
+  const filters = Object.entries(l.filters || {}).map(([k, v]) => FILTERS[k] ? FILTERS[k](v) : k);
+  const btns = l.ends.filter(e => canConsole(e.node)).map(e => `<button class="btn" type="button" data-con="${esc(e.node.id)}">Консоль ${esc(e.node.name)}</button>`).join("");
+  d.innerHTML = `<div class="dh"><div><h2>${esc(a.node.name)} — ${esc(b.node.name)}</h2><p class="dsub"><span>Соединение · Ethernet</span><span class="st ${state[0]}">${state[1]}</span></p></div>`
+    + `<button class="ib" type="button" data-close aria-label="Закрыть">${ICON_X}</button></div>`
+    + (why ? `<p class="dnote">${esc(why)}</p>` : "")
+    + `<p class="eyebrow">Концы</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Узел</th><th>Порт</th><th>Адрес</th><th>Сост.</th></tr></thead><tbody>${row(a, ia)}${row(b, ib)}</tbody></table></div>`
+    + (net || area ? `<p class="eyebrow">Сеть</p><div class="tblwrap"><table class="tbl"><tbody>${net ? `<tr><td>Подсеть</td><td class="m">${esc(net)}</td></tr>` : ""}${area ? `<tr><td>OSPF area</td><td class="m">${esc(area)}</td></tr>` : ""}</tbody></table></div>` : "")
+    + (filters.length ? `<p class="eyebrow">Фильтры на линке</p><p class="dnote" style="margin-top:0">${filters.map(esc).join("<br>")}</p>` : "")
+    + `<div class="dacts">${btns}<button class="btn" type="button" data-susp>${l.suspend ? "Возобновить" : "Приостановить"}</button></div>`;
+  d.dataset.link = l.id;
+  d.hidden = false;
+  d.querySelector("[data-close]").onclick = hideDetails;
+  d.querySelector("[data-susp]").onclick = () => setSuspend(l, !l.suspend);
+  d.querySelectorAll("[data-con]").forEach(btn => btn.onclick = () => { hideDetails(); openConsole(byId.get(btn.dataset.con)); });
+}
+function hideDetails(){ $("details").hidden = true; delete $("details").dataset.link; selectLink(null); }
 
 /* ---------------- device simulators (demo only: the plugin talks to the console gateway) ---------------- */
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
