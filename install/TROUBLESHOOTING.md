@@ -255,6 +255,56 @@ pct exec $MGR -- $ADM slots               # 703, 704: state free, in_config true
 `NODE_CPU_OVERCOMMIT` в `lab.conf`). Если лимит уже почти выбран, лишние слоты будут стоять
 свободными, а сессии ждать «Недостаточно ресурсов на узлах».
 
+## Собрать ZIP плагина и поставить в Moodle
+
+### Сборка
+
+На ноде, из того же checkout, что и остальной стенд (нужен `zip`: `apt install zip`):
+
+```sh
+cd /mnt/pve/cfs/gns3-ro && git pull
+sh plugin/devtools/build_zip.sh             # печатает путь: dist/mod_gns3lab-<release>.zip
+ls -l plugin/dist/                          # архив тут: /mnt/pve/cfs/gns3-ro/plugin/dist/mod_gns3lab-<release>.zip
+grep -E 'version|release' plugin/plugin/version.php
+```
+
+Скрипт кладёт `plugin/plugin/` в архив как одну папку `gns3lab/` — так ждёт установщик Moodle.
+`plugin/dist/` в `.gitignore`, `git pull` он не мешает. JS (`amd/build`) уже собран и лежит в Git,
+`grunt` не нужен.
+
+Moodle обновляет плагин, только если `$plugin->version` в `version.php` больше установленного:
+архив того же кода повторно ставить незачем. Установленная версия — «Администрирование →
+Плагины → Обзор плагинов», строка «Лаба GNS3».
+
+### Установка через веб-интерфейс
+
+1. Скачать архив с ноды к себе: `scp root@<нода>:/mnt/pve/cfs/gns3-ro/plugin/dist/mod_gns3lab-*.zip .`
+2. «Администрирование → Плагины → Установка плагинов» → загрузить ZIP → «Установить плагин из
+   ZIP-файла». Тип плагина Moodle определит сам (модуль деятельности).
+3. «Проверка» → «Продолжить» → «Обновить базу данных Moodle сейчас». Предупреждение про
+   `MATURITY_ALPHA` ожидаемо.
+4. Только при первой установке — настройки: «Администрирование → Плагины → Модули деятельности →
+   Лаба GNS3 → Настройки». Адрес и секрет менеджера — из `/mnt/pve/cfs/secrets/moodle/plugin.txt`
+   (`$P moodle` печатает его же).
+
+Если установщик пишет, что каталог `mod/` недоступен для записи, — веб-сервер не может писать в
+`public/mod` Moodle, тогда ставьте копированием (ниже).
+
+### Установка копированием (Moodle — LXC на этой ноде)
+
+```sh
+MOODLE=<MOODLE_VMID>; ROOT=<корень Moodle, где config.php>
+pct push $MOODLE /mnt/pve/cfs/gns3-ro/plugin/dist/mod_gns3lab-<release>.zip /tmp/gns3lab.zip
+pct exec $MOODLE -- sh -c "cd $ROOT/public/mod && rm -rf gns3lab && unzip -q /tmp/gns3lab.zip && chown -R www-data:www-data gns3lab"
+pct exec $MOODLE -- runuser -u www-data -- php $ROOT/admin/cli/upgrade.php --non-interactive
+```
+
+Если `admin/cli/upgrade.php` в корне нет, он в `public/admin/cli/` (раскладка Moodle 5.1).
+Пользователь веб-сервера — `www-data` в Ubuntu/Debian, у вас может быть другой.
+
+После обновления в браузере открывается старый JS — «Администрирование → Разработка → Сбросить все
+кэши» и обновить страницу с Ctrl+F5.
+
 ## Похожие коды и сообщения
 
 | У студента | Причина |

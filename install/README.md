@@ -120,7 +120,7 @@ $P enable 2101 2102 # на ноде менеджера: только новые 
 После `enable` запустите лабу из Moodle. Если сессия падает, смотрите журналы:
 `pct exec <MANAGER_VMID> -- journalctl -u lab-manager -n 100`, `journalctl -u lab-node-agent -n 50` на
 ноде, `pct exec <слот> -- journalctl -u lab-slot -n 50` (пока слот запущен).
-Разбор кодов (`NO_SLOTS` и другие) и добавление слотов на ноду — [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+Разбор кодов (`NO_SLOTS` и другие), добавление слотов на ноду, сборка ZIP плагина — [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
 ### Что делает каждый шаг
 
