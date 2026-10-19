@@ -147,8 +147,19 @@ button{font-family:inherit}
 
 /* overlays on the topology */
 .ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.ov line{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4}
-.ov circle{fill:var(--accent)}
+.ov .fl-base{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4;opacity:.35;transition:opacity .25s}
+.ov .hover .fl-base{opacity:.9}
+.ov .fl-in,.ov .fl-out{stroke-width:2.6;stroke-linecap:round;stroke-dasharray:1.5 10;opacity:0;transition:opacity .3s}
+.ov .fl-in{stroke:var(--accent);animation:flowIn .45s linear infinite}
+.ov .fl-out{stroke:var(--ok);animation:flowOut .45s linear infinite}
+.ov .on{opacity:1}
+.ov .fl-node{fill:var(--accent)}
+.ov .ping{fill:none;stroke-width:2;transform-box:fill-box;transform-origin:center;animation:ping .6s ease-out forwards}
+.ov .ping.in{stroke:var(--accent)} .ov .ping.out{stroke:var(--ok)}
+@keyframes flowIn{from{stroke-dashoffset:11.5}to{stroke-dashoffset:0}}
+@keyframes flowOut{from{stroke-dashoffset:0}to{stroke-dashoffset:11.5}}
+@keyframes ping{from{transform:scale(.2);opacity:.95}to{transform:scale(1);opacity:0}}
+@media (prefers-reduced-motion: reduce){.ov .fl-in,.ov .fl-out,.ov .ping{animation:none}.ov .fl-in,.ov .fl-out{stroke-dasharray:none}}
 .hint{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:12px;margin:0;max-width:calc(100% - 210px);
   font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--canvas) 88%,transparent);padding:5px 9px;border-radius:6px;pointer-events:none;z-index:2}
 .mob .hint{bottom:auto;top:10px;max-width:calc(100% - 24px)}
@@ -1353,8 +1364,17 @@ class Con {
       else if (tok) this.lines[this.lines.length - 1] += tok;
     }
     if (this.lines.length > 400) this.lines.splice(0, this.lines.length - 300);
+    if (s.length > 3 || /\n/.test(s)) this.activity("out");
     if (!this.isVisible() && /\S/.test(clean)) { this.unread = true; updateBadge(this.n); renderTabsAndChips(); }
     this.renderCard();
+  }
+  activity(dir){
+    if (mobile || mode !== "windows" || !this.win || this.min) return;
+    const now = performance.now();
+    if (dir === "in") { this.flowIn = now + 1400; if (now - (this.lastPing || 0) > 150) { this.lastPing = now; pingNode(this.n, "in"); } }
+    else { this.flowOut = now + 1100; if (now - (this.lastPong || 0) > 400) { this.lastPong = now; pingNode(this.n, "out"); } }
+    drawLinks();
+    clearTimeout(this.flowT); this.flowT = setTimeout(drawLinks, 1500);
   }
   isVisible(){
     if (mobile) return diving && active === this.n.id;
@@ -1370,7 +1390,7 @@ class Con {
     this.fit = new FitAddon.FitAddon(); this.term.loadAddon(this.fit);
     this.term.open(this.host);
     this.term.write(this.raw);
-    this.term.onData(d => this.sim.input(d));
+    this.term.onData(d => { this.sim.input(d); this.activity("in"); });
     this.term.textarea && this.term.textarea.addEventListener("focus", () => { if (active !== this.n.id) { active = this.n.id; markFocus(); } });
   }
   attach(container){ if (this.host.parentNode !== container) container.appendChild(this.host); this.ensureTerm(); this.refit(); }
@@ -1381,12 +1401,15 @@ class Con {
   }
   focus(){ this.unread = false; updateBadge(this.n); if (this.term && !(mobile && matchMedia("(pointer: coarse)").matches)) this.term.focus(); }
   renderCard(){
+    if (this.isVisible()) { if (this.card) { this.card.remove(); this.card = null; } this.cardDue = false; return; }
     if (lod < 2) { this.cardDue = true; return; }
     if (this.cardT) return;
     this.cardT = setTimeout(() => { this.cardT = null; this.drawCard(); }, 120);
   }
   drawCard(){
     if (this.card) this.card.remove();
+    this.card = null;
+    if (this.isVisible() || !cons.has(this.n.id)) return;
     this.cardDue = false;
     const n = this.n, g = el("g", { class: "card", "data-id": n.id }, L.cards);
     this.card = g;
@@ -1450,7 +1473,7 @@ function layout(){
   else if (mode === "grid") renderGrid();
   if (!mobile && mode === "windows") renderWindows(); else if (!mobile) { $("wins").textContent = ""; cons.forEach(c => { c.win = null; }); }
   setHint();
-  requestAnimationFrame(() => { cons.forEach(c => c.refit()); positionOverlays(); });
+  requestAnimationFrame(() => { cons.forEach(c => c.refit()); positionOverlays(); refreshCards(); });
 }
 function headHtml(c, buttons){
   return `<span class="dotst ${esc(c.n.status)}"></span><span class="nm">${esc(c.n.name)}<small>${esc(CAT[c.n.cat].toLowerCase())}</small></span>${c.unread ? '<span class="unr" title="Новый вывод"></span>' : ""}${buttons}`;
@@ -1471,6 +1494,7 @@ function renderPanel(){
   });
   Array.from(body.children).forEach(ch => { if (ch !== cons.get(active).host) ch.remove(); });
   cons.get(active).attach(body);
+  refreshCards();
 }
 function renderGrid(){
   const n = cons.size + 1, cols = n <= 2 ? 2 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 9 ? 3 : 4;
@@ -1508,7 +1532,7 @@ function renderWindows(){
       const b = hel("div", "tbody", w);
       w.addEventListener("pointerdown", () => { w.style.zIndex = ++zTop; active = c.n.id; markFocus(); });
       dragWin(c, hd);
-      new ResizeObserver(() => { if (c.win === w && w.offsetWidth) { c.wpos.w = w.offsetWidth; c.wpos.h = w.offsetHeight; } }).observe(w);
+      new ResizeObserver(() => { if (c.win === w && w.offsetWidth) { c.wpos.w = w.offsetWidth; c.wpos.h = w.offsetHeight; drawLinks(); } }).observe(w);
       w.addEventListener("pointerenter", () => showLink(c));
       w.addEventListener("pointerleave", () => showLink(null));
       c.attach(b);
@@ -1539,25 +1563,51 @@ function dragWin(c, hd){
   hd.addEventListener("pointerup", end); hd.addEventListener("pointercancel", end);
 }
 let linked = null;
-function showLink(c){ linked = c; drawLink(); }
-function drawLink(){
-  const ov = $("ov"); ov.textContent = "";
-  const c = linked; if (!c || !c.win || c.min) return;
-  const p = toScreen(c.n.cx, c.n.cy), x = c.wpos.x + c.wpos.w / 2, y = c.wpos.y + 16;
-  el("line", { x1: p.x, y1: p.y, x2: x, y2: y }, ov);
-  el("circle", { cx: p.x, cy: p.y, r: 4 }, ov);
+const flows = new Map();
+function showLink(c){ linked = c; drawLinks(); }
+function winAnchor(c, p){
+  const { x, y, w, h } = c.wpos;
+  const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
+  return inside ? { x: x + w / 2, y: y + 16 } : { x: clamp(p.x, x, x + w), y: clamp(p.y, y, y + h) };
 }
+/* dashed line from a console window to its node; while the student types, dots run to the node, the answer runs back */
+function drawLinks(){
+  const ov = $("ov"), now = performance.now(), want = new Set();
+  cons.forEach(c => {
+    if (mobile || mode !== "windows" || !c.win || c.min || c.win.hidden) return;
+    const fin = (c.flowIn || 0) > now, fout = (c.flowOut || 0) > now;
+    if (linked !== c && !fin && !fout) return;
+    want.add(c);
+    let f = flows.get(c);
+    if (!f) {
+      const g = el("g", { class: "flow" }, ov);
+      f = { g, base: el("line", { class: "fl-base" }, g), fin: el("line", { class: "fl-in" }, g), fout: el("line", { class: "fl-out" }, g), dot: el("circle", { r: 4, class: "fl-node" }, g) };
+      flows.set(c, f);
+    }
+    const p = toScreen(c.n.cx, c.n.cy), w = winAnchor(c, p);
+    for (const ln of [f.base, f.fin, f.fout]) { ln.setAttribute("x1", w.x); ln.setAttribute("y1", w.y); ln.setAttribute("x2", p.x); ln.setAttribute("y2", p.y); }
+    f.dot.setAttribute("cx", p.x); f.dot.setAttribute("cy", p.y);
+    f.fin.classList.toggle("on", fin); f.fout.classList.toggle("on", fout);
+    f.g.classList.toggle("hover", linked === c);
+  });
+  flows.forEach((f, c) => { if (!want.has(c)) { f.g.remove(); flows.delete(c); } });
+}
+function pingNode(n, dir){
+  const p = toScreen(n.cx, n.cy), c = el("circle", { cx: p.x, cy: p.y, r: 24, class: "ping " + dir }, $("ov"));
+  setTimeout(() => c.remove(), 650);
+}
+function refreshCards(){ cons.forEach(c => c.renderCard()); }
 function minimizeWin(c){
   const w = c.win; if (!w) return;
   const p = toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
   w.classList.add("anim");
   w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`; w.style.opacity = "0";
   showLink(null);
-  setTimeout(() => { w.hidden = true; w.classList.remove("anim"); c.min = true; updateBadge(c.n); }, reduced ? 0 : 270);
+  setTimeout(() => { w.hidden = true; w.classList.remove("anim"); c.min = true; updateBadge(c.n); c.renderCard(); drawLinks(); }, reduced ? 0 : 270);
 }
 function restoreWin(c){
   const w = c.win; if (!w) return;
-  c.min = false; updateBadge(c.n);
+  c.min = false; updateBadge(c.n); c.renderCard();
   const p = toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
   w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`; w.style.opacity = "0"; w.hidden = false;
   void w.offsetWidth;
@@ -1596,7 +1646,7 @@ function enterDive(c){
   fitDive();
   c.attach($("diveBody"));
   Array.from($("diveBody").children).forEach(ch => { if (ch !== c.host) ch.remove(); });
-  renderTabsAndChips();
+  renderTabsAndChips(); refreshCards();
   const top = wrap.getBoundingClientRect().height - d.offsetHeight + 0;
   zoomToNode(c.n, 1.7, Math.max(60, top / 2 + 10));
   setTimeout(() => c.refit(), 280);
@@ -1606,7 +1656,7 @@ function exitDive(restore){
   diving = false; $("dive").hidden = true; $("dhint").hidden = true;
   if (restore && preDive) animateTo(preDive, 320);
   preDive = null;
-  renderTabsAndChips();
+  renderTabsAndChips(); refreshCards();
 }
 function fitDive(){
   const d = $("dive"); if (d.hidden) return;
@@ -1648,7 +1698,7 @@ function renderPanelTabsOnly(){
 }
 
 /* ---------------- overlays, hints, misc ---------------- */
-function positionOverlays(){ if (radial.node && !radial.tracking) positionRadial(); if (linked) drawLink(); }
+function positionOverlays(){ if (radial.node && !radial.tracking) positionRadial(); drawLinks(); }
 function setHint(){
   const h = $("hint");
   if (store.get("hinted", false)) { h.hidden = true; return; }
