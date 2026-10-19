@@ -83,6 +83,48 @@ pct exec $MGR -- journalctl -u lab-manager --since "-2h" --no-pager | grep -E "f
 | `slot_ready`, `lab_wait`, `lab_stop_wait` | сам слот: `journalctl -u lab-slot` в CT (§3) |
 | код `TIMEOUT` | этап не уложился в свой таймаут — смотреть журнал того, кто отвечает за этап |
 
+### 2а. `SLOT_LAB_FAILED`: что сломалось в самом слоте
+
+Менеджер видит только состояние лабы `FAILED`, причину знает слот. Сначала текст ошибки сессии:
+
+```sh
+pct exec $MGR -- $SQL -c "SELECT id, slot_vmid, slot_node, student_key, project_id, error->>'stage' AS stage, error->>'message' AS message, started_at, finished_at FROM sessions WHERE id = 's-58c5120c0175b98c'"
+```
+
+- `stage = ready`, «Лаба в слоте перешла в FAILED: `<code>`» — лаба работала и упала. Код — от слота:
+  - `RuntimeError` — монитор слота (раз в 10 с) нашёл ноду GNS3 остановленной или пропавшей:
+    QEMU/IOU упал, не хватило памяти в CT, сломался образ;
+  - `SERVICE_RESTART` — `lab-slot` (или `gns3`, от которого он зависит, или весь CT)
+    перезапустился, пока лаба работала;
+  - `UNKNOWN` — слот не знает проект (404).
+- `stage = lab_submit`/`lab_wait`/`lab_stop`, «Лаба в слоте в состоянии FAILED, нужен оператор» —
+  лаба была `FAILED` уже на момент запуска или остановки.
+
+Полная ошибка слота лежит в каталоге студента на CephFS, её видно с любой ноды без запуска CT:
+
+```sh
+F=/mnt/pve/cfs/gns3-rw/students/<student_key>/.lab-slot/labs/<project_id>.json
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], d.get("stage"), d.get("error"))' "$F"
+```
+
+Журналы слота — из rootfs выключенного CT, тоже без запуска (на ноде слота):
+
+```sh
+pct mount 701
+R=/var/lib/lxc/701/rootfs
+journalctl -D $R/var/log/journal -u lab-slot -u gns3 --since "-1d" --no-pager | tail -200
+journalctl -D $R/var/log/journal -k --since "-1d" --no-pager | grep -iE "oom|killed process"
+# Операции слота (deploy/stop) с ошибками:
+python3 -c 'import sqlite3,sys; [print(r[0]) for r in sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True).execute("SELECT data FROM records WHERE kind = '"'"'operation'"'"'")]' $R/var/lib/lab-slot/state.sqlite3 | tail -5
+pct unmount 701
+```
+
+Если в `/var/log/journal` пусто, журнал в CT не сохраняется между запусками: тогда остаются файл
+лабы и SQLite.
+
+Сразу несколько слотов в `SLOT_LAB_FAILED` примерно в одно время — ищите общую причину:
+`git pull` или `lab-provision slot` во время сессий, нехватка памяти на ноде, общий образ в `mp2`.
+
 ### 3. CT слота и агент (на ноде слота)
 
 ```sh
