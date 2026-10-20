@@ -130,6 +130,9 @@ class Lifecycle:
                 "CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT, PRIMARY KEY(kind,id))"
             )
             self.tasks = set()
+            self.command_lock = asyncio.Lock()
+            self.claimed = False
+            self.boot_requires_new_owner = True
             self.project_locks = {}
             self.labs = LabStore(
                 Path(os.getenv("SLOT_LAB_STATE_DIR", LAB_STATE_DIR)) / "labs"
@@ -406,6 +409,29 @@ class Lifecycle:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
         return self.present(op, compact=True)
+
+    async def claim(self, epoch, generation):
+        """Called under command_lock. Drain accepted work before handing ownership over.
+
+        Persist the high-water mark first. A timed-out claimant can retry, but no
+        previous owner is admitted even if draining takes longer than its HTTP timeout.
+        """
+        old = self.get("authority", "slot") or {"epoch": 0, "generation": 0}
+        if ((epoch, generation) < (old["epoch"], old["generation"])
+                or (self.boot_requires_new_owner and (epoch, generation) == (old["epoch"], old["generation"]))):
+            raise HTTPException(409, {"code": "STALE_OWNER", "message": "Command owner superseded"})
+        self.claimed = False
+        self.save("authority", "slot", {"epoch": epoch, "generation": generation})
+        self.boot_requires_new_owner = False
+        if self.tasks:
+            await asyncio.shield(asyncio.gather(*list(self.tasks), return_exceptions=True))
+        self.claimed = True
+        return {"epoch": epoch, "generation": generation}
+
+    def owns(self, headers):
+        owner = self.get("authority", "slot")
+        return self.claimed and owner is not None and (headers.get("X-Lab-Epoch"), headers.get("X-Lab-Generation")) == (
+            str(owner["epoch"]), str(owner["generation"]))
 
     async def api(self, method, path, payload=None):
         return await call(self.request, method, path, payload)

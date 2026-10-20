@@ -1,4 +1,9 @@
-# Lab Manager — прототип 0.4
+# Lab Manager — 0.6.0
+
+Изменения протокола, порядок обновления и стендовая приёмка:
+[`docs/pilot-hardening/README.md`](../docs/pilot-hardening/README.md).
+Менеджер требует Agent 1.1 и Slot 0.5 с сохраняемым fencing; старые исполнители
+автоматически не допускаются. Размер CT задаёт агент, токен PVE — только чтение.
 
 Сервис между Moodle (`plugin/`) и слотами Lab Slot (`slot/`). Принимает запросы плагина по
 контракту `plugin/docs/SPEC.md` §3, подбирает для лабы свободный слот на узле, где хватает
@@ -170,7 +175,7 @@ Uvicorn работает в один процесс: оркестратор жи
 | `AGENT_START_TIMEOUT`, `AGENT_MOUNTS_TIMEOUT`, `AGENT_STOP_TIMEOUT` | 420/120/130 с — больше сумм таймаутов внутри агента |
 | `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
 | `SLOT_CODE_REVISION` | пусто: общий `<ceph>/<LAB_CODE_DIR>`; иначе `<ceph>/<LAB_CODE_DIR>/<revision>` |
-| `PLACEHOLDER_STUDENT_KEY` | что монтировать RO в освобождённый слот (`placeholder`; пусто — не перемонтировать) |
+| `PLACEHOLDER_STUDENT_KEY` | обязательный каталог-заглушка RO (`placeholder`); пустое значение запрещено |
 | `NODE_MEMORY_RESERVE_MB` | сколько памяти оставлять свободной на каждом узле при размещении (по текущему использованию) |
 | `NODE_GUEST_MEMORY_MB` | предел суммы лимитов памяти гостей узла, MiB; остальное — хосту и Ceph (0 — без предела) |
 | `NODE_CPU_OVERCOMMIT` | предел vCPU гостей узла на один CPU узла, например `2` (0 — без предела) |
@@ -183,7 +188,7 @@ Uvicorn работает в один процесс: оркестратор жи
 (не root) с правами только на пул слотов и на узлы:
 
 ```sh
-pveum role add LabManager -privs "VM.Audit VM.Config.CPU VM.Config.Memory"
+pveum role add LabManager -privs "VM.Audit"
 pveum role add LabManagerNodes -privs "Sys.Audit"
 pveum user add lab-manager@pve
 pveum pool add lab-slots
@@ -197,7 +202,7 @@ pveum acl modify /nodes -token 'lab-manager@pve!manager' -role LabManagerNodes
 ```
 
 - `VM.Audit` — `/cluster/resources` (CT), статус и конфиг CT (проверка `mp1`);
-- `VM.Config.CPU`, `VM.Config.Memory` — подгонка `cores`/`memory` под лабу;
+- размер CT задаёт агент с проверкой владельца; прав VM.Config.CPU/Memory менеджеру не требуется;
 - `Sys.Audit` на `/nodes` — узлы в `/cluster/resources` (загрузка памяти для размещения).
 
 Почему bind mount не делается через токен: см. DESIGN §3. Проверить на своей версии PVE

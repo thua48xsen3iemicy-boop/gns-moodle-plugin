@@ -31,6 +31,8 @@ feature/proxmox-node-agent is classified by HTTP status and wording:
 import ssl
 
 import httpx
+from .ownership import command_headers, current
+from .store import Fenced
 
 
 class AgentError(RuntimeError):
@@ -70,7 +72,14 @@ class AgentUncertain(AgentError):
     """The request may or may not have been executed (timeout, 503/504, connection lost)."""
 
 
+class AgentStale(Fenced, AgentError):
+    pass
+
+
 CODES = {
+    "STALE_OWNER": AgentStale,
+    "COMMAND_UNCERTAIN": AgentUncertain,
+    "FENCE_STORAGE_ERROR": AgentUncertain,
     "VMID_OUT_OF_RANGE": AgentRejected,
     "NOT_LAB_SLOT": AgentRejected,
     "PRIVILEGED_CT": AgentRejected,
@@ -110,6 +119,8 @@ def _classify(resp: httpx.Response) -> AgentError:
             return AgentBusy(409, text)
         if "must be stopped" in text:
             return AgentNotStopped(409, text)
+        if "different owner" in text:
+            return AgentRejected(409, text)
         return AgentCommandFailed(409, text)
     if status >= 500:
         return AgentUncertain(status, text)
@@ -144,7 +155,9 @@ class AgentClient:
     async def _call(self, method, node, path, *, json=None, timeout=None, mutating=False):
         url = self.base(node) + path
         try:
-            resp = await self._http.request(method, url, json=json, timeout=timeout or self.timeout)
+            headers = command_headers() if mutating else None
+            resp = await self._http.request(method, url, json=json, headers=headers,
+                                            timeout=timeout or self.timeout)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             # Not delivered: nothing happened on the node.
             raise AgentUncertain(None, f"{type(exc).__name__} to agent on {node}") from exc
@@ -171,6 +184,19 @@ class AgentClient:
         if state not in ("running", "stopped"):
             raise AgentUncertain(200, "Unexpected CT state from agent")
         return state
+
+    async def claim(self, node, vmid):
+        authority = current.get()
+        command_headers()
+        body = authority.body()
+        result = await self._call("POST", node, f"/slots/{vmid}/claim", json=body, mutating=True)
+        if any(result.get(k) != v for k, v in body.items()):
+            raise AgentUncertain(200, "Agent did not confirm ownership protocol")
+        return result
+
+    async def size(self, node, vmid, resources):
+        return await self._call("PUT", node, f"/slots/{vmid}/size", json=resources,
+                                timeout=self.mounts_timeout, mutating=True)
 
     @staticmethod
     def mounts_body(student_key: str, code_revision: str | None, data_mode: str = "rw") -> dict:

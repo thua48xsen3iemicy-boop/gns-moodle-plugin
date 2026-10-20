@@ -222,8 +222,8 @@ san_has() {  # Warn when a kept certificate no longer matches lab.conf
 pve_token() {
   local f=$S/manager/pve-token-secret tid='lab-manager@pve!manager'
   log "Proxmox token $tid, pool lab-slots"
-  pveum role add LabManager -privs "VM.Audit VM.Config.CPU VM.Config.Memory" 2>/dev/null ||
-    pveum role modify LabManager -privs "VM.Audit VM.Config.CPU VM.Config.Memory"
+  pveum role add LabManager -privs "VM.Audit" 2>/dev/null ||
+    pveum role modify LabManager -privs "VM.Audit"
   pveum role add LabManagerNodes -privs "Sys.Audit" 2>/dev/null || true
   pveum user add lab-manager@pve 2>/dev/null || true
   pveum pool add lab-slots 2>/dev/null || true
@@ -255,6 +255,9 @@ MANAGER_SITES_FILE=/etc/lab-manager/sites.json
 MANAGER_SLOTS_FILE=/etc/lab-manager/slots.json
 MANAGER_LISTEN_HOST=127.0.0.1
 MANAGER_LISTEN_PORT=8090
+SLOT_SCHEME=https
+SLOT_CA_FILE=/etc/lab-manager/slot-server-ca.crt
+ALLOW_PLAINTEXT_SLOTS=0
 LABS_DIR=/srv/gns3-ro/labs
 PVE_NODES=$(for n in "${NODE_NAMES[@]}"; do echo "$n:8006"; done | paste -sd,)
 PVE_TOKEN_ID=lab-manager@pve!manager
@@ -325,6 +328,16 @@ subjectAltName=DNS:$fqdn,IP:$ip"
   cp "$S/ca/manager-client-ca.crt" "$d/manager-ca.crt"
 }
 
+slot_cert() {
+  local id=$1 ip
+  ip=$(ct_ip "$id")
+  issue slot-server-ca "$S/slots/$id" server "slot-$id" "basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=IP:$ip"
+  san_has "$S/slots/$id/server.crt" "IP Address:$ip"
+}
+
 cmd_secrets() {
   [[ -f $REPO_DIR/slot/slot.env.example ]] || die "REPO_DIR $REPO_DIR is not a checkout of the repository"
   local id n
@@ -332,6 +345,8 @@ cmd_secrets() {
   make_ca manager-client-ca
   make_ca node-server-ca
   make_ca web-ca
+  make_ca slot-server-ca
+  cp "$S/ca/slot-server-ca.crt" "$S/manager/slot-server-ca.crt"
 
   for n in "${NODE_NAMES[@]}"; do node_cert "$n"; done
 
@@ -354,6 +369,7 @@ subjectAltName=DNS:$PUBLIC_NAME"
     install -d -m 0700 "$S/slots/$id"
     rand_into "$S/slots/$id/api-token"
     rand_into "$S/slots/$id/console-token"
+    slot_cert "$id"
     render_slot_env "$id"
   done
   pve_token
@@ -400,7 +416,8 @@ cmd_venv() {
   if [[ $name == manager ]]; then manager_mounts; else mp_set "$id" "$src" "$dst" 1; fi
   mp_set "$id" "$src/venv" "$dst/venv" 0 2  # Never mp0/mp1: the agent owns them on slots
   ct_up "$id"
-  ct_sh "$id" "$VENV_SCRIPT" CODE="$dst" REQS="$reqs"
+  ct_push "$id" "$REPO_DIR/constraints-tested.txt" /tmp/lab-constraints.txt 0644 0 0
+  ct_sh "$id" "$VENV_SCRIPT" CODE="$dst" REQS="$reqs -c /tmp/lab-constraints.txt"
   if [[ $name == slot ]]; then
     ct_sh "$id" 'runuser -u gns3 -- /srv/gns3-ro/slot/venv/bin/python /srv/gns3-ro/slot/release.py check'
   fi
@@ -464,6 +481,12 @@ cmd_slot() {
     fi
     ct_up "$id"
     ct_sh "$id" 'install -d -m 0700 /etc/lab-slot; install -d -m 0755 /usr/local/sbin'
+    ct_sh "$id" 'chgrp gns3 /etc/lab-slot; chmod 0750 /etc/lab-slot; install -d -m 0750 -g gns3 /etc/lab-slot/tls'
+    slot_cert "$id"
+    local slot_gid
+    slot_gid=$(ct_sh "$id" 'id -g gns3')
+    ct_push "$id" "$S/slots/$id/server.crt" /etc/lab-slot/tls/server.crt 0644 0 0
+    ct_push "$id" "$S/slots/$id/server.key" /etc/lab-slot/tls/server.key 0640 0 "$slot_gid"
     render_slot_env "$id"  # The CT's current net0 IP, not the one it had at 'secrets' (e.g. a fresh clone)
     ct_push "$id" "$S/slots/$id/slot.env" /etc/lab-slot/slot.env 0600 0 0
     ct_push "$id" "$REPO_DIR/agent/guest/lab-slot-init" /usr/local/sbin/lab-slot-init 0755 0 0
@@ -689,7 +712,7 @@ cmd_manager() {
   for f in sites.json slots.json manager.key; do
     ct_push "$id" "$m/$f" "/etc/lab-manager/$f" 0600 "$uid" "$gid"
   done
-  for f in manager.crt node-server-ca.crt pve-root-ca.pem; do
+  for f in manager.crt node-server-ca.crt pve-root-ca.pem slot-server-ca.crt; do
     ct_push "$id" "$m/$f" "/etc/lab-manager/$f" 0644 0 0
   done
   [[ ! -s $m/images.json ]] || ct_push "$id" "$m/images.json" /etc/lab-manager/images.json 0640 0 "$gid"

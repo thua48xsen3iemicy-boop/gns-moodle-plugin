@@ -32,6 +32,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(agent, "CEPH_ROOT", ceph)
     monkeypatch.setattr(agent, "CONF_DIR", conf)
     monkeypatch.setattr(agent, "LOCK_DIR", lock)
+    monkeypatch.setattr(agent, "FENCE_DIR", tmp_path / "authority")
+    agent.save_fence(2201, {"epoch": 1, "generation": 1})
     # Emulate only the presence of CephFS in this unit test (there is no CephFS here).
     monkeypatch.setattr(agent, "validate_cephfs", lambda: None)
     calls = []
@@ -50,7 +52,7 @@ def env(tmp_path, monkeypatch):
         return ""
 
     monkeypatch.setattr(agent, "run_cmd", run)
-    return TestClient(agent.app), calls, state, conf, ceph
+    return TestClient(agent.app, headers={"X-Lab-Epoch": "1", "X-Lab-Generation": "1"}), calls, state, conf, ceph
 
 
 def test_start_with_bind_and_allowlisted_guest_action(env):

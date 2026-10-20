@@ -18,7 +18,7 @@ from . import VERSION, labdef
 from .agent_client import AgentClient
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
-from .labs import Catalog, LabError, LabNotFound
+from .labs import Catalog, LabError, LabNotFound, deploy_ticket
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
@@ -101,6 +101,7 @@ class Services:
         )
         self.slots = {
             vmid: SlotClient(s.address, s.port, s.api_token, timeout=settings.slot_timeout,
+                             scheme=settings.slot_scheme, ca_file=settings.slot_ca_file,
                              transport=slot_transport)
             for vmid, s in settings.slots.items()
         }
@@ -239,7 +240,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         task = getattr(app.state, "orchestrator_task", None)
         alive = task is not None and not task.done()
         fresh = orch.last_tick is not None and time.monotonic() - orch.last_tick < 60
-        checks["orchestrator"] = {"ok": alive, "leader": orch.leader, "fresh": fresh}
+        checks["orchestrator"] = {"ok": alive and orch.leader and fresh,
+                                   "leader": orch.leader, "fresh": fresh}
         try:
             checks["labs"] = {"ok": settings.labs_dir.is_dir()}
         except OSError:
@@ -334,8 +336,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 raise conflict(existing)
             return JSONResponse(status_code=200, content=await present(existing))  # options not re-applied
         try:
-            resources = checked.resources if checked else (
-                await asyncio.to_thread(services.catalog.get, body.lab_ref)).resources
+            lab = None if checked else await asyncio.to_thread(services.catalog.get, body.lab_ref)
+            resources = checked.resources if checked else lab.resources
+            if not resources or not all(resources.get(k, 0) > 0 for k in ("cores", "memory_mb")):
+                raise LabError("Explicit cores and memory_mb are required for resource reservations")
             key = student_key(site.slug, body.user_id)
         except LabNotFound as exc:
             raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
@@ -350,6 +354,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
             student_key=key, resources=resources,
             lab_def=lab_def, definition=checked.definition if checked else None,
+            ticket_factory=lambda pid, name: (
+                labdef.deploy_ticket(checked.definition, site_images(site), project_id=pid, project_name=name)
+                if checked else deploy_ticket(lab, project_id=pid, project_name=name)),
         )
         if not created and not same(s):
             raise conflict(s)  # A concurrent POST for another activity won

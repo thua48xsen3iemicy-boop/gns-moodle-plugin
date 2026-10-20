@@ -1,6 +1,9 @@
 """Lab Slot REST client (slot/README.md). The manager is its only API client."""
 
 import httpx
+import ssl
+from .ownership import command_headers, current
+from .store import Fenced
 
 
 class SlotError(RuntimeError):
@@ -32,10 +35,12 @@ def _error(resp: httpx.Response) -> SlotError:
 
 class SlotClient:
     def __init__(self, address: str, port: int, api_token: str, *, timeout: float = 10.0,
+                 scheme="https", ca_file=None,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.address = address
         self._http = httpx.AsyncClient(
-            base_url=f"http://{address}:{port}",
+            base_url=f"{scheme}://{address}:{port}",
+            verify=ssl.create_default_context(cafile=str(ca_file) if ca_file else None) if transport is None else True,
             headers={"Authorization": f"Bearer {api_token}"},
             timeout=httpx.Timeout(timeout),
             transport=transport,
@@ -46,13 +51,18 @@ class SlotClient:
         await self._http.aclose()
 
     async def _call(self, method, path, *, json=None, key=None, ok=(200, 202)):
-        headers = {"Idempotency-Key": key} if key else None
+        headers = {"Idempotency-Key": key} if key else {}
+        if method in ("POST", "PUT", "DELETE", "PATCH"):
+            headers.update(command_headers())
         try:
             resp = await self._http.request(method, path, json=json, headers=headers)
         except httpx.HTTPError as exc:
             raise SlotUnavailable(f"{method} {path}: {type(exc).__name__}") from exc
         if resp.status_code not in ok:
-            raise _error(resp)
+            error = _error(resp)
+            if error.code == "STALE_OWNER":
+                raise Fenced("Slot command owner superseded")
+            raise error
         try:
             return resp.json()
         except ValueError as exc:
@@ -64,6 +74,14 @@ class SlotClient:
             return True
         except SlotError:
             return False
+
+    async def claim(self):
+        command_headers()
+        body = current.get().body()
+        result = await self._call("POST", "/v1/fence", json=body)
+        if any(result.get(k) != v for k, v in body.items()):
+            raise SlotUnavailable("Slot did not confirm ownership protocol")
+        return result
 
     async def readyz(self) -> tuple[bool, dict]:
         try:

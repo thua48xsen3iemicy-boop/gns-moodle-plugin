@@ -343,3 +343,11 @@ guest init is surfaced by pct as `PCT_FAILED`; the CT may already be running.
 
 [Follow-up to Manager review](docs/MANAGER_REVIEW_FOLLOWUP.md) records the Agent
 changes and remaining Manager concurrency/migration questions against commit 45ecd13.
+# Agent 1.1: command ownership
+
+Mutating `/slots/{vmid}` requests require a prior `POST .../claim` and the matching
+`X-Lab-Epoch` / `X-Lab-Generation` headers. The root-owned high-water mark survives
+restarts in `/var/lib/lab-node-agent`. A timed-out mutating `pct` command quarantines
+the slot (`COMMAND_UNCERTAIN`); claims cannot clear it. Do not delete fence files.
+The installer expects the repository's `constraints-tested.txt` beside `agent/`.
+See [upgrade and recovery](../docs/pilot-hardening/README.md).

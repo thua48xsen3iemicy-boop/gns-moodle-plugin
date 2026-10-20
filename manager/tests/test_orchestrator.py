@@ -29,7 +29,10 @@ def names(timeline):
 
 def new_orchestrator(env):
     sv = env.services
-    return Orchestrator(env.settings, sv.store, sv.pve, sv.agent, sv.slots, sv.catalog)
+    orch = Orchestrator(env.settings, sv.store, sv.pve, sv.agent, sv.slots, sv.catalog)
+    orch.leader = True
+    orch.epoch = env.orch.epoch
+    return orch
 
 
 async def test_full_cycle_order(tmp_path, dsn):
@@ -40,7 +43,7 @@ async def test_full_cycle_order(tmp_path, dsn):
         s = await session(env, sid)
         assert s["status"] == "running", s["status_message"]
         assert s["slot_vmid"] == 201
-        assert names(env.timeline) == ["agent:stop", "pve:config", "agent:student", "agent:start",
+        assert names(env.timeline) == ["agent:stop", "agent:mounts", "agent:size", "agent:student", "agent:start",
                                        "slot:readyz", "slot:deploy"]
         assert ("agent:student", "main-42") in env.timeline
         config = env.pve.cts[201]["config"]
@@ -367,7 +370,7 @@ async def test_agent_busy_and_migration_are_waited_out(tmp_path, dsn):
         env.agent.busy = False
         env.pve.cts[201]["node"] = "pve3"  # Migrated while waiting
         await env.run()
-        assert (await session(env, sid))["status"] == "running"
+        assert (await session(env, sid))["error"]["code"] == "SLOT_NODE_CHANGED"
         assert all(r[0] == "pve3" for r in env.agent.requests if r[2].endswith("/start"))
 
 
@@ -381,19 +384,19 @@ async def test_agent_rejection_fails_session(tmp_path, dsn):
         assert "not marked as a lab slot" in s["status_message"]
 
 
-async def test_student_dir_with_wrong_owner_waits_then_fails_keeping_slot_free(tmp_path, dsn):
+async def test_student_dir_with_wrong_owner_fails_immediately(tmp_path, dsn):
     async with make_env(tmp_path, dsn, vmids=(201,)) as env:
         env.agent.wrong_owner = {"main-42"}
         sid = await start(env)
         await env.run(4)
         s = await session(env, sid)
-        assert s["stage"] == "student_dir" and s["status_message"] == "Ожидание каталога студента…"
+        assert s["status"] == "failed" and s["error"]["code"] == "STUDENT_DIR_REJECTED"
         async with env.services.pool.connection() as conn, conn.transaction():
             await conn.execute("UPDATE sessions SET stage_started_at = now() - interval '1 hour' WHERE id = %s",
                                (sid,))
         await env.run(2)
         s = await session(env, sid)
-        assert s["status"] == "failed" and s["error"]["code"] == "TIMEOUT"
+        assert s["status"] == "failed" and s["error"]["code"] == "STUDENT_DIR_REJECTED"
         assert (await env.services.store.slot(201))["state"] == "free"
         assert env.pve.cts[201]["status"] == "stopped"
 
@@ -649,7 +652,9 @@ async def test_student_dir_is_never_writable_in_two_slots(tmp_path, dsn):
         env.slots[201].restart()
         env.orch._health_checked.clear()
         await env.run()
-        assert (await session(env, sid))["stage"] == "ct_stop"
+        assert (await session(env, sid))["stage"] == "lab_stop"
+        await _backdate_stage(env, sid)
+        await env.run()
         await _backdate_stage(env, sid)
         await env.run()
         s = await session(env, sid)

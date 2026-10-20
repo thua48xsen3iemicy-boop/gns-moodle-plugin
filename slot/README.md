@@ -1,4 +1,11 @@
-# Lab Slot — lifecycle prototype 0.4
+# Lab Slot — 0.5.0
+
+**Новый обязательный протокол:** до изменяющих запросов менеджер вызывает
+`POST /v1/fence` с `{epoch,generation}`; команды содержат `X-Lab-Epoch` и
+`X-Lab-Generation`. Примеры curl ниже описывают прежний lifecycle и требуют
+добавления этого шага/заголовков. После рестарта нужен строго более новый владелец.
+Есть HTTPS/WSS: `SLOT_TLS_CERT_FILE` и `SLOT_TLS_KEY_FILE`.
+Обновление, новый контракт и приёмка — [pilot-hardening](../docs/pilot-hardening/README.md).
 
 Независимый исполнитель одной активной лаборатории внутри непривилегированного LXC:
 Ubuntu 24.04, GNS3 **2.2.61**, Python, FastAPI, Uvicorn. Moodle и Proxmox не входят

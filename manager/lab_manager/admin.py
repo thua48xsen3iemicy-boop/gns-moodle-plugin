@@ -73,6 +73,9 @@ def gateway_env(s) -> str:
         "GW_INTERNAL_KEY": s.gateway_internal_key,
         "GW_ALLOWED_ORIGINS": ",".join(origins),
         "GW_SLOTS": json.dumps(slots, separators=(",", ":")),
+        "GW_SLOT_SCHEME": "wss" if s.slot_scheme == "https" else "ws",
+        "GW_SLOT_CA_FILE": str(s.slot_ca_file) if s.slot_ca_file else "",
+        "GW_ALLOW_PLAINTEXT_SLOTS": "1" if s.allow_plaintext_slots else "0",
     }
     if any("'" in v or "\n" in v for v in values.values()):
         raise SystemExit("CONFIG_ERROR: gateway values must not contain quotes or newlines")
@@ -107,12 +110,29 @@ def cmd_slot_state(args):
     """enable: maintenance/failed -> free, after the operator checked the CT and its lab."""
 
     async def run(services):
-        if args.state == "free":
-            node = await services.pve.find_ct_node(args.vmid)
-            state = await services.agent.status(node, args.vmid)
-            if state != "stopped":
-                raise SystemExit(f"CT {args.vmid} is {state} on {node}; stop it first")
-        await services.store.set_slot_admin_state(args.vmid, args.state, args.message)
+        from .ownership import command_scope
+
+        async with services.store.allocation_guard():
+            slot = await services.store.slot(args.vmid)
+            if slot is None or slot["state"] not in ("free", "failed", "maintenance"):
+                raise SystemExit("Slot is in use or unknown")
+            if args.state == "free":
+                epoch = await services.store.current_epoch()
+                with command_scope(epoch, 2 * slot["generation"] + 1):
+                    node = await services.pve.find_ct_node(args.vmid)
+                    await services.agent.claim(node, args.vmid)
+                    state = await services.agent.status(node, args.vmid)
+                    if state != "stopped":
+                        raise SystemExit(f"CT {args.vmid} is {state} on {node}; stop it first")
+                    key = services.settings.placeholder_student_key
+                    await services.agent.set_mounts(node, args.vmid, student_key=key, data_mode="ro",
+                                                   code_revision=services.settings.slot_code_revision)
+                    config = await services.pve.ct_config(args.vmid)
+                    if not services.orchestrator.mounts_ok(config, key, read_only=True):
+                        raise SystemExit("Parking not confirmed; slot remains unavailable")
+                    await services.store.set_slot_admin_state(args.vmid, args.state, args.message, check_epoch=True)
+            else:
+                await services.store.set_slot_admin_state(args.vmid, args.state, args.message)
         print(json.dumps({"vmid": args.vmid, "state": args.state}))
 
     asyncio.run(_with_services(run))

@@ -6,6 +6,9 @@ This service must be accessible ONLY from the Lab Manager management network.
 from __future__ import annotations
 
 import errno
+import json
+import tempfile
+from contextvars import ContextVar
 import logging
 import fcntl
 import os
@@ -16,7 +19,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Path as ApiPath
+from fastapi import FastAPI, HTTPException, Request, Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 log = logging.getLogger("uvicorn.error")
@@ -27,6 +30,8 @@ FINDMNT = "/usr/bin/findmnt"
 CEPH_ROOT = Path(os.environ.get("LAB_CEPH_ROOT", "/mnt/pve/cfs"))
 CONF_DIR = Path("/etc/pve/lxc")
 LOCK_DIR = Path("/run/lab-node-agent")
+FENCE_DIR = Path(os.environ.get("LAB_FENCE_DIR", "/var/lib/lab-node-agent"))
+ACTIVE_SLOT = ContextVar("agent_active_slot", default=None)
 VMID_MIN = int(os.environ.get("LAB_VMID_MIN", "2000"))
 VMID_MAX = int(os.environ.get("LAB_VMID_MAX", "2999"))
 REQUIRED_TAG = "labslot"
@@ -91,9 +96,62 @@ class Stop(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     force: bool = False
 
+
+class Fence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    epoch: int = Field(ge=1, le=2**63 - 1)
+    generation: int = Field(ge=1, le=2**63 - 1)
+
+
+class Size(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    cores: int = Field(ge=1, le=4096)
+    memory_mb: int = Field(ge=128, le=2**31 - 1)
+
+
+def fence_state(vmid):
+    try:
+        data = json.loads((FENCE_DIR / f"{vmid}.json").read_text())
+        if (type(data["epoch"]) is not int or type(data["generation"]) is not int
+                or data["epoch"] < 1 or data["generation"] < 1):
+            raise ValueError()
+        return data
+    except FileNotFoundError:
+        return {"epoch": 0, "generation": 0}
+    except (OSError, ValueError, KeyError, TypeError):
+        raise api_error(503, "FENCE_STORAGE_ERROR", "Cannot verify command ownership")
+
+
+def save_fence(vmid, data):
+    FENCE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=FENCE_DIR, prefix=f".{vmid}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(name, FENCE_DIR / f"{vmid}.json")
+        directory = os.open(FENCE_DIR, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def require_fence(vmid, request):
+    state = fence_state(vmid)
+    if state.get("uncertain") or state.get("inflight"):
+        raise api_error(409, "COMMAND_UNCERTAIN", "Previous host command needs operator reconciliation")
+    if (request.headers.get("X-Lab-Epoch"), request.headers.get("X-Lab-Generation")) != (
+            str(state["epoch"]), str(state["generation"])) or state["epoch"] == 0:
+        raise api_error(409, "STALE_OWNER", "Claim current command ownership first")
+
 app = FastAPI(
     title="Lab Node Agent",
-    version="1.0.0",
+    version="1.1.0",
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -126,6 +184,14 @@ def vmid_allowed(vmid: int) -> None:
 def run_cmd(args: list[str], timeout: int = 45) -> str:
     """Never invoke a shell, even for trusted action names."""
     log.info("operation argv=%r timeout=%s", args, timeout)
+    vmid = ACTIVE_SLOT.get()
+    mutating = vmid is not None and args[:2] in (
+        [PCT, "start"], [PCT, "set"], [PCT, "stop"], [PCT, "shutdown"], [PCT, "exec"])
+    if mutating:
+        state = fence_state(vmid)
+        # Write ahead of starting pct. A killed/restarted agent cannot forget an
+        # in-flight host command just because its process-local lock disappeared.
+        save_fence(vmid, dict(state, inflight=True, command=args[1]))
     try:
         p = subprocess.run(
             args, stdin=subprocess.DEVNULL, capture_output=True, text=True,
@@ -134,9 +200,16 @@ def run_cmd(args: list[str], timeout: int = 45) -> str:
         )
     except subprocess.TimeoutExpired:
         log.warning("operation timed out argv=%r", args)
+        if mutating:
+            state = fence_state(vmid)
+            save_fence(vmid, dict(state, uncertain=True, command=args[1]))
         raise api_error(504, "PCT_TIMEOUT", "Proxmox command timed out; check actual container state")
     except OSError:
+        if mutating:
+            save_fence(vmid, state)  # No process could be started.
         raise api_error(503, "PCT_UNAVAILABLE", "Proxmox command could not be executed")
+    if mutating:
+        save_fence(vmid, state)  # The synchronous command returned; re-read its actual effect.
     if p.returncode != 0:
         log.warning("operation failed argv=%r returncode=%s", args, p.returncode)
         detail = (p.stderr or p.stdout or "Command failed").strip()[:800]
@@ -241,7 +314,11 @@ def slot_lock(vmid: int):
         except BlockingIOError:
             raise api_error(409, "SLOT_BUSY", "Another operation on this slot is in progress")
         try:
-            yield
+            token = ACTIVE_SLOT.set(vmid)
+            try:
+                yield
+            finally:
+                ACTIVE_SLOT.reset(token)
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
 
@@ -263,26 +340,28 @@ def status(vmid: VMID):
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
-        return {"vmid": vmid, "state": lxc_state(vmid)}
+        return {"vmid": vmid, "state": lxc_state(vmid), "ownership": fence_state(vmid)}
 
 
 @app.put("/slots/{vmid}/mounts")
-def mounts(vmid: VMID, spec: Mounts):
+def mounts(vmid: VMID, spec: Mounts, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
+        require_fence(vmid, request)
         require_stopped(vmid)
         apply_mounts(vmid, spec)
         return {"vmid": vmid, "mounts_configured": True}
 
 
 @app.post("/slots/{vmid}/start")
-def start(vmid: VMID, spec: Start):
+def start(vmid: VMID, spec: Start, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
+        require_fence(vmid, request)
         require_stopped(vmid)
         apply_mounts(vmid, spec)
         vmid_allowed(vmid)
@@ -298,11 +377,12 @@ def start(vmid: VMID, spec: Start):
 
 
 @app.post("/slots/{vmid}/stop")
-def stop(vmid: VMID, options: Stop):
+def stop(vmid: VMID, options: Stop, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
+        require_fence(vmid, request)
         if lxc_state(vmid) == "stopped":
             return {"vmid": vmid, "state": "stopped"}
         if options.force:
@@ -372,3 +452,27 @@ def ensure_student(student_key: Key):
         log.warning("student directory operation failed key=%s errno=%s", student_key, exc.errno)
         raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot provision student directory; inspect ownership before retry")
     return {"student_key": student_key, "ready": True}
+
+
+@app.post("/slots/{vmid}/claim")
+def claim(vmid: VMID, spec: Fence):
+    with slot_lock(vmid):
+        vmid_allowed(vmid)
+        state = fence_state(vmid)
+        if state.get("uncertain") or state.get("inflight"):
+            raise api_error(409, "COMMAND_UNCERTAIN", "Previous host command needs operator reconciliation")
+        if (spec.epoch, spec.generation) < (state["epoch"], state["generation"]):
+            raise api_error(409, "STALE_OWNER", "Command owner superseded")
+        if (spec.epoch, spec.generation) != (state["epoch"], state["generation"]):
+            save_fence(vmid, spec.model_dump())
+        return {"vmid": vmid, **spec.model_dump()}
+
+
+@app.put("/slots/{vmid}/size")
+def size(vmid: VMID, spec: Size, request: Request):
+    with slot_lock(vmid):
+        vmid_allowed(vmid)
+        require_fence(vmid, request)
+        require_stopped(vmid)
+        run_cmd([PCT, "set", str(vmid), "--cores", str(spec.cores), "--memory", str(spec.memory_mb)], timeout=40)
+        return {"vmid": vmid, **spec.model_dump()}
