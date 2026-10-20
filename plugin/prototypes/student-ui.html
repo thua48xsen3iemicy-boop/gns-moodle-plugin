@@ -230,8 +230,15 @@ button{font-family:inherit}
 .dacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 
 /* consoles */
-.termhost{position:absolute;inset:6px 4px 4px 10px}
+.termhost{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0}
+.termview{flex:1;min-height:0;min-width:0;overflow:hidden;padding:6px 4px 4px 10px}
 .termhost .xterm{height:100%}
+.snips{display:flex;align-items:center;gap:6px;flex:none;overflow-x:auto;padding:7px 10px;background:var(--term-bg);border-top:1px solid var(--term-line);scrollbar-width:thin;scrollbar-color:var(--term-line) transparent}
+.snips .lbl{flex:none;color:var(--term-dim);font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.snip{flex:none;min-height:32px;padding:0 10px;border:1px dashed var(--term-line);border-radius:6px;background:transparent;color:var(--term-fg);font:500 11.5px var(--mono);cursor:pointer;touch-action:manipulation}
+.snip:hover{background:var(--term-line)}
+.snip:active{color:var(--accent)}
+.snip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tfail{color:var(--term-fg);font:13px/1.5 var(--body);padding:12px}
 .tabs{display:flex;gap:2px;padding:6px 6px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:thin}
 .tab{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 6px 0 11px;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;
@@ -393,7 +400,7 @@ button{font-family:inherit}
           <dt>Щипок</dt><dd>Масштаб и уровни. Приблизьте узел до конца и отпустите — откроется его консоль.</dd>
           <dt>Двойной тап</dt><dd>Приблизить узел.</dd>
           <dt>Тап по соединению</dt><dd>Сведения о нём: порты, адреса, подсеть, фильтры. Удержание — колесо.</dd>
-          <dt>В консоли</dt><dd>Щипок или «Схема» — назад. Чипы сверху — другие консоли.</dd>
+          <dt>В консоли</dt><dd>Щипок или «Схема» — назад. Чипы сверху — другие консоли. Сниппеты под терминалом выполняют готовые команды; полосу можно прокручивать вбок.</dd>
         </dl></div>
         <div><h3>Компьютер</h3><dl>
           <dt>Правый клик</dt><dd>Колесо действий. Можно зажать правую кнопку, повести к действию и отпустить.</dd>
@@ -401,6 +408,7 @@ button{font-family:inherit}
           <dt>Двойной клик</dt><dd>Открыть консоль узла.</dd>
           <dt>Клик по соединению</dt><dd>Сведения о нём. Правый клик — колесо.</dd>
           <dt>Панель / Сетка / Окна</dt><dd>Как показывать консоли. Окно можно свернуть в его узел.</dd>
+          <dt>Сниппеты</dt><dd>Под каждой консолью — команды для этого устройства. Нажатие сразу выполняет команду; полный текст — в подсказке кнопки.</dd>
           <dt>Клавиши</dt><dd>Tab — по узлам, Enter — консоль, Shift+F10 — колесо, 0 — вся схема.</dd>
         </dl></div>
       </div>
@@ -1139,6 +1147,7 @@ class Sim {
       if (ch === "\r") this.enter();
       else if (ch === "\x7f" || ch === "\b") { if (this.line) { this.line = this.line.slice(0, -1); this.w("\b \b"); } }
       else if (ch === "\x03") { this.line = ""; this.w("^C\r\n" + this.prompt()); }
+      else if (ch === "\x15") this.setLine("");
       else if (ch === "\x1a" && this.kind === "ios") { this.line = ""; if (["conf", "if", "router"].includes(this.mode)) this.mode = "priv"; this.w("^Z\r\n" + this.prompt()); }
       else if (ch === "\t") this.complete();
       else if (ch === "?" && this.kind === "ios") this.help();
@@ -1340,6 +1349,21 @@ class Sim {
 Sim.PENDING = {};
 
 /* ---------------- consoles ---------------- */
+const PRE = "\x15\r\x1aenable\r";
+const SNIPS = [
+  { l: "show ip int brief", s: PRE + "show ip interface brief\r", kind: "ios" },
+  { l: "Поднять Gi0/1", s: PRE + "configure terminal\rinterface GigabitEthernet0/1\rip address 10.0.12.1 255.255.255.252\rno shutdown\rend\r", kind: "ios", only: "R1" },
+  { l: "OSPF area 0", s: PRE + "configure terminal\rrouter ospf 1\rrouter-id 1.1.1.1\rnetwork 10.0.12.0 0.0.0.3 area 0\rnetwork 1.1.1.1 0.0.0.0 area 0\rend\r", kind: "ios", only: "R1" },
+  { l: "show ip ospf neighbor", s: PRE + "show ip ospf neighbor\r", kind: "ios" },
+  { l: "ping 2.2.2.2", s: PRE + "ping 2.2.2.2\r", kind: "ios", only: "R1" },
+  { l: "ping 1.1.1.1", s: PRE + "ping 1.1.1.1\r", kind: "ios", only: "R2" },
+  { l: "show run", s: PRE + "show running-config\r", kind: "ios" },
+  { l: "ip addr", s: "\x15ip addr\r", kind: "linux" },
+  { l: "hostname", s: "\x15hostname\r", kind: "linux" },
+  { l: "uname -a", s: "\x15uname -a\r", kind: "linux" },
+  { l: "show", s: "\x15show\r", kind: "vpcs" },
+  { l: "help", s: "\x15help\r", kind: "vpcs" }
+];
 const cons = new Map();
 let active = null, mode = store.get("mode", "panel"), diving = false, preDive = null, zTop = 10, fontsReady = null;
 function termTheme(){
@@ -1350,9 +1374,29 @@ class Con {
   constructor(n){
     this.n = n; this.raw = ""; this.lines = [""]; this.unread = false; this.term = null; this.fit = null; this.min = false;
     this.host = hel("div", "termhost"); this.win = null; this.wpos = null; this.cardDue = false;
+    this.viewport = hel("div", "termview", this.host);
     this.sim = new Sim(n, s => this.out(s));
+    this.buildSnippets();
     this.ro = new ResizeObserver(() => this.refit()); this.ro.observe(this.host);
   }
+  buildSnippets(){
+    const strip = hel("div", "snips", this.host);
+    strip.setAttribute("role", "group"); strip.setAttribute("aria-label", `Сниппеты для ${this.n.name}`);
+    hel("span", "lbl", strip).textContent = "Сниппеты";
+    SNIPS.filter(sn => sn.kind === this.sim.kind && (!sn.only || sn.only === this.n.name)).forEach(sn => {
+      const b = hel("button", "snip", strip); b.type = "button"; b.textContent = sn.l;
+      b.title = sn.s.replace(PRE, "").replace(/\x15/g, "").replace(/\r/g, " ⏎ ").trim();
+      b.setAttribute("aria-label", `Выполнить: ${sn.l}`);
+      b.addEventListener("pointerdown", e => e.preventDefault());
+      b.addEventListener("click", () => {
+        if (!this.sim.on || this.n.status !== "started") { toast(`${this.n.name}: устройство не запущено`); return; }
+        if (this.sim.busy) { toast("Дождитесь завершения команды или прервите её через Ctrl+C"); return; }
+        active = this.n.id; this.unread = false; updateBadge(this.n); markFocus();
+        this.send(sn.s); this.focus();
+      });
+    });
+  }
+  send(d){ this.sim.input(d); this.activity("in"); }
   out(s){
     this.raw += s; if (this.raw.length > 200000) this.raw = this.raw.slice(-150000);
     if (this.term) this.term.write(s);
@@ -1384,20 +1428,20 @@ class Con {
   }
   ensureTerm(){
     if (this.term) return;
-    if (!window.Terminal || !window.FitAddon) { this.host.innerHTML = '<p class="tfail">Не загрузилась xterm.js с cdn.jsdelivr.net. Превью консоли на схеме работает, ввод — нет.</p>'; return; }
+    if (!window.Terminal || !window.FitAddon) { this.viewport.innerHTML = '<p class="tfail">Не загрузилась xterm.js с cdn.jsdelivr.net. Превью консоли на схеме работает, ввод — нет.</p>'; return; }
     this.term = new Terminal({ fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: mobile ? 13 : 13.5, lineHeight: 1.15,
       cursorBlink: true, scrollback: mobile ? 1000 : 3000, theme: termTheme() });
     this.fit = new FitAddon.FitAddon(); this.term.loadAddon(this.fit);
-    this.term.open(this.host);
+    this.term.open(this.viewport);
     this.term.write(this.raw);
-    this.term.onData(d => { this.sim.input(d); this.activity("in"); });
+    this.term.onData(d => this.send(d));
     this.term.textarea && this.term.textarea.addEventListener("focus", () => { if (active !== this.n.id) { active = this.n.id; markFocus(); } });
   }
   attach(container){ if (this.host.parentNode !== container) container.appendChild(this.host); this.ensureTerm(); this.refit(); }
   refit(){
     if (!this.term || !this.host.isConnected) return;
     cancelAnimationFrame(this.raf);
-    this.raf = requestAnimationFrame(() => { if (this.host.offsetWidth > 40 && this.host.offsetHeight > 30) { try { this.fit.fit(); } catch (e) { /* hidden */ } } });
+    this.raf = requestAnimationFrame(() => { if (this.viewport.offsetWidth > 40 && this.viewport.offsetHeight > 30) { try { this.fit.fit(); } catch (e) { /* hidden */ } } });
   }
   focus(){ this.unread = false; updateBadge(this.n); if (this.term && !(mobile && matchMedia("(pointer: coarse)").matches)) this.term.focus(); }
   renderCard(){
@@ -1634,7 +1678,7 @@ const KEYS = [["Tab", "\t"], ["?", "?"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], [
 KEYS.forEach(([label, seq]) => {
   const b = hel("button", "key", $("keys")); b.type = "button"; b.textContent = label;
   b.addEventListener("pointerdown", e => e.preventDefault());
-  b.addEventListener("click", () => { const c = cons.get(active); if (c) c.sim.input(seq); });
+  b.addEventListener("click", () => { const c = cons.get(active); if (c) c.send(seq); });
 });
 function enterDive(c){
   if (!diving) preDive = { ...view };
