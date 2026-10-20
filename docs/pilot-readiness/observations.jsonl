@@ -1,0 +1,8 @@
+{"check": "leader_loss", "observed": [{"action": "agent.stop", "leader": false}]}
+{"check": "placement_race", "observed": {"model": "real placement, modeled SQL allocator", "slots": [201, 202], "memory_mb": 32768, "memory_budget_mb": 16384, "vcpus": 16, "cpu_budget": 8}}
+{"check": "park_disabled", "observed": {"status": "stopped", "message": "Лаба остановлена", "slot_state": "free", "slot_message": ""}}
+{"check": "ready_without_leader", "observed": {"http_status": 200, "body": {"status": "ready", "version": "0.5.2", "checks": {"database": {"ok": true}, "orchestrator": {"ok": true, "leader": false, "fresh": false}, "labs": {"ok": true}}}}}
+{"check": "error_detail_loss", "observed": {"code": "SLOT_LAB_FAILED", "stage": "ready", "message": "Лаба в слоте перешла в FAILED: RuntimeError", "slot_state": "failed"}}
+{"check": "plaintext", "observed": [{"scheme": "http", "auth": "Bearer dummy-audit-token"}]}
+{"check": "owner_contract", "observed": {"test_double": "AgentCommandFailed", "actual_agent_payload": "AgentRejected"}}
+{"check": "sizing_drift", "observed": {"reserved": {"cores": 4, "memory_mb": 8192}, "actual_config": {"cores": "8", "memory": "16384"}}}
