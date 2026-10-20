@@ -17,7 +17,7 @@ router = APIRouter(tags=["health"])
 
 
 # Manager negotiation (manager/docs/CONTRACTS.md §4.1); names are registered in its §7.
-FEATURES = ["qemu", "iou", "vpcs", "qga", "iol-cli", "student-state"]
+FEATURES = ["qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1"]
 
 
 @router.get("/healthz")

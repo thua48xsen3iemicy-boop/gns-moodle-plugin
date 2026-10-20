@@ -144,7 +144,7 @@ class Settings:
     agent_students_dir: str = "gns3-rw/students"  # LAB_STUDENTS_DIR of the agents, relative to the root
     slot_code_revision: str | None = None  # None: shared <ceph>/<code dir>, else <code dir>/<revision>
     agent_start_actions: tuple[str, ...] = ("init_slot",)
-    placeholder_student_key: str | None = None  # Mounted read-only into a released slot
+    placeholder_student_key: str = "placeholder"  # Mandatory on every release
     node_memory_reserve_mb: int = 2048
     node_guest_memory_mb: int = 0  # Memory limits of all guests of a node, MiB; 0: no limit
     node_cpu_overcommit: float = 0.0  # vCPUs of all guests of a node per node CPU; 0: no limit
@@ -167,9 +167,20 @@ class Settings:
     default_max_duration: int = 180  # Minutes
     max_duration_limit: int = 480  # Minutes; upper bound for options.max_duration from the plugin
     worker_interval: float = 2.0
+    slot_scheme: str = "https"
+    slot_ca_file: Path | None = None
+    allow_plaintext_slots: bool = False
 
     def site(self, url: str | None) -> SiteConfig | None:
         return self.sites.get((url or "").rstrip("/"))
+
+    def __post_init__(self):
+        if not self.placeholder_student_key or not KEY_RE.fullmatch(self.placeholder_student_key):
+            raise ConfigError("PLACEHOLDER_STUDENT_KEY must be a non-empty safe directory name")
+        if self.slot_scheme not in ("https", "http"):
+            raise ConfigError("SLOT_SCHEME must be https or http")
+        if self.slot_scheme == "http" and not self.allow_plaintext_slots:
+            raise ConfigError("HTTP slots require explicit ALLOW_PLAINTEXT_SLOTS=1 and verified network isolation")
 
 
 def _key(env, name, default=""):
@@ -260,8 +271,8 @@ def load(env=None, check_mode=True) -> Settings:
                 raise ConfigError(f"Site {site.slug}: limits.images lists unknown images {unknown}")
 
     gateway_public = required("GATEWAY_PUBLIC_URL").rstrip("/")
-    if not gateway_public.startswith(("wss://", "ws://")):
-        raise ConfigError("GATEWAY_PUBLIC_URL must be a ws:// or wss:// URL")
+    if not gateway_public.startswith("wss://"):
+        raise ConfigError("GATEWAY_PUBLIC_URL must be a wss:// URL")
     return Settings(
         database_url=required("DATABASE_URL"),
         sites={s.url: s for s in sites},
@@ -304,4 +315,7 @@ def load(env=None, check_mode=True) -> Settings:
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),
         max_duration_limit=_int(env, "MAX_DURATION_LIMIT", 480, 1, 7 * 24 * 60),
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),
+        slot_scheme=env.get("SLOT_SCHEME", "https"),
+        slot_ca_file=Path(env["SLOT_CA_FILE"]) if env.get("SLOT_CA_FILE") else None,
+        allow_plaintext_slots=env.get("ALLOW_PLAINTEXT_SLOTS", "0") == "1",
     )

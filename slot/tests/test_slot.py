@@ -90,6 +90,10 @@ def mock_server(tmp_path, monkeypatch):
         return reply(404, {"message": "Unknown endpoint"})
 
     with TestClient(app) as client:
+        client.headers.update({"X-Lab-Epoch": "1", "X-Lab-Generation": "1"})
+        claimed = client.post("/v1/fence", json={"epoch": 1, "generation": 1},
+                              headers={"Authorization": "Bearer test-token"})
+        assert claimed.status_code == 200, claimed.text
         fake = httpx.AsyncClient(
             transport=httpx.MockTransport(respond), base_url="http://127.0.0.1:3080/v2/"
         )

@@ -16,6 +16,7 @@ from api.nodes import router as nodes_router
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from release import VERSION, verify
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @asynccontextmanager
@@ -92,7 +93,25 @@ async def initialization_guard(request: Request, call_next):
                     }
                 },
             )
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        lifecycle = app.state.lifecycle
+        async with lifecycle.command_lock:
+            if request.url.path != "/v1/fence" and not lifecycle.owns(request.headers):
+                return JSONResponse(status_code=409, content={"detail": {
+                    "code": "STALE_OWNER", "message": "Claim current command ownership first"}})
+            return await call_next(request)
     return await call_next(request)
+
+
+class Fence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    epoch: int = Field(ge=1, le=2**63 - 1)
+    generation: int = Field(ge=1, le=2**63 - 1)
+
+
+@app.post("/v1/fence", dependencies=[Depends(require_token)])
+async def claim_slot(spec: Fence):
+    return await app.state.lifecycle.claim(spec.epoch, spec.generation)
 
 
 @app.exception_handler(sqlite3.Error)

@@ -47,6 +47,7 @@ async def test_requests_match_agent_api():
     (409, "Another operation on this slot is in progress", AgentBusy),
     (409, "Slot must be stopped to change mount points", AgentNotStopped),
     (409, "Proxmox command failed: CT 2001 already running", AgentCommandFailed),
+    (409, "Existing student directory has a different owner", AgentRejected),
     (422, "Required CephFS directory does not exist", AgentSourceMissing),
     (422, "Mount ancestor is not administrator-controlled", AgentRejected),
     (503, "CephFS is not mounted at its expected root", AgentUncertain),
@@ -92,7 +93,7 @@ async def test_ensure_student():
     agent = client(handler)
     assert await agent.ensure_student("pve1", "main-42") == {"student_key": "main-42", "ready": True}
     assert seen == [("PUT", "/students/main-42", b"")]
-    with pytest.raises(AgentCommandFailed):
+    with pytest.raises(AgentRejected):
         await agent.ensure_student("pve1", "main-7")
     await agent.close()
 

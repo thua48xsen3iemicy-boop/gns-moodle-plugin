@@ -16,6 +16,10 @@ def switch_slot(client, tmp_path, monkeypatch, name):
         app.state.lifecycle = Lifecycle(app)
 
     client.portal.call(swap)
+    generation = int(client.headers["X-Lab-Generation"]) + 1
+    client.headers["X-Lab-Generation"] = str(generation)
+    response = client.post("/v1/fence", json={"epoch": 1, "generation": generation}, headers=HEADERS)
+    assert response.status_code == 200, response.text
 
 
 def record_provisioning(monkeypatch):

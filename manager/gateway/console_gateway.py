@@ -42,6 +42,7 @@ import json
 import logging
 import os
 import secrets
+import ssl
 import time
 import uuid
 
@@ -50,6 +51,9 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 LISTEN_HOST = os.environ.get("GW_HOST", "127.0.0.1")  # Наружу — только через nginx, только /console/
 LISTEN_PORT = int(os.environ.get("GW_PORT", "8080"))
 SLOT_PORT = int(os.environ.get("GW_SLOT_PORT", "8080"))
+SLOT_SCHEME = os.environ.get("GW_SLOT_SCHEME", "wss")
+SLOT_CA_FILE = os.environ.get("GW_SLOT_CA_FILE") or None
+ALLOW_PLAINTEXT = os.environ.get("GW_ALLOW_PLAINTEXT_SLOTS") == "1"
 INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "")
 ALLOWED_ORIGINS = {o for o in os.environ.get("GW_ALLOWED_ORIGINS", "").split(",") if o}
 SLOTS = json.loads(os.environ.get("GW_SLOTS", "{}"))  # {"адрес слота": "консольный токен Slot"}
@@ -113,10 +117,10 @@ async def console(request: web.Request):
 
     http: ClientSession = request.app["http"]
     slot = g["slot"]
-    url = f"ws://{slot}:{SLOT_PORT}/v1/console/{g['project_id']}/{node_id}"
+    url = f"{SLOT_SCHEME}://{slot}:{SLOT_PORT}/v1/console/{g['project_id']}/{node_id}"
     try:
         up = await http.ws_connect(url, protocols=("lab-slot", "bearer." + SLOTS[slot]),
-                                   heartbeat=HEARTBEAT, max_msg_size=1 << 20)
+                                   heartbeat=HEARTBEAT, max_msg_size=1 << 20, ssl=request.app["slot_tls"])
     except (ClientError, asyncio.TimeoutError) as exc:
         # Slot отказывает до рукопожатия: нода не запущена, нет telnet-консоли, неверный токен.
         up = None
@@ -160,6 +164,9 @@ async def console(request: web.Request):
 
 
 async def on_startup(app):
+    if SLOT_SCHEME not in ("wss", "ws") or (SLOT_SCHEME == "ws" and not ALLOW_PLAINTEXT):
+        raise RuntimeError("Use WSS or explicitly approve isolated plaintext slots")
+    app["slot_tls"] = ssl.create_default_context(cafile=SLOT_CA_FILE)
     app["http"] = ClientSession(timeout=ClientTimeout(total=None, connect=10))
     app["tickets"] = Tickets()
 

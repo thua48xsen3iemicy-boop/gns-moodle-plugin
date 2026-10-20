@@ -4,7 +4,9 @@ Every change to a session that owns a slot is fenced: it only applies while
 slots.generation still equals the generation the session got at allocation time.
 """
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 import secrets
 import uuid
 
@@ -34,6 +36,45 @@ def _jsonable(fields: dict) -> dict:
 class Store:
     def __init__(self, pool):
         self.pool = pool
+        self._allocation_lock = asyncio.Lock()
+
+    async def next_epoch(self):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("UPDATE command_owner SET epoch = nextval('command_epochs') RETURNING epoch")
+            return (await cur.fetchone())["epoch"]
+
+    async def current_epoch(self):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("SELECT epoch FROM command_owner")
+            epoch = (await cur.fetchone())["epoch"]
+            if epoch < 1:
+                raise Fenced("Start the manager once before enabling slots")
+            return epoch
+
+    @staticmethod
+    async def _check_epoch(conn):
+        from .ownership import current
+
+        authority = current.get()
+        if authority is not None:
+            authority.headers()
+            cur = await conn.execute("SELECT epoch FROM command_owner FOR SHARE")
+            if (await cur.fetchone())["epoch"] != authority.epoch:
+                raise Fenced("Manager leadership epoch changed")
+
+    @asynccontextmanager
+    async def allocation_guard(self):
+        """Serialize snapshot + allocation across tasks/processes, before reading budgets.
+
+        The local lock prevents waiting tasks from exhausting this process's pool.
+        Other queries use pool connections while one transaction holds the cluster lock.
+        """
+        from .db import LOCK_KEY
+
+        async with self._allocation_lock:
+            async with self.pool.connection() as conn, conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK_KEY + 2,))
+                yield
 
     # ------------------------------------------------------------------ slots
     async def sync_slots(self, slots):
@@ -62,17 +103,19 @@ class Store:
             cur = await conn.execute("SELECT * FROM slots WHERE vmid = %s", (vmid,))
             return await cur.fetchone()
 
-    async def set_slot_admin_state(self, vmid, state, message=""):
+    async def set_slot_admin_state(self, vmid, state, message="", *, check_epoch=False):
         """Operator action: only between maintenance/failed/free, never on a slot in use."""
         async with self.pool.connection() as conn, conn.transaction():
+            if check_epoch:
+                await self._check_epoch(conn)
             cur = await conn.execute(
                 "UPDATE slots SET state = %s, state_message = %s, generation = generation + 1,"
-                " session_id = NULL, updated_at = now()"
+                " session_id = CASE WHEN %s = 'free' THEN NULL ELSE session_id END, updated_at = now()"
                 " WHERE vmid = %s AND state IN ('free', 'failed', 'maintenance')"
                 " AND NOT EXISTS (SELECT 1 FROM sessions WHERE slot_vmid = %s"
                 "                 AND status NOT IN ('stopped', 'failed'))"
                 " RETURNING vmid",
-                (state, message, vmid, vmid),
+                (state, message, state, vmid, vmid),
             )
             if not await cur.fetchone():
                 raise ValueError("Slot is in use or unknown")
@@ -83,7 +126,7 @@ class Store:
 
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
-                             student_key, resources, lab_def=None, definition=None):
+                             student_key, resources, lab_def=None, definition=None, ticket_factory=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
 
         The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
@@ -112,10 +155,17 @@ class Store:
                         )
                     cur = await conn.execute(
                         "SELECT * FROM workspaces WHERE site = %s AND user_id = %s"
-                        " AND instance_id = %s AND lab_key = %s",
+                        " AND instance_id = %s AND lab_key = %s FOR UPDATE",
                         (site, user_id, instance_id, lab_key),
                     )
                     ws = await cur.fetchone()
+                    snapshot = ws["resource_snapshot"] or resources
+                    ticket = ws["ticket"]
+                    if ticket is None and ticket_factory is not None:
+                        ticket = ticket_factory(str(ws["project_id"]), ws["project_name"])
+                    await conn.execute("UPDATE workspaces SET resource_snapshot = %s, ticket = %s WHERE id = %s",
+                                       (Jsonb(snapshot) if snapshot else None,
+                                        Jsonb(ticket) if ticket else None, ws["id"]))
                     sid = new_session_id()
                     project_id, name = ws["project_id"], ws["project_name"]
                     await conn.execute(
@@ -124,7 +174,7 @@ class Store:
                         " status, stage, status_message, max_duration)"
                         " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s)",
                         (sid, site, user_id, instance_id, course_id, lab_ref, lab_def, ws["id"], student_key,
-                         project_id, name, Jsonb(resources) if resources else None,
+                         project_id, name, Jsonb(snapshot) if snapshot else None,
                          "Ожидание свободного слота…", max_duration),
                     )
                     await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref, "lab_def": lab_def})
@@ -205,6 +255,7 @@ class Store:
         vmids = [v for v, _ in candidates]
         nodes = dict(candidates)
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             cur = await conn.execute(
                 "SELECT id FROM sessions WHERE id = %s AND status = 'queued' FOR UPDATE", (session["id"],)
             )
@@ -227,7 +278,8 @@ class Store:
             generation = (await cur.fetchone())["generation"]
             await conn.execute(
                 "UPDATE sessions SET status = 'starting', stage = 'ct_prepare', slot_vmid = %s,"
-                " slot_generation = %s, slot_node = %s, status_message = %s, stage_started_at = now(),"
+                " slot_generation = %s,"
+                " slot_node = %s, status_message = %s, stage_started_at = now(),"
                 " updated_at = now() WHERE id = %s",
                 (vmid, generation, nodes[vmid], "Подготовка слота…", session["id"]),
             )
@@ -255,6 +307,7 @@ class Store:
     async def set_slot_student(self, session, student_key):
         """Fenced: record (or clear, with None) the student mounted in the session's slot."""
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             cur = await conn.execute(
                 "UPDATE slots SET student_key = %s, updated_at = now() WHERE vmid = %s AND generation = %s"
                 " RETURNING vmid",
@@ -274,8 +327,9 @@ class Store:
         """Live sessions holding a slot: their memory may not show in node usage yet."""
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT slot_vmid, slot_node, resources FROM sessions"
-                " WHERE slot_vmid IS NOT NULL AND status NOT IN ('stopped', 'failed')"
+                "SELECT s.slot_vmid, s.slot_node, s.resources FROM sessions s"
+                " JOIN slots t ON t.session_id = s.id"
+                " WHERE t.state <> 'free'"
             )
             return await cur.fetchall()
 
@@ -299,6 +353,7 @@ class Store:
             sets.append("stage_started_at = now()")
         values.update(sid=session["id"], gen=session["slot_generation"], vmid=session["slot_vmid"])
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             if session["slot_vmid"] is not None:
                 cur = await conn.execute(
                     "SELECT generation FROM slots WHERE vmid = %s FOR UPDATE", (session["slot_vmid"],)
@@ -329,6 +384,7 @@ class Store:
                              slot_message=""):
         """Terminal transition. slot_state='free' releases the slot (generation bump)."""
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             vmid, gen = session["slot_vmid"], session["slot_generation"]
             if vmid is not None:
                 cur = await conn.execute("SELECT generation FROM slots WHERE vmid = %s FOR UPDATE", (vmid,))
@@ -363,6 +419,7 @@ class Store:
 
     async def mark_deployed(self, workspace_id, ticket):
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             await conn.execute(
                 "UPDATE workspaces SET deployed = true, ticket = coalesce(ticket, %s) WHERE id = %s",
                 (Jsonb(ticket) if ticket else None, workspace_id),
@@ -382,6 +439,7 @@ class Store:
     async def new_call(self, session, action, body):
         key = f"lm-{session['id']}-{action}-{secrets.token_hex(6)}"
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             cur = await conn.execute(
                 "INSERT INTO slot_calls (session_id, slot_vmid, slot_generation, action, idempotency_key, body)"
                 " VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
@@ -392,6 +450,7 @@ class Store:
 
     async def update_call(self, call_id, *, status, operation_id=None, result=None):
         async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
             await conn.execute(
                 "UPDATE slot_calls SET status = %s, operation_id = coalesce(%s, operation_id),"
                 " result = coalesce(%s, result), updated_at = now() WHERE id = %s",

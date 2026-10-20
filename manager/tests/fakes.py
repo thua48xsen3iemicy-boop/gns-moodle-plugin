@@ -135,7 +135,7 @@ class FakeAgent:
         self.missing_students = set()  # Directories that vanish after provisioning (race)
         self.wrong_owner = set()  # Existing directories with an unexpected owner
         self.student_ids_configured = True
-        self.error_codes = False  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
+        self.error_codes = True  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
         self.ceph_root = ceph_root
         self.code_dir = code_dir
         self.students_dir = students_dir
@@ -146,6 +146,7 @@ class FakeAgent:
         self.lose_start_response = False  # Start happens, then the response is lost
         self.shutdown_hangs = False  # Graceful shutdown leaves the CT running
         self.shutdown_fails_but_stops = False  # 409 from pct shutdown although the CT stopped
+        self.fences = {}
         self.park_fails = False  # PUT mounts fails with a pct error
 
     def transport(self):
@@ -179,11 +180,11 @@ class FakeAgent:
             if not self.student_ids_configured:
                 return self._err(503, "Configure mapped gns3 host UID/GID first")
             if key in self.wrong_owner:
-                return self._err(409, "Existing student directory has a different owner")
+                return self._err(409, {"code": "STUDENT_DIR_OWNER", "message": "Existing student directory has a different owner"})
             self.students.add(key)
             self.timeline.append(("agent:student", key))
             return httpx.Response(200, json={"student_key": key, "ready": True})
-        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop)", path)
+        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop|claim|size)", path)
         if not m:
             return self._err(404, "Not Found")
         vmid, action = int(m.group(1)), m.group(2)
@@ -194,6 +195,21 @@ class FakeAgent:
             return self._err(403, "Container is not marked as a lab slot")
         if self.busy:
             return self._err(409, "Another operation on this slot is in progress")
+        if action == "claim":
+            token = (body["epoch"], body["generation"])
+            if token < self.fences.get(vmid, (0, 0)):
+                return self._err(409, {"code": "STALE_OWNER", "message": "superseded"})
+            self.fences[vmid] = token
+            return httpx.Response(200, json={"vmid": vmid, **body})
+        if action != "status":
+            token = (int(request.headers.get("X-Lab-Epoch", 0)), int(request.headers.get("X-Lab-Generation", 0)))
+            if token != self.fences.get(vmid):
+                return self._err(409, {"code": "STALE_OWNER", "message": "claim first"})
+        if action == "size":
+            assert ct["status"] == "stopped"
+            ct["config"].update(cores=str(body["cores"]), memory=str(body["memory_mb"]))
+            self.timeline.append(("agent:size", vmid))
+            return httpx.Response(200, json={"vmid": vmid, **body})
         if action == "status":
             return httpx.Response(200, json={"vmid": vmid, "state": ct["status"]})
         if action in ("mounts", "start") and ct["status"] != "stopped":
@@ -257,6 +273,7 @@ class FakeSlot:
         self.projects = projects if projects is not None else {}
         self.stopped_nodes = set()  # Node names reported as stopped in the topology
         self.student_state = student_state
+        self.fence = (0, 0)
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -346,6 +363,17 @@ class FakeSlot:
             return self._json(200 if self.ready else 503,
                               {"status": "ready" if self.ready else "not_ready",
                                "checks": {"gns3": {"ok": self.ready}}})
+        if path == "/v1/fence":
+            body = json.loads(request.content)
+            token = (body["epoch"], body["generation"])
+            if token < self.fence:
+                return self._json(409, {"detail": {"code": "STALE_OWNER"}})
+            self.fence = token
+            return self._json(200, body)
+        if request.method == "POST":
+            token = (int(request.headers.get("X-Lab-Epoch", 0)), int(request.headers.get("X-Lab-Generation", 0)))
+            if token != self.fence:
+                return self._json(409, {"detail": {"code": "STALE_OWNER"}})
         key = request.headers.get("Idempotency-Key")
         if path == "/v1/labs/deploy" and request.method == "POST":
             ticket = json.loads(request.content)

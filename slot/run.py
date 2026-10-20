@@ -25,7 +25,11 @@ def main(root=ROOT):
 
     # Loopback by default; a non-loopback address must be firewalled to Manager and console gateway.
     host = os.environ.get("SLOT_LISTEN_HOST", "127.0.0.1")
-    uvicorn.run("main:app", host=host, port=8080, workers=1)
+    cert, key = os.getenv("SLOT_TLS_CERT_FILE"), os.getenv("SLOT_TLS_KEY_FILE")
+    if bool(cert) != bool(key):
+        raise SystemExit("SLOT_TLS_CERT_FILE and SLOT_TLS_KEY_FILE must be configured together")
+    tls = {"ssl_certfile": cert, "ssl_keyfile": key} if cert else {}
+    uvicorn.run("main:app", host=host, port=8080, workers=1, **tls)
 
 
 if __name__ == "__main__":

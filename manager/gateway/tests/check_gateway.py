@@ -3,7 +3,8 @@
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-os.environ.update(GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret"}), GW_SLOT_PORT="38080",
+os.environ.update(GW_SLOT_SCHEME="ws", GW_ALLOW_PLAINTEXT_SLOTS="1",
+                  GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret"}), GW_SLOT_PORT="38080",
                   GW_ALLOWED_ORIGINS="https://moodle.test")
 import console_gateway as gw
 from aiohttp import web, ClientSession, WSMsgType
