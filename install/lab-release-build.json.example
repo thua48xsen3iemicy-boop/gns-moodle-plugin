@@ -1,0 +1,69 @@
+{
+  "schema": "gns3lab.release-build/1",
+  "ceph_root": "/mnt/pve/cfs",
+  "release_root": "/mnt/pve/cfs/gns3-releases",
+  "source_repo": "/mnt/pve/cfs/build-source",
+  "index_url": "https://pypi.org/simple",
+  "build_bridge": "vmbr-build",
+  "isolated_network_confirmed": false,
+  "builders": {
+    "ubuntu": {
+      "vmid": 9801,
+      "template_vmid": 9701,
+      "template_image_sha256": "REPLACE_WITH_MAINTAINER_ATTESTED_CLEAN_IMAGE_SHA256",
+      "template_config_sha256": "REPLACE_WITH_SHA256_OF_PCT_CONFIG_CURRENT_OUTPUT_WITHOUT_TRAILING_NEWLINE",
+      "runtime": {
+        "os_id": "ubuntu",
+        "os_version": "24.04",
+        "python": "3.12",
+        "architecture": "x86_64",
+        "implementation": "cpython",
+        "cache_tag": "cpython-312",
+        "soabi": "cpython-312-x86_64-linux-gnu",
+        "executable": "/usr/bin/python3.12",
+        "executable_sha256": "REPLACE_WITH_INTERPRETER_SHA256",
+        "packages_sha256": "REPLACE_WITH_SORTED_DPKG_QUERY_SHA256"
+      },
+      "limits": {
+        "cores": 2,
+        "cpulimit": 2,
+        "memory_mb": 2048,
+        "swap_mb": 0,
+        "rootfs_max_gib": 8,
+        "io_max": "REPLACE_WITH_DEVICE_MAJOR:MINOR rbps=20971520 wbps=20971520 riops=200 wiops=200"
+      }
+    },
+    "agent": {
+      "vmid": 9802,
+      "template_vmid": 9702,
+      "template_image_sha256": "REPLACE_WITH_MAINTAINER_ATTESTED_CLEAN_IMAGE_SHA256",
+      "template_config_sha256": "REPLACE_WITH_SHA256_OF_PCT_CONFIG_CURRENT_OUTPUT_WITHOUT_TRAILING_NEWLINE",
+      "runtime": {
+        "os_id": "debian",
+        "os_version": "REPLACE_WITH_TARGET_NODE_DEBIAN_VERSION",
+        "python": "REPLACE_WITH_TARGET_NODE_PYTHON_MAJOR_MINOR",
+        "architecture": "x86_64",
+        "implementation": "cpython",
+        "cache_tag": "REPLACE_WITH_TARGET_NODE_CACHE_TAG",
+        "soabi": "REPLACE_WITH_TARGET_NODE_SOABI",
+        "executable": "/usr/bin/python3.13",
+        "executable_sha256": "REPLACE_WITH_INTERPRETER_SHA256",
+        "packages_sha256": "REPLACE_WITH_SORTED_DPKG_QUERY_SHA256"
+      },
+      "limits": {
+        "cores": 2,
+        "cpulimit": 2,
+        "memory_mb": 2048,
+        "swap_mb": 0,
+        "rootfs_max_gib": 8,
+        "io_max": "REPLACE_WITH_DEVICE_MAJOR:MINOR rbps=20971520 wbps=20971520 riops=200 wiops=200"
+      }
+    }
+  },
+  "compatibility": {
+    "components": {"manager": "0.6.0", "slot": "0.5.0", "agent": "1.1.0"},
+    "slot_state": "REPLACE_WITH_MAINTAINER_DECLARATION",
+    "agent_state": "REPLACE_WITH_MAINTAINER_DECLARATION",
+    "rollback": "not_assessed"
+  }
+}
