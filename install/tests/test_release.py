@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("lab_release", REPO / "install/lab-release.py")
 r = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)
+RAW_COMMAND = r.command
 helper_spec = importlib.util.spec_from_file_location("release_builder", REPO / "install/release-builder.py")
 h = importlib.util.module_from_spec(helper_spec)
 helper_spec.loader.exec_module(h)
@@ -675,3 +676,140 @@ def test_payload_executables_in_path_are_never_selected(tmp_path, monkeypatch):
     result = subprocess.run(["/bin/bash", str(REPO / "install/lab-provision"), "release", "verify", "--help"],
                             capture_output=True, text=True)
     assert result.returncode == 0 and not sentinel.exists()
+
+
+@pytest.mark.parametrize("action", ["verify", "list", "build"])
+def test_direct_launcher_ignores_untrusted_bash_in_path(tmp_path, action):
+    sentinel = tmp_path / "UNTRUSTED_BASH_EXECUTED"
+    trap = tmp_path / "bash"
+    trap.write_text("#!/bin/sh\n/usr/bin/touch " + str(sentinel) + "\nexit 99\n")
+    trap.chmod(0o755)
+    # Invoke the documented executable directly: the kernel must choose the trusted shebang.
+    result = subprocess.run([str(REPO / "install/lab-provision"), "release", action, "--help"],
+                            env={"PATH": str(tmp_path)}, capture_output=True, text=True)
+    assert result.returncode == 0 and not sentinel.exists()
+
+
+def test_guest_and_host_diagnostic_catalogues_agree():
+    assert r.ERROR_SCHEMA == h.ERROR_SCHEMA
+    assert r.DIAGNOSTICS == h.DIAGNOSTICS
+
+
+@pytest.mark.parametrize("stage", ["download", "install", "smoke"])
+@pytest.mark.parametrize("timeout", [False, True])
+def test_guest_emits_distinct_sanitized_stage_failures(stage, timeout, monkeypatch, capsys):
+    secret = "https://alice:SECRET_CREDENTIAL@index.invalid/private"
+    def process(args, **kwargs):
+        if timeout:
+            raise subprocess.TimeoutExpired(args, 1200, output=secret.encode(), stderr=secret.encode())
+        raise subprocess.CalledProcessError(2, args, output=secret.encode(), stderr=secret.encode())
+    monkeypatch.setattr(h.subprocess, "run", process)
+    def failed_step(component, *args):
+        return h.checked(component, stage, h.run, ["/usr/bin/pip", "--index-url", secret])
+    action = "smoke" if stage == "smoke" else "build"
+    monkeypatch.setattr(h, action, failed_step)
+    assert h.main([action, "--component", "slot"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "SECRET" not in captured.err and secret not in captured.err
+    data = r.decode_json(captured.err)
+    assert data["component"] == "slot" and data["stage"] == stage
+    assert data["code"] == r.DIAGNOSTICS[stage][0]
+    assert data["reason"] == ("timeout" if timeout else "command_failed")
+    assert data["returncode"] == (None if timeout else 2)
+    assert data["detail"] == r.DIAGNOSTICS[stage][1]
+    assert len(captured.err) < 512
+
+
+@pytest.mark.parametrize("stage", ["download", "install", "smoke"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_host_preserves_primary_diagnostic_before_and_after_cleanup(
+        model_host, stage, cleanup_fails, monkeypatch, capsys):
+    path, config, builders = model_host
+    secret = "SECRET_GUEST_LOG_TOKEN"
+    original = h.failure("manager", stage, subprocess.CalledProcessError(2, [secret], stderr=secret.encode()))
+    envelope = dict(original, detail=secret)  # Even supported guest prose is never trusted for logging.
+    helper_stderr = r.json_bytes(envelope)
+    host_command, real_process = r.command, subprocess.run
+    observed = []
+
+    def process(args, **kwargs):
+        if str(args[0]) == "/usr/sbin/pct":
+            assert "/tmp/lab-release-builder.py" in args
+            raise subprocess.CalledProcessError(1, args, output=secret.encode(), stderr=helper_stderr)
+        return real_process(args, **kwargs)
+    monkeypatch.setattr(r.subprocess, "run", process)
+    monkeypatch.setattr(r, "command", lambda args, **kw: RAW_COMMAND(args, **kw) if args[0] == "pct" else host_command(args, **kw))
+    monkeypatch.setattr(builders, "assert_owned", lambda *a, **kw: {})
+    def component(self, component):
+        self.resources["ubuntu"] = {"vmid": 9801, "state": "owned", "rootfs": "local:own-rootfs"}
+        self.helper("ubuntu", "smoke" if stage == "smoke" else "build", component)
+    def cleanup(self):
+        # This check runs before even the simulated CT deletion.
+        assert r.read_json(self.record)["failure"] == original
+        observed.append(self.record)
+        if cleanup_fails:
+            raise r.ReleaseError(secret + " cleanup details must also stay private")
+        self.resources["ubuntu"]["state"] = "deleted"
+        self.save()
+    monkeypatch.setattr(builders, "component", component)
+    monkeypatch.setattr(builders, "cleanup", cleanup)
+    with pytest.raises(r.BuilderFailure) as error:
+        r.build_release("r1", r.git(REPO, "rev-parse", "HEAD"), str(path))
+    assert observed
+    persisted = r.read_json(observed[0])
+    assert persisted["failure"] == error.value.diagnostic == original
+    assert ("cleanup_failure" in persisted) == cleanup_fails
+    if cleanup_fails:
+        assert persisted["cleanup_failure"]["code"] == "BUILDER_CLEANUP_FAILED"
+    else:
+        assert persisted["resources"]["ubuntu"]["state"] == "deleted"
+    captured = capsys.readouterr()
+    assert secret not in captured.err + str(error.value) + r.json_bytes(persisted).decode()
+    assert not (Path(config["release_root"]) / "r1").exists()
+
+
+@pytest.mark.parametrize("bad", [b"SECRET_RAW_PIP_LOG", b"x" * 4097, b'{"schema":"unknown","detail":"SECRET"}',
+                                  b'{"schema":1,"schema":2,"detail":"SECRET"}'])
+def test_host_rejects_unbounded_or_unsupported_diagnostics(bad, monkeypatch):
+    def process(args, **kwargs):
+        raise subprocess.CalledProcessError(1, args, output=b"SECRET_STDOUT", stderr=bad)
+    monkeypatch.setattr(r.subprocess, "run", process)
+    with pytest.raises(r.BuilderFailure) as error:
+        RAW_COMMAND(["pct", "exec", "9801"], builder_context={"component": "agent", "action": "build"})
+    assert error.value.diagnostic == r.builder_diagnostic("agent", "protocol", "invalid_diagnostic")
+    assert "SECRET" not in str(error.value)
+
+
+def test_host_helper_timeout_has_safe_context(monkeypatch):
+    def process(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 120, output=b"SECRET", stderr=b"SECRET")
+    monkeypatch.setattr(r.subprocess, "run", process)
+    with pytest.raises(r.BuilderFailure) as error:
+        RAW_COMMAND(["pct", "exec", "9801"], builder_context={"component": "manager", "action": "smoke"})
+    assert error.value.diagnostic == r.builder_diagnostic("manager", "smoke", "timeout")
+
+
+def test_unsaved_primary_diagnostic_prevents_builder_deletion(tmp_path, monkeypatch, capsys):
+    builders = r.Builders({}, "a" * 32, tmp_path / "stage", tmp_path / "scratch", tmp_path / "record.json")
+    save = builders.save
+    def failed_save():
+        raise OSError("SECRET_IO_ERROR")
+    monkeypatch.setattr(builders, "save", failed_save)
+    diagnostic = r.builder_diagnostic("slot", "install", "command_failed", 1)
+    builders.remember_failure(diagnostic)
+    monkeypatch.setattr(r, "command", lambda *a, **kw: pytest.fail("Unsaved primary failure must block CT deletion"))
+    with pytest.raises(r.ReleaseError, match="not durable"):
+        builders.cleanup()
+    assert "SECRET" not in capsys.readouterr().err
+    monkeypatch.setattr(builders, "save", save)
+    builders.remember_failure(diagnostic)
+    assert builders.failure_persisted and r.read_json(builders.record)["failure"] == diagnostic
+
+
+def test_nested_checked_step_keeps_primary_diagnostic():
+    primary = h.BuilderFailure(h.failure("slot", "download", ValueError("SECRET")))
+    def failed():
+        raise primary
+    with pytest.raises(h.BuilderFailure) as error:
+        h.checked("slot", "build", failed)
+    assert error.value is primary

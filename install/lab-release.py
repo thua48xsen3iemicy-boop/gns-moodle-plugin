@@ -37,10 +37,60 @@ IGNORED_SLOT = {"venv", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", 
 SLOT_REQUIRED = {"main.py", "release.py", "run.py", "api/lifecycle.py", "api/health.py",
                  "requirements.txt", "lab-slot.service"}
 SECRET_SUFFIXES = (".key", ".pem", ".sqlite", ".sqlite3", ".db", ".log", ".env")
+ERROR_SCHEMA = "gns3lab.builder-error/1"
+DIAGNOSTICS = {
+    "runtime": ("RUNTIME_CHECK_FAILED", "Unable to inspect or validate the builder runtime."),
+    "build": ("BUILD_PREPARATION_FAILED", "Unable to prepare isolated build inputs or artifacts."),
+    "requirements": ("REQUIREMENTS_INVALID", "Source requirements or constraints are unsupported."),
+    "resolver": ("RESOLVER_VENV_FAILED", "Unable to create the isolated dependency resolver."),
+    "download": ("WHEEL_DOWNLOAD_FAILED", "Unable to download a compatible complete wheel set from the configured index."),
+    "lock": ("WHEEL_LOCK_FAILED", "Wheel metadata or dependency lock generation failed."),
+    "venv": ("TARGET_VENV_FAILED", "Unable to create the venv at the required runtime path."),
+    "install": ("WHEEL_INSTALL_FAILED", "Offline installation from the hashed wheel lock failed."),
+    "pip_check": ("DEPENDENCY_CHECK_FAILED", "Installed dependencies failed pip check."),
+    "smoke": ("SMOKE_CHECK_FAILED", "Import, module origin, interpreter path or read-only smoke check failed."),
+    "resolver_cleanup": ("RESOLVER_CLEANUP_FAILED", "Unable to remove the disposable resolver workspace."),
+    "protocol": ("BUILDER_PROTOCOL_ERROR", "Builder did not return a supported bounded diagnostic."),
+    "cleanup": ("BUILDER_CLEANUP_FAILED", "Unable to confirm safe destruction of disposable builder resources."),
+}
 
 
 class ReleaseError(Exception):
     pass
+
+
+class BuilderFailure(ReleaseError):
+    def __init__(self, diagnostic):
+        self.diagnostic = diagnostic
+        super().__init__(json.dumps(diagnostic, sort_keys=True))
+
+
+def builder_diagnostic(component, stage, reason, returncode=None):
+    code, detail = DIAGNOSTICS[stage]
+    return {"schema": ERROR_SCHEMA, "ok": False, "component": component, "stage": stage,
+            "code": code, "reason": reason, "returncode": returncode, "detail": detail}
+
+
+def decode_builder_failure(stderr, context):
+    """Only a small closed vocabulary crosses the guest/host boundary; never guest prose."""
+    try:
+        require(isinstance(stderr, (bytes, str)) and len(stderr) <= 4096, "Invalid diagnostic size")
+        data = decode_json(stderr)
+        require(isinstance(data, dict) and set(data) == {
+            "schema", "ok", "component", "stage", "code", "reason", "returncode", "detail"}, "Invalid diagnostic fields")
+        require(data["schema"] == ERROR_SCHEMA and data["ok"] is False
+                and data["component"] == context["component"], "Diagnostic context mismatch")
+        allowed = {"runtime"} if context["action"] == "runtime" else (
+            {"runtime", "smoke"} if context["action"] == "smoke" else
+            set(DIAGNOSTICS) - {"protocol", "cleanup", "smoke"})
+        require(data["stage"] in allowed and data["code"] == DIAGNOSTICS[data["stage"]][0], "Invalid diagnostic code")
+        require(data["reason"] in {"command_failed", "timeout", "invalid_data", "io_error", "check_failed", "unexpected_error"}
+                and (data["returncode"] is None or type(data["returncode"]) is int and -255 <= data["returncode"] <= 255),
+                "Invalid diagnostic reason/status")
+        # Reconstruct detail locally even for well-formed input: arbitrary text can contain credentials.
+        return builder_diagnostic(context["component"], data["stage"], data["reason"], data["returncode"])
+    except (ReleaseError, ValueError, TypeError, KeyError, RecursionError):
+        return builder_diagnostic(context["component"], "protocol", "invalid_diagnostic")
 
 
 def require(condition, message):
@@ -112,7 +162,7 @@ def sync_dir(path):
         os.close(fd)
 
 
-def command(args, timeout=120, binary=False):
+def command(args, timeout=120, binary=False, builder_context=None):
     # Even a poisoned PATH pointing into an examined release must not select its executables.
     executables = {"git": "/usr/bin/git", "findmnt": "/usr/bin/findmnt",
                    "pct": "/usr/sbin/pct", "pvesm": "/usr/sbin/pvesm"}
@@ -121,8 +171,12 @@ def command(args, timeout=120, binary=False):
         result = subprocess.run([executables[args[0]], *[str(a) for a in args[1:]]], check=True, capture_output=True,
                                 timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        if builder_context is not None:
+            raise BuilderFailure(builder_diagnostic(builder_context["component"], builder_context["action"], "timeout")) from None
         raise ReleaseError("Command outcome uncertain (timeout): " + str(args[0])) from exc
     except subprocess.CalledProcessError as exc:
+        if builder_context is not None:
+            raise BuilderFailure(decode_builder_failure(exc.stderr, builder_context)) from None
         # Do not echo command arguments, environment, pip output or possible credentials.
         raise ReleaseError("Command failed: " + str(args[0]) + " exit=" + str(exc.returncode)) from exc
     return result.stdout if binary else result.stdout.decode().strip()
@@ -720,12 +774,34 @@ class Builders:
         self.stage, self.scratch, self.record = stage, scratch, record
         self.resources = {}
         self.locks = []
+        self.failure_persisted = True
         self.metadata = {"schema": "gns3lab.release-recovery/1", "attempt": attempt,
                          "stage": str(stage), "scratch": str(scratch), "resources": self.resources}
         self.save()
 
     def save(self):
         write_json(self.record, self.metadata)
+
+    def remember_failure(self, diagnostic):
+        if "failure" in self.metadata and self.failure_persisted:
+            return
+        self.metadata.setdefault("failure", diagnostic)
+        self.failure_persisted = False
+        try:
+            self.save()  # fsync + atomic replace before any CT cleanup is allowed.
+            self.failure_persisted = True
+        except OSError:
+            print("Primary builder diagnostic could not be saved; retain builders for recovery", file=sys.stderr)
+
+    def remember_cleanup_failure(self):
+        component = self.metadata.get("failure", {}).get("component", "runtime")
+        diagnostic = builder_diagnostic(component, "cleanup", "check_failed")
+        self.metadata["cleanup_failure"] = diagnostic
+        try:
+            self.save()
+        except OSError:
+            pass
+        print("Cleanup incomplete; original failure preserved. " + json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
 
     def locked(self):
         lockroot = admin_dir("/run/lab-release-builders")
@@ -806,29 +882,39 @@ class Builders:
             "cores": limits["cores"], "cpulimit": limits["cpulimit"], "memory": limits["memory_mb"],
             "swap": limits["swap_mb"]}.items()), "Configured resource limits disagree")
 
-    def guest(self, name, *args, timeout=120):
+    def guest(self, name, *args, timeout=120, builder_context=None):
         resource = self.resources[name]
         self.assert_owned(name, allow_mounts=True)
         return command(["pct", "exec", resource["vmid"], "--", "/usr/bin/env", "-i", "PATH=/usr/bin:/bin",
-                        "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1", *args], timeout=timeout)
+                        "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1", *args], timeout=timeout,
+                       builder_context=builder_context)
 
     def helper(self, name, action, component=None, timeout=120):
         executable = self.config["builders"][name]["runtime"]["executable"]
         args = [executable, "-I", "-B", "/tmp/lab-release-builder.py", action]
         if component is not None:
             args += ["--component", component]
-        data = decode_json(self.guest(name, *args, timeout=timeout))
-        require(isinstance(data, dict) and (action == "runtime" or data.get("ok") is True), "Builder check failed")
-        return data
+        context = {"component": component or "runtime", "action": action}
+        try:
+            output = self.guest(name, *args, timeout=timeout, builder_context=context)
+            try:
+                data = decode_json(output)
+                require(isinstance(data, dict) and (action == "runtime" or data.get("ok") is True), "Builder check failed")
+            except (ReleaseError, ValueError, TypeError, KeyError, RecursionError):
+                raise BuilderFailure(builder_diagnostic(context["component"], "protocol", "invalid_diagnostic")) from None
+            return data
+        except BuilderFailure as exc:
+            self.remember_failure(exc.diagnostic)
+            raise
 
-    def start(self, name):
+    def start(self, name, component):
         self.ct_mutation(name, ["start"])
         # pct start returns when init is available; any exec failure remains fail-closed.
         helper = Path(__file__).with_name("release-builder.py")
         self.ct_mutation(name, ["push", helper, "/tmp/lab-release-builder.py", "--perms", "0500", "--user", "0", "--group", "0"])
         remote = self.guest(name, "/usr/bin/sha256sum", "/tmp/lab-release-builder.py").split()[0]
         require(remote == digest(read_regular(helper)), "Builder helper hash mismatch")
-        actual = self.helper(name, "runtime")
+        actual = self.helper(name, "runtime", component)
         match_runtime(actual, self.config["builders"][name]["runtime"])
         io = self.guest(name, "/bin/cat", "/sys/fs/cgroup/io.max")
         require(io == self.config["builders"][name]["limits"]["io_max"], "Effective IO limit mismatch")
@@ -863,7 +949,7 @@ class Builders:
                   (deps, "/build/output", 0), (self.scratch / "inputs", "/build/inputs", 1)]
         for i, (host, guest, ro) in enumerate(mounts):
             self.ct_mutation(name, ["set", "--mp" + str(i), f"{host},mp={guest},ro={ro}"])
-        runtime = self.start(name)
+        runtime = self.start(name, component)
         built = self.helper(name, "build", component, timeout=3600)
         require(built["runtime"] == runtime, "Runtime changed during dependency build")
         self.stop_unmount(name)
@@ -874,7 +960,7 @@ class Builders:
         seal_tree(deps)
         for i, (host, guest, _) in enumerate(mounts):
             self.ct_mutation(name, ["set", "--mp" + str(i), f"{host},mp={guest},ro=1"])
-        self.start(name)
+        self.start(name, component)
         report = self.helper(name, "smoke", component)
         require(report["runtime"] == runtime, "Runtime changed before smoke checks")
         if component == "slot":
@@ -887,6 +973,7 @@ class Builders:
         write_json(self.stage / "verification" / (component + ".json"), report)
 
     def cleanup(self):
+        require(self.failure_persisted, "Primary diagnostic is not durable; retain builders for operator recovery")
         errors = []
         for name, resource in self.resources.items():
             if resource["state"] == "deleted":
@@ -1013,13 +1100,15 @@ def build_release(release_id, ref, config_path):
         return result
     except BaseException as exc:
         error = exc
+        if isinstance(exc, BuilderFailure):
+            builders.remember_failure(exc.diagnostic)
         raise
     finally:
         if error is not None:
             try:
                 builders.cleanup()
-            except (ReleaseError, OSError, ValueError) as cleanup:
-                print("Cleanup incomplete; original failure preserved. " + str(cleanup), file=sys.stderr)
+            except (ReleaseError, OSError, ValueError):
+                builders.remember_cleanup_failure()
             print("Recovery record: " + str(record) + "; keep staging/lock until inspected", file=sys.stderr)
         builders.close()
 
@@ -1070,6 +1159,9 @@ def main(argv=None):
                 result = list_releases(root)
         print(json.dumps(result, sort_keys=True))
         return 0 if result["ok"] else 1
+    except BuilderFailure as exc:
+        print(json.dumps(exc.diagnostic, sort_keys=True), file=sys.stderr)
+        return 1
     except (ReleaseError, OSError, ValueError, TypeError, KeyError, SyntaxError, RecursionError) as exc:
         print(json.dumps({"ok": False, "error_type": type(exc).__name__, "error": str(exc)}), file=sys.stderr)
         return 1

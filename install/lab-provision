@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Semi-manual provisioning of Proxmox nodes: secrets, node agents, slot and manager LXCs.
 # Runs as root on a cluster node. Every change inside an LXC goes through pct (push/exec), so the
 # components keep reading their secrets from the same local paths as before. pct only reaches the

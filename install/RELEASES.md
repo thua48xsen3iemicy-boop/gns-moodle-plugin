@@ -15,6 +15,7 @@ PVE; verify/list не требуют root при наличии чтения, н
 проверяющий инструмент входят в доверенную среду оператора. Для host-инструмента
 нужен системный Python 3.11+. Dispatcher и host-команды используют абсолютные
 системные пути, чтобы PATH не выбирал executable из проверяемого пакета.
+Сам launcher закрепляет `/bin/bash` в shebang, в том числе при прямом запуске.
 
 ```sh
 P=/path/to/trusted-clean-checkout/install/lab-provision
@@ -188,6 +189,21 @@ fallback на перезаписывающий rename/mv отсутствует.
 Сохраните исходную ошибку и путь `/var/lib/lab-release-build/UUID.json`, показанный
 build. Recovery metadata root-only содержит host paths и только ресурсы попытки,
 не production секреты. `.locks/ID/owner.json` связывает ID со staging/UUID/узлом.
+
+Отказ helper передаётся JSON формата `gns3lab.builder-error/1`: `component`,
+`stage`, стабильный `code`, категория `reason`, числовой `returncode` при наличии
+и короткое `detail`. Например, download/install/smoke различаются кодами
+`WHEEL_DOWNLOAD_FAILED`, `WHEEL_INSTALL_FAILED`, `SMOKE_CHECK_FAILED`.
+Пояснения берутся из фиксированного каталога; текст исключения, stdout/stderr
+pip, URL, аргументы и окружение не выводятся и не сохраняются. Host принимает
+не более 4096 байт JSON с известными полями/кодами и заново формирует detail
+из своего каталога; неподдерживаемый ответ даёт `BUILDER_PROTOCOL_ERROR`.
+
+Первичная диагностика сохраняется с fsync в поле `failure` recovery record
+**до очистки CT** и остаётся после их удаления. Дополнительная ошибка очистки
+пишется отдельно как `cleanup_failure`, не заменяя failure. Если записать
+первичную диагностику не удалось, автоматическое удаление builders блокируется;
+нужно сначала сохранить безопасный отчёт и выполнить ручной recovery.
 
 1. Подтвердите на узле и в PVE tasks, что прежний сборщик и все pct/LXC операции
    завершились. Timeout/убитый pct-клиент не доказывает завершение фоновой задачи.

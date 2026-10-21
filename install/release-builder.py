@@ -22,6 +22,59 @@ import tempfile
 import zipfile
 
 
+ERROR_SCHEMA = "gns3lab.builder-error/1"
+DIAGNOSTICS = {
+    "runtime": ("RUNTIME_CHECK_FAILED", "Unable to inspect or validate the builder runtime."),
+    "build": ("BUILD_PREPARATION_FAILED", "Unable to prepare isolated build inputs or artifacts."),
+    "requirements": ("REQUIREMENTS_INVALID", "Source requirements or constraints are unsupported."),
+    "resolver": ("RESOLVER_VENV_FAILED", "Unable to create the isolated dependency resolver."),
+    "download": ("WHEEL_DOWNLOAD_FAILED", "Unable to download a compatible complete wheel set from the configured index."),
+    "lock": ("WHEEL_LOCK_FAILED", "Wheel metadata or dependency lock generation failed."),
+    "venv": ("TARGET_VENV_FAILED", "Unable to create the venv at the required runtime path."),
+    "install": ("WHEEL_INSTALL_FAILED", "Offline installation from the hashed wheel lock failed."),
+    "pip_check": ("DEPENDENCY_CHECK_FAILED", "Installed dependencies failed pip check."),
+    "smoke": ("SMOKE_CHECK_FAILED", "Import, module origin, interpreter path or read-only smoke check failed."),
+    "resolver_cleanup": ("RESOLVER_CLEANUP_FAILED", "Unable to remove the disposable resolver workspace."),
+    "protocol": ("BUILDER_PROTOCOL_ERROR", "Builder did not return a supported bounded diagnostic."),
+    "cleanup": ("BUILDER_CLEANUP_FAILED", "Unable to confirm safe destruction of disposable builder resources."),
+}
+
+
+class BuilderFailure(Exception):
+    def __init__(self, diagnostic):
+        self.diagnostic = diagnostic
+        super().__init__(diagnostic["code"])
+
+
+def failure(component, stage, exc):
+    # Exception text, subprocess streams/arguments and dynamic exception names are never forwarded.
+    reason, returncode = "unexpected_error", None
+    if isinstance(exc, subprocess.CalledProcessError):
+        reason = "command_failed"
+        if type(exc.returncode) is int and -255 <= exc.returncode <= 255:
+            returncode = exc.returncode
+    elif isinstance(exc, subprocess.TimeoutExpired):
+        reason = "timeout"
+    elif isinstance(exc, (ValueError, KeyError, TypeError)):
+        reason = "invalid_data"
+    elif isinstance(exc, OSError):
+        reason = "io_error"
+    elif isinstance(exc, (AssertionError, RuntimeError)):
+        reason = "check_failed"
+    code, detail = DIAGNOSTICS[stage]
+    return {"schema": ERROR_SCHEMA, "ok": False, "component": component, "stage": stage,
+            "code": code, "reason": reason, "returncode": returncode, "detail": detail}
+
+
+def checked(component, stage, function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except BuilderFailure:
+        raise
+    except Exception as exc:
+        raise BuilderFailure(failure(component, stage, exc)) from None
+
+
 def run(args):
     # No caller environment, user site, PYTHONPATH, production credentials or pip config.
     result = subprocess.run(args, check=True, capture_output=True, timeout=1200,
@@ -62,6 +115,28 @@ def validate_requirements(path, constraints=False):
             raise ValueError("Unsupported requirement syntax")
 
 
+def wheel_lock(wheels, lock):
+    locks = {}
+    for path in sorted(wheels.iterdir()):
+        if not path.name.endswith(".whl") or not path.is_file() or path.is_symlink():
+            raise ValueError("Only wheels allowed")
+        with zipfile.ZipFile(path) as wheel:
+            names = [n for n in wheel.namelist() if n.endswith(".dist-info/METADATA")]
+            if len(names) != 1 or wheel.getinfo(names[0]).file_size > 4 * 1024 * 1024:
+                raise ValueError("Invalid wheel metadata")
+            metadata = email.message_from_bytes(wheel.read(names[0]))
+            name, version = normal(metadata["Name"]), metadata["Version"]
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not re.fullmatch(r"[A-Za-z0-9_.+!-]+", version):
+                raise ValueError("Invalid distribution identity")
+            if name in locks:
+                raise ValueError("Multiple wheels for distribution")
+            locks[name] = (version, sha(path))
+    if not locks:
+        raise ValueError("Empty wheel closure")
+    lock.write_text("".join(f"{name}=={version} --hash=sha256:{checksum}\n"
+                            for name, (version, checksum) in sorted(locks.items())))
+
+
 def build(component, code, output, inputs):
     code, output, inputs = Path(code), Path(output), Path(inputs)
     expected_path = "/opt/lab-node-agent" if component == "agent" else "/srv/gns3-ro/" + component
@@ -69,18 +144,19 @@ def build(component, code, output, inputs):
         raise ValueError("Unexpected build path/interpreter")
     if list(output.iterdir()) or list((code / "venv").iterdir()):
         raise ValueError("Refusing to reuse dependencies/venv")
-    before = runtime()
+    before = checked(component, "runtime", runtime)
     constraints = inputs / "constraints-tested.txt"
     reqs = [code / "requirements.txt"]
     if component == "manager":
         reqs.append(code / "gateway/requirements.txt")
     for path in reqs:
-        validate_requirements(path)
-    validate_requirements(constraints, True)
+        checked(component, "requirements", validate_requirements, path)
+    checked(component, "requirements", validate_requirements, constraints, True)
     work = Path(tempfile.mkdtemp(prefix="lab-release-resolver-"))
+    primary = None
     try:
         resolver = work / "venv"
-        run([sys.executable, "-I", "-B", "-m", "venv", str(resolver)])
+        checked(component, "resolver", run, [sys.executable, "-I", "-B", "-m", "venv", str(resolver)])
         wheels = output / "wheels"
         wheels.mkdir()
         args = [str(resolver / "bin/python"), "-I", "-B", "-m", "pip", "download",
@@ -88,43 +164,32 @@ def build(component, code, output, inputs):
                 "--dest", str(wheels), "-c", str(constraints)]
         for path in reqs:
             args += ["-r", str(path)]
-        run(args)
-        locks = {}
-        for path in sorted(wheels.iterdir()):
-            if not path.name.endswith(".whl") or not path.is_file() or path.is_symlink():
-                raise ValueError("Only wheels allowed")
-            with zipfile.ZipFile(path) as wheel:
-                names = [n for n in wheel.namelist() if n.endswith(".dist-info/METADATA")]
-                if len(names) != 1 or wheel.getinfo(names[0]).file_size > 4 * 1024 * 1024:
-                    raise ValueError("Invalid wheel metadata")
-                metadata = email.message_from_bytes(wheel.read(names[0]))
-                name, version = normal(metadata["Name"]), metadata["Version"]
-                if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not re.fullmatch(r"[A-Za-z0-9_.+!-]+", version):
-                    raise ValueError("Invalid distribution identity")
-                if name in locks:
-                    raise ValueError("Multiple wheels for distribution")
-                locks[name] = (version, sha(path))
-        if not locks:
-            raise ValueError("Empty wheel closure")
+        checked(component, "download", run, args)
         lock = output / "requirements.lock"
-        lock.write_text("".join(f"{name}=={version} --hash=sha256:{checksum}\n"
-                                for name, (version, checksum) in sorted(locks.items())))
-        run([sys.executable, "-I", "-B", "-m", "venv", str(code / "venv")])
+        checked(component, "lock", wheel_lock, wheels, lock)
+        checked(component, "venv", run, [sys.executable, "-I", "-B", "-m", "venv", str(code / "venv")])
         python = str(code / "venv/bin/python")
-        run([python, "-I", "-B", "-m", "pip", "install", "--no-compile", "--no-index",
-             "--require-hashes", "--find-links", str(wheels), "-r", str(lock)])
-        run([python, "-I", "-B", "-m", "pip", "check"])
+        checked(component, "install", run, [python, "-I", "-B", "-m", "pip", "install", "--no-compile", "--no-index",
+                                           "--require-hashes", "--find-links", str(wheels), "-r", str(lock)])
+        checked(component, "pip_check", run, [python, "-I", "-B", "-m", "pip", "check"])
         # Native libraries/system packages must not be installed implicitly during dependency work.
-        if before != runtime():
-            raise ValueError("Runtime changed during build")
+        if before != checked(component, "runtime", runtime):
+            raise BuilderFailure(failure(component, "runtime", RuntimeError()))
         # venv seeding can contain bytecode; do not ship mutable interpreter caches.
         for directory in sorted((code / "venv").rglob("__pycache__"), reverse=True):
             shutil.rmtree(directory)
         for path in (code / "venv").rglob("*.pyc"):
             path.unlink()
         return {"ok": True, "component": component, "runtime": before}
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
-        shutil.rmtree(work)
+        try:
+            checked(component, "resolver_cleanup", shutil.rmtree, work)
+        except BuilderFailure:
+            if primary is None:
+                raise
 
 
 SMOKE = r'''
@@ -192,30 +257,31 @@ def smoke(component, code):
     data = run(["/usr/sbin/runuser", "-u", user, "--", str(Path(code) / "venv/bin/python"),
                 "-I", "-B", "-c", SMOKE, component, code])
     result = json.loads(data)
-    result["runtime"] = runtime()
+    result["runtime"] = checked(component, "runtime", runtime)
     return result
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("runtime", "build", "smoke"))
     parser.add_argument("--component", choices=("manager", "slot", "agent"))
-    args = parser.parse_args()
-    if args.action == "runtime":
-        result = runtime()
-    else:
-        if args.component is None:
-            parser.error("--component required")
-        code = "/opt/lab-node-agent" if args.component == "agent" else "/srv/gns3-ro/" + args.component
-        result = (build(args.component, code, "/build/output", "/build/inputs")
-                  if args.action == "build" else smoke(args.component, code))
-    print(json.dumps(result, sort_keys=True))
+    args = parser.parse_args(argv)
+    if args.action != "runtime" and args.component is None:
+        parser.error("--component required")
+    component = args.component or "runtime"
+    try:
+        if args.action == "runtime":
+            result = checked(component, "runtime", runtime)
+        else:
+            code = "/opt/lab-node-agent" if component == "agent" else "/srv/gns3-ro/" + component
+            result = (checked(component, "build", build, component, code, "/build/output", "/build/inputs")
+                      if args.action == "build" else checked(component, "smoke", smoke, component, code))
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    except BuilderFailure as exc:
+        print(json.dumps(exc.diagnostic, sort_keys=True), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:
-        # Keep indexes/credentials and guest logs out of package reports.
-        print(json.dumps({"ok": False, "error_type": type(exc).__name__}), file=sys.stderr)
-        raise SystemExit(1)
+    raise SystemExit(main())
