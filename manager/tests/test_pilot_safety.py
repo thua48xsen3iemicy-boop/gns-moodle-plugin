@@ -40,6 +40,67 @@ async def test_no_external_mutation_after_authority_is_lost():
         await slot.close()
 
 
+async def test_restarted_slot_rejects_cached_owner_and_session_enters_safe_cleanup():
+    requests = []
+    def transport(request):
+        requests.append(request)
+        assert request.url.path == "/v1/labs/deploy"
+        assert request.headers["X-Lab-Epoch"] == "7"
+        assert request.headers["X-Lab-Generation"] == "4"
+        return httpx.Response(409, json={"detail": {
+            "code": "STALE_OWNER", "message": "Command owner superseded"}})
+
+    slot = SlotClient("slot.invalid", 8080, "dummy", transport=httpx.MockTransport(transport))
+    session = dict(id="restart", status="starting", stage="lab_submit", slot_vmid=201,
+                   slot_generation=2, status_message="Запуск лабы…", stop_requested=False,
+                   error=None)
+    call = dict(status="pending", operation_id=None, body={}, idempotency_key="deploy-1")
+    store = NS(session=AsyncMock(return_value=session), current_call=AsyncMock(return_value=call),
+               update_session=AsyncMock())
+    orch = Orchestrator(NS(), store, NS(find_ct_node=AsyncMock(return_value="pve1")),
+                        NS(), {201: slot}, None)
+    orch.leader, orch.epoch = True, 7
+    orch._claims = {("agent", (201, "pve1", 7, 4)), ("slot", (201, "pve1", 7, 4))}
+    orch._ticket = AsyncMock(return_value=({}, {}))
+    try:
+        await orch.drive("restart")
+        assert len(requests) == 1
+        store.update_session.assert_awaited_once()
+        args, changes = store.update_session.await_args
+        assert args == (session,)
+        assert changes["stage"] == "lab_stop"
+        assert changes["status"] == "stopping"
+        assert changes["slot_state"] == "releasing"
+        assert changes["error"]["code"] == "SLOT_OWNER_LOST"
+        assert changes["error"]["slot_state"] == "maintenance"
+        assert changes["error"]["source"] == {"receiver": "slot", "code": "STALE_OWNER"}
+    finally:
+        await slot.close()
+
+
+async def test_slot_rejection_after_local_leadership_loss_does_not_change_session():
+    session = dict(id="old-leader", status="starting", stage="lab_submit", slot_vmid=201,
+                   slot_generation=2, status_message="Запуск лабы…", stop_requested=False)
+    call = dict(status="pending", operation_id=None, body={}, idempotency_key="deploy-1")
+    store = NS(session=AsyncMock(return_value=session), current_call=AsyncMock(return_value=call),
+               update_session=AsyncMock())
+    orch = Orchestrator(NS(), store, NS(find_ct_node=AsyncMock(return_value="pve1")),
+                        NS(), {}, None)
+    orch.leader, orch.epoch = True, 7
+    orch._claims = {("agent", (201, "pve1", 7, 4)), ("slot", (201, "pve1", 7, 4))}
+    orch._ticket = AsyncMock(return_value=({}, {}))
+    def transport(_):
+        orch.leader = False
+        return httpx.Response(409, json={"detail": {"code": "STALE_OWNER"}})
+    slot = SlotClient("slot.invalid", 8080, "dummy", transport=httpx.MockTransport(transport))
+    orch.slot_clients[201] = slot
+    try:
+        await orch.drive("old-leader")
+        store.update_session.assert_not_awaited()
+    finally:
+        await slot.close()
+
+
 async def test_leader_connection_loss_cancels_and_joins_session_tasks():
     entered, cancelled, lost = asyncio.Event(), asyncio.Event(), asyncio.Event()
     s = dict(id="audit", status="stopping", stage="ct_stop", slot_vmid=201,

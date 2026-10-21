@@ -3,7 +3,6 @@
 import httpx
 import ssl
 from .ownership import command_headers, current
-from .store import Fenced
 
 
 class SlotError(RuntimeError):
@@ -18,6 +17,10 @@ class SlotError(RuntimeError):
 class SlotUnavailable(SlotError):
     def __init__(self, message: str):
         super().__init__(None, "UNREACHABLE", message)
+
+
+class SlotOwnerLost(SlotError):
+    """The receiver rejected our token; the manager may still own its leader lock."""
 
 
 def _error(resp: httpx.Response) -> SlotError:
@@ -61,7 +64,7 @@ class SlotClient:
         if resp.status_code not in ok:
             error = _error(resp)
             if error.code == "STALE_OWNER":
-                raise Fenced("Slot command owner superseded")
+                raise SlotOwnerLost(error.status, error.code, error.message, error.detail)
             raise error
         try:
             return resp.json()
