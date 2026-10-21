@@ -101,6 +101,52 @@ $P check            # агент ноды, менеджер, связь мене
 $P enable           # слоты из maintenance в free (или только перечисленные: enable 2101 2102)
 ```
 
+## Одной командой: `deploy` и `reset`
+
+`deploy` запускается на любой ноде и проходит все шаги по кластеру. На другие ноды он ходит
+по SSH под root, как сам Proxmox (адреса из `/etc/pve/.members`). Скрипт и `lab.conf` должны лежать
+на CephFS: каждая нода выполняет тот же `$REPO_DIR/install/lab-provision`.
+Недостающие контейнеры он создаёт сам, если они описаны в `lab.conf`:
+
+| Переменная | Что создаётся |
+|---|---|
+| `SLOT_TEMPLATE="2000=pve1:dhcp"` | шаблон слота (`template`): Ubuntu 24.04, GNS3 2.2.61 в своём venv, QEMU/KVM (`dev0` `/dev/kvm`, `dev1` `/dev/net/tun`; нужен Proxmox VE 8.1+), ubridge, VPCS, библиотеки IOU, пользователь `gns3` с uid/gid `SLOT_GNS3_ID`; без sshd и machine-id |
+| `CREATE_MANAGER="pve1:10.10.12.50"` | LXC менеджера `MANAGER_VMID`. PostgreSQL, nginx и службы в нём ставит шаг `manager` |
+| `CREATE_SLOTS="2001=pve1:10.10.12.101 …"` | слоты: полные клоны шаблона на своих нодах (`CT_STORAGE` общий, RBD), свой IP и MAC |
+
+Сеть и диски новых CT — `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`, `CT_GATEWAY`, `CT_NAMESERVER`
+(образец — `lab.conf.example`). Уже существующий CT не пересоздаётся. Если таких переменных нет,
+контейнеры должны быть созданы заранее, как раньше.
+
+```sh
+P=/mnt/pve/cfs/gns3-ro/install/lab-provision
+$P deploy                       # template, create, secrets, venv slot, slot+agent на каждой ноде,
+                                # venv manager, manager, moodle, check, enable
+$P reset                        # спросит PUBLIC_NAME; --yes без вопроса
+$P reset --secrets              # и новые CA, токены, секрет сайта
+$P reset --template             # и шаблон слота (пересобрать GNS3)
+```
+
+`reset` нужен, когда данные стенда не нужно сохранять:
+- Удаляются LXC менеджера (вместе с базой PostgreSQL) и слотов. CT Moodle скрипт не удаляет никогда.
+- На агентах удаляются записи владельцев (`/var/lib/lab-node-agent/<vmid>.json`) удалённых слотов.
+  Без этого новая база начала бы эпохи с 1, и агент отвечал бы новому менеджеру `STALE_OWNER`.
+  У слотов их SQLite пропадает вместе с CT.
+- Каталог `gns3-rw/students` переименовывается в `students.reset-<время>`, а не удаляется:
+  удалите его сами, когда он станет не нужен.
+- С `--secrets` каталог `secrets` переименовывается так же. Обратно копируются `lab.conf`,
+  `manager/images.json`, `manager/manager.env.local`, `slot/iourc` и собственный сертификат nginx
+  (не от тестового web CA). После `deploy` в плагин Moodle нужно ввести новый секрет сайта
+  (`secrets/moodle/plugin.txt`).
+
+Порядок `reset` → `deploy` — единственный поддерживаемый способ сбросить базу менеджера. Стирать
+базу или записи владельцев по отдельности на работающем стенде нельзя
+(см. [pilot-hardening](../docs/pilot-hardening/README.md#разбор-неизвестного-исхода)).
+
+Скрипт проверен на имитации кластера из двух нод: заглушки `pct`, `pvesh` и `ssh`, без
+настоящего Proxmox. Первый прогон `template` на настоящей ноде нужно проверить глазами:
+установка GNS3 из PPA и pip, проброс `/dev/kvm` в непривилегированный CT.
+
 ### Добавить ноду со слотами
 
 Venv слота общий и собран под тот же шаблон, `venv slot` не повторяется. Сессии на других нодах
