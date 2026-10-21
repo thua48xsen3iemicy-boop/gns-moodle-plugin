@@ -15,6 +15,7 @@ from lab_manager.agent_client import AgentClient
 from lab_manager.app import create_app
 from lab_manager.config import ConfigError
 from lab_manager.db import latest_version
+from lab_manager.errors import public_error
 from lab_manager.orchestrator import Orchestrator
 from lab_manager.ownership import command_scope
 from lab_manager.slot_client import SlotClient
@@ -74,6 +75,7 @@ async def test_restarted_slot_rejects_cached_owner_and_session_enters_safe_clean
         assert changes["error"]["code"] == "SLOT_OWNER_LOST"
         assert changes["error"]["slot_state"] == "maintenance"
         assert changes["error"]["source"] == {"receiver": "slot", "code": "STALE_OWNER"}
+        assert public_error(changes["error"]) == {"code": "SLOT_OWNER_LOST", "retryable": True}
     finally:
         await slot.close()
 
@@ -99,6 +101,32 @@ async def test_slot_rejection_after_local_leadership_loss_does_not_change_sessio
         store.update_session.assert_not_awaited()
     finally:
         await slot.close()
+
+
+@pytest.mark.parametrize("parked", [True, False])
+async def test_slot_owner_loss_cleanup_never_releases_slot_for_reuse(tmp_path, parked):
+    settings = make_settings(tmp_path)
+    student = "placeholder" if parked else "main-42"
+    config = {
+        "mp0": "/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1",
+        "mp1": f"/mnt/pve/cfs/gns3-rw/students/{student},mp=/opt/gns3/projects,ro={int(parked)}",
+    }
+    store = NS(set_slot_student=AsyncMock(), finish_session=AsyncMock())
+    agent = NS(set_mounts=AsyncMock())
+    pve = NS(find_ct_node=AsyncMock(return_value="pve1"), ct_config=AsyncMock(return_value=config))
+    orch = Orchestrator(settings, store, pve, agent, {}, None)
+    session = dict(id="restart", slot_vmid=201, stage="ct_park", slot_node="pve1",
+                   error={"code": "SLOT_OWNER_LOST", "message": "Слот отверг владельца",
+                          "slot_state": "maintenance"})
+
+    assert await orch._stage_ct_park(session) is False
+    _, finished = store.finish_session.await_args
+    assert finished["status"] == "failed"
+    assert finished["slot_state"] == "maintenance"
+    if parked:
+        store.set_slot_student.assert_awaited_once_with(session, None)
+    else:
+        store.set_slot_student.assert_not_awaited()
 
 
 async def test_leader_connection_loss_cancels_and_joins_session_tasks():
