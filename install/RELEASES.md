@@ -12,7 +12,9 @@
 обрабатывает `release` до чтения production lab.conf. Build требует root на узле
 PVE; verify/list не требуют root при наличии чтения, не используют сеть/pct и
 не читают production конфигурацию/секреты. Системные Python, findmnt и сам
-проверяющий инструмент входят в доверенную среду оператора.
+проверяющий инструмент входят в доверенную среду оператора. Для host-инструмента
+нужен системный Python 3.11+. Dispatcher и host-команды используют абсолютные
+системные пути, чтобы PATH не выбирал executable из проверяемого пакета.
 
 ```sh
 P=/path/to/trusted-clean-checkout/install/lab-provision

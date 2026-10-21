@@ -809,7 +809,9 @@ main() {
   shift
   if [[ $step == release ]]; then
     # Separate, trusted verifier: no production lab.conf, pct or secrets for verify/list.
-    exec python3 -I -B "$(dirname "$(readlink -f "$0")")/lab-release.py" "$@"
+    local provision_path
+    provision_path=$(/usr/bin/readlink -f "$0")
+    exec /usr/bin/python3 -I -B "${provision_path%/*}/lab-release.py" "$@"
   fi
   load_conf
   case $step in

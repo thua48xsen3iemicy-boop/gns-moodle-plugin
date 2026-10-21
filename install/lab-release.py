@@ -113,8 +113,12 @@ def sync_dir(path):
 
 
 def command(args, timeout=120, binary=False):
+    # Even a poisoned PATH pointing into an examined release must not select its executables.
+    executables = {"git": "/usr/bin/git", "findmnt": "/usr/bin/findmnt",
+                   "pct": "/usr/sbin/pct", "pvesm": "/usr/sbin/pvesm"}
+    require(args[0] in executables, "Untrusted host command")
     try:
-        result = subprocess.run([str(a) for a in args], check=True, capture_output=True,
+        result = subprocess.run([executables[args[0]], *[str(a) for a in args[1:]]], check=True, capture_output=True,
                                 timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         raise ReleaseError("Command outcome uncertain (timeout): " + str(args[0])) from exc

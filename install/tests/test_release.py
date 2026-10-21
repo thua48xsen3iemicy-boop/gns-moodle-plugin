@@ -662,3 +662,16 @@ def test_private_key_inside_allowlisted_source_is_rejected(tmp_path):
     stage.mkdir()
     with pytest.raises(r.ReleaseError, match="Private key"):
         r.export_source(repo, r.git(repo, "rev-parse", "HEAD"), stage)
+
+
+def test_payload_executables_in_path_are_never_selected(tmp_path, monkeypatch):
+    sentinel = tmp_path / "EXECUTED"
+    for name in ("findmnt", "python3", "dirname", "readlink"):
+        path = tmp_path / name
+        path.write_text("#!/bin/sh\n/usr/bin/touch " + str(sentinel) + "\nexit 99\n")
+        path.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert "findmnt" in r.command(["findmnt", "--version"])
+    result = subprocess.run(["/bin/bash", str(REPO / "install/lab-provision"), "release", "verify", "--help"],
+                            capture_output=True, text=True)
+    assert result.returncode == 0 and not sentinel.exists()
