@@ -46,7 +46,7 @@ from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotSt
 from . import labdef
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
-from .slot_client import SlotError, SlotUnavailable
+from .slot_client import SlotError, SlotOwnerLost, SlotUnavailable
 from .store import Fenced
 from .ownership import command_scope, current
 
@@ -229,6 +229,18 @@ class Orchestrator:
                     if session["slot_vmid"] is not None:
                         await self._claim(session, epoch, generation)
                     progressed = await self.step(session)
+                except SlotOwnerLost as exc:
+                    # A restarted Slot rejects the previously accepted token even while
+                    # this manager is still leader. Revoke the work token by entering
+                    # cleanup; keep the slot in maintenance after it is parked.
+                    if not self.leader or self.epoch != leader_epoch:
+                        return
+                    await self._fail(session, Failure(
+                        "Слот отверг текущего владельца; работа остановлена, слот требует проверки оператором",
+                        "SLOT_OWNER_LOST", slot_state="maintenance",
+                        source={"receiver": "slot", "code": exc.code},
+                    ))
+                    return
                 except Fenced as exc:
                     log.warning("Session %s: stale worker stopped (%s)", sid, exc)
                     return
@@ -271,7 +283,7 @@ class Orchestrator:
             return False
         try:
             return await handler(s)
-        except Fenced:
+        except (Fenced, SlotOwnerLost):
             raise
         except Failure as exc:
             await self._fail(s, exc)
@@ -672,6 +684,8 @@ class Orchestrator:
                 resp = await client.deploy(call["body"], call["idempotency_key"])
             else:
                 resp = await client.stop(str(s["project_id"]), call["idempotency_key"])
+        except SlotOwnerLost:
+            raise
         except SlotUnavailable:
             raise Wait("Слот недоступен, повтор…") from None
         except SlotError as exc:
