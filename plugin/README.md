@@ -10,7 +10,7 @@ Moodle-плагин для лабораторных работ в GNS3: схем
 | `fixtures/` | пример топологии и демо «живых» данных |
 | `docs/` | ТЗ (`SPEC.md`), первый промпт для Claude Code (`FIRST_PROMPT.md`), просьбы и вопросы к менеджеру (`MANAGER_REQUESTS.md`) |
 
-Правила для Claude Code — в `CLAUDE.md`.
+Правила для ИИ-агентов — в `AGENTS.md` (Claude Code читает его через `CLAUDE.md`).
 
 ## Шлюз консолей
 

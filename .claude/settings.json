@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./plugin/plugin/amd/build/**)",
+      "Read(./**/*.map)",
+      "Read(./plugin/plugin/amd/src/xterm.js)",
+      "Read(./plugin/plugin/amd/src/xterm-addon-fit.js)"
+    ]
+  }
+}
