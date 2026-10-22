@@ -9,6 +9,8 @@
 #
 # Steps, in order (install/README.md): secrets, venv slot, slot, agent, venv manager, manager,
 # moodle, check, enable. Every step can be repeated: existing secrets are never regenerated.
+# 'deploy' runs them all from one node, over the cluster's root ssh, after creating the missing CTs
+# ('template', 'create'); 'reset' destroys the stand for a fresh deploy.
 # Guest scripts are single-quoted on purpose: they expand inside the CT.
 # shellcheck disable=SC2016
 set -euo pipefail
@@ -16,6 +18,8 @@ umask 077
 
 CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
 ID_OFFSET=100000  # Standard unprivileged mapping: guest uid N is host uid N + 100000
+GNS3_VERSION=2.2.61  # The only GNS3 server the slot supports (slot/README.md)
+LENIENT=0  # 1: CTs of SLOTS and MANAGER_VMID may be missing (they are being created or destroyed)
 
 log() { printf '==> %s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -32,6 +36,14 @@ Usage: lab-provision <step> [args]
   moodle            give Moodle the web CA and print the plugin settings
   check             this node's agent and slots; on the manager's node also the manager and all agents
   enable [VMID...]  make the slots available in the manager (slot-enable), all of SLOTS by default
+
+  template          build the slot template CT (Ubuntu 24.04, GNS3 2.2.61) from SLOT_TEMPLATE
+  create            create the missing manager CT (CREATE_MANAGER) and slot CTs (CREATE_SLOTS)
+  deploy            template, create and all the steps above on every node, from any node (ssh)
+  reset [--yes] [--secrets] [--template]
+                    destroy the manager and slot CTs, their ownership records on the agents, the
+                    student directories (renamed, not deleted); --secrets also moves SECRETS_DIR
+                    aside (lab.conf and own files stay), --template also destroys the slot template
 EOF
 }
 
@@ -78,19 +90,77 @@ load_conf() {
   for id in "$MANAGER_VMID" "${SLOT_IDS[@]}" ${MOODLE_VMID:-}; do
     [[ $id =~ ^[0-9]+$ ]] || die "invalid VMID: $id"
   done
+  load_plan
   LOCAL_SLOTS=()
   for id in "${SLOT_IDS[@]}"; do
-    [[ -z ${SLOT_NODE[$id]:-} ]] || die "slot $id is twice in SLOTS"
-    n=$(ct_node "$id") || die "slot $id from SLOTS is not a CT of this cluster"
-    [[ -n ${NODE_IPS[$n]:-} ]] || die "slot $id is on node $n, which is not in NODES"
+    [[ ! -v SLOT_NODE[$id] ]] || die "slot $id is twice in SLOTS"
+    n=$(planned_node "$id" "slot $id from SLOTS")
     SLOT_NODE[$id]=$n
+    [[ -n $n ]] || continue
+    [[ -n ${NODE_IPS[$n]:-} ]] || die "slot $id is on node $n, which is not in NODES"
     [[ $n != "$NODE" ]] || LOCAL_SLOTS+=("$id")
   done
-  MANAGER_NODE=$(ct_node "$MANAGER_VMID") || die "MANAGER_VMID $MANAGER_VMID is not a CT of this cluster"
+  MANAGER_NODE=$(planned_node "$MANAGER_VMID" "MANAGER_VMID $MANAGER_VMID")
   # Each agent accepts the VMID range of its own node's slots, so the manager must stay outside its node's.
-  if read -r lo hi < <(node_range "$MANAGER_NODE"); then
+  if [[ -n $MANAGER_NODE ]] && read -r lo hi < <(node_range "$MANAGER_NODE"); then
     ((MANAGER_VMID < lo || MANAGER_VMID > hi)) ||
       die "MANAGER_VMID is inside the slot VMID range of node $MANAGER_NODE ($lo-$hi)"
+  fi
+  if [[ -n $TEMPLATE_VMID ]] && read -r lo hi < <(node_range "$TEMPLATE_NODE"); then
+    ((TEMPLATE_VMID < lo || TEMPLATE_VMID > hi)) ||
+      die "SLOT_TEMPLATE is inside the slot VMID range of node $TEMPLATE_NODE ($lo-$hi)"
+  fi
+}
+
+# Optional CTs the script creates itself: CREATE_MANAGER="<node>:<ip>",
+# CREATE_SLOTS="<vmid>=<node>:<ip> ...", SLOT_TEMPLATE="<vmid>=<node>:<ip|dhcp>".
+load_plan() {
+  declare -gA PLAN_NODE=() PLAN_IP=()
+  local entry id rest used=" "
+  plan_entry() {  # plan_entry <vmid> <node>:<ip> <what>
+    local node=${2%%:*} ip=${2#*:}
+    [[ $2 == *:* && $node =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || die "$3: expected <node>:<ip>, got '$2'"
+    [[ -d /etc/pve/nodes/$node ]] || die "$3: $node is not a node of this cluster"
+    [[ $ip =~ ^[0-9]+(\.[0-9]+){3}$ || ($ip == dhcp && $1 == "${TEMPLATE_VMID:-}") ]] ||
+      die "$3: invalid IP '$ip'"
+    [[ $ip == dhcp || $used != *" $ip "* ]] || die "$3: IP $ip is planned twice"
+    used+="$ip "
+    PLAN_NODE[$1]=$node PLAN_IP[$1]=$ip
+  }
+  TEMPLATE_VMID='' TEMPLATE_NODE=''
+  if [[ -n ${SLOT_TEMPLATE:-} ]]; then
+    TEMPLATE_VMID=${SLOT_TEMPLATE%%=*}
+    [[ $SLOT_TEMPLATE == *=* && $TEMPLATE_VMID =~ ^[0-9]+$ ]] ||
+      die "SLOT_TEMPLATE: expected <vmid>=<node>:<ip|dhcp>, got '$SLOT_TEMPLATE'"
+    [[ $TEMPLATE_VMID != "$MANAGER_VMID" && " $SLOTS " != *" $TEMPLATE_VMID "* ]] ||
+      die "SLOT_TEMPLATE $TEMPLATE_VMID is also the manager or a slot"
+    plan_entry "$TEMPLATE_VMID" "${SLOT_TEMPLATE#*=}" SLOT_TEMPLATE
+    TEMPLATE_NODE=${PLAN_NODE[$TEMPLATE_VMID]}
+  fi
+  [[ -z ${CREATE_MANAGER:-} ]] || plan_entry "$MANAGER_VMID" "$CREATE_MANAGER" CREATE_MANAGER
+  for entry in ${CREATE_SLOTS:-}; do
+    id=${entry%%=*} rest=${entry#*=}
+    [[ $entry == *=* && $id =~ ^[0-9]+$ ]] || die "CREATE_SLOTS: expected <vmid>=<node>:<ip>, got '$entry'"
+    [[ " $SLOTS " == *" $id "* ]] || die "CREATE_SLOTS: $id is not in SLOTS"
+    [[ ! -v PLAN_NODE[$id] ]] || die "CREATE_SLOTS: $id is planned twice"
+    plan_entry "$id" "$rest" "CREATE_SLOTS $id"
+  done
+}
+
+# planned_node <vmid> <what>: the node of an existing CT, else of a planned one. A planned CT that does
+# not exist yet is an error outside the create/destroy steps; in them "" stands for "no such CT".
+planned_node() {
+  local n
+  if n=$(ct_node "$1"); then
+    [[ -z ${PLAN_NODE[$1]:-} || ${PLAN_NODE[$1]} == "$n" ]] ||
+      warn "CT $1 is on $n, the plan in lab.conf says ${PLAN_NODE[$1]} (the existing CT wins)"
+    echo "$n"
+  elif ((LENIENT)); then
+    echo "${PLAN_NODE[$1]:-}"
+  elif [[ -n ${PLAN_NODE[$1]:-} ]]; then
+    die "$2 does not exist yet: run 'lab-provision create' (or deploy)"
+  else
+    die "$2 is not a CT of this cluster"
   fi
 }
 
@@ -98,7 +168,7 @@ need_node() { [[ -n ${NODE_IPS[$NODE]:-} ]] || die "this node ($NODE) is not in 
 
 node_range() {  # node_range <node>: "min max" VMID of the slots on that node; fails if it has none
   local id ids=()
-  for id in "${SLOT_IDS[@]}"; do [[ ${SLOT_NODE[$id]} != "$1" ]] || ids+=("$id"); done
+  for id in "${SLOT_IDS[@]}"; do [[ ${SLOT_NODE[$id]:-} != "$1" ]] || ids+=("$id"); done
   ((${#ids[@]})) || return 1
   printf '%s\n' "${ids[@]}" | sort -n | sed -n '1p;$p' | paste -sd' '
 }
@@ -441,6 +511,9 @@ for p in /opt/gns3/images/QEMU /opt/gns3/images/IOU /opt/gns3/qga /dev/kvm /dev/
   [ -e "$p" ] || echo "WARNING: $p is missing"
 done
 systemctl is-enabled gns3.service >/dev/null 2>&1 || echo "WARNING: gns3.service is not enabled"
+if grep -qs "^iourc_path = /opt/gns3/iourc" /etc/gns3/gns3_server.conf && [ ! -s /opt/gns3/iourc ]; then
+  echo "WARNING: no /opt/gns3/iourc: IOU devices need the license file (secrets/slot/iourc, then repeat slot)"
+fi
 v=""
 for _ in $(seq 1 30); do
   v=$(python3 -c "import urllib.request; print(urllib.request.urlopen(\"http://127.0.0.1:3080/v2/version\", timeout=2).read().decode())" 2>/dev/null) && break
@@ -487,6 +560,9 @@ cmd_slot() {
     slot_gid=$(ct_sh "$id" 'id -g gns3')
     ct_push "$id" "$S/slots/$id/server.crt" /etc/lab-slot/tls/server.crt 0644 0 0
     ct_push "$id" "$S/slots/$id/server.key" /etc/lab-slot/tls/server.key 0640 0 "$slot_gid"
+    if [[ -s $S/slot/iourc ]]; then  # IOU license, the same for every slot
+      ct_push "$id" "$S/slot/iourc" /opt/gns3/iourc 0600 "$(ct_sh "$id" 'id -u gns3')" "$slot_gid"
+    fi
     render_slot_env "$id"  # The CT's current net0 IP, not the one it had at 'secrets' (e.g. a fresh clone)
     ct_push "$id" "$S/slots/$id/slot.env" /etc/lab-slot/slot.env 0600 0 0
     ct_push "$id" "$REPO_DIR/agent/guest/lab-slot-init" /usr/local/sbin/lab-slot-init 0755 0 0
@@ -802,10 +878,399 @@ cmd_enable() {
   done
 }
 
+# ------------------------------------------------------------------ create: template, manager and slot CTs
+
+need_create_conf() {
+  local v
+  for v in CT_STORAGE CT_BRIDGE CT_CIDR; do
+    [[ -n ${!v:-} ]] || die "$v is not set in $CONF (needed to create CTs)"
+  done
+  [[ $CT_CIDR =~ ^[0-9]{1,2}$ ]] || die "CT_CIDR is a prefix length, e.g. 24"
+}
+
+net0() {  # net0 <ip|dhcp>: the network line of a CT the script creates
+  local ip=$1
+  [[ $ip == dhcp ]] || ip=$ip/$CT_CIDR${CT_GATEWAY:+,gw=$CT_GATEWAY}
+  echo "name=eth0,bridge=$CT_BRIDGE,ip=$ip${CT_VLAN:+,tag=$CT_VLAN}"
+}
+
+CT_DNS=()  # pct create options for DNS, if lab.conf sets them
+ct_dns() {
+  CT_DNS=()
+  [[ -z ${CT_NAMESERVER:-} ]] || CT_DNS+=(--nameserver "$CT_NAMESERVER")
+  [[ -z ${CT_SEARCHDOMAIN:-} ]] || CT_DNS+=(--searchdomain "$CT_SEARCHDOMAIN")
+}
+
+ostemplate() {  # The Ubuntu 24.04 image for new CTs on this node: CT_OSTEMPLATE, or the newest one
+  local vol=${CT_OSTEMPLATE:-} store name
+  if [[ -z $vol ]]; then
+    pveam update >/dev/null 2>&1 || warn "pveam update failed, using the cached image list"
+    name=$(pveam available --section system | awk '{print $2}' | grep '^ubuntu-24\.04-standard_' | sort -V | tail -1)
+    [[ -n $name ]] || die "no ubuntu-24.04-standard image in 'pveam available': set CT_OSTEMPLATE"
+    vol=local:vztmpl/$name
+  fi
+  store=${vol%%:*} name=${vol##*/}
+  [[ $name == ubuntu-24.04-* ]] || warn "CT_OSTEMPLATE $vol: the manager and the slots expect Ubuntu 24.04"
+  if ! pveam list "$store" | awk '{print $1}' | grep -qxF "$vol"; then
+    log "downloading $name to $store" >&2
+    pveam update >/dev/null 2>&1 || true
+    pveam download "$store" "$name" >&2
+  fi
+  echo "$vol"
+}
+
+# Inside the template CT: GNS3 server 2.2.61 (pinned, in its own venv), QEMU/KVM, ubridge, VPCS, IOU
+# libraries, user gns3 with a fixed uid/gid, the directories the agent and the slot expect.
+TEMPLATE_SCRIPT='
+export DEBIAN_FRONTEND=noninteractive
+. /etc/os-release
+[ "$VERSION_ID" = 24.04 ] || { echo "ERROR: Ubuntu $VERSION_ID, the slot template needs 24.04"; exit 1; }
+for _ in $(seq 1 30); do getent hosts archive.ubuntu.com >/dev/null && break; sleep 2; done
+apt-get update -qq
+apt-get install -y -qq software-properties-common ca-certificates curl openssl libcap2-bin \
+  python3.12 python3.12-venv qemu-system-x86 qemu-utils >/dev/null
+add-apt-repository -y ppa:gns3/ppa >/dev/null
+dpkg --add-architecture i386
+apt-get update -qq
+apt-get install -y -qq ubridge vpcs dynamips gns3-iou >/dev/null
+setcap cap_net_admin,cap_net_raw=ep /usr/bin/ubridge
+
+getent group gns3 >/dev/null || groupadd --gid "$GNS3_ID" gns3
+id gns3 >/dev/null 2>&1 ||
+  useradd --uid "$GNS3_ID" --gid gns3 --home-dir /var/lib/gns3 --create-home --shell /usr/sbin/nologin gns3
+[ "$(id -u gns3):$(id -g gns3)" = "$GNS3_ID:$GNS3_ID" ] ||
+  { echo "ERROR: gns3 is $(id -u gns3):$(id -g gns3), expected $GNS3_ID:$GNS3_ID"; exit 1; }
+getent group kvm >/dev/null || groupadd --system kvm
+usermod -aG kvm gns3
+
+# Mount points of the agent (code, student directory, images) and the local GNS3 directories.
+install -d -m 0755 /srv/gns3-ro/slot /opt/gns3 /opt/gns3/projects /opt/gns3/images \
+  /opt/gns3/images/QEMU /opt/gns3/images/IOU /etc/gns3
+install -d -o gns3 -g gns3 -m 0700 /opt/gns3/qga
+install -d -o gns3 -g gns3 -m 0750 /var/lib/gns3/configs /var/lib/gns3/appliances /var/lib/gns3/symbols
+
+python3.12 -m venv --clear /opt/gns3-server
+/opt/gns3-server/bin/python -m pip install -q --disable-pip-version-check "gns3-server==$GNS3_VERSION"
+
+cat >/etc/gns3/gns3_server.conf <<EOF
+# Generated by install/lab-provision (slot template)
+[Server]
+host = 127.0.0.1
+port = 3080
+auth = False
+images_path = /opt/gns3/images
+projects_path = /opt/gns3/projects
+configs_path = /var/lib/gns3/configs
+appliances_path = /var/lib/gns3/appliances
+symbols_path = /var/lib/gns3/symbols
+ubridge_path = /usr/bin/ubridge
+report_errors = False
+
+[Qemu]
+enable_hardware_acceleration = True
+require_hardware_acceleration = True
+
+[IOU]
+iourc_path = /opt/gns3/iourc
+license_check = True
+EOF
+cat >/etc/systemd/system/gns3.service <<EOF
+# Generated by install/lab-provision (slot template)
+[Unit]
+Description=GNS3 server $GNS3_VERSION
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=gns3
+Group=gns3
+ExecStart=/opt/gns3-server/bin/gns3server --config /etc/gns3/gns3_server.conf
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable gns3.service >/dev/null 2>&1
+# Slots are reached with pct only; a cloned sshd would share its host keys between all of them.
+apt-get purge -y -qq openssh-server >/dev/null 2>&1 || true
+apt-get autoremove -y -qq >/dev/null
+'
+
+TEMPLATE_VERIFY='
+systemctl restart gns3.service
+v=""
+for _ in $(seq 1 30); do v=$(curl -fsS http://127.0.0.1:3080/v2/version 2>/dev/null) && break; sleep 2; done
+case $v in *"$GNS3_VERSION"*) echo "GNS3: $v" ;; *) echo "ERROR: GNS3 $GNS3_VERSION does not answer ($v)"; exit 1 ;; esac
+runuser -u gns3 -- test -r /dev/kvm -a -w /dev/kvm || { echo "ERROR: gns3 cannot use /dev/kvm"; exit 1; }
+test -c /dev/net/tun || { echo "ERROR: no /dev/net/tun"; exit 1; }
+getcap /usr/bin/ubridge | grep -q cap_net_admin || { echo "ERROR: ubridge has no capabilities"; exit 1; }
+qemu-system-x86_64 --version | head -1
+'
+
+# Clones must not share anything that identifies one machine or one slot.
+TEMPLATE_CLEAN='
+systemctl stop gns3.service
+rm -rf /var/lib/lab-slot /etc/lab-slot /opt/gns3/iourc /var/lib/gns3/.config
+find /tmp /var/tmp -mindepth 1 -delete
+apt-get clean
+truncate -s 0 /etc/machine-id
+rm -f /var/lib/dbus/machine-id
+journalctl --rotate >/dev/null 2>&1 || true
+journalctl --vacuum-time=1s >/dev/null 2>&1 || true
+'
+
+cmd_template() {
+  [[ -n $TEMPLATE_VMID ]] || die "SLOT_TEMPLATE is not set in $CONF"
+  [[ $TEMPLATE_NODE == "$NODE" ]] || die "the template is planned on $TEMPLATE_NODE: run this step there"
+  need_create_conf
+  local id=$TEMPLATE_VMID gid vol
+  if ct_node "$id" >/dev/null; then
+    ct_local "$id"
+    if pct config "$id" | grep -q '^template: 1'; then log "slot template $id exists"; return 0; fi
+    die "CT $id exists and is not a template (a failed build?): check it, destroy it ('pct destroy $id') and repeat"
+  fi
+  [[ -c /dev/kvm ]] || die "this node has no /dev/kvm: the slots run QEMU with KVM"
+  vol=$(ostemplate)
+  ct_dns
+  log "slot template $id from $vol"
+  pct create "$id" "$vol" --hostname lab-slot-template --unprivileged 1 --features nesting=1 --ostype ubuntu \
+    --cores 2 --memory 4096 --swap 0 --rootfs "$CT_STORAGE:${SLOT_DISK_GB:-32}" --net0 "$(net0 "${PLAN_IP[$id]}")" \
+    "${CT_DNS[@]}" --onboot 0 --description "Lab slot template, GNS3 $GNS3_VERSION. Created by install/lab-provision."
+  ct_up "$id"
+  ct_sh "$id" "$TEMPLATE_SCRIPT" GNS3_ID="${SLOT_GNS3_ID:-1500}" GNS3_VERSION="$GNS3_VERSION"
+  gid=$(ct_sh "$id" 'getent group kvm | cut -d: -f3')
+  ct_down "$id"
+  # Unprivileged CTs get host devices by path; /dev/kvm keeps the guest group kvm.
+  pct set "$id" -dev0 "/dev/kvm,gid=$gid,mode=0660" -dev1 /dev/net/tun,mode=0666
+  ct_up "$id"
+  ct_sh "$id" "$TEMPLATE_VERIFY" GNS3_VERSION="$GNS3_VERSION"
+  ct_sh "$id" "$TEMPLATE_CLEAN"
+  ct_down "$id"
+  pct template "$id"
+  log "slot template $id ready"
+}
+
+cmd_create_manager() {  # On the manager's planned node
+  local id=$MANAGER_VMID vol
+  need_create_conf
+  [[ ${PLAN_NODE[$id]:-} == "$NODE" ]] || die "CREATE_MANAGER plans CT $id on ${PLAN_NODE[$id]:-no node}, this is $NODE"
+  if ct_node "$id" >/dev/null; then log "manager CT $id exists"; return 0; fi
+  vol=$(ostemplate)
+  ct_dns
+  log "manager CT $id from $vol"
+  pct create "$id" "$vol" --hostname lab-manager --unprivileged 1 --features nesting=1 --ostype ubuntu \
+    --cores "${MANAGER_CORES:-2}" --memory "${MANAGER_MEMORY_MB:-4096}" --swap 512 \
+    --rootfs "$CT_STORAGE:${MANAGER_DISK_GB:-16}" --net0 "$(net0 "${PLAN_IP[$id]}")" "${CT_DNS[@]}" \
+    --onboot 1 --tags labprov --description "Lab manager. Created by install/lab-provision."
+}
+
+cmd_clone_slot() {  # On the template's node: a full clone, onto the slot's node if it is another one
+  local id=$1 node=${PLAN_NODE[$1]:-} t=$TEMPLATE_VMID
+  need_create_conf
+  [[ -n $node ]] || die "slot $id is not in CREATE_SLOTS"
+  [[ $TEMPLATE_NODE == "$NODE" ]] || die "run on the template's node $TEMPLATE_NODE"
+  if ct_node "$id" >/dev/null; then log "slot CT $id exists"; return 0; fi
+  pct config "$t" 2>/dev/null | grep -q '^template: 1' || die "slot template $t is missing: run 'lab-provision template'"
+  log "slot CT $id on $node from template $t"
+  local opts=(--hostname "slot-$id" --full 1 --storage "$CT_STORAGE"
+              --description "Lab slot. Created by install/lab-provision.")
+  # Another node needs the template on shared storage (RBD): pct refuses otherwise.
+  [[ $node == "$NODE" ]] || opts+=(--target "$node")
+  pct clone "$t" "$id" "${opts[@]}"
+  # The config now lives on $node: pvesh reaches it from here. A net0 without hwaddr gets a new MAC.
+  pvesh set "/nodes/$node/lxc/$id/config" --net0 "$(net0 "${PLAN_IP[$id]}")" --onboot 0 --tags 'labslot;labprov'
+}
+
+cmd_create() {
+  need_cluster
+  local id
+  if ! ct_node "$MANAGER_VMID" >/dev/null; then
+    [[ -n ${PLAN_NODE[$MANAGER_VMID]:-} ]] || die "manager CT $MANAGER_VMID does not exist and CREATE_MANAGER is not set"
+    run_on "${PLAN_NODE[$MANAGER_VMID]}" _create-manager
+  fi
+  for id in "${SLOT_IDS[@]}"; do
+    ct_node "$id" >/dev/null && continue
+    [[ -n ${PLAN_NODE[$id]:-} ]] || die "slot CT $id does not exist and is not in CREATE_SLOTS"
+    [[ -n $TEMPLATE_VMID ]] || die "slot CT $id must be cloned, but SLOT_TEMPLATE is not set"
+    run_on "$TEMPLATE_NODE" _clone-slot "$id"
+  done
+}
+
+# ------------------------------------------------------------------ deploy, reset: the whole cluster
+
+SELF=''  # This script on CephFS, the same path on every node; set by need_cluster
+
+need_cluster() {
+  SELF=$REPO_DIR/install/lab-provision
+  [[ -x $SELF ]] || die "no $SELF: REPO_DIR must be the checkout every node sees"
+  [[ $(readlink -f "$0") == "$(readlink -f "$SELF")" ]] ||
+    warn "running $0, the nodes run $SELF: use that one to keep them identical"
+  [[ $(readlink -f "$CONF") == "$CEPH_ROOT"/* ]] || die "LAB_CONF $CONF must be on CephFS, the other nodes read it"
+}
+
+node_addr() {  # The cluster address of node $1, as corosync knows it
+  python3 - "$1" <<'PY'
+import json, sys
+print(json.load(open("/etc/pve/.members"))["nodelist"][sys.argv[1]]["ip"])
+PY
+}
+
+# run_on <node> <step> [args]: this script on that node, over the root ssh Proxmox itself uses
+run_on() {
+  local n=$1 q a
+  shift
+  log "[$n] lab-provision $*"
+  if [[ $n == "$NODE" ]]; then
+    LAB_CONF=$CONF "$SELF" "$@"
+  else
+    q="LAB_CONF=$(printf %q "$CONF") $(printf %q "$SELF")"
+    for a in "$@"; do q+=" $(printf %q "$a")"; done
+    ssh -o BatchMode=yes -o ConnectTimeout=10 -o HostKeyAlias="$n" "root@$(node_addr "$n")" "$q"
+  fi
+}
+
+reach() {  # reach <node...>: every node runs this script over ssh, before anything changes
+  local n
+  for n in $(printf '%s\n' "$@" | sort -u); do
+    [[ -z $n || $n == "$NODE" ]] || run_on "$n" _ping >/dev/null || die "cannot run the script on $n over ssh"
+  done
+}
+
+slot_nodes() {  # Nodes of NODES that have slots, in NODES order
+  local n id
+  for n in "${NODE_NAMES[@]}"; do
+    for id in "${SLOT_IDS[@]}"; do
+      if [[ ${SLOT_NODE[$id]:-} == "$n" ]]; then echo "$n"; break; fi
+    done
+  done
+}
+
+cmd_deploy() {
+  need_cluster
+  local n nodes=() moodle_node
+  [[ -n $MANAGER_NODE ]] || die "manager CT $MANAGER_VMID does not exist and CREATE_MANAGER is not set"
+  mapfile -t nodes < <(slot_nodes)
+  ((${#nodes[@]})) || die "no slot has a node: create the slots or plan them in CREATE_SLOTS"
+  moodle_node=$MANAGER_NODE
+  if [[ -n ${MOODLE_VMID:-} ]]; then
+    moodle_node=$(ct_node "$MOODLE_VMID") || die "MOODLE_VMID $MOODLE_VMID is not a CT of this cluster"
+  fi
+  log "ssh to every node"
+  reach "${nodes[@]}" "$MANAGER_NODE" "$moodle_node" "$TEMPLATE_NODE"
+
+  if [[ -n $TEMPLATE_VMID ]]; then run_on "$TEMPLATE_NODE" template; fi
+  run_on "$NODE" create
+  run_on "$NODE" secrets
+  run_on "${nodes[0]}" venv slot
+  for n in "${nodes[@]}"; do
+    run_on "$n" slot
+    run_on "$n" agent
+  done
+  run_on "$MANAGER_NODE" venv manager
+  run_on "$MANAGER_NODE" manager
+  run_on "$moodle_node" moodle
+  for n in "${nodes[@]}"; do [[ $n == "$MANAGER_NODE" ]] || run_on "$n" check; done
+  run_on "$MANAGER_NODE" check
+  run_on "$MANAGER_NODE" enable
+  log "deployed: start a lab from Moodle; the plugin settings are in $S/moodle/plugin.txt"
+}
+
+cmd_destroy() {  # On the CT's node: _destroy <vmid> [template]
+  local id=$1
+  [[ $id != "${MOODLE_VMID:-}" ]] || die "refusing to destroy the Moodle CT $id"
+  [[ -f /etc/pve/lxc/$id.conf ]] || return 0
+  if pct config "$id" | grep -q '^template: 1' && [[ ${2:-} != template ]]; then
+    log "CT $id is a template: kept (reset --template destroys it)"
+    return 0
+  fi
+  log "destroying CT $id ($(pct config "$id" | sed -n 's/^hostname: //p'))"
+  [[ $(ct_state "$id") == stopped ]] || pct stop "$id"
+  # Bind mounts (code, student directories, images) are host paths: destroy never touches them.
+  pct destroy "$id" --purge 1 --destroy-unreferenced-disks 1
+}
+
+cmd_node_reset() {  # On every node: the agent forgets the owners of slots that no longer exist
+  local d=/var/lib/lab-node-agent id
+  [[ -d $d ]] || return 0
+  systemctl stop lab-node-agent 2>/dev/null || true
+  for id in "${SLOT_IDS[@]}"; do
+    [[ -e $d/$id.json ]] || continue
+    if ct_node "$id" >/dev/null; then warn "CT $id still exists: its ownership record stays"; continue; fi
+    find "$d" -maxdepth 1 \( -name "$id.json" -o -name ".$id.*" \) -delete
+    log "$NODE: ownership record of slot $id removed"
+  done
+  if systemctl is-enabled --quiet lab-node-agent 2>/dev/null; then systemctl start lab-node-agent; fi
+}
+
+cmd_reset() {
+  need_cluster
+  local yes=0 secrets=0 template=0 a id n ts students
+  for a in "$@"; do
+    case $a in
+      --yes) yes=1 ;;
+      --secrets) secrets=1 ;;
+      --template) template=1 ;;
+      *) die "reset: unknown option $a" ;;
+    esac
+  done
+  ts=$(date +%Y%m%d-%H%M%S)
+  students=$CEPH_ROOT/$STUDENTS_DIR
+  log "reset destroys:"
+  [[ -z $MANAGER_NODE ]] || echo "  manager CT $MANAGER_VMID on $MANAGER_NODE, with its database"
+  for id in "${SLOT_IDS[@]}"; do [[ -z ${SLOT_NODE[$id]} ]] || echo "  slot CT $id on ${SLOT_NODE[$id]}"; done
+  if ((template)) && [[ -n $TEMPLATE_VMID ]]; then echo "  slot template $TEMPLATE_VMID"; fi
+  echo "  the agents' ownership records of these slots"
+  [[ ! -d $students ]] || echo "  student data: $students is renamed to $students.reset-$ts"
+  ((!secrets)) || echo "  secrets: $S is renamed to $S.reset-$ts (lab.conf and your own files are copied back)"
+  if ((!yes)); then
+    [[ -t 0 ]] || die "reset asks for confirmation: run it in a terminal or pass --yes"
+    read -r -p "Type $PUBLIC_NAME to confirm: " a
+    [[ $a == "$PUBLIC_NAME" ]] || die "not confirmed"
+  fi
+
+  reach "$MANAGER_NODE" "${SLOT_NODE[@]}" "$TEMPLATE_NODE" "${NODE_NAMES[@]}"
+  [[ -z $MANAGER_NODE ]] || run_on "$MANAGER_NODE" _destroy "$MANAGER_VMID"
+  for id in "${SLOT_IDS[@]}"; do [[ -z ${SLOT_NODE[$id]} ]] || run_on "${SLOT_NODE[$id]}" _destroy "$id"; done
+  if ((template)) && [[ -n $TEMPLATE_VMID ]] && n=$(ct_node "$TEMPLATE_VMID"); then
+    run_on "$n" _destroy "$TEMPLATE_VMID" template
+  fi
+  # A new database counts command epochs from 1 again: an agent that still remembered a higher one for
+  # a VMID would refuse the new manager there (STALE_OWNER). The CTs are gone, so are their records.
+  for n in "${NODE_NAMES[@]}"; do run_on "$n" _node-reset; done
+  if [[ -d $students ]]; then
+    mv "$students" "$students.reset-$ts"
+    log "student data moved to $students.reset-$ts (delete it when it is not needed)"
+  fi
+  if ((secrets)); then
+    mv "$S" "$S.reset-$ts"
+    install -d -m 0700 "$S"
+    local own=("${CONF#"$S"/}" manager/images.json manager/manager.env.local slot/iourc)
+    # A gw certificate from a real CA is the operator's; one from the old test web CA is re-issued.
+    a=$S.reset-$ts/manager/nginx
+    if [[ -s $a/gw.crt ]] && ! openssl verify -CAfile "$S.reset-$ts/ca/web-ca.crt" "$a/gw.crt" >/dev/null 2>&1; then
+      own+=(manager/nginx/gw.crt manager/nginx/gw.key)
+    fi
+    for a in "${own[@]}"; do
+      [[ $a != /* && -e $S.reset-$ts/$a ]] || continue
+      install -d -m 0700 "$(dirname "$S/$a")"
+      cp -p "$S.reset-$ts/$a" "$S/$a"
+    done
+    log "secrets moved to $S.reset-$ts: after deploy Moodle needs the new site secret (moodle step)"
+  fi
+  log "reset done: 'lab-provision deploy' builds the stand again"
+}
+
 main() {
   local step=${1:-}
   [[ -n $step && $step != -h && $step != --help ]] || { usage; exit 0; }
   shift
+  case $step in
+    template | create | deploy | reset | _create-manager | _clone-slot | _destroy | _node-reset | _ping) LENIENT=1 ;;
+  esac
   load_conf
   case $step in
     secrets) cmd_secrets ;;
@@ -816,6 +1281,16 @@ main() {
     moodle) cmd_moodle ;;
     check) cmd_check ;;
     enable) cmd_enable "$@" ;;
+    template) cmd_template ;;
+    create) cmd_create ;;
+    deploy) cmd_deploy ;;
+    reset) cmd_reset "$@" ;;
+    # Internal: what deploy, create and reset run on each node
+    _create-manager) cmd_create_manager ;;
+    _clone-slot) cmd_clone_slot "$@" ;;
+    _destroy) cmd_destroy "$@" ;;
+    _node-reset) cmd_node_reset ;;
+    _ping) echo "$NODE ok" ;;
     *) usage; exit 2 ;;
   esac
 }
