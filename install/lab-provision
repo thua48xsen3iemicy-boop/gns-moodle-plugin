@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Semi-manual provisioning of Proxmox nodes: secrets, node agents, slot and manager LXCs.
 # Runs as root on a cluster node. Every change inside an LXC goes through pct (push/exec), so the
 # components keep reading their secrets from the same local paths as before. pct only reaches the
@@ -24,6 +24,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage: lab-provision <step> [args]
+  release build|verify|list  prepare/check immutable releases; does not apply them (RELEASES.md)
   secrets           generate CAs, certificates, tokens and config files into SECRETS_DIR (any node)
   venv slot|manager build the Python venv of the slot or manager code on CephFS
   slot [VMID...]    tag a stopped slot LXC of this node and push slot.env, lab-slot-init, lab-slot.service
@@ -806,6 +807,12 @@ main() {
   local step=${1:-}
   [[ -n $step && $step != -h && $step != --help ]] || { usage; exit 0; }
   shift
+  if [[ $step == release ]]; then
+    # Separate, trusted verifier: no production lab.conf, pct or secrets for verify/list.
+    local provision_path
+    provision_path=$(/usr/bin/readlink -f "$0")
+    exec /usr/bin/python3 -I -B "${provision_path%/*}/lab-release.py" "$@"
+  fi
   load_conf
   case $step in
     secrets) cmd_secrets ;;
