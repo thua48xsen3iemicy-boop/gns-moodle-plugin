@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Full screen lab page: the topology viewer without the Moodle page chrome.
+ * Full screen lab page of a student: the scheme, the consoles and the session controls without the Moodle page chrome.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -40,7 +40,7 @@ $PAGE->set_title(format_string($instance->name));
 $PAGE->set_heading(format_string($course->fullname));
 $PAGE->set_activity_record($instance);
 
-$viewer = new \mod_gns3lab\output\viewer($cm, $instance, true);
+$viewer = new \mod_gns3lab\output\viewer($cm, $instance);
 
 echo $OUTPUT->header();
 echo $OUTPUT->render_from_template('mod_gns3lab/viewer', $viewer->export_for_template($OUTPUT));

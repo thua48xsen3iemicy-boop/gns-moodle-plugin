@@ -1,0 +1,967 @@
+// This file is part of Moodle - https://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+
+/**
+ * Consoles of the student interface: xterm.js terminals connected to the gateway, shown as a panel beside the
+ * scheme, as a grid with it, as windows over it, and on a phone as a sheet the student dives into.
+ *
+ * Ported from prototypes/student-ui.html; the simulator of the prototype is replaced by the gateway connection
+ * (mod_gns3lab/console). A console is tied to its node: the badge on the node, a preview of the output on the scheme
+ * from the level "Addresses", and in the windows arrangement a line from the window to the node with the traffic.
+ *
+ * @module     mod_gns3lab/consoles
+ * @copyright  2026 mod_gns3lab contributors
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
+// Straight port of the prototype; these style rules stay relaxed.
+/* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
+
+import {CISCO_TYPES, ConsoleConnection, KEYS, PORT_RE, THEME, loadXterm, note} from 'mod_gns3lab/console';
+import {snippetsFor} from 'mod_gns3lab/snippets';
+import {svgEl as el, hel, store, fill} from 'mod_gns3lab/dom';
+import {clamp, esc} from 'mod_gns3lab/model';
+
+const ICON_X = '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+const ICON_MAX = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
+const ICON_MIN = '<svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg>';
+
+/** The kinds of connection state that mean the console works now (a green dot). */
+const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: 'off', failed: 'bad', idle: 'wait', closed: 'off'};
+
+/**
+ * One console: the terminal, its connection, the snippets strip.
+ */
+class Con {
+    /**
+     * Constructor.
+     *
+     * @param {Consoles} owner the views
+     * @param {object} node node of the model
+     */
+    constructor(owner, node) {
+        this.owner = owner;
+        this.n = node;
+        this.unread = false;
+        this.min = false;
+        this.term = null;
+        this.fit = null;
+        this.conn = null;
+        this.state = 'idle';
+        this.win = null;
+        this.wpos = null;
+        this.flowIn = 0;
+        this.flowOut = 0;
+        this.host = hel('div', 'termhost');
+        this.viewport = hel('div', 'termview', this.host);
+        this.buildSnippets();
+        this.ro = new ResizeObserver(() => this.refit());
+        this.ro.observe(this.host);
+    }
+
+    buildSnippets() {
+        const o = this.owner, strip = hel('div', 'snips', this.host);
+        strip.setAttribute('role', 'group');
+        strip.setAttribute('aria-label', fill(o.s('ui_snippets_for'), this.n.name));
+        hel('span', 'lbl', strip).textContent = o.s('ui_snippets');
+        snippetsFor(this.n).forEach(sn => {
+            const b = hel('button', 'snip', strip);
+            b.type = 'button';
+            b.textContent = sn.label;
+            b.title = sn.title;
+            b.disabled = o.readonly;
+            b.setAttribute('aria-label', fill(o.s('ui_snippet_run'), sn.title));
+            b.addEventListener('pointerdown', e => e.preventDefault());
+            b.addEventListener('click', () => {
+                if (!this.send(sn.seq)) {
+                    o.toast(fill(o.s('ui_not_connected'), this.n.name));
+                    return;
+                }
+                o.active = this.n.id;
+                this.unread = false;
+                o.paintBadges(this);
+                o.markFocus();
+                this.focus();
+            });
+        });
+    }
+
+    /**
+     * Sends input to the device.
+     *
+     * @param {string} seq bytes
+     * @returns {boolean} false: the console is not connected
+     */
+    send(seq) {
+        if (this.owner.readonly || !this.conn || this.conn.state !== 'open') return false;
+        this.conn.send(seq);
+        return true;
+    }
+
+    ensureTerm() {
+        if (this.term) return;
+        const o = this.owner, {Terminal, FitAddon} = o.xterm;
+        this.term = new Terminal({
+            fontFamily: getComputedStyle(o.root).getPropertyValue('--mono').trim() || 'monospace',
+            fontSize: o.stage.mobile ? 13 : 13.5, lineHeight: 1.15, cursorBlink: !o.readonly,
+            scrollback: o.stage.mobile ? 1000 : 3000, theme: THEME, disableStdin: o.readonly,
+        });
+        this.fit = new FitAddon();
+        this.term.loadAddon(this.fit);
+        this.term.open(this.viewport);
+        this.addKeyHandler();
+        this.addPortLinks();
+        this.term.onWriteParsed(() => this.output());
+        this.term.onData(() => this.activity('in'));
+        if (this.term.textarea) {
+            this.term.textarea.addEventListener('focus', () => {
+                if (o.active !== this.n.id) {
+                    o.active = this.n.id;
+                    o.markFocus();
+                }
+            });
+        }
+        this.conn = new ConsoleConnection({
+            cmid: o.cmid, userid: o.userid, nodeId: this.n.id, term: this.term, strings: o.strings,
+            nodeStatus: () => o.nodeStatus(this.n.id),
+            transform: data => o.applyCtrl(data),
+            paced: CISCO_TYPES.includes(this.n.type),
+            onState: state => this.setState(state),
+        });
+        this.term.write(note(o.s('consoleconnecting')));
+        this.conn.connect();
+    }
+
+    /** Ctrl+C with a selection copies; Ctrl+Shift+6 sends the Cisco break sequence. */
+    addKeyHandler() {
+        const o = this.owner, term = this.term;
+        term.attachCustomKeyEventHandler(event => {
+            if (event.type !== 'keydown') return true;
+            if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'c' && term.hasSelection()) {
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(term.getSelection()).then(() => o.toast(o.s('consolecopied')), () => o.toast(o.s('consolecopyfailed')));
+                }
+                return false;
+            }
+            if (event.ctrlKey && event.shiftKey && (event.code === 'Digit6' || event.key === '^')) {
+                this.send('\x1e');
+                return false;
+            }
+            return true;
+        });
+    }
+
+    /** Interface names in the output become links that show the port on the scheme. */
+    addPortLinks() {
+        const term = this.term, o = this.owner;
+        term.registerLinkProvider({
+            provideLinks: (y, callback) => {
+                const line = term.buffer.active.getLine(y - 1);
+                if (!line) {
+                    callback(undefined);
+                    return;
+                }
+                const links = [];
+                for (const match of line.translateToString(true).matchAll(PORT_RE)) {
+                    const port = match[1];
+                    links.push({
+                        text: port,
+                        range: {start: {x: match.index + 1, y}, end: {x: match.index + port.length, y}},
+                        decorations: {underline: true, pointerCursor: true},
+                        activate: () => o.stage.showPort(this.n.id, port),
+                    });
+                }
+                callback(links.length ? links : undefined);
+            },
+        });
+    }
+
+    setState(state) {
+        this.state = state;
+        this.owner.paintState(this);
+        this.host.querySelector('.creconnect')?.remove();
+        if (state === 'failed' || state === 'stopped') {
+            const b = hel('button', 'btn creconnect', this.viewport.parentNode);
+            b.type = 'button';
+            b.textContent = this.owner.s('consolereconnect');
+            b.addEventListener('click', () => {
+                b.remove();
+                this.conn.attempt = 0;
+                this.conn.connect();
+            });
+        }
+    }
+
+    /** The last lines of the output for the preview on the scheme. */
+    tail(n) {
+        if (!this.term) return [];
+        const buf = this.term.buffer.active, out = [];
+        for (let i = Math.max(0, buf.length - 60); i < buf.length; i++) {
+            const l = buf.getLine(i);
+            out.push(l ? l.translateToString(true) : '');
+        }
+        while (out.length && !out[out.length - 1].trim()) out.pop();
+        return out.slice(-n);
+    }
+
+    output() {
+        const o = this.owner;
+        this.activity('out');
+        if (!o.isVisible(this)) {
+            if (!this.unread) {
+                this.unread = true;
+                o.paintBadges(this);
+                o.renderTabsAndChips();
+            }
+            o.stage.scheduleCard(this.n.id);
+        }
+    }
+
+    /** Typed input and output of the device in the windows arrangement: dots run along the line to the node. */
+    activity(dir) {
+        const o = this.owner;
+        if (o.stage.mobile || o.mode !== 'windows' || !this.win || this.min) return;
+        const now = performance.now();
+        if (dir === 'in') {
+            this.flowIn = now + 1400;
+            if (now - (this.lastPing || 0) > 150) {
+                this.lastPing = now;
+                o.pingNode(this.n, 'in');
+            }
+        } else {
+            this.flowOut = now + 1100;
+            if (now - (this.lastPong || 0) > 400) {
+                this.lastPong = now;
+                o.pingNode(this.n, 'out');
+            }
+        }
+        o.drawLinks();
+        clearTimeout(this.flowT);
+        this.flowT = setTimeout(() => o.drawLinks(), 1500);
+    }
+
+    attach(container) {
+        if (this.host.parentNode !== container) container.appendChild(this.host);
+        this.ensureTerm();
+        this.refit();
+    }
+
+    refit() {
+        if (!this.term || !this.host.isConnected) return;
+        cancelAnimationFrame(this.raf);
+        this.raf = requestAnimationFrame(() => {
+            if (this.viewport.offsetWidth > 40 && this.viewport.offsetHeight > 30) {
+                try {
+                    this.fit.fit();
+                } catch (e) {
+                    // The area is hidden; the next resize fits it.
+                }
+            }
+        });
+    }
+
+    focus() {
+        this.unread = false;
+        this.owner.paintBadges(this);
+        if (this.term && !(this.owner.stage.mobile && matchMedia('(pointer: coarse)').matches)) this.term.focus();
+    }
+
+    dispose() {
+        this.ro.disconnect();
+        clearTimeout(this.flowT);
+        if (this.conn) this.conn.close();
+        if (this.term) this.term.dispose();
+        this.host.remove();
+        if (this.win) this.win.remove();
+    }
+}
+
+export class Consoles {
+    /**
+     * Constructor.
+     *
+     * @param {HTMLElement} root the application element
+     * @param {object} options
+     * @param {object} options.stage the stage
+     * @param {object} options.strings language strings
+     * @param {number} options.cmid course module id
+     * @param {number} options.userid whose lab, 0 for the current user
+     * @param {boolean} options.readonly observer: input is disabled
+     * @param {Function} options.nodeStatus async nodeId => {status, stale} from a fresh session state
+     * @param {Function} options.toast shows a short message
+     */
+    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast}) {
+        this.root = root;
+        this.stage = stage;
+        this.strings = strings;
+        this.cmid = cmid;
+        this.userid = userid;
+        this.readonly = readonly;
+        this.nodeStatus = nodeStatus;
+        this.toast = toast;
+        this.xterm = null;
+        this.cons = new Map();
+        this.active = null;
+        this.mode = store.get('mode', 'panel');
+        if (!['panel', 'grid', 'windows'].includes(this.mode)) this.mode = 'panel';
+        this.diving = false;
+        this.preDive = null;
+        this.zTop = 10;
+        this.ctrl = false;
+        this.linked = null;
+        this.flows = new Map();
+        const r = name => root.querySelector(`[data-region="${name}"]`);
+        this.r = r;
+        this.box = r('stagebox');
+        this.dock = r('dock');
+        this.tabs = r('tabs');
+        this.dockBody = r('dockBody');
+        this.grid = r('grid');
+        this.wins = r('wins');
+        this.ov = r('ov');
+        this.dive = r('dive');
+        this.diveBody = r('diveBody');
+        this.diveChips = r('diveChips');
+        this.keys = r('keys');
+        this.buildKeys();
+        this.bind();
+        this.layout();
+    }
+
+    s(key) {
+        return this.strings[key] || key;
+    }
+
+    get size() {
+        return this.cons.size;
+    }
+
+    has(nodeId) {
+        return this.cons.has(nodeId);
+    }
+
+    /* ---------------- open and close ---------------- */
+
+    /**
+     * Opens the console of a node or brings it to the front.
+     *
+     * @param {object} node node of the model
+     */
+    async open(node) {
+        if (!this.xterm) {
+            try {
+                this.xterm = await loadXterm();
+            } catch (e) {
+                this.toast(this.s('ui_term_fail'));
+                return;
+            }
+        }
+        let c = this.cons.get(node.id);
+        if (!c) {
+            c = new Con(this, node);
+            this.cons.set(node.id, c);
+        }
+        this.active = node.id;
+        c.unread = false;
+        this.paintBadges(c);
+        this.stage.call('closeOverlays');
+        this.stage.select(null);
+        if (this.stage.mobile) {
+            this.enterDive(c);
+            return;
+        }
+        if (this.mode === 'windows' && c.min) {
+            this.layout();
+            this.restoreWin(c);
+            return;
+        }
+        this.layout();
+        c.focus();
+    }
+
+    close(nodeId) {
+        const c = this.cons.get(nodeId);
+        if (!c) return;
+        c.dispose();
+        this.cons.delete(nodeId);
+        this.stage.setBadge(nodeId, null);
+        this.stage.setCard(nodeId, null);
+        if (this.active === nodeId) this.active = this.cons.size ? Array.from(this.cons.keys()).pop() : null;
+        if (this.diving) {
+            if (this.active) this.enterDive(this.cons.get(this.active));
+            else this.exitDive(true);
+            return;
+        }
+        this.layout();
+    }
+
+    closeAll() {
+        [...this.cons.keys()].forEach(id => this.close(id));
+    }
+
+    /**
+     * The session reported fresh node states: a console of a node that runs again reconnects.
+     *
+     * @param {Map} statuses node id → status
+     */
+    updateNodes(statuses) {
+        this.cons.forEach((c, id) => {
+            if (c.conn) c.conn.nodeChanged(statuses.get(id) || null);
+        });
+    }
+
+    /* ---------------- state of a console on the screen ---------------- */
+
+    isVisible(c) {
+        if (this.stage.mobile) return this.diving && this.active === c.n.id;
+        if (this.mode === 'grid') return true;
+        if (this.mode === 'windows') return !c.min;
+        return this.active === c.n.id;
+    }
+
+    paintBadges(c) {
+        this.stage.setBadge(c.n.id, {has: true, unread: c.unread, min: c.min});
+    }
+
+    paintState(c) {
+        const cls = 'dotst ' + (STATE_DOT[c.state] || 'wait');
+        this.root.querySelectorAll(`[data-con="${CSS.escape(c.n.id)}"] .dotst`).forEach(d => { d.className = cls; });
+    }
+
+    markFocus() {
+        this.root.querySelectorAll('.tile,.win').forEach(t => t.classList.toggle('focus', t.dataset.id === this.active));
+        const c = this.cons.get(this.active);
+        if (c && c.unread) {
+            c.unread = false;
+            this.paintBadges(c);
+            this.refreshCards();
+        }
+    }
+
+    /** Previews on the scheme: of every console that is not on the screen. */
+    refreshCards() {
+        this.cons.forEach(c => {
+            if (this.isVisible(c)) this.stage.setCard(c.n.id, null);
+            else this.stage.setCard(c.n.id, {lines: () => c.tail(14), unread: c.unread});
+        });
+    }
+
+    /* ---------------- the arrangements ---------------- */
+
+    layout() {
+        const stage = this.stage, mobile = stage.mobile;
+        this.root.classList.toggle('mob', mobile);
+        this.box.dataset.mode = mobile ? 'mobile' : this.mode;
+        this.box.classList.toggle('has-cons', this.cons.size > 0);
+        this.root.querySelectorAll('[data-region="modes"] button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === this.mode)));
+        this.grid.textContent = '';
+        this.box.style.gridTemplateColumns = '';
+        this.box.style.gridTemplateRows = '';
+        if (mobile) {
+            this.wins.textContent = '';
+            this.cons.forEach(c => { c.win = null; });
+            if (this.diving && this.cons.get(this.active)) this.cons.get(this.active).attach(this.diveBody);
+        } else if (this.mode === 'panel') {
+            this.renderPanel();
+        } else if (this.mode === 'grid') {
+            this.renderGrid();
+        }
+        if (!mobile && this.mode === 'windows') {
+            this.renderWindows();
+        } else if (!mobile) {
+            this.wins.textContent = '';
+            this.cons.forEach(c => { c.win = null; });
+        }
+        requestAnimationFrame(() => {
+            this.cons.forEach(c => c.refit());
+            this.drawLinks();
+            this.refreshCards();
+        });
+    }
+
+    headHtml(c, buttons) {
+        return `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span><span class="nm">${esc(c.n.name)}<small>${esc(this.s('ui_cat_' + c.n.cat).toLowerCase())}</small></span>`
+            + `${c.unread ? `<span class="unr" title="${esc(this.s('ui_new_output'))}"></span>` : ''}${buttons}`;
+    }
+
+    renderPanel() {
+        const tabs = this.tabs, body = this.dockBody;
+        tabs.textContent = '';
+        if (!this.cons.size) {
+            body.textContent = '';
+            return;
+        }
+        if (!this.cons.has(this.active)) this.active = Array.from(this.cons.keys())[0];
+        this.cons.forEach(c => {
+            const t = hel('button', 'tab', tabs);
+            t.type = 'button';
+            t.dataset.con = c.n.id;
+            t.setAttribute('role', 'tab');
+            t.setAttribute('aria-selected', String(c.n.id === this.active));
+            t.innerHTML = `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span>${esc(c.n.name)}${c.unread ? '<span class="unr"></span>' : ''}<span class="x" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</span>`;
+            t.onclick = ev => {
+                if (ev.target.closest('[data-x]')) {
+                    this.close(c.n.id);
+                    return;
+                }
+                this.active = c.n.id;
+                c.unread = false;
+                this.paintBadges(c);
+                this.renderPanel();
+                this.refreshCards();
+                c.focus();
+            };
+        });
+        const act = this.cons.get(this.active);
+        Array.from(body.children).forEach(ch => {
+            if (ch !== act.host) ch.remove();
+        });
+        act.attach(body);
+    }
+
+    renderGrid() {
+        const n = this.cons.size + 1, cols = n <= 2 ? 2 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 9 ? 3 : 4;
+        if (this.cons.size === 0) {
+            this.box.style.gridTemplateColumns = '1fr';
+            return;
+        }
+        this.box.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+        this.box.style.gridTemplateRows = `repeat(${Math.ceil(n / cols)}, minmax(0, 1fr))`;
+        this.cons.forEach(c => {
+            const t = hel('div', 'tile', this.grid);
+            t.dataset.id = c.n.id;
+            t.dataset.con = c.n.id;
+            const hd = hel('div', 'thead', t);
+            hd.innerHTML = this.headHtml(c, `<button type="button" data-max title="${esc(this.s('ui_maximize'))}">${ICON_MAX}</button><button type="button" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</button>`);
+            const b = hel('div', 'tbody', t);
+            hd.addEventListener('dblclick', () => t.classList.toggle('max'));
+            hd.querySelector('[data-max]').onclick = () => {
+                t.classList.toggle('max');
+                c.refit();
+            };
+            hd.querySelector('[data-x]').onclick = () => this.close(c.n.id);
+            t.addEventListener('pointerdown', () => {
+                this.active = c.n.id;
+                this.markFocus();
+            });
+            c.attach(b);
+        });
+        this.markFocus();
+    }
+
+    renderWindows() {
+        const layer = this.wins, r = this.stage.wrap.getBoundingClientRect();
+        let i = 0;
+        this.cons.forEach(c => {
+            if (!c.win) {
+                const w = hel('div', 'win', layer);
+                w.dataset.id = c.n.id;
+                w.dataset.con = c.n.id;
+                c.win = w;
+                if (!c.wpos) {
+                    const W = Math.min(480, r.width * 0.4), H = Math.min(290, r.height * 0.42);
+                    c.wpos = {x: Math.max(8, r.width - W - 16 - i * 26), y: clamp(16 + i * 30, 8, Math.max(8, r.height - H - 60)), w: W, h: H};
+                }
+                Object.assign(w.style, {left: c.wpos.x + 'px', top: c.wpos.y + 'px', width: c.wpos.w + 'px', height: c.wpos.h + 'px', zIndex: ++this.zTop});
+                const hd = hel('div', 'thead', w);
+                const b = hel('div', 'tbody', w);
+                w.addEventListener('pointerdown', () => {
+                    w.style.zIndex = ++this.zTop;
+                    this.active = c.n.id;
+                    this.markFocus();
+                });
+                this.dragWin(c, hd);
+                new ResizeObserver(() => {
+                    if (c.win === w && w.offsetWidth) {
+                        c.wpos.w = w.offsetWidth;
+                        c.wpos.h = w.offsetHeight;
+                        this.drawLinks();
+                    }
+                }).observe(w);
+                w.addEventListener('pointerenter', () => this.showLink(c));
+                w.addEventListener('pointerleave', () => this.showLink(null));
+                c.attach(b);
+            }
+            c.win.querySelector('.thead').innerHTML = this.headHtml(c, `<button type="button" data-min title="${esc(this.s('ui_minimize'))}">${ICON_MIN}</button><button type="button" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</button>`);
+            c.win.querySelector('[data-min]').onclick = ev => {
+                ev.stopPropagation();
+                this.minimizeWin(c);
+            };
+            c.win.querySelector('[data-x]').onclick = ev => {
+                ev.stopPropagation();
+                this.close(c.n.id);
+            };
+            c.win.hidden = c.min;
+            i++;
+        });
+        layer.querySelectorAll('.win').forEach(w => {
+            if (!this.cons.has(w.dataset.id)) w.remove();
+        });
+        this.markFocus();
+    }
+
+    dragWin(c, hd) {
+        let s = null;
+        hd.addEventListener('pointerdown', e => {
+            if (e.target.closest('button')) return;
+            s = {x: e.clientX, y: e.clientY, ox: c.wpos.x, oy: c.wpos.y};
+            hd.setPointerCapture(e.pointerId);
+            this.showLink(c);
+        });
+        hd.addEventListener('pointermove', e => {
+            if (!s) return;
+            const r = this.stage.wrap.getBoundingClientRect();
+            c.wpos.x = clamp(s.ox + e.clientX - s.x, -c.wpos.w + 80, r.width - 80);
+            c.wpos.y = clamp(s.oy + e.clientY - s.y, 0, r.height - 36);
+            c.win.style.left = c.wpos.x + 'px';
+            c.win.style.top = c.wpos.y + 'px';
+            this.showLink(c);
+        });
+        const end = () => {
+            if (s) {
+                s = null;
+                this.showLink(null);
+            }
+        };
+        hd.addEventListener('pointerup', end);
+        hd.addEventListener('pointercancel', end);
+    }
+
+    showLink(c) {
+        this.linked = c;
+        this.drawLinks();
+    }
+
+    winAnchor(c, p) {
+        const {x, y, w, h} = c.wpos;
+        const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
+        return inside ? {x: x + w / 2, y: y + 16} : {x: clamp(p.x, x, x + w), y: clamp(p.y, y, y + h)};
+    }
+
+    /** A dashed line from a console window to its node; typed input runs to the node, the answer runs back. */
+    drawLinks() {
+        const ov = this.ov, now = performance.now(), want = new Set();
+        this.cons.forEach(c => {
+            if (this.stage.mobile || this.mode !== 'windows' || !c.win || c.min || c.win.hidden) return;
+            const fin = c.flowIn > now, fout = c.flowOut > now;
+            if (this.linked !== c && !fin && !fout) return;
+            want.add(c);
+            let f = this.flows.get(c);
+            if (!f) {
+                const g = el('g', {class: 'flow'}, ov);
+                f = {g, base: el('line', {class: 'fl-base'}, g), fin: el('line', {class: 'fl-in'}, g), fout: el('line', {class: 'fl-out'}, g), dot: el('circle', {r: 4, class: 'fl-node'}, g)};
+                this.flows.set(c, f);
+            }
+            const p = this.stage.toScreen(c.n.cx, c.n.cy), w = this.winAnchor(c, p);
+            for (const ln of [f.base, f.fin, f.fout]) {
+                ln.setAttribute('x1', w.x);
+                ln.setAttribute('y1', w.y);
+                ln.setAttribute('x2', p.x);
+                ln.setAttribute('y2', p.y);
+            }
+            f.dot.setAttribute('cx', p.x);
+            f.dot.setAttribute('cy', p.y);
+            f.fin.classList.toggle('on', fin);
+            f.fout.classList.toggle('on', fout);
+            f.g.classList.toggle('hover', this.linked === c);
+        });
+        this.flows.forEach((f, c) => {
+            if (!want.has(c)) {
+                f.g.remove();
+                this.flows.delete(c);
+            }
+        });
+    }
+
+    pingNode(n, dir) {
+        const p = this.stage.toScreen(n.cx, n.cy), c = el('circle', {cx: p.x, cy: p.y, r: 24, class: 'ping ' + dir}, this.ov);
+        setTimeout(() => c.remove(), 650);
+    }
+
+    minimizeWin(c) {
+        const w = c.win;
+        if (!w) return;
+        const p = this.stage.toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
+        w.classList.add('anim');
+        w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`;
+        w.style.opacity = '0';
+        this.showLink(null);
+        setTimeout(() => {
+            w.hidden = true;
+            w.classList.remove('anim');
+            c.min = true;
+            this.paintBadges(c);
+            this.refreshCards();
+            this.drawLinks();
+        }, this.stage.reduced ? 0 : 270);
+    }
+
+    restoreWin(c) {
+        const w = c.win;
+        if (!w) return;
+        c.min = false;
+        this.paintBadges(c);
+        this.refreshCards();
+        const p = this.stage.toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
+        w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`;
+        w.style.opacity = '0';
+        w.hidden = false;
+        void w.offsetWidth;
+        w.classList.add('anim');
+        w.style.transform = '';
+        w.style.opacity = '';
+        w.style.zIndex = ++this.zTop;
+        setTimeout(() => {
+            w.classList.remove('anim');
+            c.refit();
+            c.focus();
+        }, this.stage.reduced ? 0 : 270);
+        this.active = c.n.id;
+        this.markFocus();
+    }
+
+    /* ---------------- phone: diving into a console ---------------- */
+
+    enterDive(c) {
+        if (!this.diving) this.preDive = {...this.stage.view};
+        this.diving = true;
+        this.active = c.n.id;
+        c.unread = false;
+        this.paintBadges(c);
+        this.stage.markHinted();
+        const chip = this.stage.r('chip');
+        if (chip) chip.hidden = true;
+        const d = this.dive, was = !d.hidden;
+        d.hidden = false;
+        if (!was) {
+            d.classList.remove('in');
+            void d.offsetWidth;
+            d.classList.add('in');
+        }
+        if (this.stage.wheel) this.stage.wheel.close();
+        this.fitDive();
+        c.attach(this.diveBody);
+        Array.from(this.diveBody.children).forEach(ch => {
+            if (ch !== c.host) ch.remove();
+        });
+        this.renderTabsAndChips();
+        this.refreshCards();
+        const top = this.stage.wrap.getBoundingClientRect().height - d.offsetHeight;
+        this.stage.zoomToNode(c.n, 1.7, Math.max(60, top / 2 + 10));
+        setTimeout(() => c.refit(), 280);
+    }
+
+    exitDive(restore) {
+        this.diving = false;
+        this.dive.hidden = true;
+        this.stage.showDiveHint('');
+        if (restore && this.preDive) this.stage.animateTo(this.preDive, 320);
+        this.preDive = null;
+        this.renderTabsAndChips();
+        this.refreshCards();
+    }
+
+    /** The sheet follows the visible part of the screen: the system keyboard covers the lower part of it. */
+    fitDive() {
+        const d = this.dive;
+        if (d.hidden) return;
+        const vv = window.visualViewport, H = vv ? vv.height : innerHeight, off = vv ? vv.offsetTop : 0;
+        const kb = Math.max(0, innerHeight - H - off);
+        d.style.bottom = kb + 'px';
+        d.style.height = Math.round(H * (kb > 80 ? 0.9 : 0.68)) + 'px';
+        const c = this.cons.get(this.active);
+        if (c) c.refit();
+    }
+
+    /** Pinch over a node that has a console: show what happens when the fingers are lifted. */
+    diveCandidate(n) {
+        if (n && !(this.diving && this.active === n.id)) this.stage.showDiveHint(fill(this.s('ui_dive_release'), n.name));
+        else this.stage.showDiveHint('');
+    }
+
+    diveRelease(n) {
+        this.stage.showDiveHint('');
+        if (n && !(this.diving && this.active === n.id)) {
+            this.open(n);
+            return;
+        }
+        if (this.diving && this.stage.view.k < 1.1) this.exitDive(true);
+    }
+
+    /**
+     * Chips of the open consoles in the phone sheet, state marks in the tabs of the other arrangements.
+     */
+    renderTabsAndChips() {
+        if (this.stage.mobile) {
+            const box = this.diveChips;
+            box.textContent = '';
+            this.cons.forEach(c => {
+                const b = hel('button', 'dchip', box);
+                b.type = 'button';
+                b.dataset.con = c.n.id;
+                b.setAttribute('aria-pressed', String(c.n.id === this.active));
+                b.innerHTML = `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span>${esc(c.n.name)}${c.unread ? '<span class="unr"></span>' : ''}`;
+                b.onclick = () => this.enterDive(c);
+            });
+            return;
+        }
+        // The other arrangements: tabs, tiles and windows are drawn again with their marks.
+        if (this.mode === 'panel') this.renderPanel();
+        else if (this.mode === 'grid') {
+            this.root.querySelectorAll('.tile').forEach(t => {
+                const c = this.cons.get(t.dataset.id);
+                if (!c) return;
+                const u = t.querySelector('.unr');
+                if (c.unread && !u) t.querySelector('.nm').insertAdjacentHTML('afterend', '<span class="unr"></span>');
+                if (!c.unread && u) u.remove();
+            });
+        } else if (this.mode === 'windows') {
+            this.cons.forEach(c => {
+                if (!c.win) return;
+                const u = c.win.querySelector('.unr');
+                if (c.unread && !u) c.win.querySelector('.nm').insertAdjacentHTML('afterend', '<span class="unr"></span>');
+                if (!c.unread && u) u.remove();
+            });
+        }
+    }
+
+    /** The page became phone sized or the other way round. */
+    mobileChanged(mobile) {
+        if (!mobile && this.diving) this.exitDive(false);
+        this.layout();
+        this.renderTabsAndChips();
+    }
+
+    /* ---------------- key strip of the phone sheet ---------------- */
+
+    buildKeys() {
+        const strip = this.keys;
+        strip.setAttribute('aria-label', this.s('consolekeys'));
+        KEYS.forEach(key => {
+            const b = hel('button', 'key', strip);
+            b.type = 'button';
+            b.textContent = key.label;
+            b.disabled = this.readonly;
+            const label = key.ctrl ? this.s('keyctrl') : key.key ? this.s(key.key) : '';
+            if (label) {
+                b.title = label;
+                b.setAttribute('aria-label', label);
+            }
+            if (key.ctrl) {
+                b.setAttribute('aria-pressed', 'false');
+                this.ctrlButton = b;
+            }
+            b.addEventListener('pointerdown', e => e.preventDefault());
+            b.addEventListener('click', () => {
+                if (key.ctrl) {
+                    this.setCtrl(!this.ctrl);
+                    return;
+                }
+                const c = this.cons.get(this.active);
+                if (c) c.send(key.seq);
+            });
+        });
+    }
+
+    setCtrl(on) {
+        this.ctrl = on;
+        if (this.ctrlButton) this.ctrlButton.setAttribute('aria-pressed', String(on));
+    }
+
+    /** The next typed letter becomes a control character while Ctrl of the strip is pressed. */
+    applyCtrl(data) {
+        if (!this.ctrl) return data;
+        this.setCtrl(false);
+        if (data.length === 1 && /[a-z@[\\\]^_]/i.test(data)) return String.fromCharCode(data.toUpperCase().charCodeAt(0) % 32);
+        return data;
+    }
+
+    /* ---------------- controls ---------------- */
+
+    bind() {
+        this.root.querySelectorAll('[data-region="modes"] button').forEach(b => {
+            b.onclick = () => {
+                this.mode = b.dataset.mode;
+                store.set('mode', this.mode);
+                if (this.mode === 'windows') {
+                    this.cons.forEach(c => {
+                        c.min = false;
+                        this.paintBadges(c);
+                    });
+                }
+                if (this.mode === 'grid' && !this.cons.size) this.toast(this.s('ui_grid_hint'));
+                this.layout();
+            };
+        });
+        this.splitter();
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && !this.stage.mobile && this.mode === 'grid') {
+                const m = this.root.querySelector('.tile.max');
+                if (m) {
+                    m.classList.remove('max');
+                    this.cons.forEach(c => c.refit());
+                }
+            }
+        });
+        const vv = window.visualViewport;
+        if (vv) {
+            vv.addEventListener('resize', () => this.fitDive());
+            vv.addEventListener('scroll', () => this.fitDive());
+        }
+        this.r('diveBack').onclick = () => this.exitDive(true);
+        this.r('diveClose').onclick = () => {
+            const c = this.cons.get(this.active);
+            if (c) this.close(c.n.id);
+        };
+        // Pinching the sheet apart or together leaves it, like pinching the scheme out of a node.
+        let d0 = 0;
+        const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        this.dive.addEventListener('touchstart', e => {
+            d0 = e.touches.length === 2 ? dist(e.touches) : 0;
+        }, {passive: true});
+        this.dive.addEventListener('touchmove', e => {
+            if (d0 && e.touches.length === 2 && dist(e.touches) < d0 * 0.6) {
+                d0 = 0;
+                this.exitDive(true);
+            }
+        }, {passive: true});
+    }
+
+    splitter() {
+        const sp = this.r('splitter'), box = this.box;
+        let s = null;
+        sp.addEventListener('pointerdown', e => {
+            s = {x: e.clientX, w: this.dock.offsetWidth};
+            sp.setPointerCapture(e.pointerId);
+            sp.classList.add('drag');
+        });
+        sp.addEventListener('pointermove', e => {
+            if (!s) return;
+            const w = clamp(s.w - (e.clientX - s.x), 320, box.offsetWidth * 0.72);
+            box.style.setProperty('--dockw', w + 'px');
+        });
+        const end = () => {
+            if (!s) return;
+            s = null;
+            sp.classList.remove('drag');
+            store.set('dockw', box.style.getPropertyValue('--dockw'));
+            this.cons.forEach(c => c.refit());
+        };
+        sp.addEventListener('pointerup', end);
+        sp.addEventListener('pointercancel', end);
+        const saved = store.get('dockw', '');
+        if (saved && /^\d+(\.\d+)?px$/.test(saved)) box.style.setProperty('--dockw', saved);
+    }
+}

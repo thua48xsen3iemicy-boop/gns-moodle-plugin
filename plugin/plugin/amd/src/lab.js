@@ -14,11 +14,11 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Lab session control: start and stop buttons, status polling, and the link between the viewer and the consoles.
+ * The lab page of a student: connects the session, the scheme, the action wheel, the details card and the consoles.
  *
- * Talks to the viewer through events on its root element:
- * - gns3lab:session (sent here) — the session changed, detail {session, readonly};
- * - gns3lab:openconsole (from the viewer) — open the console of a node, detail {nodeId, name, consoleType, nodeType, ports}.
+ * Layout and behaviour come from prototypes/student-ui.html (levels of detail by zoom, an action wheel, consoles as
+ * a panel, a grid or windows, diving into a console on a phone). The session is the source of truth: the scheme shows
+ * the reference topology until the lab runs and the live topology of the session after that.
  *
  * Permissions are decided by the server; the flags here only choose what to draw.
  *
@@ -27,319 +27,378 @@
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-import Ajax from 'core/ajax';
-import {saveCancelPromise} from 'core/notification';
 import {getStrings} from 'core/str';
-import {ConsolePanel} from 'mod_gns3lab/console';
+import {STRING_KEYS as CONSOLE_KEYS} from 'mod_gns3lab/console';
+import {Consoles} from 'mod_gns3lab/consoles';
+import {Details} from 'mod_gns3lab/details';
+import {fill} from 'mod_gns3lab/dom';
+import {Session, STRING_KEYS as SESSION_KEYS} from 'mod_gns3lab/session';
+import {Stage} from 'mod_gns3lab/stage';
+import {Wheel} from 'mod_gns3lab/wheel';
 
-/** Statuses that change by themselves: poll often. */
-const TRANSIENT = ['queued', 'starting', 'stopping'];
+const CATEGORIES = ['router', 'switch', 'pc', 'server', 'cloud', 'firewall', 'hypervisor'];
 
-/** Poll interval while the session changes, ms (SPEC §3). */
-const POLL_TRANSIENT = 3000;
-
-/** Poll interval of a running lab, for node states and the time left, ms. */
-const POLL_RUNNING = 15000;
-
-/** Manager steps with an own text (CONTRACTS §2.3); an unknown step shows the text of its status. */
-const STAGES = [
-    'wait_slot', 'ct_prepare', 'student_dir', 'ct_start', 'slot_ready', 'lab_submit', 'lab_wait', 'ready',
-    'lab_stop', 'lab_stop_wait', 'ct_stop', 'ct_park',
-];
-
-const STRING_KEYS = [
-    'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
-    'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'consoleneedsrunning', 'consolevnclater',
-    'consolenone', 'managernotconfigured', 'labnotready', 'failedretry', 'failedadmin', 'stopconfirmtitle',
-    'stopconfirm', 'conflictlink', ...STAGES.map(stage => 'stage_' + stage),
+/** Language strings of the interface; the texts of the layers and of the details tables are in the modules. */
+const UI_KEYS = [
+    'ui_lod0', 'ui_lod1', 'ui_lod2', 'ui_lod3', 'ui_st_started', 'ui_st_stopped', 'ui_st_suspended',
+    ...CATEGORIES.map(c => 'ui_cat_' + c),
+    'ui_chip_touch', 'ui_chip_mouse', 'ui_hint_touch', 'ui_hint_mouse', 'ui_link_aria', 'ui_filter_on', 'ui_port_unlinked',
+    'ui_console', 'ui_new', 'ui_link', 'ui_status_nodata', 'ui_open_console', 'ui_console_of', 'ui_close',
+    'ui_snippets', 'ui_snippets_for', 'ui_snippet_run', 'ui_not_connected', 'ui_term_fail', 'ui_close_console',
+    'ui_minimize', 'ui_maximize', 'ui_new_output', 'ui_grid_hint', 'ui_dive_release',
+    'ui_act_console', 'ui_act_console_open', 'ui_act_console_goto', 'ui_act_info', 'ui_act_info_full', 'ui_act_zoom',
+    'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
+    'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',
+    'consoleneedsrunning', 'consolevnclater', 'consolenone',
 ];
 
 /**
- * Controller of one lab on the page.
+ * The lab page.
  */
-class Lab {
+class LabPage {
     /**
      * Constructor.
      *
-     * @param {HTMLElement} app viewer root
-     * @param {number} cmid course module id
-     * @param {number} userid whose lab, 0 for the current user
-     * @param {object} strings language strings
+     * @param {HTMLElement} root the application element
+     * @param {object} options
+     * @param {string} options.prefix id prefix of the template
+     * @param {number} options.cmid course module id
+     * @param {number} options.userid whose lab, 0 for the current user
+     * @param {object} options.strings language strings
      */
-    constructor(app, cmid, userid, strings) {
-        this.app = app;
-        this.cmid = cmid;
-        this.userid = userid;
+    constructor(root, {prefix, cmid, userid, strings}) {
+        this.root = root;
         this.strings = strings;
-        this.state = null;
-        this.timer = null;
-        this.busy = false;
-        const region = name => app.querySelector(`[data-region="${name}"]`);
-        this.statusEl = region('status');
-        this.timeEl = region('timeleft');
-        this.startBtn = region('start');
-        this.stopBtn = region('stop');
-        this.messageEl = region('message');
-        this.consoles = new ConsolePanel({
-            root: region('consoles'),
-            app,
+        this.data = JSON.parse(root.dataset.json || '{}');
+        this.liveKey = null;
+        const region = name => root.querySelector(`[data-region="${name}"]`);
+        this.toastEl = region('toast');
+        this.toastTimer = null;
+
+        this.stage = new Stage(root, {prefix, strings});
+        this.details = new Details(region('details'), {
+            stage: this.stage,
+            strings,
+            host: {
+                canConsole: n => this.canConsole(n),
+                openConsole: n => this.openConsole(n),
+            },
+        });
+        this.consoles = new Consoles(root, {
+            stage: this.stage,
+            strings,
             cmid,
             userid,
             readonly: userid !== 0,
-            nodeStatus: nodeId => this.freshNodeStatus(nodeId),
+            nodeStatus: nodeId => (this.session
+                ? this.session.freshNodeStatus(nodeId)
+                : Promise.resolve({status: null, stale: false})),
+            toast: (text, ms) => this.toast(text, ms),
         });
+        this.wheel = new Wheel(region('radial'), {
+            stage: this.stage,
+            prefix,
+            strings,
+            host: {
+                actionsFor: target => this.actionsFor(target),
+                run: (id, target) => this.runAction(id, target),
+                toast: (text, ms) => this.toast(text, ms),
+            },
+        });
+        this.hookStage();
+        this.bindChrome(region);
 
-        this.startBtn.addEventListener('click', () => this.act('mod_gns3lab_start_session'));
-        this.stopBtn.addEventListener('click', () => this.stop());
-        app.addEventListener('gns3lab:openconsole', event => this.openConsole(event.detail));
-        setInterval(() => this.renderTime(), 1000);
-    }
-
-    /**
-     * Current session or null.
-     *
-     * @returns {object|null}
-     */
-    get session() {
-        return (this.state && this.state.session) || null;
-    }
-
-    /**
-     * Reads the state from the server and schedules the next poll.
-     *
-     * @returns {Promise<object|null>} state, null on error
-     */
-    async refresh() {
-        clearTimeout(this.timer);
-        try {
-            const [state] = await Promise.all(Ajax.call([{
-                methodname: 'mod_gns3lab_get_state',
-                args: {cmid: this.cmid, userid: this.userid},
-            }]));
-            this.apply(state);
-            return state;
-        } catch (error) {
-            this.showMessage(error.message || String(error));
-            this.timer = setTimeout(() => this.refresh(), POLL_RUNNING);
-            return null;
+        // Users who may only look at the lab have no session bar.
+        const controllable = !!region('start');
+        this.session = controllable ? new Session(root, {
+            cmid,
+            userid,
+            strings,
+            onState: (state, before) => this.stateChanged(state, before),
+        }) : null;
+        this.preview();
+        if (this.session) {
+            this.session.render();
+            this.session.refresh();
         }
     }
 
     /**
-     * Starts or stops the lab.
-     *
-     * @param {string} methodname external function
+     * Connects the stage with the details card, the wheel and the consoles.
      */
-    async act(methodname) {
-        if (this.busy) {
-            return;
-        }
-        this.busy = true;
-        this.render();
-        try {
-            const [session] = await Promise.all(Ajax.call([{methodname, args: {cmid: this.cmid}}]));
-            this.showMessage('');
-            this.apply({...this.state, session});
-        } catch (error) {
-            // A conflict names the activity with the other running lab and links to it.
-            const link = error.errorcode === 'sessionconflictat' ? error.link : null;
-            this.showMessage(error.message || String(error), link);
-        } finally {
-            this.busy = false;
-            this.render();
-        }
+    hookStage() {
+        const stage = this.stage, consoles = this.consoles, details = this.details, wheel = this.wheel;
+        stage.hooks = {
+            details: sel => details.show(sel),
+            console: n => this.openConsole(n),
+            nodeAction: n => {
+                if (this.canConsole(n)) {
+                    this.openConsole(n);
+                } else {
+                    stage.select({kind: 'node', id: n.id}, true);
+                    details.show(stage.sel);
+                }
+            },
+            canConsole: n => this.canConsole(n),
+            diveCandidate: n => consoles.diveCandidate(n),
+            diveRelease: n => consoles.diveRelease(n),
+            closeOverlays: () => details.hide(),
+            viewChanged: () => {
+                if (wheel.node && !wheel.tracking) {
+                    wheel.position();
+                }
+                consoles.drawLinks();
+            },
+            layerChanged: () => details.refresh(),
+            mobileChanged: mobile => {
+                consoles.mobileChanged(mobile);
+                details.hide();
+            },
+            toast: text => this.toast(text),
+        };
     }
 
     /**
-     * Stops the lab, asking first when the manager does not keep the work.
+     * The help card, the overview button and the demo switch of the facts.
      *
-     * When it does, the student saves the Cisco configuration (write memory) like on a real device.
+     * @param {Function} region finds an element of the template
      */
-    async stop() {
-        if (!this.state.resume) {
-            try {
-                await saveCancelPromise(this.strings.stopconfirmtitle, this.strings.stopconfirm, this.strings.stoplab);
-            } catch (cancelled) {
-                return;
+    bindChrome(region) {
+        const help = region('help');
+        region('helpBtn').onclick = () => {
+            help.hidden = false;
+            region('helpClose').focus();
+        };
+        region('helpClose').onclick = () => {
+            help.hidden = true;
+        };
+        help.addEventListener('click', e => {
+            if (e.target === help) {
+                help.hidden = true;
             }
-        }
-        await this.act('mod_gns3lab_stop_session');
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && !help.hidden) {
+                help.hidden = true;
+            }
+        });
+        region('overview').onclick = () => this.details.toggleSummary();
     }
 
     /**
-     * Takes a new state: redraws, tells the viewer and the consoles, schedules polling.
+     * Shows the reference topology of the activity (the lab is not running).
      *
-     * @param {object} state result of get_state (or a state with a fresh session)
+     * @param {boolean} [keepView] keep zoom and position
      */
-    apply(state) {
-        const before = this.session;
-        this.state = state;
-        const session = this.session;
-        const running = session && session.status === 'running';
-        if (!running || (before && before.sessionid !== session.sessionid)) {
+    preview(keepView = false) {
+        const data = this.data;
+        // Statuses exist only in the demo data: the reference lab does not run anywhere.
+        const live = data.live && data.live.node_status;
+        this.stage.load(data.topology, {
+            statuses: live ? new Map(Object.entries(live)) : null,
+            guests: (data.live && data.live.guests) || null,
+            facts: data.facts || null,
+            keepView,
+        });
+        this.details.hide();
+    }
+
+    /**
+     * A new state from the server: the scheme and the consoles follow the session.
+     *
+     * @param {object} state result of get_state
+     * @param {object|null} before the session before this state
+     */
+    stateChanged(state, before) {
+        const s = state.session;
+        const running = !!s && s.status === 'running';
+        if (!running || (before && before.sessionid !== s.sessionid)) {
             this.consoles.closeAll();
         }
-        if (running) {
-            this.consoles.updateNodes(new Map(session.nodes.map(n => [n.nodeid, n.status])));
-        }
-        this.app.dispatchEvent(new CustomEvent('gns3lab:session', {detail: {session, readonly: state.readonly}}));
-        this.render();
-        clearTimeout(this.timer);
-        if (session && TRANSIENT.includes(session.status)) {
-            this.timer = setTimeout(() => this.refresh(), POLL_TRANSIENT);
-        } else if (running) {
-            this.timer = setTimeout(() => this.refresh(), POLL_RUNNING);
+        if (running && s.topology) {
+            const statuses = new Map(s.nodes.map(n => [n.nodeid, n.status]));
+            const key = s.sessionid + '\n' + s.topology;
+            if (key !== this.liveKey) {
+                this.loadLive(s, statuses, key);
+            } else {
+                this.stage.setStatuses(statuses);
+                this.details.refresh();
+            }
+            this.consoles.updateNodes(statuses);
+        } else if (this.liveKey) {
+            this.liveKey = null;
+            this.preview(true);
         }
     }
 
     /**
-     * Draws the status bar.
-     */
-    render() {
-        if (!this.state) {
-            // Nothing is known before the first answer: draw nothing rather than a wrong status.
-            this.startBtn.hidden = true;
-            this.stopBtn.hidden = true;
-            return;
-        }
-        const state = this.state;
-        const session = this.session;
-        const status = session ? session.status : 'none';
-        this.app.dataset.session = status;
-        let text = this.strings['status_' + status] || status;
-        if (session) {
-            text = this.sessionText(session) || text;
-        } else if (!state.managerconfigured) {
-            text = this.strings.managernotconfigured;
-        } else if (!state.labready) {
-            text = this.strings.labnotready;
-        }
-        this.statusEl.textContent = text;
-        this.statusEl.dataset.status = status;
-        // The manager's own text (in Russian) stays available as a detail.
-        this.statusEl.title = (session && session.statusmessage) || '';
-
-        const live = session && !['stopped', 'failed'].includes(status);
-        const retry = status === 'failed' && session.errorretryable;
-        this.startBtn.textContent = retry ? this.strings.startagain : this.strings.startlab;
-        this.startBtn.hidden = !state.canuse || !!live;
-        this.stopBtn.hidden = !state.canuse || !live || status === 'stopping';
-        this.startBtn.disabled = this.busy || !state.labready;
-        this.stopBtn.disabled = this.busy;
-        this.renderTime();
-    }
-
-    /**
-     * Text of a session in the site language: its step and progress, or why it failed.
+     * Shows the live topology of the session.
      *
-     * @param {object} session session
-     * @returns {string} empty if the session says nothing more than its status
+     * @param {object} s session
+     * @param {Map} statuses node id → status
+     * @param {string} key identity of this topology
      */
-    sessionText(session) {
-        if (session.status === 'failed' && session.errorcode) {
-            return session.errorretryable
-                ? this.strings.failedretry
-                : this.strings.failedadmin.replace('{$a}', session.errorcode);
-        }
-        if (!TRANSIENT.includes(session.status) || !STAGES.includes(session.stage)) {
-            return '';
-        }
-        const text = this.strings['stage_' + session.stage];
-        return session.progress >= 0 ? `${text} ${session.progress}%` : text;
-    }
-
-    /**
-     * Time left before the manager stops the lab.
-     */
-    renderTime() {
-        const session = this.session;
-        if (!session || session.status !== 'running' || !session.expiresat) {
-            this.timeEl.hidden = true;
+    loadLive(s, statuses, key) {
+        let doc;
+        try {
+            doc = JSON.parse(s.topology);
+        } catch (e) {
+            this.toast(this.strings.ui_live_bad);
             return;
         }
-        const left = Math.max(0, session.expiresat - Math.floor(Date.now() / 1000));
-        const h = Math.floor(left / 3600);
-        const m = String(Math.floor(left / 60) % 60).padStart(2, '0');
-        const s = String(left % 60).padStart(2, '0');
-        this.timeEl.textContent = this.strings.timeleft.replace('{$a}', h ? `${h}:${m}:${s}` : `${m}:${s}`);
-        this.timeEl.hidden = false;
+        const types = new Map(s.nodes.map(n => [n.nodeid, n.consoletype]));
+        // Node states come from the live data of the session, not from the saved project.
+        ((doc.topology && doc.topology.nodes) || []).forEach(n => {
+            delete n.status;
+            if (types.get(n.node_id)) {
+                n.console_type = types.get(n.node_id);
+            }
+        });
+        // The project name of a session is technical (lab-…-s-…): the title stays the name of the lab.
+        doc.name = this.stage.model ? this.stage.model.name : doc.name;
+        this.liveKey = key;
+        this.stage.load(doc, {statuses, keepView: true});
+        this.details.hide();
+    }
+
+    /* ---------------- consoles: can the student open one now ---------------- */
+
+    get live() {
+        const state = this.session && this.session.state;
+        const s = state && state.session;
+        return state && s && s.status === 'running' ? {state, session: s} : null;
     }
 
     /**
-     * Shows or clears an error message.
+     * Why the console of a node cannot be opened now.
      *
-     * @param {string} text message, empty to clear
-     * @param {string|null} link URL of a page that helps, shown after the message
+     * @param {object} n node of the model
+     * @returns {string} empty if it can
      */
-    showMessage(text, link = null) {
-        this.messageEl.textContent = text;
-        if (text && link) {
-            const a = document.createElement('a');
-            a.href = link;
-            a.textContent = this.strings.conflictlink;
-            this.messageEl.append(' ', a);
+    consoleWhy(n) {
+        const live = this.live;
+        if (!live) {
+            return this.session ? this.strings.consoleneedsrunning : this.strings.ui_why_viewer;
         }
-        this.messageEl.hidden = !text;
+        if (!live.state.canuse && !live.state.readonly) {
+            return this.strings.ui_why_viewer;
+        }
+        if (n.consoleType === 'vnc') {
+            return this.strings.consolevnclater;
+        }
+        if (!n.consoleType || n.consoleType === 'none') {
+            return this.strings.consolenone;
+        }
+        if (this.stage.nodeStatus(n) !== 'started') {
+            return fill(this.strings.ui_why_node_off, n.name);
+        }
+        return '';
+    }
+
+    canConsole(n) {
+        return this.consoleWhy(n) === '';
+    }
+
+    openConsole(n) {
+        const why = this.consoleWhy(n);
+        if (why) {
+            this.toast(why);
+            return;
+        }
+        this.consoles.open(n);
+    }
+
+    /* ---------------- the action wheel ---------------- */
+
+    actionsFor(target) {
+        const s = this.strings, free = id => ({
+            id, label: s.ui_act_free, full: s.ui_act_free_full, icon: 'free', off: true, why: s.ui_act_free_why, free: true,
+        });
+        if (target.isLink) {
+            const items = [
+                {id: 'linfo', label: s.ui_act_info, full: s.ui_act_link_info, icon: 'info'},
+                {id: 'lzoom', label: s.ui_act_zoom, full: s.ui_act_link_zoom, icon: 'zoom'},
+                free('free1'),
+            ];
+            [target.link.a, target.link.b].forEach((e, i) => {
+                const n = this.stage.model.nodes.get(e.nodeId);
+                if (n && n.consoleType !== 'none') {
+                    const why = this.consoleWhy(n);
+                    items.push({
+                        id: i ? 'conb' : 'cona', label: n.name, full: fill(s.ui_console_of, n.name), icon: 'term',
+                        off: !!why, why,
+                    });
+                }
+            });
+            return items;
+        }
+        const n = target, open = this.consoles.has(n.id), why = n.consoleType === 'none' ? '' : this.consoleWhy(n);
+        const items = [];
+        if (n.consoleType !== 'none') {
+            items.push({
+                id: 'console', label: s.ui_act_console, full: open ? s.ui_act_console_goto : s.ui_act_console_open,
+                icon: 'term', off: !!why, why,
+            });
+        }
+        items.push({id: 'info', label: s.ui_act_info, full: s.ui_act_info_full, icon: 'info'});
+        items.push({id: 'zoom', label: s.ui_act_zoom, full: s.ui_act_zoom_node, icon: 'zoom'});
+        if (open) {
+            items.push({id: 'close', label: s.ui_act_close, full: s.ui_act_close_full, icon: 'close'});
+        }
+        // Free places: node control (start, stop, restart) is not part of the plugin API yet.
+        items.push(free('free1'), free('free2'));
+        return items;
+    }
+
+    runAction(id, t) {
+        const stage = this.stage, ends = t.isLink ? [t.link.a, t.link.b].map(e => stage.model.nodes.get(e.nodeId)) : [];
+        ({
+            console: () => this.openConsole(t),
+            info: () => {
+                stage.select({kind: 'node', id: t.id}, true);
+                this.details.show(stage.sel);
+            },
+            zoom: () => stage.zoomToNode(t, Math.max(2.4, stage.view.k)),
+            close: () => this.consoles.close(t.id),
+            linfo: () => this.details.show(stage.sel && stage.sel.kind === 'link' ? stage.sel : {kind: 'link', id: t.id}),
+            lzoom: () => stage.zoomToLink(t.link),
+            cona: () => this.openConsole(ends[0]),
+            conb: () => this.openConsole(ends[1]),
+        })[id]();
     }
 
     /**
-     * Opens a console if the session allows it.
+     * Short message over the scheme.
      *
-     * @param {object} node detail of gns3lab:openconsole
+     * @param {string} text message
+     * @param {number} [ms] how long
      */
-    openConsole(node) {
-        const session = this.session;
-        if (!session || session.status !== 'running') {
-            this.showMessage(this.strings.consoleneedsrunning);
-            return;
-        }
-        const live = session.nodes.find(n => n.nodeid === node.nodeId);
-        const type = (live && live.consoletype) || node.consoleType;
-        if (type === 'vnc') {
-            this.showMessage(this.strings.consolevnclater);
-            return;
-        }
-        if (type === 'none') {
-            this.showMessage(this.strings.consolenone);
-            return;
-        }
-        this.showMessage('');
-        this.consoles.open({nodeId: node.nodeId, name: node.name, nodeType: node.nodeType, ports: node.ports || []});
-    }
-
-    /**
-     * Node status from a fresh state, asked by a console that the gateway closed.
-     *
-     * @param {string} nodeId node id
-     * @returns {Promise<{status: string|null, stale: boolean}>} stale: the manager has only an old snapshot
-     */
-    async freshNodeStatus(nodeId) {
-        const state = await this.refresh();
-        const session = state && state.session;
-        if (!session || session.status !== 'running') {
-            return {status: null, stale: false};
-        }
-        const node = session.nodes.find(n => n.nodeid === nodeId);
-        return {status: node ? node.status : null, stale: session.nodesstale};
+    toast(text, ms) {
+        const t = this.toastEl;
+        t.textContent = text;
+        t.hidden = false;
+        clearTimeout(this.toastTimer);
+        this.toastTimer = setTimeout(() => {
+            t.hidden = true;
+        }, ms || 2600);
     }
 }
 
 /**
- * Starts the controller for a viewer on the page.
+ * Starts the lab page.
  *
- * @param {string} prefix id prefix of the template
+ * @param {string} prefix id prefix of the template ({{uniqid}})
  * @param {number} cmid course module id
  * @param {number} userid whose lab, 0 for the current user
  */
 export const init = async(prefix, cmid, userid = 0) => {
-    const app = document.getElementById(prefix + '-app');
-    if (!app || app.dataset.labReady) {
+    const root = document.getElementById(prefix + '-app');
+    if (!root || root.dataset.labReady) {
         return;
     }
-    app.dataset.labReady = '1';
-    const values = await getStrings(STRING_KEYS.map(key => ({key, component: 'mod_gns3lab'})));
-    const strings = Object.fromEntries(STRING_KEYS.map((key, i) => [key, values[i]]));
-    const lab = new Lab(app, cmid, userid, strings);
-    lab.render();
-    lab.refresh();
+    root.dataset.labReady = '1';
+    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...CONSOLE_KEYS])];
+    const values = await getStrings(keys.map(key => ({key, component: 'mod_gns3lab'})));
+    const strings = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
+    new LabPage(root, {prefix, cmid, userid, strings});
 };
