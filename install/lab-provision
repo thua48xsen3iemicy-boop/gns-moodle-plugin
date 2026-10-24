@@ -34,7 +34,9 @@ Usage: lab-provision <step> [args]
   release build|verify|list  prepare/check immutable releases; does not apply them (RELEASES.md)
   secrets           generate CAs, certificates, tokens and config files into SECRETS_DIR (any node)
   venv slot|manager build the Python venv of the slot or manager code on CephFS
-  slot [VMID...]    tag a stopped slot LXC of this node and push slot.env, lab-slot-init, lab-slot.service
+  slot [VMID...]    tag a stopped slot LXC of this node, push slot.env, lab-slot-init, lab-slot.service, then
+                    save its clean state (the snapshot the agent rolls back to after every session)
+  snapshot [VMID...]  save the clean state again, without pushing anything (the slot must be stopped)
   agent             prepare CephFS directories and install the node agent on this node
   manager           mounts, packages, configs and services of the manager LXC (with nginx)
   moodle            give Moodle the web CA and print the plugin settings
@@ -66,6 +68,9 @@ load_conf() {
   IMAGES_DIR=${IMAGES_DIR:-} IMAGES_DIR=${IMAGES_DIR#/} IMAGES_DIR=${IMAGES_DIR%/}
   [[ -z $IMAGES_DIR || $IMAGES_DIR =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] ||
     die "IMAGES_DIR must be a relative path below CEPH_ROOT of plain directory names"
+  CLEAN_SNAPSHOT=${CLEAN_SNAPSHOT:-lab-clean}  # LAB_CLEAN_SNAPSHOT of the agent
+  [[ $CLEAN_SNAPSHOT =~ ^[A-Za-z][A-Za-z0-9_-]{0,39}$ ]] ||
+    die "CLEAN_SNAPSHOT must be a Proxmox snapshot name: a letter, then letters, digits, _ and -, up to 40"
   SLOT_CLONE=${SLOT_CLONE:-full}
   [[ $SLOT_CLONE == full || $SLOT_CLONE == linked ]] || die "SLOT_CLONE must be full or linked, got '$SLOT_CLONE'"
   [[ $REPO_DIR == "$CEPH_ROOT"/* ]] || die "REPO_DIR must be below CEPH_ROOT"
@@ -542,9 +547,34 @@ case $v in *2.2.61*) echo "GNS3: $v" ;; *) echo "WARNING: GNS3 2.2.61 does not a
 echo "gns3-ids $(id -u gns3):$(id -g gns3)"
 '
 
+drop_agent_mounts() {  # The agent sets mp0/mp1 on every start: they never belong in a slot's saved state
+  local id=$1 i
+  for i in 0 1; do
+    if pct config "$id" | grep -q "^mp$i:"; then
+      pct config "$id" | grep -qE "^mp$i: .*mp=(/srv/gns3-ro/slot|/opt/gns3/projects)(,|\$)" ||
+        die "slot $id: mp$i is used for something else, but the agent owns mp0 and mp1 (move it to mp2+)"
+      pct set "$id" --delete "mp$i"
+    fi
+  done
+}
+
+# The clean state of a slot: the template plus the slot's own identity. The agent rolls the stopped slot
+# back to it after every session ('reset'), so nothing a student did in the guest reaches the next one.
+# A rollback also restores the CT config: take it again after any change of the slot CT, 'slot' does.
+snapshot_slot() {  # snapshot_slot <vmid>: replaces the previous snapshot; the CT is stopped
+  local id=$1
+  [[ $(ct_state "$id") == stopped ]] || die "slot $id must be stopped for its snapshot"
+  drop_agent_mounts "$id"  # a student's directory must never come back with a rollback
+  if pct config "$id" --snapshot "$CLEAN_SNAPSHOT" >/dev/null 2>&1; then
+    pct delsnapshot "$id" "$CLEAN_SNAPSHOT"
+  fi
+  log "slot $id: snapshot $CLEAN_SNAPSHOT"
+  pct snapshot "$id" "$CLEAN_SNAPSHOT" --description "Clean slot: template and its own identity. Created by install/lab-provision."
+}
+
 cmd_slot() {
   need_secrets
-  local ids=("$@") id tags i out
+  local ids=("$@") id tags out
   ((${#ids[@]})) || ids=("${LOCAL_SLOTS[@]}")
   ((${#ids[@]})) || die "no slot of SLOTS on this node ($NODE)"
   for id in "${ids[@]}"; do
@@ -556,14 +586,7 @@ cmd_slot() {
     tags=$(pct config "$id" | sed -n 's/^tags: //p')
     [[ ";$tags;" == *";labslot;"* ]] || pct set "$id" --tags "${tags:+$tags;}labslot"
     pct set "$id" --onboot 0
-    # The agent sets mp0/mp1 itself on every start; drop them, so the CT boots without them now.
-    for i in 0 1; do
-      if pct config "$id" | grep -q "^mp$i:"; then
-        pct config "$id" | grep -qE "^mp$i: .*mp=(/srv/gns3-ro/slot|/opt/gns3/projects)(,|\$)" ||
-          die "slot $id: mp$i is used for something else, but the agent owns mp0 and mp1 (move it to mp2+)"
-        pct set "$id" --delete "mp$i"
-      fi
-    done
+    drop_agent_mounts "$id"  # so the CT boots without them now
     # With IMAGES_DIR the agent also owns mp2 (images); set it now, so the checks below see the images.
     if [[ -n $IMAGES_DIR ]]; then
       ! pct config "$id" | grep -q '^mp2:' || pct config "$id" | grep -qE '^mp2: .*mp=/opt/gns3/images(,|$)' ||
@@ -590,7 +613,23 @@ cmd_slot() {
     grep '^gns3-ids ' <<<"$out" | cut -d' ' -f2 >"$S/slots/$id/gns3-ids"
     [[ -s $S/slots/$id/gns3-ids ]] || die "slot $id: cannot read the gns3 uid/gid"
     ct_down "$id"
+    snapshot_slot "$id"
     log "slot $id ready ($(ct_ip "$id"), gns3 $(cat "$S/slots/$id/gns3-ids"))"
+  done
+}
+
+cmd_snapshot() {
+  local ids=("$@") id
+  ((${#ids[@]})) || ids=("${LOCAL_SLOTS[@]}")
+  ((${#ids[@]})) || die "no slot of SLOTS on this node ($NODE)"
+  for id in "${ids[@]}"; do
+    [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || die "$id is not in SLOTS of $CONF"
+    ct_checked "$id"
+    [[ $(ct_state "$id") == stopped ]] ||
+      die "slot $id is running: put it into maintenance in the manager and shut it down first"
+    # The snapshot must hold the identity that 'slot' pushes (tokens, TLS, IP), not a bare clone.
+    [[ -s $S/slots/$id/gns3-ids ]] || die "slot $id: run 'lab-provision slot $id' first"
+    snapshot_slot "$id"
   done
 }
 
@@ -667,6 +706,7 @@ Environment=LAB_CEPH_ROOT=$CEPH_ROOT
 Environment=LAB_CODE_DIR=$CODE_DIR
 Environment=LAB_STUDENTS_DIR=$STUDENTS_DIR
 Environment=LAB_IMAGES_DIR=$IMAGES_DIR
+Environment=LAB_CLEAN_SNAPSHOT=$CLEAN_SNAPSHOT
 Environment=LAB_VMID_MIN=$vmid_min
 Environment=LAB_VMID_MAX=$vmid_max
 Environment=LAB_STUDENT_HOST_UID=$uid
@@ -694,6 +734,11 @@ agent_check() {
   echo "health: $(agent_curl "https://$NODE_FQDN:8443/health" 2>&1 || echo ' FAILED')"
   for id in "${LOCAL_SLOTS[@]}"; do
     echo "slot $id: $(agent_curl "https://$NODE_FQDN:8443/slots/$id/status" 2>&1 || echo ' FAILED')"
+    if pct config "$id" --snapshot "$CLEAN_SNAPSHOT" >/dev/null 2>&1; then
+      echo "slot $id snapshot $CLEAN_SNAPSHOT: present"
+    else
+      echo "slot $id snapshot $CLEAN_SNAPSHOT: MISSING, the agent cannot reset it (run 'lab-provision snapshot $id')"
+    fi
   done
 }
 
@@ -1306,6 +1351,7 @@ main() {
     secrets) cmd_secrets ;;
     venv) cmd_venv "$@" ;;
     slot) cmd_slot "$@" ;;
+    snapshot) cmd_snapshot "$@" ;;
     agent) cmd_agent ;;
     manager) cmd_manager ;;
     moodle) cmd_moodle ;;
