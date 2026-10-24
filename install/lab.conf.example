@@ -71,3 +71,6 @@ CT_NAMESERVER=10.10.12.1
 # disk (a snapshot on RBD), seconds, but the template cannot be removed or rebuilt while clones exist
 # (make a new template under a new VMID instead), and the clones must stay on the template's storage.
 #SLOT_CLONE=full
+# Name of the snapshot a slot is rolled back to after every session (the agent's LAB_CLEAN_SNAPSHOT). A letter,
+# then letters, digits, _ and -. 'slot' and 'snapshot' take it, 'agent' passes the name to the agent.
+#CLEAN_SNAPSHOT=lab-clean

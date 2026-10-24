@@ -16,7 +16,8 @@ def test_old_and_missing_owners_cannot_touch_reassigned_slot(env):
     response = client.post("/slots/2201/claim", json={"epoch": 2, "generation": 4})
     assert response.status_code == 200
     for path, body in (("start", {"student_key": "student42"}), ("stop", {}),
-                       ("mounts", {"student_key": "student42"}), ("size", {"cores": 2, "memory_mb": 1024})):
+                       ("mounts", {"student_key": "student42"}), ("size", {"cores": 2, "memory_mb": 1024}),
+                       ("reset", {})):
         method = client.put if path in ("mounts", "size") else client.post
         response = method(f"/slots/2201/{path}", json=body)
         assert response.status_code == 409
@@ -47,6 +48,15 @@ def test_timed_out_host_command_blocks_transfer_until_operator_reconciles(env, m
     response = client.post("/slots/2201/claim", json={"epoch": 100, "generation": 100})
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "COMMAND_UNCERTAIN"
+
+
+def test_timed_out_rollback_quarantines_the_slot(env, monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 1)
+    monkeypatch.setattr(agent.subprocess, "run", timeout)
+    with agent.slot_lock(2201), pytest.raises(HTTPException):
+        REAL_RUN([agent.PCT, "rollback", "2201", agent.CLEAN_SNAPSHOT])
+    assert agent.fence_state(2201)["uncertain"] is True
 
 
 def test_transfer_cannot_overtake_inflight_host_command(env, monkeypatch):

@@ -10,6 +10,8 @@ Agent endpoints (all synchronous, one operation per CT at a time):
     PUT  /slots/{vmid}/mounts            {code_revision, student_key, data_mode}   (CT stopped)
     POST /slots/{vmid}/start             {..mounts.., actions[]}  mounts, pct start, guest actions
     POST /slots/{vmid}/stop              {force}  pct shutdown --timeout 60, or pct stop if force
+    POST /slots/{vmid}/reset             {}  agent 1.2: pct rollback of the stopped CT to its clean snapshot
+                                         (disk and the whole CT config) -> {"state", "reset": true, "snapshot"}
     PUT  /students/{student_key}         ensure students/<key> (0700, mapped gns3 owner)
                                          -> {"student_key", "ready": true}; 409 if the existing
                                          directory has another owner (also briefly during a
@@ -90,6 +92,8 @@ CODES = {
     "SLOT_BUSY": AgentBusy,
     "STUDENT_DIR_OWNER": AgentRejected,
     "NOT_STOPPED": AgentNotStopped,
+    "SNAPSHOT_MISSING": AgentRejected,
+    "SNAPSHOT_UNSAFE": AgentRejected,
     "PCT_FAILED": AgentCommandFailed,
     "STORAGE_UNAVAILABLE": AgentUncertain,
     "PCT_UNAVAILABLE": AgentUncertain,
@@ -130,13 +134,14 @@ def _classify(resp: httpx.Response) -> AgentError:
 class AgentClient:
     def __init__(self, url_template: str, *, ca_file=None, cert_file=None, key_file=None,
                  timeout: float = 30.0, start_timeout: float = 420.0, mounts_timeout: float = 120.0,
-                 stop_timeout: float = 130.0,
+                 stop_timeout: float = 130.0, reset_timeout: float = 270.0,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.url_template = url_template
         self.timeout = timeout
         self.start_timeout = start_timeout
         self.mounts_timeout = mounts_timeout
         self.stop_timeout = stop_timeout
+        self.reset_timeout = reset_timeout  # The agent allows its rollback 180 s, plus two status reads
         if transport is None:
             # mTLS: the agent authenticates the manager by its client certificate.
             verify = ssl.create_default_context(cafile=str(ca_file))
@@ -223,3 +228,18 @@ class AgentClient:
     async def stop(self, node, vmid, *, force=False):
         return await self._call("POST", node, f"/slots/{vmid}/stop", json={"force": force},
                                 timeout=self.stop_timeout, mutating=True)
+
+    async def reset(self, node, vmid):
+        """Roll the stopped CT back to its clean snapshot. The CT config comes back as it was in the
+        snapshot (no student mount, the size of the snapshot): park and size it again afterwards."""
+        try:
+            body = await self._call("POST", node, f"/slots/{vmid}/reset", json={},
+                                    timeout=self.reset_timeout, mutating=True)
+        except AgentWrongNode as exc:
+            # An agent older than 1.2 has no such route: a bare 404 "Not Found", not CT_NOT_ON_NODE.
+            if exc.code is None and exc.message == "Not Found":
+                raise AgentRejected(404, "The node agent has no reset (needs agent 1.2)", "RESET_UNSUPPORTED") from exc
+            raise
+        if body.get("reset") is not True or body.get("state") != "stopped":
+            raise AgentUncertain(200, "Unexpected reset response from agent")
+        return body

@@ -162,6 +162,7 @@ class Settings:
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
     queue_timeout: float = 600.0  # Seconds a session may wait for a slot; 0 = no limit
+    slot_lab_failure_limit: int = 3  # Different students whose labs fail in a row before a slot is held; 0 = off
     images: dict | None = None  # Image catalog by id (IMAGES_FILE); None: no labs from Moodle
     lab_memory_overhead_mb: int = 1024  # Added to node memory when sizing a CT for a lab definition
     default_max_duration: int = 180  # Minutes
@@ -310,6 +311,7 @@ def load(env=None, check_mode=True) -> Settings:
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),
         queue_timeout=_int(env, "QUEUE_TIMEOUT", 600, 0, 86400),
+        slot_lab_failure_limit=_int(env, "SLOT_LAB_FAILURE_LIMIT", 3, 0, 1000),
         images=images,
         lab_memory_overhead_mb=_int(env, "LAB_MEMORY_OVERHEAD_MB", 1024, 0, 65536),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),

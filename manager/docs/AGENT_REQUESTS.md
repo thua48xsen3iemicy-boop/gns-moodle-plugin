@@ -52,6 +52,8 @@ HTTP-статусами, что сейчас. Ошибки валидации з
 | 422 | `SOURCE_MISSING` | нет `students/<key>` (или `slot/<revision>`) | сессия `failed` с понятным текстом, слот свободен |
 | 409 | `STUDENT_DIR_OWNER` | у существующего `students/<key>` другой владелец | сессия `failed` сразу, без ожидания |
 | 422 | `SOURCE_UNSAFE` | симлинк, предок не под root, ACL, не на CephFS-монтировании | сессия `failed`, слот `failed` |
+| 422 | `SNAPSHOT_MISSING` | у слота нет снимка чистого состояния (`POST /slots/{vmid}/reset`, агент 1.2) | уборка не удалась: слот `maintenance`, оператор делает `lab-provision snapshot` |
+| 422 | `SNAPSHOT_UNSAFE` | в снимке нет `unprivileged: 1` или тега `labslot` (откат оставил бы слот, которым агент не управляет) | то же |
 | 503 | `STORAGE_UNAVAILABLE` | CephFS не смонтирована, не проверить ACL, нет конфига CT | ждёт, перечитывает `status` |
 | 503 | `PCT_UNAVAILABLE` | `pct`/`findmnt` не запускается, непонятный вывод | то же |
 | 504 | `PCT_TIMEOUT` | команда не уложилась в таймаут | исход неизвестен: перечитывает `status` |

@@ -460,3 +460,69 @@ def test_source_unsafe_code(env):
     result = client.post('/slots/2201/start', json={'student_key': 'evil'})
     assert result.status_code == 422
     assert result.json()['detail']['code'] == 'SOURCE_UNSAFE'
+
+
+SNAPSHOT_OK = "unprivileged: 1\ntags: labslot\n[lab-clean]\nunprivileged: 1\ntags: labslot\nsnaptime: 1\n"
+
+
+def test_reset_rolls_back_to_the_clean_snapshot(env):
+    client, calls, state, conf, _ = env
+    (conf / "2201.conf").write_text(SNAPSHOT_OK)
+    response = client.post("/slots/2201/reset", json={})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"vmid": 2201, "state": "stopped", "reset": True, "snapshot": "lab-clean"}
+    assert [agent.PCT, "rollback", "2201", "lab-clean"] in calls
+    assert all(c[:2] != [agent.PCT, "start"] for c in calls)  # reset never starts the CT
+
+
+def test_reset_needs_a_stopped_slot_and_the_clean_snapshot(env):
+    client, calls, state, conf, _ = env
+    (conf / "2201.conf").write_text(SNAPSHOT_OK)
+    state["value"] = "running"
+    response = client.post("/slots/2201/reset", json={})
+    assert (response.status_code, response.json()["detail"]["code"]) == (409, "NOT_STOPPED")
+    assert "roll back" in response.json()["detail"]["message"] and "must be stopped" in response.json()["detail"]["message"]
+    state["value"] = "stopped"
+    # Another snapshot is no substitute: the name is fixed by the agent, not by the caller.
+    (conf / "2201.conf").write_text("unprivileged: 1\ntags: labslot\n[other]\nunprivileged: 1\ntags: labslot\n")
+    response = client.post("/slots/2201/reset", json={})
+    assert (response.status_code, response.json()["detail"]["code"]) == (422, "SNAPSHOT_MISSING")
+    assert not any(c[:2] == [agent.PCT, "rollback"] for c in calls)
+
+
+@pytest.mark.parametrize("saved", ["unprivileged: 0\ntags: labslot\n", "unprivileged: 1\ntags: other\n", "unprivileged: 1\n"])
+def test_reset_refuses_a_snapshot_the_agent_would_not_manage(env, saved):
+    client, calls, _, conf, _ = env
+    (conf / "2201.conf").write_text("unprivileged: 1\ntags: labslot\n[lab-clean]\n" + saved)
+    response = client.post("/slots/2201/reset", json={})
+    assert (response.status_code, response.json()["detail"]["code"]) == (422, "SNAPSHOT_UNSAFE")
+    assert not any(c[:2] == [agent.PCT, "rollback"] for c in calls)
+
+
+def test_reset_body_is_strict_and_the_snapshot_name_is_not_a_parameter(env):
+    client, calls, _, conf, _ = env
+    (conf / "2201.conf").write_text(SNAPSHOT_OK)
+    assert client.post("/slots/2201/reset", json={"snapshot": "other"}).status_code == 422
+    assert client.post("/slots/2201/reset").status_code == 422
+    assert not any(c[:2] == [agent.PCT, "rollback"] for c in calls)
+
+
+def test_snapshot_sections_do_not_vouch_for_the_current_config(env):
+    client, _, _, conf, _ = env
+    # The snapshot says "unprivileged, labslot", the CT as it is now says neither.
+    (conf / "2201.conf").write_text("unprivileged: 0\n[lab-clean]\nunprivileged: 1\ntags: labslot\n")
+    assert client.get("/slots/2201/status").json()["detail"]["code"] == "PRIVILEGED_CT"
+    (conf / "2201.conf").write_text("unprivileged: 1\ntags: other\n[lab-clean]\nunprivileged: 1\ntags: labslot\n")
+    assert client.get("/slots/2201/status").json()["detail"]["code"] == "NOT_LAB_SLOT"
+    (conf / "2201.conf").write_text("unprivileged: 1\ntags: labslot\n[pve:pending]\ntags: other\n")
+    assert client.get("/slots/2201/status").status_code == 200
+
+
+def test_clean_snapshot_name_setting(monkeypatch):
+    assert agent.CLEAN_SNAPSHOT == "lab-clean"
+    monkeypatch.setenv("LAB_CLEAN_SNAPSHOT", "slot_clean-2")
+    assert agent.snapshot_name("LAB_CLEAN_SNAPSHOT", "x") == "slot_clean-2"
+    for value in ("", "--description", "1abc", "a b", "a;b", "a" * 41):
+        monkeypatch.setenv("LAB_CLEAN_SNAPSHOT", value)
+        with pytest.raises(SystemExit):
+            agent.snapshot_name("LAB_CLEAN_SNAPSHOT", "x")

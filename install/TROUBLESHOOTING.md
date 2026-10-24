@@ -25,9 +25,16 @@ P=/mnt/pve/cfs/gns3-ro/install/lab-provision
 
 1. **Слот ни разу не включили.** Новый слот из `slots.json` попадает в БД в состоянии
    `maintenance` и ждёт `enable`. Это самый частый случай после установки или добавления ноды.
-2. **Слот ушёл в `failed` после сбоя сессии.** Менеджер сам останавливает лабу и CT, монтирует
-   заглушку и оставляет слот оператору. В `maintenance` слот уходит, если заглушку не удалось
-   подтвердить в конфиге CT (`placeholder not confirmed`).
+2. **Слот ушёл в `failed` или `maintenance`.** Сбой лабы (`SLOT_LAB_FAILED`, таймаут лабы и т. п.)
+   слот не выводит из работы: менеджер останавливает лабу и CT, агент откатывает CT к снимку чистого
+   слота, менеджер монтирует заглушку, слот снова `free`. В `failed` слот остаётся, если сломался он
+   сам (CT не запускается, отказ агента или Proxmox, не те монтирования, слот не стал готов). Такой
+   слот **не откатывается**: CT выключен, заглушка стоит, а гость цел, и его журналы (§2, §2а, §3)
+   на месте до `enable`. В `maintenance` слот уходит, если не подтвердились откат
+   (`reset failed: SNAPSHOT_MISSING`, `RESET_UNSUPPORTED`, `PCT_FAILED`) или заглушка
+   (`placeholder not confirmed`), или если подряд упали лабы стольких разных студентов, сколько
+   задано в `SLOT_LAB_FAILURE_LIMIT` (`N labs of different students failed in a row`): тогда слот
+   откатан, причину ищите в сессиях (§2).
 3. **Слота нет в `slots.json`** (`in_config: false`): VMID поменяли, а `secrets` + `manager` не
    повторили.
 
@@ -171,12 +178,16 @@ pct exec $MGR -- $ADM slots             # теперь state: free
 ```
 
 `slot-enable` переводит `maintenance`/`failed` → `free` и снимает `student_key`, но сначала
-спрашивает у агента состояние CT. Ошибки:
+спрашивает у агента состояние CT, откатывает его к снимку чистого слота и ставит заглушку. Поэтому
+сначала прочитайте журналы (§2, §2а, §3), потом `enable`: после отката в госте их уже нет. Ошибки:
 
 | Ошибка | Что делать |
 |---|---|
 | `CT 2001 is running on pve1; stop it first` | §3: выключить CT |
 | `Slot is in use or unknown` | на слоте живая сессия (`SELECT id, status, stage FROM sessions WHERE slot_vmid = 2001 AND status NOT IN ('stopped', 'failed')`), слот в `preparing`/`busy`/`releasing`, или VMID нет в БД |
+| `CT 2001 was not reset … SNAPSHOT_MISSING` | у слота нет снимка: `$P snapshot 2001` на ноде слота (слот выключен), потом снова `enable` |
+| `CT 2001 was not reset … RESET_UNSUPPORTED` | агент ноды старше 1.2: обновить его (`$P agent`) |
+| `CT 2001 was not reset … SNAPSHOT_UNSAFE` | в снимке нет `unprivileged: 1` или тега `labslot`: `$P slot 2001` пересоздаст снимок |
 | ошибка TLS / соединения с агентом | `$P check`, `journalctl -u lab-node-agent` на ноде слота |
 
 Вывести слот из работы вручную (например, на время обслуживания CT):
