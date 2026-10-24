@@ -547,7 +547,7 @@ case $v in *2.2.61*) echo "GNS3: $v" ;; *) echo "WARNING: GNS3 2.2.61 does not a
 echo "gns3-ids $(id -u gns3):$(id -g gns3)"
 '
 
-drop_agent_mounts() {  # The agent sets mp0/mp1 on every start: they never belong in a slot's saved state
+drop_agent_mounts() {  # The agent sets its mount points on every start: they never belong in a slot's saved state
   local id=$1 i
   for i in 0 1; do
     if pct config "$id" | grep -q "^mp$i:"; then
@@ -556,6 +556,10 @@ drop_agent_mounts() {  # The agent sets mp0/mp1 on every start: they never belon
       pct set "$id" --delete "mp$i"
     fi
   done
+  # With IMAGES_DIR mp2 (the images) is the agent's as well: it puts it back with mp0 and mp1.
+  if [[ -n $IMAGES_DIR ]] && pct config "$id" | grep -qE '^mp2: .*mp=/opt/gns3/images(,|$)'; then
+    pct set "$id" --delete mp2
+  fi
 }
 
 # The clean state of a slot: the template plus the slot's own identity. The agent rolls the stopped slot
@@ -565,6 +569,11 @@ snapshot_slot() {  # snapshot_slot <vmid>: replaces the previous snapshot; the C
   local id=$1
   [[ $(ct_state "$id") == stopped ]] || die "slot $id must be stopped for its snapshot"
   drop_agent_mounts "$id"  # a student's directory must never come back with a rollback
+  # Proxmox refuses to snapshot a CT that has a bind mount ("snapshot feature is not available").
+  local binds
+  binds=$(pct config "$id" | grep -E '^mp[0-9]+: /' | cut -d: -f1 | paste -sd, -) || true
+  [[ -z $binds ]] ||
+    die "slot $id has bind mounts ($binds) and Proxmox cannot snapshot such a CT: only the agent's mp0, mp1 and mp2 are removed"
   if pct config "$id" --snapshot "$CLEAN_SNAPSHOT" >/dev/null 2>&1; then
     pct delsnapshot "$id" "$CLEAN_SNAPSHOT"
   fi

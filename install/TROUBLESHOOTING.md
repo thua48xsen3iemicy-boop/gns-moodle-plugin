@@ -193,6 +193,13 @@ pct exec $MGR -- $ADM slots             # теперь state: free
 Вывести слот из работы вручную (например, на время обслуживания CT):
 `pct exec $MGR -- $ADM slot-maintenance 2001 --message "обновляю образы"`.
 
+### `lab-provision slot` или `snapshot`: `snapshot feature is not available`
+
+Proxmox не делает снимок CT, у которого есть bind-монтирование (`mpN: /путь,mp=…`). Точки агента `mp0`,
+`mp1` и с `IMAGES_DIR` `mp2` шаг убирает сам перед снимком. Если ошибка осталась, у слота есть чужое
+bind-монтирование: шаг называет его (`has bind mounts (mp3)`), его нужно убрать из конфига слота
+(`pct set <VMID> --delete mp3`) или заменить томом хранилища. Проверка: `pct config <VMID> | grep ^mp`.
+
 ## Похожие коды и сообщения
 
 | У студента | Причина |
