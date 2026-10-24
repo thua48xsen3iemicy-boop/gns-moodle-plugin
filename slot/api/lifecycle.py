@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
 from api.models import DeployTicket
-from api.nodes import exec_sync, qga_call
+from api.qga import Priority, QgaBroker
 
 TRANSITIONS = {
     None: {"DEPLOYING"},
@@ -134,6 +134,7 @@ class Lifecycle:
             self.claimed = False
             self.boot_requires_new_owner = True
             self.project_locks = {}
+            self.qga = QgaBroker(self.qga_socket)
             self.labs = LabStore(
                 Path(os.getenv("SLOT_LAB_STATE_DIR", LAB_STATE_DIR)) / "labs"
             )
@@ -171,6 +172,12 @@ class Lifecycle:
                 self.db.close()
             self.lock.close()
             raise
+
+    @staticmethod
+    def qga_socket(node_id):
+        from api import labs
+
+        return labs.QGA_DIR / (node_id + ".sock")
 
     def get(self, kind, ident):
         if kind == "lab":
@@ -493,20 +500,24 @@ class Lifecycle:
             )
 
     async def provision(self, lab, node, spec, initial):
-        from api import labs
-
         deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
         while True:
             try:
                 if spec["kind"] == "qemu":
-                    sock = str(labs.QGA_DIR / (node["node_id"] + ".sock"))
-                    await asyncio.to_thread(qga_call, sock, "guest-ping", None, 2)
+                    await self.qga.call(
+                        node["node_id"],
+                        "guest-ping",
+                        timeout=2,
+                        priority=Priority.LIFECYCLE,
+                    )
                     command = (
                         "systemctl enable --now serial-getty@ttyS0.service && systemctl is-active --quiet serial-getty@ttyS0.service"
                         if initial
                         else "systemctl is-active --quiet serial-getty@ttyS0.service"
                     )
-                    result = await asyncio.to_thread(exec_sync, sock, command, 20)
+                    result = await self.qga.exec(
+                        node["node_id"], command, timeout=20, priority=Priority.LIFECYCLE
+                    )
                     if result["exit_code"] != 0:
                         raise RuntimeError("serial-getty readiness failed")
                 port = node.get("console")
@@ -537,8 +548,11 @@ class Lifecycle:
                     raise RuntimeError(
                         "NOT_SUPPORTED: Cisco CLI provisioning requires a verified prompt/command adapter"
                     )
-                result = await asyncio.to_thread(
-                    exec_sync, sock, cmd["command"], cmd["timeout_seconds"]
+                result = await self.qga.exec(
+                    node["node_id"],
+                    cmd["command"],
+                    timeout=cmd["timeout_seconds"],
+                    priority=Priority.LIFECYCLE,
                 )
                 if result["exit_code"] != 0:
                     raise RuntimeError("Mandatory provisioning command failed")
@@ -683,6 +697,7 @@ class Lifecycle:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(self.monitor, *self.tasks, return_exceptions=True)
+        await self.qga.close()
         for handle in self.project_locks.values():
             handle.close()
         self.db.close()
