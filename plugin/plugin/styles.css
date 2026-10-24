@@ -2167,50 +2167,475 @@ body.gns3lab-fullscreen {
     bottom: 60px;
     z-index: 2;
 }
+/* the bar under a terminal: snippets menu, pinned snippets, font size */
+.gns3lab-student .tbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    padding: 6px 8px;
+    background: var(--term-bg);
+    border-top: 1px solid var(--term-line);
+}
+.gns3lab-student [data-g="inspect"] {
+    --sg: #5aa8f2;
+}
+.gns3lab-student [data-g="routing"] {
+    --sg: #3cc47a;
+}
+.gns3lab-student [data-g="switching"] {
+    --sg: #4fc1c9;
+}
+.gns3lab-student [data-g="tools"] {
+    --sg: #e0b13a;
+}
+.gns3lab-student [data-g="config"] {
+    --sg: #c792ea;
+}
+.gns3lab-student .snipbtn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 32px;
+    padding: 0 10px 0 9px;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    background: color-mix(in srgb,var(--term-fg) 8%,transparent);
+    color: var(--term-fg);
+    font: 600 12px var(--display);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .snipbtn svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .snipbtn i {
+    width: 6px;
+    height: 6px;
+    margin-left: 1px;
+    border-right: 1.6px solid currentcolor;
+    border-bottom: 1.6px solid currentcolor;
+    transform: translateY(1px) rotate(-135deg);
+    transition: transform .15s;
+}
+.gns3lab-student .snipbtn:hover,
+.gns3lab-student .snipbtn.open {
+    border-color: var(--accent);
+    background: color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.gns3lab-student .snipbtn.open i {
+    transform: translateY(-1px) rotate(45deg);
+}
 .gns3lab-student .snips {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
-    flex: none;
     overflow-x: auto;
-    padding: 7px 10px;
-    background: var(--term-bg);
-    border-top: 1px solid var(--term-line);
-    scrollbar-width: thin;
-    scrollbar-color: var(--term-line) transparent;
+    padding: 2px 0;
+    scrollbar-width: none;
 }
-.gns3lab-student .snips .lbl {
-    flex: none;
+.gns3lab-student .snips.more {
+    mask-image: linear-gradient(to right,#000 calc(100% - 28px),transparent);
+}
+.gns3lab-student .snips.less {
+    mask-image: linear-gradient(to right,transparent,#000 28px);
+}
+.gns3lab-student .snips.more.less {
+    mask-image: linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent);
+}
+.gns3lab-student .snips .nopins {
     color: var(--term-dim);
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: .06em;
+    font: 11.5px var(--display);
+    white-space: nowrap;
 }
 .gns3lab-student .snip {
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     min-height: 32px;
-    padding: 0 10px;
-    border: 1px dashed var(--term-line);
-    border-radius: 6px;
+    padding: 0 11px 0 9px;
+    border: 1px solid var(--term-line);
+    border-radius: 999px;
     background: transparent;
     color: var(--term-fg);
     font: 500 11.5px var(--mono);
     cursor: pointer;
     touch-action: manipulation;
+    transition: border-color .15s, background-color .15s, transform .15s;
+}
+.gns3lab-student .sdot {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--sg, var(--term-dim));
+    transition: box-shadow .15s;
 }
 .gns3lab-student .snip:hover {
-    background: var(--term-line);
+    border-color: var(--sg);
+    background: color-mix(in srgb,var(--sg) 14%,transparent);
+    transform: translateY(-1px);
+}
+.gns3lab-student .snip:hover .sdot {
+    box-shadow: 0 0 0 3px color-mix(in srgb,var(--sg) 30%,transparent);
 }
 .gns3lab-student .snip:active {
-    color: var(--accent);
+    background: color-mix(in srgb,var(--sg) 28%,transparent);
+    transform: none;
 }
-.gns3lab-student .snip:disabled {
-    opacity: .4;
-    cursor: default;
+.gns3lab-student .snip.sent {
+    animation: gns3lab-snip-sent .7s ease-out;
 }
-.gns3lab-student .snip:focus-visible {
+.gns3lab-student .snip:focus-visible,
+.gns3lab-student .snipbtn:focus-visible,
+.gns3lab-student .tf-btn:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+@keyframes gns3lab-snip-sent {
+    from {
+        background: color-mix(in srgb,var(--sg) 55%,transparent);
+    }
+    to {
+        background: transparent;
+    }
+}
+.gns3lab-student .tfont {
+    flex: none;
+    display: inline-flex;
+    align-items: stretch;
+    overflow: hidden;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+}
+.gns3lab-student .tf-btn {
+    min-width: 30px;
+    height: 30px;
+    padding: 0 7px;
+    border: 0;
+    background: transparent;
+    color: var(--term-fg);
+    font: 600 12px var(--mono);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .tf-btn:hover {
+    background: var(--term-line);
+}
+.gns3lab-student .tf-dec {
+    font-size: 11px;
+}
+.gns3lab-student .tf-inc {
+    font-size: 15px;
+}
+.gns3lab-student .tf-val {
+    min-width: 34px;
+    border-right: 1px solid var(--term-line);
+    border-left: 1px solid var(--term-line);
+    color: var(--term-dim);
+    font-weight: 500;
+}
+.gns3lab-student .tf-val.custom {
+    color: var(--accent);
+}
+.gns3lab-student .tf-btn[aria-disabled="true"] {
+    opacity: .35;
+    cursor: default;
+}
+.gns3lab-student .tf-btn[aria-disabled="true"]:hover {
+    background: transparent;
+}
+/* the snippet menu and the hint over a pinned snippet: dark in both themes, like the terminal */
+.gns3lab-student .snipmenu,
+.gns3lab-student .snip-tip {
+    --menu-bg: color-mix(in srgb,var(--term-bg) 90%,#fff);
+    background: var(--menu-bg);
+    color: var(--term-fg);
+    border: 1px solid color-mix(in srgb,var(--term-fg) 22%,var(--term-line));
+    box-shadow: 0 18px 48px rgb(0 0 0 / .45);
+}
+.gns3lab-student .snipmenu [hidden],
+.gns3lab-student .snip-tip[hidden] {
+    display: none !important;
+}
+.gns3lab-student .snipmenu {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    overflow: hidden;
+    animation: gns3lab-snip-in .12s ease-out;
+}
+@keyframes gns3lab-snip-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+.gns3lab-student .sm-head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--term-line);
+}
+.gns3lab-student .sm-search {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    padding: 0 11px;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    background: var(--term-bg);
+    color: var(--term-fg);
+    font: 13px var(--display);
+}
+.gns3lab-student .sm-search::placeholder {
+    color: var(--term-dim);
+}
+.gns3lab-student .sm-search:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+}
+.gns3lab-student .sm-x,
+.gns3lab-student .sm-act {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--term-dim);
+    cursor: pointer;
+}
+.gns3lab-student .sm-x:hover,
+.gns3lab-student .sm-act:hover {
+    background: color-mix(in srgb,var(--term-fg) 14%,transparent);
+    color: var(--term-fg);
+}
+.gns3lab-student .sm-x svg,
+.gns3lab-student .sm-act svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .sm-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 6px 6px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--term-line) transparent;
+}
+.gns3lab-student .sm-gh {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 8px 5px;
+    background: var(--menu-bg);
+    color: var(--sg);
+    font: 600 10.5px var(--display);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.gns3lab-student .sm-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 8px;
+    border-left: 3px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.gns3lab-student .sm-item.active {
+    border-left-color: var(--sg);
+    background: color-mix(in srgb,var(--sg) 15%,transparent);
+}
+.gns3lab-student .sm-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.gns3lab-student .sm-cmd {
+    color: var(--term-fg);
+    font: 600 12.5px var(--mono);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .sm-arg {
+    margin-left: 2px;
+    color: var(--sg);
+}
+.gns3lab-student .sm-desc {
+    color: var(--term-dim);
+    font: 12px/1.3 var(--display);
+}
+.gns3lab-student .sm-acts {
+    display: flex;
+    flex: none;
+    align-items: center;
+}
+.gns3lab-student .sm-act {
+    opacity: 0;
+}
+.gns3lab-student .sm-item:hover .sm-act,
+.gns3lab-student .sm-item.active .sm-act,
+.gns3lab-student .sm-act:focus-visible,
+.gns3lab-student .sm-pin[aria-pressed="true"] {
+    opacity: 1;
+}
+.gns3lab-student .sm-pin[aria-pressed="true"] {
+    color: var(--sg);
+}
+.gns3lab-student .sm-pin[aria-pressed="true"] svg {
+    fill: currentcolor;
+}
+.gns3lab-student .sm-none {
+    margin: 0;
+    padding: 22px 12px;
+    color: var(--term-dim);
+    font: 13px var(--display);
+    text-align: center;
+}
+.gns3lab-student .sm-foot {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px 9px;
+    border-top: 1px solid var(--term-line);
+}
+.gns3lab-student .sm-prev {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: var(--term-bg);
+    font: 12.5px var(--mono);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .sm-p {
+    flex: none;
+    color: #3cc47a;
+}
+.gns3lab-student .sm-t {
+    color: var(--term-fg);
+}
+.gns3lab-student .sm-ret {
+    color: var(--term-dim);
+}
+.gns3lab-student .sm-caret {
+    align-self: center;
+    width: .55em;
+    height: 1.1em;
+    background: var(--term-fg);
+    animation: gns3lab-caret 1s steps(2, start) infinite;
+}
+@keyframes gns3lab-caret {
+    to {
+        visibility: hidden;
+    }
+}
+.gns3lab-student .sm-note {
+    color: var(--term-dim);
+    font: 11.5px/1.35 var(--display);
+}
+.gns3lab-student .sm-keys {
+    color: var(--term-dim);
+    font: 10.5px var(--display);
+    opacity: .8;
+}
+.gns3lab-student .snip-tip {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 300px;
+    padding: 8px 11px 9px;
+    border-top: 2px solid var(--sg);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgb(0 0 0 / .4);
+    pointer-events: none;
+}
+.gns3lab-student .st-cmd {
+    color: var(--term-fg);
+    font: 600 12px var(--mono);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .st-desc {
+    color: #c3cdd4;
+    font: 12px/1.35 var(--display);
+}
+.gns3lab-student .st-hint {
+    color: var(--sg);
+    font: 11px var(--display);
+}
+@media (pointer: coarse) {
+    .gns3lab-student .snip,
+    .gns3lab-student .snipbtn {
+        min-height: 38px;
+    }
+    .gns3lab-student .tf-btn {
+        min-width: 36px;
+        height: 36px;
+    }
+    .gns3lab-student .sm-item {
+        padding: 8px 4px 8px 8px;
+    }
+    .gns3lab-student .sm-x,
+    .gns3lab-student .sm-act {
+        width: 38px;
+        height: 38px;
+    }
+    .gns3lab-student .sm-act {
+        opacity: 1;
+    }
+    .gns3lab-student .sm-keys {
+        display: none;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-student .snip,
+    .gns3lab-student .snipbtn i,
+    .gns3lab-student .sdot {
+        transition: none;
+    }
+    .gns3lab-student .snip:hover {
+        transform: none;
+    }
+    .gns3lab-student .snip.sent,
+    .gns3lab-student .snipmenu,
+    .gns3lab-student .sm-caret {
+        animation: none;
+    }
 }
 .gns3lab-student .tabs {
     display: flex;
