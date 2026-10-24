@@ -121,7 +121,9 @@ class Store:
                 raise ValueError("Slot is in use or unknown")
             if state == "free":
                 # `slot-enable` confirmed the CT is stopped: no student directory is writable there.
-                await conn.execute("UPDATE slots SET student_key = NULL WHERE vmid = %s", (vmid,))
+                # The operator has looked at the slot: its record of failed labs starts again.
+                await conn.execute("UPDATE slots SET student_key = NULL, lab_failures = '[]'::jsonb"
+                                   " WHERE vmid = %s", (vmid,))
             await self._event(conn, None, vmid, "slot_admin_state", {"state": state})
 
     # ------------------------------------------------------------------ sessions
@@ -381,8 +383,10 @@ class Store:
             return row
 
     async def finish_session(self, session, *, status, message, error=None, slot_state="free",
-                             slot_message=""):
-        """Terminal transition. slot_state='free' releases the slot (generation bump)."""
+                             slot_message="", lab_failures=None):
+        """Terminal transition. slot_state='free' releases the slot (generation bump).
+
+        lab_failures: the slot's new list of students whose labs failed in a row; None leaves it."""
         async with self.pool.connection() as conn, conn.transaction():
             await self._check_epoch(conn)
             vmid, gen = session["slot_vmid"], session["slot_generation"]
@@ -401,17 +405,20 @@ class Store:
             if not row:
                 raise Fenced("Session already finished")
             if vmid is not None:
+                failures = Jsonb(lab_failures) if lab_failures is not None else None
                 if slot_state == "free":
                     await conn.execute(
                         "UPDATE slots SET state = 'free', generation = generation + 1, session_id = NULL,"
-                        " state_message = '', updated_at = now() WHERE vmid = %s",
-                        (vmid,),
+                        " state_message = '', lab_failures = coalesce(%s, lab_failures), updated_at = now()"
+                        " WHERE vmid = %s",
+                        (failures, vmid),
                     )
                 else:
                     # failed/maintenance keep ownership visible for the operator.
                     await conn.execute(
-                        "UPDATE slots SET state = %s, state_message = %s, updated_at = now() WHERE vmid = %s",
-                        (slot_state, slot_message[:500], vmid),
+                        "UPDATE slots SET state = %s, state_message = %s, lab_failures = coalesce(%s, lab_failures),"
+                        " updated_at = now() WHERE vmid = %s",
+                        (slot_state, slot_message[:500], failures, vmid),
                     )
             await self._event(conn, session["id"], vmid, "session_" + status,
                               {"message": message, "error": error} if error else {"message": message})

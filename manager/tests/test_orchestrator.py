@@ -573,6 +573,7 @@ async def test_slot_never_ready_times_out_and_keeps_slot_for_operator(tmp_path, 
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "TIMEOUT"
         assert (await env.services.store.slot(201))["state"] == "failed"
+        assert ("agent:reset", 201) not in env.timeline  # Kept as it is for the operator
 
 
 async def test_proxmox_unavailable_keeps_session_queued(tmp_path, dsn):
@@ -746,27 +747,122 @@ async def test_lab_timeout_frees_slot(tmp_path, dsn):
         assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
 
 
-async def test_slot_enable_resets_the_slot_before_it_is_freed(tmp_path, dsn, monkeypatch):
+async def enable_slot(env, monkeypatch, vmid):
+    """The operator's `slot-enable`, run against the fakes (the test loop is already running)."""
     from types import SimpleNamespace
 
     from lab_manager import admin
 
+    captured = []
+    monkeypatch.setattr(admin, "_with_services", lambda fn: fn(env.services))
+    monkeypatch.setattr(admin, "asyncio", SimpleNamespace(run=captured.append))
+    admin.cmd_slot_state(SimpleNamespace(vmid=vmid, state="free", message=""))
+    await captured.pop()
+
+
+async def test_slot_enable_resets_the_slot_before_it_is_freed(tmp_path, dsn, monkeypatch):
     async with make_env(tmp_path, dsn, vmids=(201,)) as env:
-        captured = []
-        monkeypatch.setattr(admin, "_with_services", lambda fn: fn(env.services))
-        monkeypatch.setattr(admin, "asyncio", SimpleNamespace(run=captured.append))  # The test loop is running
-
-        async def enable():
-            admin.cmd_slot_state(SimpleNamespace(vmid=201, state="free", message=""))
-            await captured.pop()
-
         await env.services.store.set_slot_admin_state(201, "failed")
         env.agent.no_snapshot.add(201)
         with pytest.raises(SystemExit, match="was not reset"):  # No snapshot: it does not come back unclean
-            await enable()
+            await enable_slot(env, monkeypatch, 201)
         assert (await env.services.store.slot(201))["state"] == "failed"
         env.agent.no_snapshot.clear()
-        await enable()
+        await enable_slot(env, monkeypatch, 201)
         assert (await env.services.store.slot(201))["state"] == "free"
         assert names(env.timeline).index("agent:reset") < names(env.timeline).index("agent:mounts")
         assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
+
+
+async def test_failed_slot_is_parked_but_not_rolled_back_until_the_operator_enables_it(tmp_path, dsn, monkeypatch):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.agent.start_fails = "startup for container '201' failed"
+        sid = await start(env)
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "SLOT_START_FAILED"
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "failed"
+        # The guest is left as it was, for the journal of the slot, GNS3 logs and journald of the guest.
+        assert ("agent:reset", 201) not in env.timeline
+        assert env.pve.cts[201]["status"] == "stopped"
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]  # The student's directory is off
+        assert slot["student_key"] is None
+        env.agent.start_fails = None
+        await enable_slot(env, monkeypatch, 201)  # He has looked: now the slot is rolled back and freed
+        assert ("agent:reset", 201) in env.timeline
+        assert (await env.services.store.slot(201))["state"] == "free"
+
+
+async def fail_a_lab(env, user_id):
+    env.slots[201].fail_next = {"code": "RuntimeError", "message": "GNS3 does not answer"}
+    sid = await start(env, user_id=user_id)
+    await env.run()
+    s = await session(env, sid)
+    assert s["status"] == "failed" and s["error"]["code"] == "SLOT_OPERATION_FAILED", s["status_message"]
+    return s
+
+
+async def test_slot_where_different_students_fail_in_a_row_is_held(tmp_path, dsn, monkeypatch):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        for user in (1, 2):
+            await fail_a_lab(env, user)
+            slot = await env.services.store.slot(201)
+            assert slot["state"] == "free"  # Rolled back and back to work, no operator
+        await fail_a_lab(env, 3)
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "maintenance" and slot["lab_failures"] == ["main-1", "main-2", "main-3"]
+        assert "3 labs of different students failed in a row" in slot["state_message"]
+        assert ("agent:reset", 201) in env.timeline  # It was rolled back before it was held
+        other = await start(env, user_id=9)
+        await env.run(3)
+        assert (await session(env, other))["error"]["code"] == "NO_SLOTS"
+        await enable_slot(env, monkeypatch, 201)  # The operator has looked
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "free" and slot["lab_failures"] == []
+
+
+async def test_one_student_failing_again_does_not_blame_the_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        for _ in range(4):
+            await fail_a_lab(env, 42)  # E.g. a broken project in the student's directory
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "free" and slot["lab_failures"] == ["main-42"]
+
+
+async def test_a_lab_that_ran_and_stopped_cleanly_clears_the_failures(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        await fail_a_lab(env, 1)
+        await fail_a_lab(env, 2)
+        assert (await env.services.store.slot(201))["lab_failures"] == ["main-1", "main-2"]
+        sid = await start(env, user_id=3)
+        await env.run()
+        await stop(env, sid)
+        await env.run()
+        assert (await session(env, sid))["status"] == "stopped"
+        assert (await env.services.store.slot(201))["lab_failures"] == []
+        await fail_a_lab(env, 4)
+        assert (await env.services.store.slot(201))["state"] == "free"  # One failure again, not the third
+
+
+async def test_failure_limit_zero_never_holds_a_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,), slot_lab_failure_limit=0) as env:
+        for user in (1, 2, 3, 4):
+            await fail_a_lab(env, user)
+        assert (await env.services.store.slot(201))["state"] == "free"
+
+
+@pytest.mark.parametrize("error,counts", [
+    ({"code": "SLOT_OPERATION_FAILED"}, True),
+    ({"code": "SLOT_LAB_FAILED"}, True),
+    ({"code": "SLOT_STOP_FAILED"}, True),
+    ({"code": "TIMEOUT", "stage": "lab_wait"}, True),
+    ({"code": "TIMEOUT", "stage": "lab_stop_wait"}, True),
+    ({"code": "TIMEOUT", "stage": "slot_ready"}, False),  # The slot itself: it is failed anyway
+    ({"code": "TIMEOUT", "stage": "student_dir"}, False),
+    ({"code": "LAB_UNAVAILABLE"}, False),  # One broken lab definition must not hold every slot
+    ({"code": "SLOT_PROJECT_UNKNOWN"}, False),
+    ({"code": "PROJECT_MISSING"}, False),
+])
+def test_which_lab_failures_count_against_the_slot(error, counts):
+    assert Orchestrator._counts_against_slot(error) is counts

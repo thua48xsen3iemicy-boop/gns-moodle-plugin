@@ -47,6 +47,9 @@ def test_valid_config(env):
     assert (load(env).node_guest_memory_mb, load(env).node_cpu_overcommit) == (118784, 1.5)
     env["AGENT_START_ACTIONS"] = ""
     assert load(env).agent_start_actions == ()
+    assert s.slot_lab_failure_limit == 3
+    env["SLOT_LAB_FAILURE_LIMIT"] = "0"
+    assert load(env).slot_lab_failure_limit == 0  # Off
     assert SECRET not in repr(s)
 
 
@@ -92,7 +95,8 @@ def test_short_secret_rejected_without_leaking_it(env, tmp_path):
                                        ("LAB_CODE_DIR", "../slot"), ("LAB_CODE_DIR", "a//b"),
                                        ("LAB_STUDENTS_DIR", ""), ("LAB_STUDENTS_DIR", ".hidden/students"),
                                        ("NODE_GUEST_MEMORY_MB", "116G"), ("NODE_CPU_OVERCOMMIT", "-1"),
-                                       ("NODE_CPU_OVERCOMMIT", "two")])
+                                       ("NODE_CPU_OVERCOMMIT", "two"), ("SLOT_LAB_FAILURE_LIMIT", "-1"),
+                                       ("SLOT_LAB_FAILURE_LIMIT", "few")])
 def test_invalid_values(env, key, value):
     env[key] = value
     with pytest.raises(ConfigError):

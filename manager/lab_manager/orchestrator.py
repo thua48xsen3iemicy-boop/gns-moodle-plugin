@@ -23,7 +23,10 @@ stored in the database. Nothing is deleted or recreated "just in case".
     stopping       ct_stop          agent: pct shutdown (pct stop only as last resort)
     stopping       ct_reset         agent: the stopped CT is rolled back to its clean snapshot, so the
                                     next session gets the guest as this one did; a failed rollback sends
-                                    the slot to maintenance
+                                    the slot to maintenance. Skipped when the slot stays failed or in
+                                    maintenance for the operator: the rollback would wipe what he needs
+                                    (the slot's journal, GNS3 logs, the guest's journald); slot-enable
+                                    rolls it back after he has looked
     stopping       ct_park          agent: placeholder mounted read-only instead of the student dir;
                                     verified, otherwise the slot goes to maintenance (never free)
     stopped/failed                  terminal; the slot is free again, except after a failure of the slot
@@ -75,7 +78,12 @@ LAB_STAGES = ("lab_submit", "lab_wait", "ready")
 LAB_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_PROJECT_UNKNOWN",
                           "SLOT_STOP_FAILED", "LAB_UNAVAILABLE"})
 # A stage that runs only when the slot is already known to work: a timeout there is the lab's.
-LAB_TIMEOUT_STAGES = ("student_dir", "lab_submit", "lab_wait", "lab_stop", "lab_stop_wait")
+LAB_STAGE_TIMEOUTS = ("lab_submit", "lab_wait", "lab_stop", "lab_stop_wait")
+LAB_TIMEOUT_STAGES = ("student_dir",) + LAB_STAGE_TIMEOUTS
+# The lab failures that say something about the slot when different students meet them one after
+# another (settings.slot_lab_failure_limit). Not the ones about the lab definition or one project:
+# LAB_UNAVAILABLE and SLOT_PROJECT_UNKNOWN would hold every slot for a single broken lab.
+SLOT_SUSPECT_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_STOP_FAILED"})
 # Stages of the release chain: their commands carry the odd (cleanup) generation.
 RELEASE_STAGES = ("lab_stop", "lab_stop_wait", "ct_stop", "ct_reset", "ct_park")
 
@@ -881,7 +889,19 @@ class Orchestrator:
             raise Wait("Остановка контейнера слота…") from None
         if await self.agent.status(node, vmid) != "stopped":
             raise Wait("Остановка контейнера слота…")
+        if self._slot_kept(s):
+            return await self._goto(s, "ct_park", "Освобождение слота…")
         return await self._goto(s, "ct_reset", "Очистка слота…")
+
+    @staticmethod
+    def _counts_against_slot(error) -> bool:
+        return error["code"] in SLOT_SUSPECT_FAILURES or (
+            error["code"] == "TIMEOUT" and error.get("stage") in LAB_STAGE_TIMEOUTS)
+
+    @staticmethod
+    def _slot_kept(s) -> bool:
+        """The first error of the session leaves the slot failed or in maintenance, not free."""
+        return bool(s["error"]) and s["error"].get("slot_state", "free") != "free"
 
     async def _stage_ct_reset(self, s):
         """Roll the stopped CT back to its clean snapshot. Whatever the student did in the guest ends
@@ -934,14 +954,30 @@ class Orchestrator:
                 # A slot-level failure: parked, but kept for the operator.
                 slot_state = s["error"]["slot_state"]
                 slot_message = f"session {s['id']}: {s['error']['code']}"
+            lab_failures = None
+            if slot_state == "free" and self._counts_against_slot(s["error"]):
+                lab_failures = list((held or {}).get("lab_failures") or [])
+                if s["student_key"] not in lab_failures:
+                    lab_failures.append(s["student_key"])
+                limit = self.settings.slot_lab_failure_limit
+                if limit and len(lab_failures) >= limit:
+                    # Different students, one failed lab after another: the slot is the likelier culprit.
+                    slot_state = "maintenance"
+                    slot_message = (f"{len(lab_failures)} labs of different students failed in a row "
+                                    f"(last: session {s['id']}, {s['error']['code']}); look at the slot")
+                    log.error("Slot %s held: %s", s["slot_vmid"], slot_message)
             await self.store.finish_session(s, status="failed", message=s["error"]["message"], error=s["error"],
-                                            slot_state=slot_state, slot_message=slot_message)
+                                            slot_state=slot_state, slot_message=slot_message,
+                                            lab_failures=lab_failures)
         else:
             reason = s["stop_reason"] or "user"
             message = {"maxduration": "Время лабы истекло",
                        "teacher": "Лаба остановлена преподавателем"}.get(reason, "Лаба остановлена")
+            # A lab that ran and stopped cleanly shows the slot works: the record of failures starts again.
+            clean = [] if slot_state == "free" and s.get("started_at") else None
             await self.store.finish_session(s, status="stopped", message=message,
-                                            slot_state=slot_state, slot_message=slot_message)
+                                            slot_state=slot_state, slot_message=slot_message,
+                                            lab_failures=clean)
         self._health_checked.pop(s["id"], None)
         return False
 

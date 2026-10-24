@@ -130,6 +130,23 @@ async def test_slot_owner_loss_cleanup_never_releases_slot_for_reuse(tmp_path, p
         store.set_slot_student.assert_not_awaited()
 
 
+@pytest.mark.parametrize("error,expected", [
+    (None, "ct_reset"),
+    ({"code": "SLOT_LAB_FAILED", "slot_state": "free"}, "ct_reset"),
+    ({"code": "SLOT_START_FAILED", "slot_state": "failed"}, "ct_park"),
+    ({"code": "SLOT_OWNER_LOST", "slot_state": "maintenance"}, "ct_park"),
+])
+async def test_only_a_slot_that_will_be_freed_is_rolled_back(tmp_path, error, expected):
+    # A slot kept for the operator keeps its guest: its journal, GNS3 logs and journald are what he reads.
+    store = NS(update_session=AsyncMock())
+    agent = NS(status=AsyncMock(return_value="stopped"))
+    pve = NS(find_ct_node=AsyncMock(return_value="pve1"))
+    orch = Orchestrator(make_settings(tmp_path), store, pve, agent, {}, None)
+    session = dict(id="s", slot_vmid=201, stage="ct_stop", slot_node="pve1", error=error)
+    assert await orch._stage_ct_stop(session) is True
+    assert store.update_session.await_args.kwargs["stage"] == expected
+
+
 async def test_leader_connection_loss_cancels_and_joins_session_tasks():
     entered, cancelled, lost = asyncio.Event(), asyncio.Event(), asyncio.Event()
     s = dict(id="audit", status="stopping", stage="ct_stop", slot_vmid=201,

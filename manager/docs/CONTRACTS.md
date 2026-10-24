@@ -456,6 +456,15 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 `STALE_IDEMPOTENCY_KEY`, `OPERATION_IN_PROGRESS`, `INVALID_TRANSITION`,
 `IDEMPOTENCY_KEY_CONFLICT`. Добавляется `UNSUPPORTED_REQUIREMENT`.
 
+### 4.5. Владелец слота после отката
+
+Слот хранит отметку владельца (`POST /v1/fence`, `X-Lab-Epoch` / `X-Lab-Generation`) в
+`SLOT_STATE_DIR=/var/lib/lab-slot` внутри rootfs, а агент при освобождении откатывает CT к снимку
+(§5). После отката отметки нет, и слот принимает первого владельца, каким бы ни был его `epoch` и
+`generation`. Менеджер на это опирается так: `fence` нового владельца идёт до первого `deploy`, а
+прежних исполнителей до этого останавливает fencing агента и проверка лидерства менеджера. Почему
+этого достаточно — DESIGN §6.3, «Владелец слота и откат».
+
 ## 5. Менеджер → агент узла
 
 Формат и доработки — `AGENT_REQUESTS.md`. Агент строгий (`extra="forbid"`, `strict=True`),
