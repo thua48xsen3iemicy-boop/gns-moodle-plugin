@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Activity page: description, a button to open the lab full screen and an inline preview of the topology.
+ * Activity page: the description and a button to open the lab full screen.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -50,8 +50,8 @@ $PAGE->set_title(format_string($course->shortname) . ': ' . format_string($insta
 $PAGE->set_heading(format_string($course->fullname));
 $PAGE->set_activity_record($instance);
 
-$viewer = new \mod_gns3lab\output\viewer($cm, $instance, false);
+$overview = new \mod_gns3lab\output\overview($cm, $instance);
 
 echo $OUTPUT->header();
-echo $OUTPUT->render_from_template('mod_gns3lab/viewer', $viewer->export_for_template($OUTPUT));
+echo $OUTPUT->render_from_template('mod_gns3lab/overview', $overview->export_for_template($OUTPUT));
 echo $OUTPUT->footer();
