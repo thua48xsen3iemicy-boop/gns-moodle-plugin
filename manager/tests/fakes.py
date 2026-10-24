@@ -125,7 +125,7 @@ class FakePve:
 
 
 class FakeAgent:
-    """Lab Node Agent semantics (status/mounts/start/stop) on top of FakePve's CTs."""
+    """Lab Node Agent semantics (status/mounts/start/stop/reset) on top of FakePve's CTs."""
 
     def __init__(self, pve: FakePve, ceph_root="/mnt/pve/cfs", code_dir="gns3-ro/slot",
                  students_dir="gns3-rw/students"):
@@ -148,6 +148,9 @@ class FakeAgent:
         self.shutdown_fails_but_stops = False  # 409 from pct shutdown although the CT stopped
         self.fences = {}
         self.park_fails = False  # PUT mounts fails with a pct error
+        self.no_snapshot = set()  # Slots without the clean snapshot: reset answers SNAPSHOT_MISSING
+        self.reset_fails = False  # pct rollback fails
+        self.reset_unsupported = False  # An agent older than 1.2: the route does not exist
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -184,8 +187,8 @@ class FakeAgent:
             self.students.add(key)
             self.timeline.append(("agent:student", key))
             return httpx.Response(200, json={"student_key": key, "ready": True})
-        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop|claim|size)", path)
-        if not m:
+        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop|claim|size|reset)", path)
+        if not m or (m.group(2) == "reset" and self.reset_unsupported):
             return self._err(404, "Not Found")
         vmid, action = int(m.group(1)), m.group(2)
         ct = self.pve.cts.get(vmid)
@@ -214,6 +217,19 @@ class FakeAgent:
             return httpx.Response(200, json={"vmid": vmid, "state": ct["status"]})
         if action in ("mounts", "start") and ct["status"] != "stopped":
             return self._err(409, "Slot must be stopped to change mount points")
+        if action == "reset":
+            if ct["status"] != "stopped":
+                return self._err(409, {"code": "NOT_STOPPED", "message": "Slot must be stopped to roll back"})
+            if vmid in self.no_snapshot:
+                return self._err(422, {"code": "SNAPSHOT_MISSING", "message": "Slot has no 'lab-clean' snapshot"})
+            if self.reset_fails:
+                return self._err(409, {"code": "PCT_FAILED", "message": "Proxmox command failed: rollback"})
+            # The snapshot is taken without the agent's mounts: the rollback takes them away.
+            ct["config"].pop("mp0", None)
+            ct["config"].pop("mp1", None)
+            self.timeline.append(("agent:reset", vmid))
+            return httpx.Response(200, json={"vmid": vmid, "state": "stopped", "reset": True,
+                                             "snapshot": "lab-clean"})
         if action == "mounts":
             if self.park_fails:
                 return self._err(409, "Proxmox command failed: unable to apply mount points")

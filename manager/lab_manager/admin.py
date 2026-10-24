@@ -110,6 +110,7 @@ def cmd_slot_state(args):
     """enable: maintenance/failed -> free, after the operator checked the CT and its lab."""
 
     async def run(services):
+        from .agent_client import AgentError
         from .ownership import command_scope
 
         async with services.store.allocation_guard():
@@ -124,6 +125,11 @@ def cmd_slot_state(args):
                     state = await services.agent.status(node, args.vmid)
                     if state != "stopped":
                         raise SystemExit(f"CT {args.vmid} is {state} on {node}; stop it first")
+                    # Whatever the operator found in the guest, the slot goes back to work clean.
+                    try:
+                        await services.agent.reset(node, args.vmid)
+                    except AgentError as exc:
+                        raise SystemExit(f"CT {args.vmid} was not reset, the slot remains unavailable: {exc}")
                     key = services.settings.placeholder_student_key
                     await services.agent.set_mounts(node, args.vmid, student_key=key, data_mode="ro",
                                                    code_revision=services.settings.slot_code_revision)

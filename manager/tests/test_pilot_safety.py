@@ -111,7 +111,8 @@ async def test_slot_owner_loss_cleanup_never_releases_slot_for_reuse(tmp_path, p
         "mp0": "/mnt/pve/cfs/gns3-ro/slot,mp=/srv/gns3-ro/slot,ro=1",
         "mp1": f"/mnt/pve/cfs/gns3-rw/students/{student},mp=/opt/gns3/projects,ro={int(parked)}",
     }
-    store = NS(set_slot_student=AsyncMock(), finish_session=AsyncMock())
+    store = NS(set_slot_student=AsyncMock(), finish_session=AsyncMock(),
+               slot=AsyncMock(return_value={"state": "releasing", "state_message": ""}))
     agent = NS(set_mounts=AsyncMock())
     pve = NS(find_ct_node=AsyncMock(return_value="pve1"), ct_config=AsyncMock(return_value=config))
     orch = Orchestrator(settings, store, pve, agent, {}, None)

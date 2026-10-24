@@ -64,8 +64,8 @@ async def test_full_cycle_order(tmp_path, dsn):
         await env.run()
         s = await session(env, sid)
         assert s["status"] == "stopped"
-        assert env.timeline == [("slot:stop", "10.0.0.1"), ("agent:stop", "shutdown"),
-                                ("agent:mounts", "placeholder", "ro")]
+        assert env.timeline == [("slot:stop", "10.0.0.1"), ("agent:stop", "shutdown"), ("agent:reset", 201),
+                                ("agent:mounts", "placeholder", "ro")]  # Rolled back, then parked
         assert "students/placeholder,mp=/opt/gns3/projects,ro=1" in env.pve.cts[201]["config"]["mp1"]
         slot = await env.services.store.slot(201)
         assert slot["state"] == "free" and slot["session_id"] is None
@@ -232,7 +232,7 @@ async def test_maxduration_stops_and_releases(tmp_path, dsn):
         assert (await env.services.store.slot(201))["state"] == "free"
 
 
-async def test_slot_failed_operation_fails_session_and_keeps_slot(tmp_path, dsn):
+async def test_slot_failed_operation_fails_session_and_frees_slot(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         env.slots[201].fail_next = {"code": "RuntimeError", "message": "Missing QEMU image"}
         sid = await start(env)
@@ -240,14 +240,16 @@ async def test_slot_failed_operation_fails_session_and_keeps_slot(tmp_path, dsn)
         s = await session(env, sid)
         assert s["status"] == "failed" and "Missing QEMU image" in s["status_message"]
         slot = await env.services.store.slot(201)
-        assert slot["state"] == "failed" and slot["student_key"] is None  # Operator decides
+        # The lab is to blame, not the slot: rolled back and parked, it is free again, no operator.
+        assert slot["state"] == "free" and slot["student_key"] is None
+        assert ("agent:reset", 201) in env.timeline
         # The student's directory is released: lab stopped, CT stopped and parked.
         assert env.slots[201].labs[str(s["project_id"])]["state"] == "STOPPED"
         assert env.pve.cts[201]["status"] == "stopped"
         assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
-        again = await start(env)  # The student can start right away on another slot
+        again = await start(env)  # The student can start right away
         await env.run()
-        assert (await session(env, again))["slot_vmid"] == 202
+        assert (await session(env, again))["slot_vmid"] in (201, 202)
 
 
 async def test_slot_lab_failing_while_running(tmp_path, dsn):
@@ -259,8 +261,9 @@ async def test_slot_lab_failing_while_running(tmp_path, dsn):
         await env.run()
         s = await session(env, sid)
         assert s["status"] == "failed" and s["error"]["code"] == "SLOT_LAB_FAILED"
-        assert (await env.services.store.slot(201))["state"] == "failed"
+        assert (await env.services.store.slot(201))["state"] == "free"  # A FAILED lab is the lab's problem
         assert env.pve.cts[201]["status"] == "stopped"  # The FAILED lab is stopped, the CT too
+        assert ("agent:reset", 201) in env.timeline
 
 
 async def test_stop_before_slot_is_allocated(tmp_path, dsn):
@@ -422,8 +425,8 @@ async def test_failed_park_puts_slot_into_maintenance(tmp_path, dsn):
         s = await session(env, sid)
         assert s["status"] == "stopped"  # For the student the lab did stop
         slot = await env.services.store.slot(201)
-        assert slot["state"] == "maintenance"  # The last student's directory is still configured
-        assert "students/main-42," in env.pve.cts[201]["config"]["mp1"]
+        assert slot["state"] == "maintenance"  # The placeholder is not confirmed
+        assert "mp1" not in env.pve.cts[201]["config"]  # The rollback took the student's directory away
         other = await start(env, user_id=7)
         await env.run(3)
         s = await session(env, other)  # Never handed out unparked; nothing else to run on
@@ -684,3 +687,86 @@ async def test_live_symbols_come_from_the_reference_lab(tmp_path, dsn):
         nodes = {n["name"]: n for n in (await session(env, sid))["topology"]["topology"]["nodes"]}
         assert nodes["SW1"]["symbol"] == ":/symbols/multilayer_switch.svg"
         assert nodes["D1"]["symbol"] == ":/symbols/computer.svg"
+
+
+@pytest.mark.parametrize("fault,code", [("no_snapshot", "SNAPSHOT_MISSING"), ("reset_fails", "PCT_FAILED"),
+                                        ("reset_unsupported", "RESET_UNSUPPORTED")])
+async def test_slot_that_cannot_be_reset_is_parked_but_never_handed_out(tmp_path, dsn, fault, code):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await env.run()
+        if fault == "no_snapshot":
+            env.agent.no_snapshot.add(201)
+        else:
+            setattr(env.agent, fault, True)
+        await stop(env, sid)
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "stopped"  # For the student the lab did stop
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "maintenance" and f"reset failed: {code}" in slot["state_message"]
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]  # Parked all the same
+        assert slot["student_key"] is None
+        other = await start(env, user_id=7)
+        await env.run(3)
+        s = await session(env, other)
+        assert s["status"] == "failed" and s["error"]["code"] == "NO_SLOTS"
+
+
+async def test_every_release_rolls_the_slot_back_before_parking(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        for user in (42, 7):
+            sid = await start(env, user_id=user)
+            await env.run()
+            assert (await session(env, sid))["status"] == "running"
+            env.timeline.clear()
+            await stop(env, sid)
+            await env.run()
+            assert (await session(env, sid))["status"] == "stopped"
+            assert names(env.timeline).index("agent:reset") < names(env.timeline).index("agent:mounts")
+            assert (await env.services.store.slot(201))["state"] == "free"
+
+
+async def test_lab_timeout_frees_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.slots[201].op_polls = 10**6  # The deploy never finishes, and the slot cannot stop it either
+        sid = await start(env)
+        await env.run(6)
+        assert (await session(env, sid))["stage"] == "lab_wait"
+        await _backdate_stage(env, sid)
+        await env.run()
+        s = await session(env, sid)
+        assert s["stage"] == "lab_stop" and s["error"]["code"] == "TIMEOUT"
+        await _backdate_stage(env, sid)  # The stop times out too: the CT is stopped all the same
+        await env.run()
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "TIMEOUT"
+        assert (await env.services.store.slot(201))["state"] == "free"  # Rolled back and parked
+        assert ("agent:reset", 201) in env.timeline
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
+
+
+async def test_slot_enable_resets_the_slot_before_it_is_freed(tmp_path, dsn, monkeypatch):
+    from types import SimpleNamespace
+
+    from lab_manager import admin
+
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        captured = []
+        monkeypatch.setattr(admin, "_with_services", lambda fn: fn(env.services))
+        monkeypatch.setattr(admin, "asyncio", SimpleNamespace(run=captured.append))  # The test loop is running
+
+        async def enable():
+            admin.cmd_slot_state(SimpleNamespace(vmid=201, state="free", message=""))
+            await captured.pop()
+
+        await env.services.store.set_slot_admin_state(201, "failed")
+        env.agent.no_snapshot.add(201)
+        with pytest.raises(SystemExit, match="was not reset"):  # No snapshot: it does not come back unclean
+            await enable()
+        assert (await env.services.store.slot(201))["state"] == "failed"
+        env.agent.no_snapshot.clear()
+        await enable()
+        assert (await env.services.store.slot(201))["state"] == "free"
+        assert names(env.timeline).index("agent:reset") < names(env.timeline).index("agent:mounts")
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]

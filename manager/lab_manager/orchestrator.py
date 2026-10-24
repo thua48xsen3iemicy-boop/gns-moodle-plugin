@@ -21,16 +21,20 @@ stored in the database. Nothing is deleted or recreated "just in case".
     stopping       lab_stop         slot stop with Idempotency-Key
     stopping       lab_stop_wait    operation polling: STOPPING -> STOPPED
     stopping       ct_stop          agent: pct shutdown (pct stop only as last resort)
+    stopping       ct_reset         agent: the stopped CT is rolled back to its clean snapshot, so the
+                                    next session gets the guest as this one did; a failed rollback sends
+                                    the slot to maintenance
     stopping       ct_park          agent: placeholder mounted read-only instead of the student dir;
                                     verified, otherwise the slot goes to maintenance (never free)
-    stopped/failed                  terminal; failed keeps the slot 'failed' for the operator
+    stopped/failed                  terminal; the slot is free again, except after a failure of the slot
+                                    itself (see Failure): then it stays 'failed' for the operator
 
 A failure while the CT may hold the student's directory (ct_start .. lab_stop_wait) does not
 end the session at once: the lab is stopped if it may exist, the CT is stopped and parked,
-and only then the session is failed (the slot stays 'failed' for the operator, but with the
-placeholder mounted). Until the CT is confirmed stopped, slots.student_key names the student,
-and a new session of that student fails with STUDENT_DIR_BUSY instead of mounting the same
-directory read-write in a second slot.
+and only then the session is failed (the slot is free again if the lab was to blame, 'failed' for the
+operator if the slot was, in both cases rolled back and with the placeholder mounted). Until the CT is
+confirmed stopped, slots.student_key names the student, and a new session of that student fails with
+STUDENT_DIR_BUSY instead of mounting the same directory read-write in a second slot.
 """
 
 import asyncio
@@ -63,6 +67,17 @@ NODE_STATUSES = {"started", "stopped", "suspended"}
 MOUNTED_STAGES = ("ct_start", "slot_ready", "lab_submit", "lab_wait", "ready", "lab_stop", "lab_stop_wait")
 # The lab may exist in the slot: stop it before the CT.
 LAB_STAGES = ("lab_submit", "lab_wait", "ready")
+# A slot is rolled back to its clean snapshot whenever a session releases it, so what a student's lab
+# did in the guest cannot reach the next session. These failures are about the lab and its project, not
+# about the slot: the slot is freed once it is stopped, rolled back and parked. Any other failure (the CT
+# does not start, the agent or Proxmox refuse, a mount is wrong) would repeat on a clean guest: the
+# operator looks at the slot first.
+LAB_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_PROJECT_UNKNOWN",
+                          "SLOT_STOP_FAILED", "LAB_UNAVAILABLE"})
+# A stage that runs only when the slot is already known to work: a timeout there is the lab's.
+LAB_TIMEOUT_STAGES = ("student_dir", "lab_submit", "lab_wait", "lab_stop", "lab_stop_wait")
+# Stages of the release chain: their commands carry the odd (cleanup) generation.
+RELEASE_STAGES = ("lab_stop", "lab_stop_wait", "ct_stop", "ct_reset", "ct_park")
 
 SLOT_STAGE_MESSAGES = {
     "DEPLOYING": "Создание или открытие проекта…",
@@ -75,14 +90,15 @@ SLOT_STAGE_MESSAGES = {
 
 
 class Failure(Exception):
-    """Unrecoverable for this session: it goes to failed, the slot to failed (after the CT is
-    stopped and parked when the failure happens in a MOUNTED_STAGES stage)."""
+    """Unrecoverable for this session: it goes to failed. The slot goes to failed too (after the CT is
+    stopped, rolled back and parked when the failure happens in a MOUNTED_STAGES stage), unless
+    slot_state says otherwise or the code is one of LAB_FAILURES: then the slot is freed."""
 
-    def __init__(self, message, code="FAILED", slot_state="failed", source=None):
+    def __init__(self, message, code="FAILED", slot_state=None, source=None):
         super().__init__(message)
         self.message = message
         self.code = code
-        self.slot_state = slot_state
+        self.slot_state = slot_state or ("free" if code in LAB_FAILURES else "failed")
         self.source = source
 
 
@@ -221,7 +237,7 @@ class Orchestrator:
             epoch = leader_epoch
             # Odd tokens revoke all starting/running commands before cleanup.
             generation = 2 * (session["slot_generation"] or 0)
-            if session["stage"] in ("lab_stop", "lab_stop_wait", "ct_stop", "ct_park"):
+            if session["stage"] in RELEASE_STAGES:
                 generation += 1
             with command_scope(epoch, max(1, generation),
                                lambda: self.leader and self.epoch == leader_epoch):
@@ -344,8 +360,9 @@ class Orchestrator:
     async def _check_stage_timeout(self, s) -> bool:
         limit = self._stage_limit(s["stage"])
         if limit is not None and (now() - s["stage_started_at"]).total_seconds() > limit:
-            # Before ct_start the CT was not touched for this session: the slot stays usable.
-            slot_state = "free" if s["stage"] == "student_dir" else "failed"
+            # Before ct_start the CT was not touched for this session; after slot_ready the slot is known
+            # to work and the lab is what did not finish: the slot stays usable in both cases.
+            slot_state = "free" if s["stage"] in LAB_TIMEOUT_STAGES else "failed"
             await self._fail(s, Failure(f"Этап {s['stage']} не завершился за {int(limit)} с", "TIMEOUT",
                                         slot_state=slot_state))
             return True
@@ -406,7 +423,7 @@ class Orchestrator:
         """Current Proxmox node of the slot CT (it may have migrated since allocation)."""
         node = await self.pve.find_ct_node(s["slot_vmid"])
         if (s.get("slot_node") and node != s["slot_node"]
-                and s["stage"] not in ("lab_stop", "lab_stop_wait", "ct_stop", "ct_park")):
+                and s["stage"] not in RELEASE_STAGES):
             raise Failure("Слот перемещён на другой узел без переноса резерва", "SLOT_NODE_CHANGED",
                           slot_state="maintenance")
         return node
@@ -864,6 +881,26 @@ class Orchestrator:
             raise Wait("Остановка контейнера слота…") from None
         if await self.agent.status(node, vmid) != "stopped":
             raise Wait("Остановка контейнера слота…")
+        return await self._goto(s, "ct_reset", "Очистка слота…")
+
+    async def _stage_ct_reset(self, s):
+        """Roll the stopped CT back to its clean snapshot. Whatever the student did in the guest ends
+        here; the next session starts from the same guest as this one did. The rollback also restores the
+        CT config of the snapshot, so ct_park mounts the placeholder afterwards."""
+        vmid, node = s["slot_vmid"], await self._node(s)
+        try:
+            await self.agent.reset(node, vmid)
+        except (AgentBusy, AgentUncertain, AgentNotStopped):
+            raise Wait("Очистка слота…") from None
+        except (AgentRejected, AgentCommandFailed) as exc:
+            # The guest may still hold the last session and the CT config is not what we expect. Park it
+            # all the same (the student's directory must not stay mounted), but never hand the slot out.
+            code = exc.code or "PCT_FAILED"
+            log.error("Session %s: slot %s not reset: %s %s", s["id"], vmid, code, exc.message)
+            await self.store.event(s["id"], vmid, "reset_failed", {"code": code, "error": exc.message[:200]})
+            return await self._goto(s, "ct_park", "Освобождение слота…", slot_state="maintenance",
+                                    slot_message=f"session {s['id']}: reset failed: {code}")
+        await self.store.event(s["id"], vmid, "slot_reset", {})
         return await self._goto(s, "ct_park", "Освобождение слота…")
 
     async def _stage_ct_park(self, s):
@@ -874,6 +911,9 @@ class Orchestrator:
             raise Failure("Не настроен обязательный каталог-заглушка", "PARK_REQUIRED",
                           slot_state="maintenance")
         slot_state, slot_message = "free", ""
+        held = await self.store.slot(s["slot_vmid"])
+        if held and held["state"] == "maintenance":  # ct_reset failed: parked, but not handed out again
+            slot_state, slot_message = "maintenance", held["state_message"]
         if key:
             vmid, node = s["slot_vmid"], await self._node(s)
             try:

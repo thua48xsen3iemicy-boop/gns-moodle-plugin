@@ -184,7 +184,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 |---|---|
 | `lab_ref`, `lab_def` | какая лаба: эталонная (`lab_def: null`) или из Moodle (`lab_ref: null`, `lab_def` — `sha256:…` из `validate`) |
 | `status` | `queued` · `starting` · `running` · `stopping` · `stopped` · `failed` (SPEC §3). Новые статусы — только с новой версией `session`. После сбоя на этапах с запущенным CT сессия сначала проходит `stopping` (менеджер выключает слот), уже с `error`, затем `failed` |
-| `stage` | внутренний этап (DESIGN §6.4): `wait_slot`, `ct_prepare`, `student_dir`, `ct_start`, `slot_ready`, `lab_submit`, `lab_wait`, `ready`, `lab_stop`, `lab_stop_wait`, `ct_stop`, `ct_park`; у завершённых — `stopped`/`failed`. Список может расти: незнакомый этап плагин показывает как общий текст своего `status` |
+| `stage` | внутренний этап (DESIGN §6.4): `wait_slot`, `ct_prepare`, `student_dir`, `ct_start`, `slot_ready`, `lab_submit`, `lab_wait`, `ready`, `lab_stop`, `lab_stop_wait`, `ct_stop`, `ct_reset`, `ct_park`; у завершённых — `stopped`/`failed`. Список может расти: незнакомый этап плагин показывает как общий текст своего `status` |
 | `progress` | процент текущей операции слота, если известен; иначе поля нет |
 | `status_message` | текст для студента по-русски; логика по нему не строится |
 | `error` | при `failed`: `{"code", "retryable"}` (§2.5); иначе `null` |
