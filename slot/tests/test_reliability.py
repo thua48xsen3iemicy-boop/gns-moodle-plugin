@@ -132,6 +132,12 @@ def test_gns3_failure_is_structured(mock_server):
         app.state.gns3_http = original
 
 
+def test_repository_manifest_matches_the_tree():
+    # release.json hashes every .py/.md/.json of the Slot, docs included: after any change run
+    # 'python slot/release.py seal', or 'lab-provision venv slot' stops on RELEASE_INTEGRITY_ERROR.
+    assert release.verify()["ok"], "release.json is stale: run 'python release.py seal' in slot/"
+
+
 def test_release_missing_corrupt_and_startup_rejection(tmp_path, monkeypatch):
     assert release.verify(tmp_path)["ok"] is False
     (tmp_path / "release.json").write_text(

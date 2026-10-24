@@ -151,6 +151,13 @@ journalctl -u lab-node-agent -n 200 --no-pager
   ```
 
 - Связь менеджер → агенты, слоты и Proxmox целиком: `$P check` на ноде менеджера.
+- CT не стартует: `Failed to open "/var/lib/lxc/2001/rootfs": Permission denied` и в `ls -ldn /var/lib/lxc/2001`
+  права `drwx------`. Каталог создан с `umask 077`, а непривилегированному CT нужен `0755`
+  (`lab-provision` теперь запускает `pct` с `umask 022`, но у CT, созданных старой версией, так и осталось):
+
+  ```sh
+  chmod 755 /var/lib/lxc/2001
+  ```
 
 ### 4. Вернуть слот в работу
 

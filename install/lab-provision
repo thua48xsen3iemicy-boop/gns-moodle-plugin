@@ -15,6 +15,9 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 umask 077
+# pct creates /var/lib/lxc/<vmid> with the umask it inherits: under 077 the directory is 0700 and an
+# unprivileged CT cannot open its rootfs ("Failed to open /var/lib/lxc/<vmid>/rootfs: Permission denied").
+pct() { (umask 022; command pct "$@"); }
 
 CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
 ID_OFFSET=100000  # Standard unprivileged mapping: guest uid N is host uid N + 100000
@@ -50,7 +53,7 @@ EOF
 
 load_conf() {
   [[ $EUID == 0 ]] || die "run as root on the Proxmox node"
-  command -v pct >/dev/null || die "pct not found: run on a Proxmox node"
+  type -P pct >/dev/null || die "pct not found: run on a Proxmox node"  # type -P: the function above is not the binary
   [[ -f $CONF ]] || die "no $CONF: copy install/lab.conf.example there and edit it"
   # shellcheck source=/dev/null
   . "$CONF"
@@ -63,6 +66,8 @@ load_conf() {
   IMAGES_DIR=${IMAGES_DIR:-} IMAGES_DIR=${IMAGES_DIR#/} IMAGES_DIR=${IMAGES_DIR%/}
   [[ -z $IMAGES_DIR || $IMAGES_DIR =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] ||
     die "IMAGES_DIR must be a relative path below CEPH_ROOT of plain directory names"
+  SLOT_CLONE=${SLOT_CLONE:-full}
+  [[ $SLOT_CLONE == full || $SLOT_CLONE == linked ]] || die "SLOT_CLONE must be full or linked, got '$SLOT_CLONE'"
   [[ $REPO_DIR == "$CEPH_ROOT"/* ]] || die "REPO_DIR must be below CEPH_ROOT"
   CODE_DIR=${REPO_DIR#"$CEPH_ROOT"/}/slot  # LAB_CODE_DIR of the agent and the manager
   NODE=$(hostname)
@@ -464,6 +469,15 @@ venv/bin/python -m pip install -q --disable-pip-version-check $REQS
 venv/bin/python -m pip check
 '
 
+venv_abort() {  # venv_abort <vmid> <name> <code dir in CT> <host code dir>: a failed build leaves nothing writable
+  local id=$1 name=$2 dst=$3 src=$4
+  warn "venv build failed: stopping CT $id and taking the writable mount away; fix the cause and repeat the step"
+  ct_down "$id" || true
+  mp_drop "$id" "$dst/venv" || true
+  [[ $name == manager ]] || mp_drop "$id" "$dst" || true  # The agent mounts the slot code itself
+  chown -R root:root "$src/venv" || true
+}
+
 cmd_venv() {
   local id name src dst reqs
   case ${1:-} in
@@ -481,6 +495,8 @@ cmd_venv() {
   fi
   log "venv for $name, built in CT $id at $dst/venv"
   # The CT's root may write only into venv/, and only while it is built.
+  # shellcheck disable=SC2064  # expanded now on purpose: the locals are gone when the trap fires
+  trap "$(printf 'venv_abort %q %q %q %q' "$id" "$name" "$dst" "$src")" EXIT
   install -d -m 0755 "$src/venv"
   chown -R "$ID_OFFSET:$ID_OFFSET" "$src/venv"
   ct_down "$id"
@@ -498,6 +514,7 @@ cmd_venv() {
   chown -R root:root "$src/venv"
   chmod -R u+rwX,go+rX,go-w "$src/venv"
   [[ $name == slot ]] || ct_up "$id"
+  trap - EXIT
   log "venv $src/venv ready"
 }
 
@@ -1069,16 +1086,19 @@ cmd_create_manager() {  # On the manager's planned node
     --onboot 1 --tags labprov --description "Lab manager. Created by install/lab-provision."
 }
 
-cmd_clone_slot() {  # On the template's node: a full clone, onto the slot's node if it is another one
+cmd_clone_slot() {  # On the template's node: a clone (SLOT_CLONE), onto the slot's node if it is another one
   local id=$1 node=${PLAN_NODE[$1]:-} t=$TEMPLATE_VMID
   need_create_conf
   [[ -n $node ]] || die "slot $id is not in CREATE_SLOTS"
   [[ $TEMPLATE_NODE == "$NODE" ]] || die "run on the template's node $TEMPLATE_NODE"
   if ct_node "$id" >/dev/null; then log "slot CT $id exists"; return 0; fi
   pct config "$t" 2>/dev/null | grep -q '^template: 1' || die "slot template $t is missing: run 'lab-provision template'"
-  log "slot CT $id on $node from template $t"
-  local opts=(--hostname "slot-$id" --full 1 --storage "$CT_STORAGE"
-              --description "Lab slot. Created by install/lab-provision.")
+  log "slot CT $id on $node from template $t ($SLOT_CLONE clone)"
+  local opts=(--hostname "slot-$id" --description "Lab slot. Created by install/lab-provision.")
+  # A linked clone shares the template's disk (a snapshot on RBD): seconds instead of copying all of it.
+  # It stays on the template's storage, so there is no --storage, and the template cannot be removed
+  # while a clone exists.
+  if [[ $SLOT_CLONE == linked ]]; then opts+=(--full 0); else opts+=(--full 1 --storage "$CT_STORAGE"); fi
   # Another node needs the template on shared storage (RBD): pct refuses otherwise.
   [[ $node == "$NODE" ]] || opts+=(--target "$node")
   pct clone "$t" "$id" "${opts[@]}"

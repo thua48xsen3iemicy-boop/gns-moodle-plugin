@@ -116,10 +116,16 @@ $P enable           # слоты из maintenance в free (или только �
 |---|---|
 | `SLOT_TEMPLATE="2000=pve1:dhcp"` | шаблон слота (`template`): Ubuntu 24.04, GNS3 2.2.61 в своём venv, QEMU/KVM (`dev0` `/dev/kvm`, `dev1` `/dev/net/tun`; нужен Proxmox VE 8.1+), ubridge, VPCS, библиотеки IOU, пользователь `gns3` с uid/gid `SLOT_GNS3_ID`; без sshd и machine-id |
 | `CREATE_MANAGER="pve1:10.10.12.50"` | LXC менеджера `MANAGER_VMID`. PostgreSQL, nginx и службы в нём ставит шаг `manager` |
-| `CREATE_SLOTS="2001=pve1:10.10.12.101 …"` | слоты: полные клоны шаблона на своих нодах (`CT_STORAGE` общий, RBD), свой IP и MAC |
+| `CREATE_SLOTS="2001=pve1:10.10.12.101 …"` | слоты: клоны шаблона на своих нодах (`CT_STORAGE` общий, RBD), свой IP и MAC; по умолчанию полные, `SLOT_CLONE=linked` делает связанные |
 
-Сеть и диски новых CT — `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`, `CT_GATEWAY`, `CT_NAMESERVER`
-(образец — `lab.conf.example`). Уже существующий CT не пересоздаётся. Если таких переменных нет,
+Сеть и диски новых CT — `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`, `CT_GATEWAY`, `CT_NAMESERVER`, при
+необходимости `CT_VLAN` (тег попадает в `net0` слотов, шаблона и менеджера; образец — `lab.conf.example`).
+
+Полный клон копирует весь диск слота, поэтому создание слотов долгое. `SLOT_CLONE=linked` делает связанные
+клоны: слот появляется за секунды, потому что делит диск с шаблоном (снимок на RBD). Цена: шаблон нельзя
+удалить или пересобрать, пока живы клоны (новую основу делайте шаблоном с новым VMID и пересоздайте слоты;
+`reset` удаляет слоты раньше шаблона); клоны остаются на хранилище шаблона. Связанный клон на другую ноду
+(`--target`) в сессии не проверялся: проверьте на стенде. Уже созданные слоты опция не меняет. Уже существующий CT не пересоздаётся. Если таких переменных нет,
 контейнеры должны быть созданы заранее, как раньше.
 
 ```sh
@@ -150,6 +156,29 @@ $P reset --template             # и шаблон слота (пересобра
 Скрипт проверен на имитации кластера из двух нод: заглушки `pct`, `pvesh` и `ssh`, без
 настоящего Proxmox. Первый прогон `template` на настоящей ноде нужно проверить глазами:
 установка GNS3 из PPA и pip, проброс `/dev/kvm` в непривилегированный CT.
+
+### Свой шаблон слота (вручную)
+
+Если CT для шаблона уже есть и пересоздавать его не хочется, шаг `template` не подойдёт: он не берёт
+существующий CT, который не шаблон. Вместо него внутри своего CT запускается `install/slot-template-setup`.
+Он делает то же, что `template`: пакеты, пользователь `gns3`, GNS3 2.2.61 в своём venv, конфиг, служба.
+CT: непривилегированный Ubuntu 24.04, `nesting=1`, сеть; его VMID вне `SLOTS` и диапазонов слотов.
+Скрипт сам откажется работать не в LXC. `dev0`/`dev1` и `pct template` делаются на ноде, скрипт печатает команды.
+
+```sh
+V=191                                          # VMID вашего CT
+pct push $V /mnt/pve/cfs/gns3-ro/install/slot-template-setup /root/slot-template-setup --perms 0755
+pct exec $V -- env GNS3_ID=1500 /root/slot-template-setup install   # GNS3_ID = SLOT_GNS3_ID из lab.conf
+pct set $V -dev0 /dev/kvm,gid=<gid группы kvm из вывода>,mode=0660 -dev1 /dev/net/tun,mode=0666
+pct shutdown $V && pct start $V                # устройства применяются при старте
+pct exec $V -- env GNS3_ID=1500 /root/slot-template-setup verify
+pct exec $V -- /root/slot-template-setup clean   # через pct exec, не по ssh: убирает sshd и machine-id
+pct shutdown $V && pct template $V
+```
+
+Затем в `lab.conf`: `SLOT_TEMPLATE="<VMID>=<нода>:<IP>"` (IP шаблону нужен только формально, он не запускается),
+`CREATE_SLOTS`, `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`; слоты создаст `lab-provision create`. Шаг `template`
+увидит `template: 1` и ничего не пересоберёт.
 
 ### Добавить ноду со слотами
 
