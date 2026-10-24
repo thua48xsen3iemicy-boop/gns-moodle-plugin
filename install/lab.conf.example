@@ -67,3 +67,7 @@ CT_NAMESERVER=10.10.12.1
 #SLOT_DISK_GB=32
 # Slots cloned from the template: <vmid>=<node>:<IP>, every VMID also in SLOTS.
 #CREATE_SLOTS="2001=pve1:10.10.12.101 2002=pve1:10.10.12.102"
+# Kind of the slot clones. full (default): copies the whole disk, slow. linked: shares the template's
+# disk (a snapshot on RBD), seconds, but the template cannot be removed or rebuilt while clones exist
+# (make a new template under a new VMID instead), and the clones must stay on the template's storage.
+#SLOT_CLONE=full
