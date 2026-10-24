@@ -151,6 +151,29 @@ $P reset --template             # и шаблон слота (пересобра
 настоящего Proxmox. Первый прогон `template` на настоящей ноде нужно проверить глазами:
 установка GNS3 из PPA и pip, проброс `/dev/kvm` в непривилегированный CT.
 
+### Свой шаблон слота (вручную)
+
+Если CT для шаблона уже есть и пересоздавать его не хочется, шаг `template` не подойдёт: он не берёт
+существующий CT, который не шаблон. Вместо него внутри своего CT запускается `install/slot-template-setup`.
+Он делает то же, что `template`: пакеты, пользователь `gns3`, GNS3 2.2.61 в своём venv, конфиг, служба.
+CT: непривилегированный Ubuntu 24.04, `nesting=1`, сеть; его VMID вне `SLOTS` и диапазонов слотов.
+Скрипт сам откажется работать не в LXC. `dev0`/`dev1` и `pct template` делаются на ноде, скрипт печатает команды.
+
+```sh
+V=191                                          # VMID вашего CT
+pct push $V /mnt/pve/cfs/gns3-ro/install/slot-template-setup /root/slot-template-setup --perms 0755
+pct exec $V -- env GNS3_ID=1500 /root/slot-template-setup install   # GNS3_ID = SLOT_GNS3_ID из lab.conf
+pct set $V -dev0 /dev/kvm,gid=<gid группы kvm из вывода>,mode=0660 -dev1 /dev/net/tun,mode=0666
+pct shutdown $V && pct start $V                # устройства применяются при старте
+pct exec $V -- env GNS3_ID=1500 /root/slot-template-setup verify
+pct exec $V -- /root/slot-template-setup clean   # через pct exec, не по ssh: убирает sshd и machine-id
+pct shutdown $V && pct template $V
+```
+
+Затем в `lab.conf`: `SLOT_TEMPLATE="<VMID>=<нода>:<IP>"` (IP шаблону нужен только формально, он не запускается),
+`CREATE_SLOTS`, `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`; слоты создаст `lab-provision create`. Шаг `template`
+увидит `template: 1` и ничего не пересоберёт.
+
 ### Добавить ноду со слотами
 
 Venv слота общий и собран под тот же шаблон, `venv slot` не повторяется. Сессии на других нодах
