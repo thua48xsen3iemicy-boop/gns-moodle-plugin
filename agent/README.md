@@ -70,6 +70,7 @@ All endpoints require a valid **client TLS certificate** signed by `manager-clie
 | PUT | `/slots/{vmid}/mounts` | Attach approved CephFS paths while stopped |
 | POST | `/slots/{vmid}/start` | Attach approved CephFS paths, start CT, execute fixed guest actions |
 | POST | `/slots/{vmid}/stop` | Graceful shutdown or forced stop |
+| POST | `/slots/{vmid}/reset` | Roll a stopped slot back to its clean snapshot (disk and CT config) |
 
 The request body for `POST /slots/2201/start`:
 
@@ -294,6 +295,34 @@ reapply mounts or call start. mp0/mp1 destinations are replaced; no student data
 is moved or deleted. Check for any manually configured mounts overlapping the
 new destinations and coordinate changes through the Manager. Running containers
 are never remounted live.
+
+## Reset to the clean snapshot
+
+A slot lives for one session: when the Manager releases it, the guest goes back to its clean state, so
+nothing a student did in the guest reaches the next one. Everything that belongs to the student is
+in their directory on CephFS, not in the slot.
+
+`POST /slots/{vmid}/reset` with body `{}` runs `pct rollback <vmid> <snapshot>` on a **stopped** slot. It
+needs the usual claim and `X-Lab-Epoch` / `X-Lab-Generation` headers, and never starts the CT.
+
+```json
+{"vmid": 2201, "state": "stopped", "reset": true, "snapshot": "lab-clean"}
+```
+
+- **The snapshot** is named by the administrator: `LAB_CLEAN_SNAPSHOT` in the service unit, default
+  `lab-clean` (a Proxmox snapshot name: a letter, then letters, digits, `_`, `-`, up to 40). A client cannot
+  choose it. `install/lab-provision snapshot` takes it once per slot, after the slot got its own
+  identity (tokens, TLS, IP) and while the CT is stopped. It is the template plus that identity.
+- **A rollback replaces the whole CT config**, not only the disk: mount points, cores, memory, `net0`,
+  tags. The Manager mounts the placeholder and sizes the CT again after a reset. A manual change of
+  the CT config (IP, MAC, ...) is lost on the next reset unless the snapshot is taken again.
+- **Checks before the rollback**, from the CT's own file `/etc/pve/lxc/<vmid>.conf`: the snapshot
+  must exist (`SNAPSHOT_MISSING`, 422), and must be `unprivileged: 1` with the tag `labslot`
+  (`SNAPSHOT_UNSAFE`, 422); otherwise the rollback would leave a slot that this agent refuses to manage.
+- **Only the current config decides** what the agent may touch. `unprivileged:` and `tags:` lines in a
+  snapshot section (`[lab-clean]`) or in `[pve:pending]` are ignored by the VMID checks.
+- The rollback is a mutating `pct` command like `start` and `stop`: a timeout leaves the slot in
+  `COMMAND_UNCERTAIN`. It is limited to 180 s (a few seconds on RBD in practice).
 
 ## Coordination with Manager development
 

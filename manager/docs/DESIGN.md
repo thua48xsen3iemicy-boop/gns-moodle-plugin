@@ -93,6 +93,7 @@ peer-аутентификацией (`postgresql:///lab_manager`, без пар�
 | `PUT /slots/{vmid}/mounts` | `mp0=<ceph>/slot[/<rev>]→/srv/gns3-ro/slot,ro=1`, `mp1=<ceph>/students/<key>→/opt/gns3/projects,ro=0\|1` (агент 6a735df); только на остановленном CT | при освобождении: `student_key=PLACEHOLDER_STUDENT_KEY`, `data_mode=ro` |
 | `POST /slots/{vmid}/start` | те же mounts → повторная проверка путей → `pct start` → действия в госте | старт сессии: `student_key` студента, `data_mode=rw`, `code_revision=SLOT_CODE_REVISION`, `actions=AGENT_START_ACTIONS` (по умолчанию `["init_slot"]`) |
 | `POST /slots/{vmid}/stop` | `pct shutdown --timeout 60` или `pct stop` при `force` | освобождение; `force=true` — только если shutdown не удался |
+| `POST /slots/{vmid}/reset` | `pct rollback` остановленного CT к снимку чистого слота (агент 1.2): диск и весь конфиг CT | освобождение после `ct_stop`, до заглушки; CONTRACTS §5 |
 
 Пути внутри слота совпадают с тем, чего ждёт Lab Slot: код — `/srv/gns3-ro/slot` (`run.py`,
 `lab-slot.service`, venv), каталог студента — `/opt/gns3/projects`. Это каталог проектов GNS3
