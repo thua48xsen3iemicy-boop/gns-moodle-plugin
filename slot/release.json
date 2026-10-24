@@ -1,6 +1,6 @@
 {
   "version": "0.5.0",
-  "build_id": "sha256:0ffe13b904810e00978064208c5b10d72944873601964a6228d1559264dedb39",
+  "build_id": "sha256:6101ee2762dba402453ea09980269e2bfe42b35fd0317d3dbc9f579c8fe941e7",
   "files": {
     "AGENTS.md": "92aabc43b794d40b51c513f522c3ed045138c5a06672c72b240cc220d63a9fbd",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
@@ -27,7 +27,7 @@
     "tests/test_console.py": "5f54f0c1021ddd2fad7cdd6e4a8656e6e83e7e7e79373ce195687df2b8cada84",
     "tests/test_fencing.py": "e6671cc0b236e0cd694349636a8ccbf9d9aca7ca67ad7dd55a35796ac6b199ed",
     "tests/test_fixed_mount.py": "e9193a75a6304f8ee0fd1c8defff7e526f9a1baec0bc5ab14a412fec7f64cbd3",
-    "tests/test_reliability.py": "f6dbf3a5b259edaa66c654c7a1cadb7fac75f83d163a32f7e9471449979eecb4",
+    "tests/test_reliability.py": "f26c939b9577c2e0ec592d609657ea574a195cda3eda044e13e1c10e0c2c5ffc",
     "tests/test_slot.py": "7c1138670dd1f9c11f737e8e4726f753b56d1bba8d0b3e35da6b7cb18836228a",
     "tests/test_student_state.py": "df830da5ebf588f9b7d4548dcde03b472332ee71e5261d8e264be58044ddf546",
     "tools/check_slot.py": "a951dab74d9a7a8c72e29ea98214ed02ccee3cb0beb77f9ff53b5b78adb6b4fd"
