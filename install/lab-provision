@@ -15,6 +15,9 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 umask 077
+# pct creates /var/lib/lxc/<vmid> with the umask it inherits: under 077 the directory is 0700 and an
+# unprivileged CT cannot open its rootfs ("Failed to open /var/lib/lxc/<vmid>/rootfs: Permission denied").
+pct() { (umask 022; command pct "$@"); }
 
 CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
 ID_OFFSET=100000  # Standard unprivileged mapping: guest uid N is host uid N + 100000
@@ -50,7 +53,7 @@ EOF
 
 load_conf() {
   [[ $EUID == 0 ]] || die "run as root on the Proxmox node"
-  command -v pct >/dev/null || die "pct not found: run on a Proxmox node"
+  type -P pct >/dev/null || die "pct not found: run on a Proxmox node"  # type -P: the function above is not the binary
   [[ -f $CONF ]] || die "no $CONF: copy install/lab.conf.example there and edit it"
   # shellcheck source=/dev/null
   . "$CONF"
@@ -492,6 +495,7 @@ cmd_venv() {
   fi
   log "venv for $name, built in CT $id at $dst/venv"
   # The CT's root may write only into venv/, and only while it is built.
+  # shellcheck disable=SC2064  # expanded now on purpose: the locals are gone when the trap fires
   trap "$(printf 'venv_abort %q %q %q %q' "$id" "$name" "$dst" "$src")" EXIT
   install -d -m 0755 "$src/venv"
   chown -R "$ID_OFFSET:$ID_OFFSET" "$src/venv"
