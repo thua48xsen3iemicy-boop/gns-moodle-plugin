@@ -37,6 +37,7 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
 Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>
 """
 import asyncio
+import base64
 import hmac
 import json
 import logging
@@ -53,6 +54,7 @@ LISTEN_PORT = int(os.environ.get("GW_PORT", "8080"))
 SLOT_PORT = int(os.environ.get("GW_SLOT_PORT", "8080"))
 SLOT_SCHEME = os.environ.get("GW_SLOT_SCHEME", "wss")
 SLOT_CA_FILE = os.environ.get("GW_SLOT_CA_FILE") or None
+SLOT_CA_B64 = os.environ.get("GW_SLOT_CA_B64") or None  # PEM of the slot CA, base64 (gateway-env writes it)
 ALLOW_PLAINTEXT = os.environ.get("GW_ALLOW_PLAINTEXT_SLOTS") == "1"
 INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "")
 ALLOWED_ORIGINS = {o for o in os.environ.get("GW_ALLOWED_ORIGINS", "").split(",") if o}
@@ -163,10 +165,28 @@ async def console(request: web.Request):
     return browser
 
 
+def slot_tls_context() -> ssl.SSLContext:
+    """Trust for the slots' certificates: GW_SLOT_CA_B64 and/or GW_SLOT_CA_FILE, else the system store.
+
+    The unit hides /etc/lab-manager from the gateway's dynamic user, so `gateway-env` inlines the CA
+    into gateway.env instead of pointing at SLOT_CA_FILE there.
+    """
+    try:
+        cadata = base64.b64decode(SLOT_CA_B64, validate=True).decode("ascii") if SLOT_CA_B64 else None
+        return ssl.create_default_context(cafile=SLOT_CA_FILE, cadata=cadata)
+    except ValueError as exc:
+        raise RuntimeError(f"GW_SLOT_CA_B64 is not base64 of a PEM certificate: {exc}") from exc
+    except ssl.SSLError as exc:
+        raise RuntimeError(f"slot CA is not a valid PEM certificate: {exc}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"cannot read GW_SLOT_CA_FILE={SLOT_CA_FILE} as the gateway user: {exc}; "
+                           "regenerate gateway.env with `lab-manager-admin gateway-env`") from exc
+
+
 async def on_startup(app):
     if SLOT_SCHEME not in ("wss", "ws") or (SLOT_SCHEME == "ws" and not ALLOW_PLAINTEXT):
         raise RuntimeError("Use WSS or explicitly approve isolated plaintext slots")
-    app["slot_tls"] = ssl.create_default_context(cafile=SLOT_CA_FILE)
+    app["slot_tls"] = slot_tls_context()
     app["http"] = ClientSession(timeout=ClientTimeout(total=None, connect=10))
     app["tickets"] = Tickets()
 

@@ -1,4 +1,4 @@
-# Lab Manager — 0.6.0
+# Lab Manager — 0.6.1
 
 Изменения протокола, порядок обновления и стендовая приёмка:
 [`docs/pilot-hardening/README.md`](../docs/pilot-hardening/README.md).
@@ -65,8 +65,10 @@ pct set <MGR_VMID> -mp0 /mnt/pve/cfs/gns3-ro/manager,mp=/srv/gns3-ro/manager,ro=
   шлюза, `GATEWAY_PUBLIC_URL=wss://<публичное имя>` (без `/` на конце).
 - Шлюз: переменные `GW_*` не пишутся руками, их генерирует менеджер из своего конфига
   (`GW_SLOTS` — адреса и `console_token` из `slots.json`, `GW_ALLOWED_ORIGINS` — origin сайтов из
-  `sites.json`, `GW_INTERNAL_KEY` = `GATEWAY_INTERNAL_KEY`, порт — из `GATEWAY_INTERNAL_URL`).
-  После любого изменения `slots.json` или `sites.json` файл нужно сгенерировать заново и перезапустить шлюз.
+  `sites.json`, `GW_INTERNAL_KEY` = `GATEWAY_INTERNAL_KEY`, порт — из `GATEWAY_INTERNAL_URL`,
+  `GW_SLOT_CA_B64` — CA слотов из `SLOT_CA_FILE`, целиком одной строкой base64: unit закрывает
+  `/etc/lab-manager` от шлюза, и путь к файлу оттуда он не прочитал бы).
+  После любого изменения `slots.json`, `sites.json` или CA слотов файл нужно сгенерировать заново и перезапустить шлюз.
 - Шлюз работает под своим временным пользователем (`DynamicUser`), секретов менеджера (токен
   Proxmox, API-токены слотов) он не видит.
 - Шлюз один на все слоты: билеты живут в его памяти, и менеджер рассчитан на один шлюз.
