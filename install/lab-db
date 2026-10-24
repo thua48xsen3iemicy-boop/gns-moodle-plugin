@@ -1,0 +1,140 @@
+#!/bin/bash
+# Read-only look into the lab manager's database from the Proxmox node of the manager LXC.
+# Runs as root on that node; the queries go through pct exec as the lab-manager user (peer
+# authentication, DATABASE_URL of /etc/lab-manager/manager.env), so there is nothing to log in to.
+#
+#   install/lab-db <command> [args]      settings: ${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf} (MANAGER_VMID)
+#
+# Every session is read-only (default_transaction_read_only): a guard against typos, not a security
+# boundary, root on the node can do anything anyway. Secrets (manager.env) are never printed.
+set -euo pipefail
+
+CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: lab-db <command> [args]
+  sessions [N]       the last N sessions (default 10): slot, status, stage, error code
+  slots              the slot registry: state, generation, owner session
+  why [SESSION]      why a session failed: its error, the slot calls with the slot's own answer,
+                     the events; default is the last session with an error
+  calls SESSION      slot calls of a session (deploy/stop, operation id, result)
+  events SESSION     audit events of a session
+  sql 'SELECT ...'   any query, read-only
+SESSION is an id such as s-b8f66938cff9bb66.
+EOF
+}
+
+# Placeholders: @N@ (a number), @SID@ (a quoted session id or a subquery for the default one).
+read -r -d '' Q_SESSIONS <<'SQL' || true
+SELECT id, user_id AS "user", instance_id AS inst, coalesce(lab_ref, left(lab_def, 14)) AS lab,
+       slot_vmid AS slot, status, stage, error->>'code' AS code,
+       to_char(created_at, 'MM-DD HH24:MI:SS') AS created, left(status_message, 50) AS message
+FROM sessions ORDER BY created_at DESC LIMIT @N@
+SQL
+read -r -d '' Q_SLOTS <<'SQL' || true
+SELECT vmid, address, state, generation AS gen, session_id, student_key, in_config, state_message
+FROM slots ORDER BY vmid
+SQL
+read -r -d '' Q_SESSION <<'SQL' || true
+SELECT id, status, stage, slot_vmid AS slot, project_name, status_message,
+       to_char(created_at, 'MM-DD HH24:MI:SS') AS created, to_char(finished_at, 'MM-DD HH24:MI:SS') AS finished,
+       jsonb_pretty(error) AS error
+FROM sessions WHERE id = @SID@
+SQL
+read -r -d '' Q_CALLS <<'SQL' || true
+SELECT id, action, status, operation_id, to_char(created_at, 'MM-DD HH24:MI:SS') AS created,
+       jsonb_pretty(result) AS result
+FROM slot_calls WHERE session_id = @SID@ ORDER BY id
+SQL
+read -r -d '' Q_EVENTS <<'SQL' || true
+SELECT id, to_char(at, 'MM-DD HH24:MI:SS') AS at, slot_vmid AS slot, kind, left(detail::text, 160) AS detail
+FROM events WHERE session_id = @SID@ ORDER BY id
+SQL
+
+# The default session of 'why': the last one with an error, else the last one.
+DEFAULT_SID="coalesce((SELECT id FROM sessions WHERE error IS NOT NULL ORDER BY created_at DESC LIMIT 1), (SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1))"
+
+fill() {  # fill <query> <N> <SID>
+  local q=${1//@N@/$2}
+  printf '%s' "${q//@SID@/$3}"
+}
+
+# psql_run <statement>...: every argument is one psql -c (an SQL statement or one backslash command).
+psql_run() {
+  # shellcheck disable=SC2016  # expands inside the CT
+  pct exec "$MANAGER_VMID" -- runuser -u lab-manager -- bash -c '
+    set -euo pipefail
+    set -a; . /etc/lab-manager/manager.env; set +a
+    [[ -n ${DATABASE_URL:-} ]] || { echo "ERROR: no DATABASE_URL in /etc/lab-manager/manager.env" >&2; exit 1; }
+    export PGOPTIONS="-c default_transaction_read_only=on"
+    args=()
+    for q in "$@"; do args+=(-c "$q"); done
+    exec psql "$DATABASE_URL" -X -q -P pager=off "${args[@]}"
+  ' lab-db "$@"
+}
+
+session_arg() {  # prints the SQL for the session id argument, or the default
+  if [[ -z ${1:-} ]]; then
+    printf '(%s)' "$DEFAULT_SID"
+  else
+    [[ $1 =~ ^s-[0-9a-f]{1,32}$ ]] || die "'$1' is not a session id (s-<hex>)"
+    printf "'%s'" "$1"
+  fi
+}
+
+count_arg() {
+  local n=${1:-10}
+  [[ $n =~ ^[0-9]{1,4}$ && $n != 0* ]] || die "'$n' is not a number of rows (1..9999)"
+  printf '%s' "$n"
+}
+
+main() {
+  local cmd=${1:-}
+  if [[ -z $cmd || $cmd == -h || $cmd == --help ]]; then
+    usage
+    exit 0
+  fi
+  shift
+  case $cmd in
+    sessions | slots | why | calls | events | sql) ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  [[ $EUID == 0 ]] || die "run as root on the node of the manager LXC"
+  type -P pct >/dev/null || die "pct not found: run on a Proxmox node"
+  [[ -f $CONF ]] || die "no $CONF (LAB_CONF=... to use another file)"
+  # shellcheck source=/dev/null
+  . "$CONF"
+  [[ -n ${MANAGER_VMID:-} ]] || die "MANAGER_VMID is not set in $CONF"
+  [[ $(pct status "$MANAGER_VMID" 2>/dev/null) == "status: running" ]] ||
+    die "manager CT $MANAGER_VMID is not running on this node: run lab-db on the node of the manager"
+
+  local sid
+  case $cmd in
+    sessions) psql_run "$(fill "$Q_SESSIONS" "$(count_arg "${1:-}")" '')" ;;
+    slots) psql_run "$Q_SLOTS" ;;
+    sql)
+      [[ -n ${1:-} ]] || die "sql needs a query: lab-db sql 'SELECT ...'"
+      psql_run "$1"
+      ;;
+    calls | events)
+      [[ -n ${1:-} ]] || die "$cmd needs a session id"
+      sid=$(session_arg "$1")
+      if [[ $cmd == calls ]]; then
+        psql_run '\x on' "$(fill "$Q_CALLS" '' "$sid")"
+      else
+        psql_run "$(fill "$Q_EVENTS" '' "$sid")"
+      fi
+      ;;
+    why)
+      sid=$(session_arg "${1:-}")
+      psql_run '\echo == session' '\x on' "$(fill "$Q_SESSION" '' "$sid")" \
+        '\echo == slot calls (result is the answer of the slot)' "$(fill "$Q_CALLS" '' "$sid")" \
+        '\x off' '\echo == events' "$(fill "$Q_EVENTS" '' "$sid")"
+      ;;
+  esac
+}
+
+main "$@"
