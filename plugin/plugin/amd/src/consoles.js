@@ -30,19 +30,34 @@
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 
 import {CISCO_TYPES, ConsoleConnection, KEYS, PORT_RE, THEME, loadXterm, note} from 'mod_gns3lab/console';
-import {snippetsFor} from 'mod_gns3lab/snippets';
+import {SnipMenu} from 'mod_gns3lab/snipmenu';
+import {snippetSet} from 'mod_gns3lab/snippets';
 import {svgEl as el, hel, store, fill} from 'mod_gns3lab/dom';
 import {clamp, esc} from 'mod_gns3lab/model';
 
 const ICON_X = '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
 const ICON_MAX = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
 const ICON_MIN = '<svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg>';
+const ICON_LIST = '<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>';
+
+/**
+ * Font sizes of the terminals, px. The choice is one for all consoles and stays in the browser: a student with weak
+ * sight takes it larger, a student on a small screen smaller.
+ */
+export const FONT_STEPS = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
+
+/** Font size before the student chooses one, px. */
+const FONT_DESKTOP = 12;
+const FONT_MOBILE = 13;
+
+/** Ctrl + wheel turns the size by one step after this much scrolling (a wheel notch is 100, a trackpad pinch is many small ones). */
+const FONT_WHEEL_STEP = 50;
 
 /** The kinds of connection state that mean the console works now (a green dot). */
 const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: 'off', failed: 'bad', idle: 'wait', closed: 'off'};
 
 /**
- * One console: the terminal, its connection, the snippets strip.
+ * One console: the terminal, its connection, the bar under it (snippets and font size).
  */
 class Con {
     /**
@@ -66,36 +81,174 @@ class Con {
         this.flowOut = 0;
         this.host = hel('div', 'termhost');
         this.viewport = hel('div', 'termview', this.host);
-        this.buildSnippets();
-        this.ro = new ResizeObserver(() => this.refit());
+        this.buildBar();
+        this.wheelSum = 0;
+        this.host.addEventListener('wheel', event => this.wheel(event), {capture: true, passive: false});
+        this.ro = new ResizeObserver(() => {
+            this.refit();
+            this.fadeSnips();
+        });
         this.ro.observe(this.host);
     }
 
-    buildSnippets() {
-        const o = this.owner, strip = hel('div', 'snips', this.host);
-        strip.setAttribute('role', 'group');
-        strip.setAttribute('aria-label', fill(o.s('ui_snippets_for'), this.n.name));
-        hel('span', 'lbl', strip).textContent = o.s('ui_snippets');
-        snippetsFor(this.n).forEach(sn => {
+    /** The bar under the terminal: the snippets menu, the pinned snippets, the font size. */
+    buildBar() {
+        const o = this.owner, bar = hel('div', 'tbar', this.host);
+        bar.setAttribute('role', 'toolbar');
+        bar.setAttribute('aria-label', fill(o.s('ui_snippets_for'), this.n.name));
+        this.quick = hel('div', 'snips');
+        this.quick.setAttribute('role', 'group');
+        this.quick.setAttribute('aria-label', o.s('ui_snippets'));
+        if (!o.readonly) {
+            // An observer cannot type, so he gets no snippets, only the font size.
+            const b = hel('button', 'snipbtn', bar);
+            b.type = 'button';
+            b.innerHTML = ICON_LIST + '<span></span><i aria-hidden="true"></i>';
+            b.querySelector('span').textContent = o.s('ui_snippets');
+            b.setAttribute('aria-haspopup', 'dialog');
+            b.setAttribute('aria-expanded', 'false');
+            b.addEventListener('pointerdown', e => e.preventDefault());
+            b.addEventListener('click', () => o.snip.toggle(this, b));
+            this.menuBtn = b;
+        }
+        bar.appendChild(this.quick);
+        this.quick.addEventListener('scroll', () => this.fadeSnips(), {passive: true});
+        // The wheel over the strip scrolls it sideways: the scrollbar is hidden.
+        this.quick.addEventListener('wheel', event => {
+            const strip = this.quick;
+            if (!event.deltaY || event.deltaX || strip.scrollWidth <= strip.clientWidth) return;
+            strip.scrollLeft += event.deltaY;
+            event.preventDefault();
+        }, {passive: false});
+        this.renderQuick();
+        this.buildFont(bar);
+        this.applyFont();
+    }
+
+    /** The snippets pinned to the bar. */
+    renderQuick() {
+        const o = this.owner, strip = this.quick;
+        o.snip.hideTip();
+        strip.textContent = '';
+        if (o.readonly) {
+            return;
+        }
+        const items = o.pinnedFor(this.n);
+        if (!items.length) {
+            hel('span', 'nopins', strip).textContent = o.s('ui_snip_nopins');
+        }
+        items.forEach(item => {
             const b = hel('button', 'snip', strip);
             b.type = 'button';
-            b.textContent = sn.label;
-            b.title = sn.title;
-            b.disabled = o.readonly;
-            b.setAttribute('aria-label', fill(o.s('ui_snippet_run'), sn.title));
+            b.dataset.id = item.id;
+            b.dataset.g = item.group;
+            hel('span', 'sdot', b);
+            hel('span', 'sl', b).textContent = item.short + (item.insertOnly ? '…' : '');
+            b.setAttribute('aria-label', fill(o.s(item.insertOnly ? 'ui_snippet_type' : 'ui_snippet_run'), item.cmd.trim()));
             b.addEventListener('pointerdown', e => e.preventDefault());
             b.addEventListener('click', () => {
-                if (!this.send(sn.seq)) {
-                    o.toast(fill(o.s('ui_not_connected'), this.n.name));
-                    return;
+                if (this.runSnippet(item.seq)) {
+                    this.flash(item.id);
                 }
-                o.active = this.n.id;
-                this.unread = false;
-                o.paintBadges(this);
-                o.markFocus();
+            });
+            o.snip.attachTip(b, item);
+        });
+        requestAnimationFrame(() => this.fadeSnips());
+    }
+
+    /** A fade at the edge of the strip says that more pinned snippets wait beyond it. */
+    fadeSnips() {
+        const strip = this.quick;
+        strip.classList.toggle('more', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2);
+        strip.classList.toggle('less', strip.scrollLeft > 2);
+    }
+
+    /**
+     * Sends a snippet to the device and makes this console the current one.
+     *
+     * @param {string} seq bytes
+     * @returns {boolean} false: the console is not connected
+     */
+    runSnippet(seq) {
+        const o = this.owner;
+        if (!this.send(seq)) {
+            o.toast(fill(o.s('ui_not_connected'), this.n.name));
+            return false;
+        }
+        o.active = this.n.id;
+        this.unread = false;
+        o.paintBadges(this);
+        o.markFocus();
+        this.focus();
+        return true;
+    }
+
+    /**
+     * A short flash on the pinned button of a snippet that was just sent.
+     *
+     * @param {string} id snippet id
+     */
+    flash(id) {
+        const b = Array.from(this.quick.querySelectorAll('.snip')).find(x => x.dataset.id === id);
+        if (!b) return;
+        b.classList.remove('sent');
+        void b.offsetWidth;
+        b.classList.add('sent');
+        setTimeout(() => b.classList.remove('sent'), 700);
+    }
+
+    /** Smaller, size, larger: the size is one for all consoles. */
+    buildFont(bar) {
+        const o = this.owner, g = hel('div', 'tfont', bar);
+        g.setAttribute('role', 'group');
+        g.setAttribute('aria-label', o.s('ui_font'));
+        const button = (cls, text, label, action) => {
+            const b = hel('button', cls, g);
+            b.type = 'button';
+            b.textContent = text;
+            b.setAttribute('aria-label', label);
+            b.title = label;
+            b.addEventListener('pointerdown', e => e.preventDefault());
+            b.addEventListener('click', () => {
+                if (b.getAttribute('aria-disabled') !== 'true') action();
                 this.focus();
             });
-        });
+            return b;
+        };
+        this.fontDec = button('tf-btn tf-dec', 'A−', o.s('ui_font_smaller'), () => o.stepFont(-1));
+        this.fontVal = button('tf-btn tf-val', '', '', () => o.resetFont());
+        this.fontVal.setAttribute('aria-live', 'polite');
+        this.fontInc = button('tf-btn tf-inc', 'A+', o.s('ui_font_larger'), () => o.stepFont(1));
+    }
+
+    /** The size of the font of the owner: in the terminal and in the controls. */
+    applyFont() {
+        const o = this.owner, size = o.fontSize;
+        this.fontVal.textContent = String(size);
+        const label = fill(o.s('ui_font_reset'), size);
+        this.fontVal.title = label;
+        this.fontVal.setAttribute('aria-label', label);
+        this.fontDec.setAttribute('aria-disabled', String(size <= FONT_STEPS[0]));
+        this.fontInc.setAttribute('aria-disabled', String(size >= FONT_STEPS[FONT_STEPS.length - 1]));
+        this.fontVal.classList.toggle('custom', size !== o.defaultFont());
+        if (this.term && this.term.options.fontSize !== size) {
+            this.term.options.fontSize = size;
+            this.refit();
+        }
+    }
+
+    /** Ctrl + wheel over the terminal or its bar changes the font instead of zooming the page. */
+    wheel(event) {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const delta = event.deltaMode === 0 ? event.deltaY : event.deltaY * 33;
+        if (this.wheelSum * delta < 0) this.wheelSum = 0;
+        this.wheelSum += delta;
+        if (Math.abs(this.wheelSum) >= FONT_WHEEL_STEP) {
+            this.owner.stepFont(this.wheelSum < 0 ? 1 : -1);
+            this.wheelSum = 0;
+        }
     }
 
     /**
@@ -115,7 +268,7 @@ class Con {
         const o = this.owner, {Terminal, FitAddon} = o.xterm;
         this.term = new Terminal({
             fontFamily: getComputedStyle(o.root).getPropertyValue('--mono').trim() || 'monospace',
-            fontSize: o.stage.mobile ? 13 : 13.5, lineHeight: 1.15, cursorBlink: !o.readonly,
+            fontSize: o.fontSize, lineHeight: 1.15, cursorBlink: !o.readonly,
             scrollback: o.stage.mobile ? 1000 : 3000, theme: THEME, disableStdin: o.readonly,
         });
         this.fit = new FitAddon();
@@ -279,6 +432,7 @@ class Con {
     }
 
     dispose() {
+        this.owner.snip.closeFor(this);
         this.ro.disconnect();
         clearTimeout(this.flowT);
         if (this.conn) this.conn.close();
@@ -314,6 +468,9 @@ export class Consoles {
         this.xterm = null;
         this.cons = new Map();
         this.active = null;
+        this.fontSize = this.loadFont();
+        this.pins = store.get('snippins', {});
+        this.snip = new SnipMenu(this);
         this.mode = store.get('mode', 'panel');
         if (!['panel', 'grid', 'windows'].includes(this.mode)) this.mode = 'panel';
         this.diving = false;
@@ -350,6 +507,62 @@ export class Consoles {
 
     has(nodeId) {
         return this.cons.has(nodeId);
+    }
+
+    /* ---------------- font size and pinned snippets: shared by all consoles, kept in the browser ---------------- */
+
+    defaultFont() {
+        return this.stage.mobile ? FONT_MOBILE : FONT_DESKTOP;
+    }
+
+    loadFont() {
+        const size = Number(store.get('termfont', 0));
+        return FONT_STEPS.includes(size) ? size : this.defaultFont();
+    }
+
+    setFont(size) {
+        if (size === this.fontSize) return;
+        this.fontSize = size;
+        store.set('termfont', size);
+        this.cons.forEach(c => c.applyFont());
+    }
+
+    /** One step larger (1) or smaller (-1). */
+    stepFont(dir) {
+        const i = FONT_STEPS.indexOf(this.fontSize);
+        this.setFont(FONT_STEPS[clamp(i + dir, 0, FONT_STEPS.length - 1)]);
+    }
+
+    /** Back to the default size, which follows the screen: phone or desktop. */
+    resetFont() {
+        this.fontSize = this.defaultFont();
+        store.set('termfont', 0);
+        this.cons.forEach(c => c.applyFont());
+    }
+
+    /** Ids of the snippets on the bar for this set of snippets: the choice of the student or the defaults. */
+    pinIds(set) {
+        const ids = this.pins[set.pinKey];
+        return Array.isArray(ids) ? ids : set.defaults;
+    }
+
+    isPinned(set, id) {
+        return this.pinIds(set).includes(id);
+    }
+
+    /** The snippets of a node that are pinned to the bar, in the order of the menu. */
+    pinnedFor(node) {
+        const set = snippetSet(node), ids = this.pinIds(set);
+        return set.items.filter(item => ids.includes(item.id));
+    }
+
+    togglePin(set, id) {
+        const ids = this.pinIds(set);
+        this.pins = {...this.pins, [set.pinKey]: ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]};
+        store.set('snippins', this.pins);
+        this.cons.forEach(c => {
+            if (snippetSet(c.n).pinKey === set.pinKey) c.renderQuick();
+        });
     }
 
     /* ---------------- open and close ---------------- */
@@ -462,6 +675,7 @@ export class Consoles {
 
     layout() {
         const stage = this.stage, mobile = stage.mobile;
+        this.snip.close(false);
         this.root.classList.toggle('mob', mobile);
         this.box.dataset.mode = mobile ? 'mobile' : this.mode;
         this.box.classList.toggle('has-cons', this.cons.size > 0);
@@ -840,6 +1054,10 @@ export class Consoles {
     /** The page became phone sized or the other way round. */
     mobileChanged(mobile) {
         if (!mobile && this.diving) this.exitDive(false);
+        if (!Number(store.get('termfont', 0))) {
+            this.fontSize = this.defaultFont();
+            this.cons.forEach(c => c.applyFont());
+        }
         this.layout();
         this.renderTabsAndChips();
     }

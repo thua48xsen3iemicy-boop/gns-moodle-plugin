@@ -29,6 +29,7 @@
 
 import {getStrings} from 'core/str';
 import {STRING_KEYS as CONSOLE_KEYS} from 'mod_gns3lab/console';
+import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
@@ -44,7 +45,9 @@ const UI_KEYS = [
     ...CATEGORIES.map(c => 'ui_cat_' + c),
     'ui_chip_touch', 'ui_chip_mouse', 'ui_hint_touch', 'ui_hint_mouse', 'ui_link_aria', 'ui_filter_on', 'ui_port_unlinked',
     'ui_console', 'ui_new', 'ui_link', 'ui_status_nodata', 'ui_open_console', 'ui_console_of', 'ui_close',
-    'ui_snippets', 'ui_snippets_for', 'ui_snippet_run', 'ui_not_connected', 'ui_term_fail', 'ui_close_console',
+    'ui_snippets', 'ui_snippets_for', 'ui_snippet_run', 'ui_snippet_type', 'ui_snip_filter', 'ui_snip_none', 'ui_snip_insert',
+    'ui_snip_pin', 'ui_snip_unpin', 'ui_snip_hint_run', 'ui_snip_hint_type', 'ui_snip_keys', 'ui_snip_ios_prep',
+    'ui_snip_nopins', 'ui_font', 'ui_font_smaller', 'ui_font_larger', 'ui_font_reset', 'ui_not_connected', 'ui_term_fail', 'ui_close_console',
     'ui_minimize', 'ui_maximize', 'ui_new_output', 'ui_grid_hint', 'ui_dive_release',
     'ui_act_console', 'ui_act_console_open', 'ui_act_console_goto', 'ui_act_info', 'ui_act_info_full', 'ui_act_zoom',
     'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
@@ -397,7 +400,7 @@ export const init = async(prefix, cmid, userid = 0) => {
         return;
     }
     root.dataset.labReady = '1';
-    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...CONSOLE_KEYS])];
+    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...CONSOLE_KEYS, ...SNIPPET_KEYS])];
     const values = await getStrings(keys.map(key => ({key, component: 'mod_gns3lab'})));
     const strings = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
     new LabPage(root, {prefix, cmid, userid, strings});
