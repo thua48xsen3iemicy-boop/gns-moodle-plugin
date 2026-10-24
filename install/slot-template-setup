@@ -148,7 +148,10 @@ cmd_verify() {
 
 cmd_clean() {
   export DEBIAN_FRONTEND=noninteractive
-  [[ -z ${SSH_CONNECTION:-} ]] || die "clean removes sshd: run it with pct exec <vmid>, not over ssh"
+  # pct exec passes the node's SSH_CONNECTION on, so look for a login session of this CT's own sshd.
+  if command -v pgrep >/dev/null && pgrep -f '^sshd: .+@' >/dev/null; then
+    die "clean removes sshd: run it with pct exec <vmid>, not over ssh into the CT"
+  fi
   [[ -x /opt/gns3-server/bin/gns3server ]] || die "GNS3 is not installed: nothing to clean, run 'install' first"
   # Clones must not share anything that identifies one machine or one slot. Slots are reached with
   # pct only; a cloned sshd would share its host keys between all of them.
