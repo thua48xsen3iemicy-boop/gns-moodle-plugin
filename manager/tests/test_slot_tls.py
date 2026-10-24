@@ -1,4 +1,5 @@
 """Actual TLS handshake for manager REST and gateway WSS; no Proxmox needed."""
+import base64
 import importlib.util
 import ssl
 import subprocess
@@ -10,7 +11,8 @@ from aiohttp import web, ClientSession, WSMsgType
 from lab_manager.slot_client import SlotClient, SlotUnavailable
 
 
-async def test_verified_slot_rest_and_gateway_wss(tmp_path, monkeypatch):
+@pytest.mark.parametrize("ca_via", ["GW_SLOT_CA_B64", "GW_SLOT_CA_FILE"])
+async def test_verified_slot_rest_and_gateway_wss(tmp_path, monkeypatch, ca_via):
     root = Path(__file__).resolve().parents[2]
     subprocess.run(["bash", str(root / "agent/make-demo-pki.sh"), "localhost=127.0.0.1"],
                    cwd=tmp_path, capture_output=True, check=True, timeout=30)
@@ -49,7 +51,9 @@ async def test_verified_slot_rest_and_gateway_wss(tmp_path, monkeypatch):
         with pytest.raises(SlotUnavailable):
             await bad._call("GET", "/healthz")
         monkeypatch.setenv("GW_SLOT_SCHEME", "wss")
-        monkeypatch.setenv("GW_SLOT_CA_FILE", str(pki / "node-server-ca.crt"))
+        ca = pki / "node-server-ca.crt"
+        # B64 is what `gateway-env` writes (the unit hides the CA file's directory from the gateway)
+        monkeypatch.setenv(ca_via, base64.b64encode(ca.read_bytes()).decode() if ca_via.endswith("B64") else str(ca))
         monkeypatch.setenv("GW_SLOT_PORT", str(port))
         monkeypatch.setenv("GW_SLOTS", '{"127.0.0.1":"console-secret"}')
         monkeypatch.setenv("GW_ALLOWED_ORIGINS", "https://moodle.test")
