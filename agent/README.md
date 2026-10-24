@@ -319,6 +319,9 @@ needs the usual claim and `X-Lab-Epoch` / `X-Lab-Generation` headers, and never 
 - **Checks before the rollback**, from the CT's own file `/etc/pve/lxc/<vmid>.conf`: the snapshot
   must exist (`SNAPSHOT_MISSING`, 422), and must be `unprivileged: 1` with the tag `labslot`
   (`SNAPSHOT_UNSAFE`, 422); otherwise the rollback would leave a slot that this agent refuses to manage.
+- **The rest of the CT config is the administrator's.** The agent checks and changes only `mp0`, `mp1`,
+  `mp2`, cores, memory, the `labslot` tag and `unprivileged`; it never requires the CT config or the
+  snapshot to match anything else, and it keeps what the snapshot restored (network, hostname, features).
 - **Only the current config decides** what the agent may touch. `unprivileged:` and `tags:` lines in a
   snapshot section (`[lab-clean]`) or in `[pve:pending]` are ignored by the VMID checks.
 - The rollback is a mutating `pct` command like `start` and `stop`: a timeout leaves the slot in
