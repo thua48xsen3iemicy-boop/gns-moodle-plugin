@@ -232,6 +232,27 @@ $P enable 2101 2102 # на ноде менеджера: только новые 
   проверяет `https://PUBLIC_NAME/api/v1/info` с секретом сайта. Печатает значения для плагина
   (`secrets/moodle/plugin.txt`). Если Moodle не LXC на этой ноде, сертификат нужно поставить вручную.
 
+## Смотреть базу менеджера: `lab-db`
+
+`lab-db` запускают от root на ноде, где работает LXC менеджера (`MANAGER_VMID` из `lab.conf`). Он заходит
+в LXC через `pct exec` под пользователем `lab-manager`, берёт `DATABASE_URL` из `/etc/lab-manager/manager.env`
+(секреты не печатает) и открывает базу только на чтение: запись, например `DELETE`, база отклонит.
+
+```sh
+L=/mnt/pve/cfs/gns3-ro/install/lab-db
+$L sessions 5          # последние сессии: слот, статус, этап, код ошибки
+$L slots               # состояние слотов (то же, что lab-manager-admin slots, плюс владелец и in_config)
+$L why                 # почему упала последняя сессия с ошибкой: error, ответ слота, события
+$L why s-b8f66938cff9bb66
+$L calls s-b8f66938cff9bb66     # вызовы слота: deploy/stop, operation_id, result (ответ слота)
+$L events s-b8f66938cff9bb66    # журнал событий сессии
+$L sql "SELECT status, count(*) FROM sessions GROUP BY 1"
+```
+
+В `why` причину сбоя слота ищите в `error.source.error` и в `result` вызова `deploy`: слот пишет туда
+свои `code` и `message` (например, нет образа). Слот после сбоя остаётся `failed`, пока оператор не
+выполнит `lab-provision enable <VMID>`. Если LXC менеджера на другой ноде, скрипт скажет об этом.
+
 ## Ограничения тестового режима
 
 - Ключи CA лежат в `secrets/ca`. Перед рабочим режимом унесите их офлайн и **перевыпустите всё**:
