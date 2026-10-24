@@ -9,7 +9,9 @@ Commands never print secrets, except `gateway-env`, which writes the gateway's e
 
 import argparse
 import asyncio
+import base64
 import json
+import ssl
 import sys
 from urllib.parse import urlsplit
 
@@ -56,6 +58,19 @@ def cmd_check_config(args):
     }, ensure_ascii=False))
 
 
+def _slot_ca_b64(path) -> str:
+    """The slot CA as one base64 line. The gateway's unit hides /etc/lab-manager from its dynamic
+    user, so a path to SLOT_CA_FILE in gateway.env would be unreadable there."""
+    try:
+        pem = path.read_text("ascii")
+        if "-----BEGIN CERTIFICATE-----" not in pem:
+            raise ValueError("no PEM certificate in it")
+        ssl.create_default_context(cadata=pem)
+    except (OSError, ValueError) as exc:  # ssl.SSLError is an OSError
+        raise SystemExit(f"CONFIG_ERROR: SLOT_CA_FILE {path} is not a readable PEM CA: {exc}") from exc
+    return base64.b64encode(pem.encode("ascii")).decode("ascii")
+
+
 def gateway_env(s) -> str:
     """Env file of the console gateway from the manager's own config: one source for the slot
     console tokens, the ticket key and the Moodle origins (README §1.1)."""
@@ -74,7 +89,7 @@ def gateway_env(s) -> str:
         "GW_ALLOWED_ORIGINS": ",".join(origins),
         "GW_SLOTS": json.dumps(slots, separators=(",", ":")),
         "GW_SLOT_SCHEME": "wss" if s.slot_scheme == "https" else "ws",
-        "GW_SLOT_CA_FILE": str(s.slot_ca_file) if s.slot_ca_file else "",
+        "GW_SLOT_CA_B64": _slot_ca_b64(s.slot_ca_file) if s.slot_ca_file else "",
         "GW_ALLOW_PLAINTEXT_SLOTS": "1" if s.allow_plaintext_slots else "0",
     }
     if any("'" in v or "\n" in v for v in values.values()):
