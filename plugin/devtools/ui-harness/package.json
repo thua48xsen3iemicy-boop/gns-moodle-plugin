@@ -1,0 +1,18 @@
+{
+  "name": "gns3lab-ui-harness",
+  "private": true,
+  "description": "Runs the student interface of mod_gns3lab in a browser without Moodle (see README.md)",
+  "scripts": {
+    "build": "node build.js",
+    "serve": "node server.js"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-transform-dynamic-import": "^7.29.7",
+    "@babel/plugin-transform-modules-amd": "^7.25.0",
+    "mustache": "^4.2.0",
+    "requirejs": "^2.3.7",
+    "terser": "^5.36.0",
+    "ws": "^8.18.0"
+  }
+}

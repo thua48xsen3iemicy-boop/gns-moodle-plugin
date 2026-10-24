@@ -5,6 +5,7 @@
 | `build_zip.sh` | ZIP плагина для установки через интерфейс Moodle |
 | `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` в демо-лабу плагина |
 | `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot |
+| `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
 
 ## Плагин с консолями без Proxmox
 
