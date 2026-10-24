@@ -1,7 +1,9 @@
 {
   "version": "0.5.0",
-  "build_id": "sha256:bcb8e39c53febc95bfde1145c5b729698da5919e3039abe9a134a09c6166a474",
+  "build_id": "sha256:0ffe13b904810e00978064208c5b10d72944873601964a6228d1559264dedb39",
   "files": {
+    "AGENTS.md": "92aabc43b794d40b51c513f522c3ed045138c5a06672c72b240cc220d63a9fbd",
+    "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
     "README.md": "098c4a85e6837a6b46617ea200e8187a1e03d3a67e6dcbe49c63dcbfbff17db1",
     "api/__init__.py": "b61bb532c208db9570b32a1b4903291e1cb21600ea4bd89c101ca995f7ec324d",
     "api/auth.py": "3b6238c07a3068450132d3051b7cd6aa7a979381809607daf305c1203879ae9f",
