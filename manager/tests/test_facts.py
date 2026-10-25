@@ -107,6 +107,20 @@ def test_build_state_merges_collectors_and_marks_failures():
                   "error": {"code": "unreachable", "message": "no channel"}}  # never collected: no collected_at
 
 
+def test_switch_net_replaces_the_interfaces_of_linux_net_and_keeps_its_routes():
+    ports = [{"name": "ens3", "kind": "physical", "admin": "up", "oper": "up", "mac": "0c:00:00:00:00:01",
+              "switchport": {"mode": "access", "vlan": 10}},
+             {"name": "ens4", "kind": "physical", "admin": "up", "oper": "up", "mac": "0c:00:00:00:00:02",
+              "switchport": {"mode": "trunk", "allowed": [10, 20], "native": None}}]
+    # Rows arrive in any order: the precedence comes from the collector names, not from the storage.
+    rows = [row("sw", "switch.net", {"interfaces": ports}, name="SW1"),
+            row("sw", "linux.net", DATA, name="SW1")]
+    node = build_state(1, rows, {"sw": "started"}, 90)["nodes"]["sw"]
+    assert node["interfaces"] == ports  # replaced as a whole, not merged by name
+    assert node["routes"] == DATA["routes"]
+    assert build_state(1, rows[::-1], {"sw": "started"}, 90) == build_state(1, rows, {"sw": "started"}, 90)
+
+
 def test_build_state_of_a_lab_without_facts_and_of_a_stopped_one():
     assert build_state(0, [], {}, 90) == {"schema": "gns3lab.facts/1", "rev": 0, "ttl": 90, "nodes": {}}
     stopped = build_state(2, [row("n1", "linux.net", DATA)], {}, 90)
