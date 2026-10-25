@@ -69,30 +69,61 @@ function indexFacts(m, facts){
   });
   return fx;
 }
-export const endIf = (fx, e) => (fx && fx.byPort.get(e.nodeId + "|" + e.adapter + "/" + e.port)) || null;
+const endKey = e => e.nodeId + "|" + e.adapter + "/" + e.port;
+export const endIf = (fx, e) => (fx && fx.byPort.get(endKey(e))) || null;
 const portOf = (f, i) => i.port || (i.parent && f.byName.get(i.parent) && f.byName.get(i.parent).port) || null;
 const endIs = (e, nodeId, p) => e.nodeId === nodeId && e.adapter === p.adapter && e.port === p.port;
 
-/* L1: линк не работает, если приостановлен, нода остановлена или интерфейс выключен / без несущей */
+/**
+ * State of a link end as the scheme shows it (L1 `ends`).
+ *
+ * @param {object|null} der derived layers
+ * @param {{nodeId: string, adapter: number, port: number}} e end of a link of the model
+ * @returns {{down: boolean}|null} null without facts or for a port that is not on a link
+ */
+export const endState = (der, e) => (der && der.l1.ends.get(endKey(e))) || null;
+
+/**
+ * State of the link end an interface sits on.
+ *
+ * @param {object|null} der derived layers
+ * @param {object} f facts record of the node
+ * @param {object} i interface of the node
+ * @returns {{down: boolean}|null} null if the interface is not on a link
+ */
+export const portEnd = (der, f, i) => {
+  const p = portOf(f, i);
+  return p ? endState(der, {nodeId: f.id, adapter: p.adapter, port: p.port}) : null;
+};
+
+/*
+ * L1: линк не работает, если приостановлен, нода остановлена или интерфейс выключен / без несущей.
+ * ends — состояние каждого конца линка. У конца с switchport собственные admin / oper не читаются: порт коммутатора
+ * повторяет линк, который падает только по остальным причинам. Остальные концы падают, если остановлена нода или линк
+ * приостановлен, либо их собственный интерфейс выключен / без несущей.
+ */
 function deriveL1(m, fx){
-  const links = new Map(), issues = [];
+  const links = new Map(), ends = new Map(), issues = [];
   m.links.forEach(l => {
-    const hard = [], soft = [];
+    const hard = [], soft = [], sw = [], own = [];
     let cfg = false;                                   // причина в настройке устройства, а не в состоянии лабы
+    let halted = !!l.suspend;                          // линк приостановлен или нода любого конца остановлена
     if (l.suspend) hard.push("линк приостановлен в GNS3");
-    [l.a, l.b].forEach(e => {
+    [l.a, l.b].forEach((e, k) => {
       const N = m.nodes.get(e.nodeId), f = fx.nodes.get(e.nodeId), i = endIf(fx, e);
-      if (f && NODE_OFF[f.status]) hard.push(`${N.name} ${NODE_OFF[f.status]}`);
-      else if (i && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; }
-      else if (i && i.oper === "down") soft.push(`${N.name} ${i.name}: нет несущей`);
+      sw[k] = !!(i && i.switchport); own[k] = false;
+      if (f && NODE_OFF[f.status]) { hard.push(`${N.name} ${NODE_OFF[f.status]}`); halted = true; }
+      else if (i && !sw[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = true; }
+      else if (i && !sw[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
     });
     const why = hard.length ? hard : soft;
     if (!hard.length && soft.length) cfg = true;
     links.set(l.id, { down: why.length > 0, why });
+    [l.a, l.b].forEach((e, k) => ends.set(endKey(e), { down: sw[k] ? why.length > 0 : halted || own[k] }));
     if (why.length) issues.push({ sev: cfg ? "bad" : "info",
       text: `Линк ${epName(m, l.a)} — ${epName(m, l.b)} не работает: ${why.join("; ")}.`, go: { kind: "link", id: l.id } });
   });
-  return { links, issues };
+  return { links, ends, issues };
 }
 const epName = (m, e) => m.nodes.get(e.nodeId).name + " " + e.text;
 
@@ -101,11 +132,14 @@ function wireTags(f, i){
   const sp = i.switchport;
   if (sp && sp.mode === "access") return { sw: true, sp, set: new Set(["u"]), any: false, map: t => t === "u" ? +sp.vlan : null };
   if (sp && sp.mode === "trunk") {
-    const nat = sp.native != null ? +sp.native : 1, all = sp.allowed == null || sp.allowed === "all";
-    const allowed = all ? null : new Set(sp.allowed.map(Number)), set = new Set(["u"]);
+    // no native at all (null): the trunk neither takes nor sends frames without a tag; a missing native is VLAN 1
+    const nat = sp.native === null ? null : sp.native != null ? +sp.native : 1, all = sp.allowed == null || sp.allowed === "all";
+    const allowed = all ? null : new Set(sp.allowed.map(Number)), set = new Set(nat === null ? [] : ["u"]);
     if (allowed) allowed.forEach(v => { if (v !== nat) set.add(v); });
     return { sw: true, sp, set, any: all, nat, map: t => t === "u" ? nat : t !== nat && (all || allowed.has(t)) ? t : null };
   }
+  // a port without any VLAN forwards nothing: no L2 for it
+  if (sp && sp.mode === "none") return { sw: true, sp, set: new Set(), any: false, none: true, map: () => null };
   if (sp) return null;
   const subs = f.subs(i.name), set = new Set();
   if (v4(i).length || !subs.length) set.add("u");
@@ -132,7 +166,8 @@ function switchVlans(f){
 }
 function tagIssue(m, t, from, to, wTo){
   const F = epName(m, from), T = epName(m, to);
-  if (t === "u") return `${F} шлёт кадры без тега, а у ${T} только сабинтерфейсы с dot1q — такие кадры он отбросит.`;
+  if (t === "u") return wTo.sw ? `${F} шлёт кадры без тега, а на транке ${T} native нет — такие кадры он отбросит.`
+    : `${F} шлёт кадры без тега, а у ${T} только сабинтерфейсы с dot1q — такие кадры он отбросит.`;
   const why = !wTo.sw ? `у ${T} нет сабинтерфейса с dot1q ${t}`
     : wTo.sp.mode === "access" ? `${T} — access-порт в VLAN ${wTo.sp.vlan}, кадры с тегом он не принимает`
     : t === wTo.nat ? `на транке ${T} это native VLAN — его кадры должны идти без тега`
@@ -158,7 +193,7 @@ function deriveL2(m, fx, l1){
     const trunk = [wa, wb].some(w => w && w.sw && w.sp.mode === "trunk"), sw = [wa, wb].some(w => w && w.sw);
     const rec = { id: l.id, kind: trunk ? "trunk" : sw ? "access" : "p2p", wa, wb, ia, ib, known: !!(wa && wb), vlans: [], tags: [], issues: [] };
     links.set(l.id, rec);
-    if (!rec.known || l1.links.get(l.id).down) return;
+    if (!rec.known || l1.links.get(l.id).down || wa.none || wb.none) return;
     const cand = new Set([...wa.set, ...wb.set]);
     if (wa.any && wb.any) [l.a.nodeId, l.b.nodeId].forEach(idv => switchVlans(fx.nodes.get(idv)).forEach(v => cand.add(v)));
     cand.forEach(t => {
@@ -171,7 +206,7 @@ function deriveL2(m, fx, l1){
         rec.issues.push(va ? tagIssue(m, t, l.a, l.b, wb) : tagIssue(m, t, l.b, l.a, wa));
       }
     });
-    if (wa.sw && wb.sw && wa.map("u") !== wb.map("u"))
+    if (wa.sw && wb.sw && wa.map("u") != null && wb.map("u") != null && wa.map("u") !== wb.map("u"))
       rec.issues.push(`Кадры без тега склеивают VLAN ${wa.map("u")} на ${epName(m, l.a)} и VLAN ${wb.map("u")} на ${epName(m, l.b)}: native или access VLAN на концах не совпадают.`);
     rec.vlans.sort((a, b) => a - b);
     rec.issues.forEach(text => issues.push({ sev: "warn", text, go: { kind: "link", id: l.id } }));
