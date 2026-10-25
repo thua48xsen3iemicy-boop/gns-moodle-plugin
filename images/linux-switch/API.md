@@ -1,4 +1,4 @@
-# Switch API 0.1.0
+# Switch API 0.1.1
 
 Python standard-library daemon, local Unix socket and a CLI for QGA. Runtime
 dependencies inside Debian 13: python3, iproute2, tcpdump, systemd and
@@ -14,20 +14,34 @@ Run from this image recipe directory, while SSH and package access still work:
 ```sh
 apt-get update
 apt-get install --no-install-recommends python3 iproute2 tcpdump qemu-guest-agent
-install -d -m 0755 /opt/switch-api/switch_api
-install -m 0644 switch_api/*.py /opt/switch-api/switch_api/
-install -m 0755 bin/switchctl /usr/local/sbin/switchctl
-install -d -m 0700 /etc/switch-api
-install -m 0644 system/switch-api.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable switch-api.service
+python3 tools/install_guest.py prepare
 ```
 
-Install the network profile from README.md as well: in this version the bridge
-starts VLAN-filtered with no default membership. The daemon assigns access VLAN 1
-on an unconfigured image. Ports remain isolated until the daemon has reconciled
-them. Do not restart networkd or start the API over the temporary SSH network;
-activate on the final reboot after verifying QGA and serial access.
+Preparation installs the API and stages all three bridge profile files under
+/opt/switch-api/network-profile. It does not run systemctl, activate networking,
+enable the new service or stop SSH. The script resolves its source directory
+relative to itself, so it does not depend on the current working directory.
+
+Verify QGA command execution from the platform and console login. Then, as the
+last deployment step inside the dedicated guest:
+
+```sh
+python3 tools/install_guest.py activate
+reboot
+```
+
+Activation backs up existing .network/.netdev files under /var/backups/switch-network,
+installs and verifies all three staged files in /etc/systemd/network, disables
+cloud-init's future execution if installed, enables networkd/API/serial getty and
+masks the previous network managers. SSH service/socket are masked last, without
+--now. The sshd alias is deliberately not masked. The script never reboots or
+restarts networking; the administrator runs reboot after it succeeds.
+
+At final boot the bridge starts VLAN-filtered with no default membership. The
+daemon assigns access VLAN 1 on an unconfigured image. Ports remain isolated until
+the daemon reconciles them. A service preflight now rejects missing or malformed
+bridge profiles instead of leaving the API running against a nonexistent bridge.
+Do not restart networkd or start the API over the temporary SSH network.
 
 The production daemon is root with NET_ADMIN/NET_RAW and SETUID/SETGID capabilities
 (tcpdump drops to nobody after opening its capture socket), a private
@@ -84,4 +98,6 @@ privileged networking, VM or GNS3 environment is started.
    CPU at two simultaneous captures under representative load.
 
 These checks require the owner's GNS3 test environment and are not replaced by
-the unit tests. Live guest verification has not yet been performed.
+the unit tests. The owner verified bridge creation and status/ports/vlans in a
+Debian guest after installing the three network files. End-to-end VLAN forwarding,
+capture behavior and the new installer still require guest acceptance testing.

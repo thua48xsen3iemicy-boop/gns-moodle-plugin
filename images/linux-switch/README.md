@@ -1,4 +1,4 @@
-# Linux switch guest image 0.1.0
+# Linux switch guest image 0.1.1
 
 Base: Debian 13 (trixie) minimal, amd64, Linux bridge, systemd-networkd and
 qemu-guest-agent from the maintained Debian repositories. These files configure
@@ -48,6 +48,16 @@ apt-get full-upgrade -y
 apt-get install --no-install-recommends python3 iproute2 tcpdump qemu-guest-agent systemd
 ```
 
+Install the API and stage its network profile using the same installer:
+
+```sh
+python3 tools/install_guest.py prepare
+```
+
+This installs all API files and stages all three network files together without
+enabling the API, invoking systemctl or changing the running network. Do not use
+the earlier manual API-only installation sequence.
+
 Reboot after the upgrade while the original network and SSH configuration are
 still intact. Prepare the image over SSH; leave SSH and the current network
 manager running until the final activation step below. Do not start or restart
@@ -56,13 +66,12 @@ addresses during SSH preparation. If networkd already owns the temporary SSH
 network, stage the new network files outside /etc/systemd/network until the final
 step. If SSH uses IPv6, applying the appliance sysctls would disconnect it.
 
-At final activation, remove temporary
-Ethernet configuration from `/etc/network/interfaces` and its includes, cloud-init
-network configuration, and other `.network` files which match the same cards.
-If ifupdown, NetworkManager or cloud-init is present in the base image, disable
-its network configuration before the next boot. systemd-networkd must be the
-sole owner of the switch interfaces. It uses the first matching `.network` file;
-check `/run/systemd/network` and `/usr/lib/systemd/network` as well as `/etc`.
+At final activation the installer backs up existing .network/.netdev files in
+/etc/systemd/network, installs the complete profile, disables the previous network
+managers and disables cloud-init if present. systemd-networkd must be the sole
+owner of the switch interfaces. It uses the first matching .network file; check
+/run/systemd/network and /usr/lib/systemd/network for any additional custom
+profiles that could override this dedicated guest's configuration.
 
 Enable guest management during preparation:
 
@@ -141,22 +150,17 @@ measured under load. IP forwarding is off; Ethernet bridging remains enabled.
 ### Final activation: disable SSH last
 
 Finish all package installation and file transfer first. Verify QGA and the
-serial console. Remove the old persistent Ethernet configuration described
-above, then install the bridge profile and prevent the temporary services from
-starting on the next boot. Run from this recipe's directory:
+serial console, then activate the complete staged installation:
 
 ```sh
-install -d /etc/systemd/network
-install -m 0644 network/* /etc/systemd/network/
-systemctl enable systemd-networkd.service
-systemctl enable switch-api.service
-systemctl mask networking.service NetworkManager.service systemd-resolved.service
-systemctl mask ssh.service ssh.socket sshd.service
+python3 tools/install_guest.py activate
 reboot
 ```
 
 The final masks deliberately omit --now: the running SSH service and current
 network remain available until reboot. Do not manually flush addresses over SSH.
+SSH is masked only after the three installed profile files are validated. Do not
+mask sshd.service: it can already be an alias symlink to ssh.service on Debian.
 After reboot the old temporary addresses are absent, networkd applies the bridge
 profile, and guest management uses QGA and the serial console.
 

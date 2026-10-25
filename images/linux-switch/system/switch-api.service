@@ -5,6 +5,7 @@ After=systemd-networkd.service
 
 [Service]
 Type=simple
+ExecStartPre=/usr/bin/python3 -m switch_api.preflight
 ExecStart=/usr/bin/python3 -m switch_api.server
 WorkingDirectory=/opt/switch-api
 Environment=PYTHONPATH=/opt/switch-api
@@ -30,7 +31,7 @@ LimitCORE=0
 TasksMax=32
 MemoryMax=64M
 StandardOutput=null
-StandardError=null
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
