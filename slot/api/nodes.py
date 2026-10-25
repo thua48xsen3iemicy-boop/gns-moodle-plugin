@@ -55,6 +55,11 @@ async def qga_exec(
 async def enable_serial_getty(request: Request, project_id: UUID, node_id: UUID):
     """Enable a persistent Linux login console on ttyS0; QEMU QGA must be reachable."""
     node = await call(request, "GET", f"projects/{project_id}/nodes/{node_id}")
+    if node.get("console_type") == "vnc":
+        # No serial port is attached to such a node: ttyS0 does not exist in the guest.
+        raise HTTPException(
+            409, "Serial getty setup is not available for a node with a VNC console"
+        )
     if node.get("node_type") != "qemu" or node.get("status") != "started":
         raise HTTPException(409, "Serial getty setup requires a running QEMU node")
     qga = get_lifecycle(request).qga
