@@ -290,6 +290,9 @@ class FakeSlot:
         self.stopped_nodes = set()  # Node names reported as stopped in the topology
         self.student_state = student_state
         self.fence = (0, 0)
+        self.facts_enabled = False  # Slot 0.6.0 serves /facts; older slots answer 404
+        self.facts = {}  # project_id -> {node_id: {"name", "collectors": {...}}} served by GET /facts
+        self.refreshes = []  # project ids the manager asked to collect now
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -390,6 +393,13 @@ class FakeSlot:
             token = (int(request.headers.get("X-Lab-Epoch", 0)), int(request.headers.get("X-Lab-Generation", 0)))
             if token != self.fence:
                 return self._json(409, {"detail": {"code": "STALE_OWNER"}})
+        facts = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/facts(/refresh)?", path)
+        if facts and self.facts_enabled:
+            if facts.group(2):
+                self.refreshes.append(facts.group(1))
+                return self._json(202, {"accepted": True})
+            return self._json(200, {"schema": "gns3lab.slot-facts/1", "project_id": facts.group(1),
+                                    "nodes": self.facts.get(facts.group(1), {})})
         key = request.headers.get("Idempotency-Key")
         if path == "/v1/labs/deploy" and request.method == "POST":
             ticket = json.loads(request.content)

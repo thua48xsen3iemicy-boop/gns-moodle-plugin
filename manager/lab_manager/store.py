@@ -13,6 +13,8 @@ import uuid
 import psycopg
 from psycopg.types.json import Jsonb
 
+from .facts import differs
+
 LIVE = ("queued", "starting", "running", "stopping")
 TERMINAL = ("stopped", "failed")
 SESSION_FIELDS = {
@@ -462,6 +464,72 @@ class Store:
                 "UPDATE slot_calls SET status = %s, operation_id = coalesce(%s, operation_id),"
                 " result = coalesce(%s, result), updated_at = now() WHERE id = %s",
                 (status, operation_id, Jsonb(result) if result is not None else None, call_id),
+            )
+
+    # ------------------------------------------------------------------ facts (DESIGN 6.7)
+    async def facts_rows(self, sid):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM session_facts WHERE session_id = %s", (sid,))
+            return await cur.fetchall()
+
+    async def record_facts(self, sid, records):
+        """Store what the slot reported. records: facts.parse_slot_facts().
+
+        The latest result of every node and collector is always updated. A journal row is added only
+        when something changed (new data or schema, a collection that started or stopped failing), and
+        then the session's facts_rev grows once for the whole read. Returns the rev, None if the session
+        is gone. Raises Fenced if the manager is no longer the leader.
+        """
+        async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
+            cur = await conn.execute("SELECT facts_rev FROM sessions WHERE id = %s FOR UPDATE", (sid,))
+            session = await cur.fetchone()
+            if session is None:
+                return None
+            cur = await conn.execute("SELECT * FROM session_facts WHERE session_id = %s", (sid,))
+            known = {(r["node_id"], r["collector"]): r for r in await cur.fetchall()}
+            rev, changed = session["facts_rev"], False
+            for node_id, node_name, collector, record in records:
+                old = known.get((node_id, collector))
+                fresh = old is None or differs(old, record)
+                if fresh and not changed:
+                    rev, changed = rev + 1, True
+                values = dict(
+                    sid=sid, node_id=node_id, node_name=node_name, collector=collector, schema=record["schema"],
+                    observed_at=record["observed_at"], attempted_at=record["attempted_at"], ok=record["ok"],
+                    error=Jsonb(record["error"]) if record["error"] is not None else None,
+                    data=Jsonb(record["data"]) if record["data"] is not None else None,
+                )
+                await conn.execute(
+                    "INSERT INTO session_facts (session_id, node_id, node_name, collector, schema, observed_at,"
+                    " attempted_at, ok, error, data) VALUES (%(sid)s, %(node_id)s, %(node_name)s, %(collector)s,"
+                    " %(schema)s, %(observed_at)s, %(attempted_at)s, %(ok)s, %(error)s, %(data)s)"
+                    " ON CONFLICT (session_id, node_id, collector) DO UPDATE SET node_name = excluded.node_name,"
+                    " schema = excluded.schema, observed_at = excluded.observed_at,"
+                    " attempted_at = excluded.attempted_at, ok = excluded.ok, error = excluded.error,"
+                    " data = excluded.data",
+                    values,
+                )
+                if fresh:
+                    await conn.execute(
+                        "INSERT INTO session_facts_log (session_id, rev, node_id, node_name, collector, schema,"
+                        " observed_at, attempted_at, ok, error, data) VALUES (%(sid)s, %(rev)s, %(node_id)s,"
+                        " %(node_name)s, %(collector)s, %(schema)s, %(observed_at)s, %(attempted_at)s, %(ok)s,"
+                        " %(error)s, %(data)s)",
+                        dict(values, rev=rev),
+                    )
+            await conn.execute(
+                "UPDATE sessions SET facts_rev = %s, facts_polled_at = now() WHERE id = %s", (rev, sid)
+            )
+            return rev
+
+    async def request_facts_refresh(self, sid, min_gap=10):
+        """The plugin asked for a collection now. A request within min_gap seconds of the last is merged."""
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE sessions SET facts_refresh_at = now() WHERE id = %s AND (facts_refresh_at IS NULL"
+                " OR facts_refresh_at < now() - make_interval(secs => %s))",
+                (sid, min_gap),
             )
 
     # ------------------------------------------------------------------ events
