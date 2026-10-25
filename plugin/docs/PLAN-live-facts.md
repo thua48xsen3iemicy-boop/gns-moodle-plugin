@@ -64,3 +64,30 @@
   ручной прогон живого режима в ui-harness через Chromium (скриншоты L2/L3 с `facts-broken`).
 - У владельца (dev-Moodle): `moodle-plugin-ci phpcs`, PHPUnit плагина, `grunt amd` (сверить с собранным),
   запуск лабы через mock-менеджер: слои появляются, «Обновить сейчас» меняет снимок, устаревание по `ttl`.
+
+## Статус
+
+Сделано (0.6.0, `version.php` 2026102500): шаги 1–10.
+
+- `manager_client::get_session_facts()` / `refresh_session_facts()`; `request()` принимает `304` только там, где его ждут.
+- `session_data` отдаёт `features`; кэш MUC `facts` и класс `local/session_facts`; `mod_gns3lab_get_facts` и
+  `mod_gns3lab_refresh_facts` (проверки как у `get_state`, сессию ищет сервер).
+- JS: опрос в `lab.js`, `stage.setFacts()`, строки фактов и ошибок сбора в `details.js`, стили, строки `ui_facts_*` (en, ru).
+- mock-менеджер, ui-harness, тесты PHPUnit, SPEC §5.3, `live-state.md` §6–7, `devtools/README.md`, README плагина.
+
+Отступление от плана (контракт не менялся): у менеджера `generated_at` сдвигается при каждом сборе, а `rev` — только
+при изменении фактов (`manager/lab_manager/facts.py`, `differs()`). Если всегда спрашивать с `since_rev`, после `304`
+плагин не узнает новый `generated_at` и через `ttl` ложно пометит факты устаревшими. Поэтому:
+снимок моложе половины `ttl` проверяется с `since_rev`, старше — перечитывается целиком; `get_facts` всегда отдаёт
+`generatedat` и `ttl`, даже при `changed: false`. Стоит записать это правило в CONTRACTS §2.7 явно (вопрос менеджеру).
+`refresh_facts` без `facts` в сессии — ошибка `factsnotavailable`; наблюдатель тоже может нажать «Обновить сейчас».
+
+Проверить в dev-Moodle:
+
+1. `moodle-plugin-ci phpcs`, `phpdoc`, PHPUnit плагина (`tests/local/manager_client_test.php`, `tests/external/facts_test.php`),
+   `grunt amd` — сверить с собранным `amd/build` (`lab`, `stage`, `details`, `facts`), stylelint.
+2. Обновление плагина до 2026102500: появились две функции и кэш `facts` (сброс кэшей).
+3. Через mock-менеджер (`devtools/README.md`, «Живые факты лабы»): после запуска появляются L2/L3/OSPF; «Обновить
+   сейчас» через ~5 с меняет снимок; `/mock/facts/nodes/<id>/fail` бледнит ноду; `/mock/facts/stall/on` — через 90 с
+   «данные устарели»; остановка возвращает превью с демо-фактами; наблюдатель видит факты студента своей группы.
+4. С настоящим менеджером 0.8 на стенде: те же шаги, и что `generated_at` не даёт ложного «устарели» при штатном сборе.
