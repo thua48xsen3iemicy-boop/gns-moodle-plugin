@@ -29,7 +29,7 @@ Claude Code читает этот файл через `CLAUDE.md`. Во всех
 2. **Не читай и не ищи.** Эти пути исключены из `rg` файлом `.ignore`, а для Claude Code
    сгенерированное и сторонние библиотеки закрыты на чтение в `.claude/settings.json`:
    - `plugin/plugin/amd/build/` и `*.map` — генерируются `grunt amd`;
-   - `plugin/plugin/amd/src/xterm.js`, `xterm-addon-fit.js` — сторонние библиотеки;
+   - `plugin/plugin/amd/src/xterm.js`, `xterm-addon-fit.js`, `novnc.js` — сторонние библиотеки;
    - `plugin/prototypes/*.html` — эталон UI по 60–140 КБ. Открывай, только если задача про них,
      и только нужный фрагмент. Искать внутри них — `rg --no-ignore <шаблон> plugin/prototypes`.
 3. **Большие документы не читай целиком.** Сначала оглавление: `grep -n '^#' <файл>`,

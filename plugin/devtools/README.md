@@ -4,6 +4,7 @@
 |---|---|
 | `build_zip.sh` | ZIP плагина для установки через интерфейс Moodle |
 | `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` и `fixtures/linux-switch-vlan.*` в `plugin/demo` |
+| `build_novnc.mjs` | собирает `plugin/amd/src/novnc.js` из пакета `@novnc/novnc` (esbuild, один ES-модуль); нужен только при смене версии noVNC, порядок команд — в шапке скрипта |
 | `check_facts.mjs` | проверка чистых функций `facts.js` на Node, без Moodle и браузера (раздел «Проверка слоёв без браузера») |
 | `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot |
 | `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
