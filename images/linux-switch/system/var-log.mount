@@ -1,0 +1,12 @@
+[Unit]
+Description=Small volatile log directory for the switch guest
+Before=systemd-journald.service
+
+[Mount]
+What=tmpfs
+Where=/var/log
+Type=tmpfs
+Options=mode=0755,size=8M,nr_inodes=1024,nodev,nosuid,noexec
+
+[Install]
+WantedBy=local-fs.target
