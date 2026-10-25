@@ -1,0 +1,144 @@
+{
+  "schema": "gns3lab.facts/1",
+  "generated_at": "2026-10-25T10:00:30Z",
+  "ttl": 60,
+  "nodes": {
+    "a41c7e5d-2b9f-4d83-8c6e-000000000001": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "ens3",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "down",
+          "oper": "down",
+          "ipv4": [
+            "10.0.10.11/24"
+          ]
+        }
+      ]
+    },
+    "a41c7e5d-2b9f-4d83-8c6e-000000000002": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "ens3",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.20.11/24"
+          ]
+        }
+      ]
+    },
+    "a41c7e5d-2b9f-4d83-8c6e-000000000003": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "ens3",
+          "kind": "physical",
+          "port": {
+            "adapter": 0,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up"
+        },
+        {
+          "name": "ens3.10",
+          "kind": "subif",
+          "parent": "ens3",
+          "dot1q": 10,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.10.12/24"
+          ]
+        },
+        {
+          "name": "ens3.20",
+          "kind": "subif",
+          "parent": "ens3",
+          "dot1q": 20,
+          "admin": "up",
+          "oper": "up",
+          "ipv4": [
+            "10.0.20.12/24"
+          ]
+        }
+      ]
+    },
+    "a41c7e5d-2b9f-4d83-8c6e-000000000004": {
+      "status": "started",
+      "interfaces": [
+        {
+          "name": "ens4",
+          "kind": "physical",
+          "port": {
+            "adapter": 1,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "access",
+            "vlan": 10
+          }
+        },
+        {
+          "name": "ens5",
+          "kind": "physical",
+          "port": {
+            "adapter": 2,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "access",
+            "vlan": 20
+          }
+        },
+        {
+          "name": "ens6",
+          "kind": "physical",
+          "port": {
+            "adapter": 3,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "trunk",
+            "allowed": [
+              10,
+              20
+            ],
+            "native": null
+          }
+        },
+        {
+          "name": "ens7",
+          "kind": "physical",
+          "port": {
+            "adapter": 4,
+            "port": 0
+          },
+          "admin": "up",
+          "oper": "up",
+          "switchport": {
+            "mode": "none"
+          }
+        }
+      ]
+    }
+  }
+}

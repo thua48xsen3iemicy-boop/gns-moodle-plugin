@@ -18,7 +18,7 @@ define([], function() {
 
     const loadDemo = async() => {
         if (!demo) {
-            demo = await (await fetch('demo.json')).json();
+            demo = await (await fetch(cfg.lab ? `demo.${cfg.lab}.json` : 'demo.json')).json();
             Object.assign(nodeStatus, demo.live.node_status);
         }
         return demo;

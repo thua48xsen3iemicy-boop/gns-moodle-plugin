@@ -30,7 +30,7 @@
 
 import {fill} from 'mod_gns3lab/dom';
 import {esc, fmtFilters, natSort} from 'mod_gns3lab/model';
-import {ipStr, v4, acolor, vcolor} from 'mod_gns3lab/facts';
+import {ipStr, v4, acolor, vcolor, portEnd} from 'mod_gns3lab/facts';
 
 const GiB = 1024 ** 3, MiB = 1024 ** 2;
 
@@ -248,10 +248,11 @@ function linkState(l){
 /* что настроено на портах и что проходит по линку */
 function modeText(f, i){
   if (!i) return "фактов нет";
-  if (i.admin === "down") return "shutdown";
-  const sp = i.switchport;
-  if (sp && sp.mode === "access") return `access · VLAN ${sp.vlan}`;
-  if (sp && sp.mode === "trunk") return `trunk · ${Array.isArray(sp.allowed) ? sp.allowed.join(",") : "все VLAN"} · native ${sp.native != null ? sp.native : 1}`;
+  const sp = i.switchport, end = sp && portEnd(st.der, f, i), down = end && end.down ? " · down" : "";
+  if (i.admin === "down" && !end) return "shutdown";
+  if (sp && sp.mode === "access") return `access · VLAN ${sp.vlan}${down}`;
+  if (sp && sp.mode === "none") return `без VLAN${down}`;
+  if (sp && sp.mode === "trunk") return `trunk · ${Array.isArray(sp.allowed) ? sp.allowed.join(",") : "все VLAN"} · ${sp.native === null ? "native нет" : "native " + (sp.native != null ? sp.native : 1)}${down}`;
   if (i.kind === "subif") return `dot1q ${i.dot1q}`;
   if (i.kind === "svi") return `SVI VLAN ${i.vlan}`;
   if (i.kind === "loopback") return "loopback";
@@ -284,7 +285,9 @@ function nodeLayerHTML(n){
   if (L === "l3") {
     const rows = f.ifs.filter(i => v4(i).length || i.kind === "physical").map(i => {
       const ips = v4(i).map(c => `<button class="tag" type="button" data-goto-subnet="${esc(c.key)}" style="cursor:pointer;border:0">${esc(c.ip + "/" + c.pre)}</button>`).join(" ") || `<span class="peer">—</span>`;
-      const state = i.admin === "down" ? `<span class="tag bad">shutdown</span>` : i.oper === "down" ? `<span class="tag bad">down</span>` : "up";
+      const end = i.switchport && portEnd(D, f, i);   // a switch port repeats its link end, its own admin/oper are not read
+      const state = end ? (end.down ? `<span class="tag bad">down</span>` : "up")
+        : i.admin === "down" ? `<span class="tag bad">shutdown</span>` : i.oper === "down" ? `<span class="tag bad">down</span>` : "up";
       return `<tr><td class="mono">${esc(i.name)}</td><td>${ips}</td><td>${state}</td></tr>`;
     }).join("");
     const gw = f.ifs.map(i => i.gateway).filter(Boolean);

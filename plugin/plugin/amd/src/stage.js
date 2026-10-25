@@ -43,7 +43,7 @@
 
 import {buildModel, clamp, esc, fmtFilters} from 'mod_gns3lab/model';
 import {svgEl as el, store, fill} from 'mod_gns3lab/dom';
-import {acolor, derive, endIf, hostPart, vcolor} from 'mod_gns3lab/facts';
+import {acolor, derive, endIf, endState, hostPart, vcolor} from 'mod_gns3lab/facts';
 
 const KMIN = 0.22, KMAX = 6;
 
@@ -491,6 +491,17 @@ export class Stage {
         });
     }
 
+    /**
+     * Whether the port at a link end is drawn down: the state comes from L1, a switch port repeats its link end.
+     *
+     * @param {object} e end of a link of the model
+     * @returns {boolean}
+     */
+    endDown(e) {
+        const end = endState(this.der, e);
+        return !!(end && end.down);
+    }
+
     /** Layer L1: wires with port names (level 1) and addresses (level 2). */
     drawLink(l, g) {
         const m = this.model, fx = this.fx, a = l.a, b = l.b;
@@ -511,7 +522,7 @@ export class Stage {
         }
         const d = Math.min(58, g.len * 0.36);
         [[a, ia, g.ax, g.ay, g.dx, g.dy], [b, ib, g.bx, g.by, -g.dx, -g.dy]].forEach(([e, ifc, x, y, ux, uy]) => {
-            const bad = !!(ifc && (ifc.oper === 'down' || ifc.admin === 'down')), old = this.factsFailed(e.nodeId) ? ' fstale' : '';
+            const bad = this.endDown(e), old = this.factsFailed(e.nodeId) ? ' fstale' : '';
             el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: 3.2, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
             const px = x + ux * d, py = y + uy * d;
             el('text', {x: px, y: py + 3, class: 'plabel l1'}, G).textContent = e.text;
@@ -539,8 +550,8 @@ export class Stage {
         else if (r2.kind === 'trunk' && g.len > 240) pill(this.L.labels, mx, my, r2.vlans.join(' · '), 'vpill dimmable', l.id);
         const d = Math.min(46, g.len * 0.32);
         [[l.a, 1, r2.ia], [l.b, -1, r2.ib]].forEach(([e, s, i]) => {
-            const fi = endIf(this.fx, e), bad = !!(fi && (fi.admin === 'down' || fi.oper === 'down'));
-            const sp = i && i.switchport, text = sp ? e.text + (sp.mode === 'access' ? ' · ' + sp.vlan : ' · T') : e.text;
+            const bad = this.endDown(e);
+            const sp = i && i.switchport, text = sp ? e.text + (sp.mode === 'access' ? ' · ' + sp.vlan : sp.mode === 'none' ? ' · —' : ' · T') : e.text;
             pill(this.L.labels, (s > 0 ? g.ax : g.bx) + s * g.dx * d, (s > 0 ? g.ay : g.by) + s * g.dy * d, text, 'ppill l1 dimmable' + (bad ? ' bad' : '') + (this.factsFailed(e.nodeId) ? ' fstale' : ''), l.id);
         });
     }

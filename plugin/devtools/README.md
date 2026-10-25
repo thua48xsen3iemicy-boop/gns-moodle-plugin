@@ -3,7 +3,8 @@
 | Что | Зачем |
 |---|---|
 | `build_zip.sh` | ZIP плагина для установки через интерфейс Moodle |
-| `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` в демо-лабу плагина |
+| `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` и `fixtures/linux-switch-vlan.*` в `plugin/demo` |
+| `check_facts.mjs` | проверка чистых функций `facts.js` на Node, без Moodle и браузера (раздел «Проверка слоёв без браузера») |
 | `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot |
 | `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
 
@@ -29,7 +30,10 @@ python3 devtools/mock-manager/mock_manager.py
    - секрет — `dev-secret`;
    - адрес шлюза можно не задавать: mock отдаёт `ws://127.0.0.1:8080` вместе с билетом.
 
-   У активности эталонная лаба — `ospf-multi-area`: лабы mock-менеджера — это `fixtures/*.gns3`.
+   У активности эталонная лаба — `ospf-multi-area`: лабы mock-менеджера — это `fixtures/*.gns3`. Лаба `linux-switch-vlan`
+   (два хоста и сервер с VLAN-подинтерфейсами вокруг Linux-коммутатора: access, транк без native, порт без VLAN) —
+   то же с `labref` `linux-switch-vlan`: «Обновить сейчас» переключает верный снимок и снимок, где порт PC1 выключен
+   (порт коммутатора на схеме тоже становится down).
 
 `GW_ALLOWED_ORIGINS` — origin сайта Moodle, с которого браузер открывает консоли. Настройка обязательна: без неё
 шлюз не запускается.
@@ -80,6 +84,17 @@ curl -X POST localhost:8090/mock/facts/stall/off
 
 Без Moodle то же видно в `ui-harness` (`?factsempty` — «нет данных», `?nofacts` — сессия без фактов,
 `window.__stub.facts` — сбой ноды и устаревание).
+
+## Проверка слоёв без браузера
+
+```bash
+node plugin/devtools/check_facts.mjs     # из корня репозитория; Node 22, зависимостей нет
+```
+
+Скрипт подключает настоящие `plugin/amd/src/model.js` и `facts.js` (префикс `mod_gns3lab/` ведёт в `amd/src`) и прогоняет
+сценарии над маленькими лабами: девять сценариев задачи Б из `docs/linux-switch-integration/PLAN.md` (состояние обоих
+концов линка и самого линка: порт коммутатора повторяет линк и не читает свои `admin` / `oper`) и режимы L2 `none` и
+`native: null` (`docs/live-state.md` §3.1). Печатает `ok` / `FAIL` по каждому, при сбое выходит с кодом 1.
 
 ## Библиотека и редактор лаб
 
