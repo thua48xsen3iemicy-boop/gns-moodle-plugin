@@ -14,8 +14,9 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Consoles of the student interface: xterm.js terminals connected to the gateway, shown as a panel beside the
- * scheme, as a grid with it, as windows over it, and on a phone as a sheet the student dives into.
+ * Consoles of the student interface: xterm.js terminals (and noVNC screens for nodes with a graphical console)
+ * connected to the gateway, shown as a panel beside the scheme, as a grid with it, as windows over it, and on a phone
+ * as a sheet the student dives into.
  *
  * Ported from prototypes/student-ui.html; the simulator of the prototype is replaced by the gateway connection
  * (mod_gns3lab/console). A console is tied to its node: the badge on the node, a preview of the output on the scheme
@@ -32,6 +33,7 @@
 import {CISCO_TYPES, ConsoleConnection, KEYS, PORT_RE, THEME, loadXterm, note} from 'mod_gns3lab/console';
 import {SnipMenu} from 'mod_gns3lab/snipmenu';
 import {snippetSet} from 'mod_gns3lab/snippets';
+import {VncConnection, loadNovnc} from 'mod_gns3lab/vnc';
 import {svgEl as el, hel, store, fill} from 'mod_gns3lab/dom';
 import {clamp, esc} from 'mod_gns3lab/model';
 
@@ -53,11 +55,18 @@ const FONT_MOBILE = 13;
 /** Ctrl + wheel turns the size by one step after this much scrolling (a wheel notch is 100, a trackpad pinch is many small ones). */
 const FONT_WHEEL_STEP = 50;
 
+/** Longest text that Paste sends to a screen, characters: it goes out in one frame, and the gateway takes 64 KB at most. */
+const PASTE_MAX = 8192;
+
 /** The kinds of connection state that mean the console works now (a green dot). */
 const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: 'off', failed: 'bad', idle: 'wait', closed: 'off'};
 
 /**
  * One console: the terminal, its connection, the bar under it (snippets and font size).
+ *
+ * A node with a graphical console (console_type "vnc") gets a noVNC screen instead of the terminal, and a bar with
+ * Ctrl+Alt+Del and Paste instead of snippets and font size. The views do not tell them apart: both have a host,
+ * a connection in `conn` and the same methods.
  */
 class Con {
     /**
@@ -75,15 +84,20 @@ class Con {
         this.fit = null;
         this.conn = null;
         this.state = 'idle';
+        this.vnc = node.consoleType === 'vnc';
         this.win = null;
         this.wpos = null;
         this.flowIn = 0;
         this.flowOut = 0;
-        this.host = hel('div', 'termhost');
-        this.viewport = hel('div', 'termview', this.host);
-        this.buildBar();
+        this.host = hel('div', 'termhost' + (this.vnc ? ' vnchost' : ''));
+        this.viewport = hel('div', 'termview' + (this.vnc ? ' vncview' : ''), this.host);
         this.wheelSum = 0;
-        this.host.addEventListener('wheel', event => this.wheel(event), {capture: true, passive: false});
+        if (this.vnc) {
+            this.buildScreenBar();
+        } else {
+            this.buildBar();
+            this.host.addEventListener('wheel', event => this.wheel(event), {capture: true, passive: false});
+        }
         this.ro = new ResizeObserver(() => {
             this.refit();
             this.fadeSnips();
@@ -127,6 +141,7 @@ class Con {
 
     /** The snippets pinned to the bar. */
     renderQuick() {
+        if (this.vnc) return;
         const o = this.owner, strip = this.quick;
         o.snip.hideTip();
         strip.textContent = '';
@@ -159,6 +174,7 @@ class Con {
     /** A fade at the edge of the strip says that more pinned snippets wait beyond it. */
     fadeSnips() {
         const strip = this.quick;
+        if (!strip) return;
         strip.classList.toggle('more', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2);
         strip.classList.toggle('less', strip.scrollLeft > 2);
     }
@@ -223,6 +239,7 @@ class Con {
 
     /** The size of the font of the owner: in the terminal and in the controls. */
     applyFont() {
+        if (this.vnc) return;
         const o = this.owner, size = o.fontSize;
         this.fontVal.textContent = String(size);
         const label = fill(o.s('ui_font_reset'), size);
@@ -258,9 +275,90 @@ class Con {
      * @returns {boolean} false: the console is not connected
      */
     send(seq) {
-        if (this.owner.readonly || !this.conn || this.conn.state !== 'open') return false;
+        if (this.vnc || this.owner.readonly || !this.conn || this.conn.state !== 'open') return false;
         this.conn.send(seq);
         return true;
+    }
+
+    /** The bar under a screen: Ctrl+Alt+Del and Paste. */
+    buildScreenBar() {
+        const o = this.owner, bar = hel('div', 'tbar vncbar', this.host);
+        bar.setAttribute('role', 'toolbar');
+        bar.setAttribute('aria-label', fill(o.s('consolevnclabel'), this.n.name));
+        const button = (text, label, action) => {
+            const b = hel('button', 'vncbtn', bar);
+            b.type = 'button';
+            b.textContent = text;
+            b.title = label;
+            // The accessible name keeps the visible text in it; otherwise the tooltip is only a hint.
+            if (label.includes(text)) b.setAttribute('aria-label', label);
+            // The screen keeps the keyboard focus while a button is pressed.
+            b.addEventListener('pointerdown', e => e.preventDefault());
+            b.addEventListener('click', action);
+            return b;
+        };
+        button('Ctrl+Alt+Del', o.s('consolevncctrlaltdel'), () => {
+            if (this.conn && this.conn.ctrlAltDel()) this.focus();
+            else o.toast(fill(o.s('ui_not_connected'), this.n.name));
+        });
+        button(o.s('consolevncpaste'), o.s('consolevncpastehint'), () => this.pasteText());
+    }
+
+    /** Puts the text of the clipboard of the browser into the clipboard of the node. */
+    async pasteText() {
+        const o = this.owner;
+        if (!this.conn || this.conn.state !== 'open') {
+            o.toast(fill(o.s('ui_not_connected'), this.n.name));
+            return;
+        }
+        let text;
+        try {
+            text = await navigator.clipboard.readText();
+        } catch (e) {
+            // No permission, or a page that is not secure.
+            o.toast(o.s('consolevncpastefailed'));
+            return;
+        }
+        if (!text) {
+            o.toast(o.s('consolevncpasteempty'));
+        } else if (text.length > PASTE_MAX) {
+            o.toast(fill(o.s('consolevncpastelong'), PASTE_MAX));
+        } else if (this.conn.paste(text)) {
+            o.toast(o.s('consolevncpasted'));
+            this.focus();
+        }
+    }
+
+    /** The screen of a node with a graphical console, connected to the gateway. */
+    ensureScreen() {
+        if (this.conn) return;
+        const o = this.owner;
+        this.screen = hel('div', 'vncscreen', this.viewport);
+        this.screen.setAttribute('role', 'group');
+        this.screen.setAttribute('aria-label', fill(o.s('consolevnclabel'), this.n.name));
+        this.vnote = hel('div', 'vncnote', this.viewport);
+        this.vnote.setAttribute('role', 'status');
+        this.vnote.hidden = true;
+        // The canvas takes the focus on a click; the screen is the current console from then on.
+        this.screen.addEventListener('focusin', () => {
+            if (o.active !== this.n.id) {
+                o.active = this.n.id;
+                o.markFocus();
+            }
+        });
+        // Typed input and clicks light the line to the node in the windows arrangement.
+        this.screen.addEventListener('keydown', () => this.activity('in'), true);
+        this.screen.addEventListener('pointerdown', () => this.activity('in'), true);
+        this.conn = new VncConnection({
+            cmid: o.cmid, userid: o.userid, nodeId: this.n.id, RFB: o.RFB, screen: this.screen, strings: o.strings,
+            nodeStatus: () => o.nodeStatus(this.n.id),
+            onState: state => this.setState(state),
+            onNote: text => {
+                this.vnote.textContent = text;
+                this.vnote.hidden = !text;
+            },
+        });
+        this.conn.connect();
     }
 
     ensureTerm() {
@@ -407,7 +505,8 @@ class Con {
 
     attach(container) {
         if (this.host.parentNode !== container) container.appendChild(this.host);
-        this.ensureTerm();
+        if (this.vnc) this.ensureScreen();
+        else this.ensureTerm();
         this.refit();
     }
 
@@ -428,6 +527,10 @@ class Con {
     focus() {
         this.unread = false;
         this.owner.paintBadges(this);
+        if (this.vnc) {
+            if (this.conn) this.conn.focus();
+            return;
+        }
         if (this.term && !(this.owner.stage.mobile && matchMedia('(pointer: coarse)').matches)) this.term.focus();
     }
 
@@ -466,6 +569,7 @@ export class Consoles {
         this.nodeStatus = nodeStatus;
         this.toast = toast;
         this.xterm = null;
+        this.RFB = null;
         this.cons = new Map();
         this.active = null;
         this.fontSize = this.loadFont();
@@ -573,13 +677,18 @@ export class Consoles {
      * @param {object} node node of the model
      */
     async open(node) {
-        if (!this.xterm) {
-            try {
-                this.xterm = await loadXterm();
-            } catch (e) {
-                this.toast(this.s('ui_term_fail'));
-                return;
-            }
+        const screen = node.consoleType === 'vnc';
+        if (screen && this.readonly) {
+            // The teacher does not see the screen of a student; the server does not issue the ticket either.
+            this.toast(this.s('consolevncobserver'));
+            return;
+        }
+        try {
+            if (screen && !this.RFB) this.RFB = await loadNovnc();
+            if (!screen && !this.xterm) this.xterm = await loadXterm();
+        } catch (e) {
+            this.toast(this.s(screen ? 'ui_screen_fail' : 'ui_term_fail'));
+            return;
         }
         let c = this.cons.get(node.id);
         if (!c) {
@@ -666,7 +775,8 @@ export class Consoles {
     /** Previews on the scheme: of every console that is not on the screen. */
     refreshCards() {
         this.cons.forEach(c => {
-            if (this.isVisible(c)) this.stage.setCard(c.n.id, null);
+            // A screen has no text to preview.
+            if (c.vnc || this.isVisible(c)) this.stage.setCard(c.n.id, null);
             else this.stage.setCard(c.n.id, {lines: () => c.tail(14), unread: c.unread});
         });
     }
@@ -965,6 +1075,8 @@ export class Consoles {
             d.classList.add('in');
         }
         if (this.stage.wheel) this.stage.wheel.close();
+        // The key strip sends text to a terminal; a screen has no use for it.
+        this.keys.hidden = c.vnc;
         this.fitDive();
         c.attach(this.diveBody);
         Array.from(this.diveBody.children).forEach(ch => {

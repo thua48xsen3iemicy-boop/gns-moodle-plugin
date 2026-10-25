@@ -149,11 +149,50 @@ final class console_ticket_test extends \advanced_testcase {
         $this->assertSame([], $this->manager->requests_to('POST', self::TICKETS));
     }
 
-    public function test_vnc_node_is_refused(): void {
+    public function test_student_gets_a_writable_ticket_to_a_graphical_console(): void {
         $this->setUser($this->student);
 
-        $this->expectExceptionMessage(get_string('consolenotsupported', 'gns3lab'));
-        $this->ticket(fake_manager::NODE_VNC);
+        $ticket = $this->ticket(fake_manager::NODE_VNC);
+
+        $this->assertSame(
+            ['ticket' => 't-123', 'gatewayurl' => 'wss://gw.example.org', 'expiresin' => 30, 'readonly' => false],
+            $ticket
+        );
+        [$request] = $this->manager->requests_to('POST', self::TICKETS);
+        $this->assertSame(['node_id' => fake_manager::NODE_VNC, 'readonly' => false,
+            'issued_for_user_id' => (int) $this->student->id], $request['body']);
+    }
+
+    public function test_teacher_gets_no_ticket_to_the_graphical_console_of_a_student(): void {
+        $group = $this->getDataGenerator()->create_group(['courseid' => $this->course->id]);
+        $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->student->id]);
+        $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->teacher->id]);
+        $this->prohibit_access_all_groups();
+        $this->setUser($this->teacher);
+
+        try {
+            $this->ticket(fake_manager::NODE_VNC, (int) $this->student->id);
+            $this->fail('No exception');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('consolevncobserver', $e->errorcode);
+        }
+        // The refusal is made by Moodle: the manager is not asked for a ticket.
+        $this->assertSame([], $this->manager->requests_to('POST', self::TICKETS));
+    }
+
+    public function test_console_of_another_kind_is_refused(): void {
+        $session = fake_manager::session();
+        $session['nodes'][fake_manager::NODE_TELNET]['console_type'] = 'none';
+        $this->manager->on('GET', '/api/v1/sessions', 200, $session);
+        $this->setUser($this->student);
+
+        try {
+            $this->ticket(fake_manager::NODE_TELNET);
+            $this->fail('No exception');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('consolenotsupported', $e->errorcode);
+        }
+        $this->assertSame([], $this->manager->requests_to('POST', self::TICKETS));
     }
 
     public function test_no_ticket_unless_running(): void {

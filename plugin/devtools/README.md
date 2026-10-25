@@ -6,7 +6,7 @@
 | `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` и `fixtures/linux-switch-vlan.*` в `plugin/demo` |
 | `build_novnc.mjs` | собирает `plugin/amd/src/novnc.js` из пакета `@novnc/novnc` (esbuild, один ES-модуль); нужен только при смене версии noVNC, порядок команд — в шапке скрипта |
 | `check_facts.mjs` | проверка чистых функций `facts.js` на Node, без Moodle и браузера (раздел «Проверка слоёв без браузера») |
-| `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot |
+| `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot; у `vnc`-ноды (PVE1 эталонной лабы, образ `debian12-desktop`) — экран по RFB 3.8, билет только владельцу |
 | `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
 
 ## Плагин с консолями без Proxmox
@@ -50,6 +50,11 @@ curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/stop
 # нода снова работает: консоль подключится сама
 curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/start
 ```
+
+Нода с `console_type: vnc` (PVE1) открывается экраном noVNC: цветные полосы и буквы VNC; клавиша рисует цветной квадрат
+внизу, мышь — жёлтый маркер, щелчок — красный квадрат. Что дошло до экрана — `curl localhost:8090/mock/vnc/<node_id>`.
+Шлюзу менеджера для этого нужна поддержка `vnc` (`console: "vnc"` в `/internal/tickets`, CONTRACTS §6); без неё —
+`ui-harness` (`ui-harness/README.md`, раздел про noVNC).
 
 Команда `reload` в консоли закрывает её на стороне слота: так проверяется переподключение. Поддельная консоль
 понимает режимы IOS (`enable`, `configure terminal`, `interface …`, `router …`, `exit`, `end`, Ctrl+Z, Ctrl+U) и меняет
