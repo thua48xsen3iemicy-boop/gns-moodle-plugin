@@ -121,7 +121,7 @@ def test_images_file_and_site_limits(env, tmp_path):
         {"url": "https://m.example/", "slug": "main", "secret": SECRET,
          "limits": {"max_nodes": 30, "max_memory_mb": 16384, "images": ["debian12"]}}])
     s = load(env)
-    assert sorted(s.images) == ["cisco-iou-l2", "debian12", "vpcs"]
+    assert sorted(s.images) == ["cisco-iou-l2", "debian12", "linux-switch", "vpcs"]
     limits = s.site("https://m.example").limits
     assert limits.allows("debian12") and not limits.allows("vpcs") and limits.max_cpus is None
 

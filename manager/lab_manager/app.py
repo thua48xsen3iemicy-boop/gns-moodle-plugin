@@ -422,6 +422,12 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         node_ids = {n["node_id"] for n in s["topology"]["topology"]["nodes"]}
         if body.node_id not in node_ids:
             raise ApiError(404, "node_not_found", "Node does not belong to this session")
+        try:
+            no_console = await services.orchestrator.consoleless(s)
+        except (LabError, KeyError) as exc:  # Fail closed: not knowing is not a reason to hand out a console
+            raise ApiError(503, "console_unavailable", "Cannot tell whether this node has a console") from exc
+        if body.node_id in no_console:  # For everybody, a read-only observer too
+            raise ApiError(403, "console_disabled", "The image of this node has no console for users")
         nodes, stale = await services.orchestrator.live_nodes(s)
         if not stale and nodes.get(body.node_id, {}).get("status") != "started":
             # Saves the plugin a closed WebSocket and a session re-read (П5).

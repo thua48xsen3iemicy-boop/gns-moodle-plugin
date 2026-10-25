@@ -1,4 +1,4 @@
-# Lab Manager — 0.8.0
+# Lab Manager — 0.8.1
 
 Изменения протокола, порядок обновления и стендовая приёмка:
 [`docs/pilot-hardening/README.md`](../docs/pilot-hardening/README.md).
@@ -167,7 +167,7 @@ Uvicorn работает в один процесс: оркестратор жи
 | `MANAGER_SITES_FILE` | сайты Moodle: `url` (= `$CFG->wwwroot`), `slug` (часть `student_key`; **после появления данных не меняется**: новый slug — это новые каталоги студентов), `secret` (Bearer), необязательные `limits` для лаб из Moodle: `max_nodes` (≤ 100), `max_memory_mb`, `max_cpus`, `images` (список `id` или `"*"`) |
 | `MANAGER_SLOTS_FILE` | слоты: `vmid`, `address` (= `SLOT_LISTEN_HOST` слота и ключ в `GW_SLOTS` шлюза), `port`, `api_token`, `console_token`. Токены у всех слотов разные (каждый клон CT со своим `slot.env`), иначе менеджер не стартует |
 | `LABS_DIR` | каталог лаб; `meta.json` может задавать `resources: {cores, memory_mb}` |
-| `IMAGES_FILE` | каталог образов для лаб, которые преподаватели собирают в Moodle (пример — `examples/images.json`). Не задан — лабы только из `LABS_DIR`. Формат и проверки — `lab_manager/images.py` |
+| `IMAGES_FILE` | каталог образов для лаб, которые преподаватели собирают в Moodle (пример — `examples/images.json`). Не задан — лабы только из `LABS_DIR`. Формат и проверки — `lab_manager/images.py`. Образ с `"console_type": "none"` (Linux-коммутатор) не получает билет консоли ни у кого, и у студента, и у наблюдателя (`403 console_disabled`, CONTRACTS §2.4); правило действует и для эталонных лаб с тем же файлом образа, значение читается при старте менеджера |
 | `LAB_MEMORY_OVERHEAD_MB` | запас памяти CT для лабы из Moodle: память нод + 10 % + это значение (по умолчанию 1024) |
 | `QUEUE_TIMEOUT` | сколько секунд сессия ждёт слот, потом `failed` с `QUEUE_TIMEOUT`; `0` — без ограничения (по умолчанию 600) |
 | `SLOT_LAB_FAILURE_LIMIT` | слот, на котором подряд упали лабы стольких **разных** студентов (без чистой сессии между ними), уходит в `maintenance`; `0` — не выводить (по умолчанию 3) |

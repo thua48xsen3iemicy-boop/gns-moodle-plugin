@@ -190,7 +190,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `error` | при `failed`: `{"code", "retryable"}` (§2.5); иначе `null` |
 | `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
 | `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
-| `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none` |
+| `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
 ### 2.4. ✅ Остальные маршруты
@@ -200,7 +200,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `GET /api/v1/sessions?user_id=&instance_id=` | живая сессия студента в активности, иначе последняя завершённая; `404 session_not_found`, если не было ни одной |
 | `GET /api/v1/sessions?instance_id=` | список для наблюдателя: по одной записи на студента активности (живая или последняя завершённая) — поля §2.3 без `topology`/`nodes`/`features` плюс `user_id`; `[]` — сессий нет |
 | `POST /api/v1/sessions/{id}/stop` | тело необязательно: `{"requested_by_user_id": 17}` — кто остановил (только журнал); если это не сам студент, причина «преподаватель» и текст «Лаба остановлена преподавателем». Ответ — сессия со `status: "stopping"` |
-| `POST /api/v1/sessions/{id}/console-tickets` | `{"node_id", "readonly", "issued_for_user_id"}` → `{"ticket", "gateway_url", "expires_in"}`. `gateway_url` есть всегда: `ws://` или `wss://` (в бою `wss://`), хост, порт, путь, **без `/` на конце**; плагин дописывает `/console/<node_id>?ticket=…`. К ноде, которая по живым статусам не `started`, — `409 node_not_running` (при `nodes_stale` билет выдаётся) |
+| `POST /api/v1/sessions/{id}/console-tickets` | `{"node_id", "readonly", "issued_for_user_id"}` → `{"ticket", "gateway_url", "expires_in"}`. `gateway_url` есть всегда: `ws://` или `wss://` (в бою `wss://`), хост, порт, путь, **без `/` на конце**; плагин дописывает `/console/<node_id>?ticket=…`. К ноде, которая по живым статусам не `started`, — `409 node_not_running` (при `nodes_stale` билет выдаётся). К ноде, чей образ в каталоге объявлен с `console_type: "none"` (например, Linux-коммутатор), — `403 console_disabled`: для всех, и для наблюдателя (`readonly`) тоже; образ узла берётся из билета развёртывания рабочей области по имени файла, поэтому правило одинаково для лаб из Moodle и эталонных. Если лабу сессии уже не разобрать (образ убран из каталога), — `503 console_unavailable`: менеджер не выдаёт консоль, пока не знает, что она разрешена |
 
 Состояние лабы — `/sessions/{id}/state` (§2.7, ✅ менеджер 0.8.0). Маршруты `/sessions/{id}/checks` появятся
 вместе с возможностью `checks`.
@@ -210,6 +210,10 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 Есть, только когда в `info.features` есть `images` и `lab_definitions` (у менеджера задан `IMAGES_FILE`).
 
 **`GET /api/v1/images`** — образы, которые разрешены сайту (`limits.images`); кешировать как `info`.
+
+`console_type` образа — `telnet` · `vnc` · `none` (по умолчанию `telnet`). `none` действует: узлы с таким образом не получают билет
+консоли ни у кого (§2.4, `403 console_disabled`) и в `session.nodes` выглядят как `none`. Так закрывается управление устройством, которым
+студент управлять не должен (образ `images/linux-switch/`). Каталог читается при старте менеджера: смена значения — после перезапуска.
 
 ```json
 {"images": [{"id": "debian12", "title": "Debian 12", "kind": "qemu", "category": "host",

@@ -155,6 +155,17 @@ def node_states(topology: dict) -> dict:
     return result
 
 
+def consoleless_names(ticket: dict, images: dict) -> set:
+    """Names of the nodes whose image the catalog declares without a console (`console_type: none`).
+
+    The slot keeps a console on every node for its own readiness checks; this only decides for whom the
+    manager may issue a ticket. The image is matched by its file, so reference labs (ticket.json) and labs
+    defined in Moodle are treated alike.
+    """
+    files = {image.file for image in images.values() if image.console_type == "none" and image.file}
+    return {n["name"] for n in ticket.get("nodes") or [] if n.get("image") in files}
+
+
 class Orchestrator:
     def __init__(self, settings, store, pve, agent, slot_clients, catalog, *, sleep=asyncio.sleep):
         self.settings = settings
@@ -170,6 +181,7 @@ class Orchestrator:
         self._facts_next: dict[str, float] = {}  # session id -> monotonic time of the next read
         self._facts_refreshed: dict[str, object] = {}  # session id -> facts_refresh_at already served
         self._live_cache: dict[str, tuple[float, dict]] = {}
+        self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
         self.leader = False
         self.epoch = None
         self._claims = set()
@@ -1018,6 +1030,7 @@ class Orchestrator:
         self._health_checked.pop(s["id"], None)
         self._facts_next.pop(s["id"], None)
         self._facts_refreshed.pop(s["id"], None)
+        self._consoleless.pop(s["id"], None)
         return False
 
     # ------------------------------------------------------------------ reads for the API
@@ -1037,5 +1050,22 @@ class Orchestrator:
             nodes, stale = {k: live.get(k, v) for k, v in nodes.items()}, False
         except (SlotError, Failure):
             pass
+        try:
+            hidden = await self.consoleless(s)
+        except (LabError, KeyError):
+            hidden = set()  # Only what the plugin draws: console_ticket asks again and refuses
+        nodes = {k: ({**v, "console_type": "none"} if k in hidden else v) for k, v in nodes.items()}
         self._live_cache[s["id"]] = (time.monotonic(), nodes, stale)
         return nodes, stale
+
+    async def consoleless(self, s) -> set:
+        """node_ids of a running session that get no console for anybody, observers included (an image of
+        the catalog with `console_type: none`, e.g. the Linux switch). Raises LabError or KeyError if
+        the lab of the session can no longer be resolved: the caller must not issue a ticket then."""
+        known = self._consoleless.get(s["id"])
+        if known is None:
+            ticket, _ = await self._ticket(s)
+            names = consoleless_names(ticket, self.settings.images or {})
+            known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
+            self._consoleless[s["id"]] = known
+        return known

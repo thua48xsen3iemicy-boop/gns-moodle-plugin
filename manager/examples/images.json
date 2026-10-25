@@ -11,6 +11,19 @@
       "adapters": {"default": 1, "min": 1, "max": 4}
     },
     {
+      "id": "linux-switch",
+      "title": "Linux Switch",
+      "kind": "qemu",
+      "category": "switch",
+      "console_type": "none",
+      "symbol": ":/symbols/ethernet_switch.svg",
+      "file": "linux-switch.qcow2",
+      "ram_mb": {"default": 512, "min": 256, "max": 2048},
+      "cpus": {"default": 1, "min": 1, "max": 2},
+      "adapters": {"default": 5, "min": 1, "max": 16},
+      "slot": {"disk_interface": "virtio"}
+    },
+    {
       "id": "debian12",
       "title": "Debian 12",
       "kind": "qemu",
