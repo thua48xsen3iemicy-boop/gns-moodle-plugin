@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
+from api.facts import Facts
 from api.models import DeployTicket
 from api.qga import Priority, QgaBroker
 
@@ -198,6 +199,7 @@ class Lifecycle:
                         },
                     )
             self.monitor = asyncio.create_task(self.watch())
+            self.facts = Facts(self)
         except BaseException:
             if hasattr(self, "db"):
                 self.db.close()
@@ -459,6 +461,7 @@ class Lifecycle:
                 or (self.boot_requires_new_owner and (epoch, generation) == (old["epoch"], old["generation"]))):
             raise HTTPException(409, {"code": "STALE_OWNER", "message": "Command owner superseded"})
         self.claimed = False
+        self.facts.reset()  # nothing collected for the previous owner is served to this one
         self.save("authority", "slot", {"epoch": epoch, "generation": generation})
         self.boot_requires_new_owner = False
         pending = [*self.tasks, *self.commands]
@@ -736,6 +739,7 @@ class Lifecycle:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(self.monitor, *self.tasks, return_exceptions=True)
+        await self.facts.stop()
         await self.qga.close()
         for handle in self.project_locks.values():
             handle.close()
