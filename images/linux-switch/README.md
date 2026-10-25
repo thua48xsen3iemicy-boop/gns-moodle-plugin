@@ -41,10 +41,19 @@ guest still has temporary network access:
 
 ```sh
 apt-get update
+apt-get full-upgrade -y
 apt-get install --no-install-recommends iproute2 qemu-guest-agent systemd
 ```
 
-Do not install competing network managers in the final image. Remove temporary
+Reboot after the upgrade while the original network and SSH configuration are
+still intact. Prepare the image over SSH; leave SSH and the current network
+manager running until the final activation step below. Do not start or restart
+systemd-networkd, reload its configuration, apply the appliance sysctls, or flush
+addresses during SSH preparation. If networkd already owns the temporary SSH
+network, stage the new network files outside /etc/systemd/network until the final
+step. If SSH uses IPv6, applying the appliance sysctls would disconnect it.
+
+At final activation, remove temporary
 Ethernet configuration from `/etc/network/interfaces` and its includes, cloud-init
 network configuration, and other `.network` files which match the same cards.
 If ifupdown, NetworkManager or cloud-init is present in the base image, disable
@@ -52,19 +61,18 @@ its network configuration before the next boot. systemd-networkd must be the
 sole owner of the switch interfaces. It uses the first matching `.network` file;
 check `/run/systemd/network` and `/usr/lib/systemd/network` as well as `/etc`.
 
-Copy the three files from `network/` into `/etc/systemd/network/`, then enable:
+Enable guest management during preparation:
 
 ```sh
-systemctl enable systemd-networkd.service
 systemctl enable qemu-guest-agent.service
 systemctl enable serial-getty@ttyS0.service
 ```
 
 If the guest-agent unit is static, retain its packaged device activation instead
 of adding a replacement unit. Ensure the QGA virtio-serial channel is present.
-Reboot into the final configuration using serial/QGA access; Ethernet access
-will no longer be available. Configure console authentication separately during
-image preparation. Do not publish credentials with the image recipe.
+Verify QGA command execution from the slot and a ttyS0 console login before
+final activation. Configure console authentication separately during image
+preparation. Do not publish credentials with the image recipe.
 
 ## Minimal appliance profile
 
@@ -99,14 +107,13 @@ syslog-ng package from the final image. QGA must not have custom log-file or
 verbose/debug options; check its packaged defaults and /etc/qemu/qemu-ga.conf.
 No durable diagnostic history will be available after reboot.
 
-Disable installed background jobs and network services during image preparation.
-Masking the socket units as well as the services prevents socket activation:
+Disable installed background jobs and discovery services during preparation.
+Keep SSH, its sockets, the current network manager and DNS service running until
+the final step, so package installation and file transfer continue to work:
 
 ```sh
 for unit in \
-    ssh.service ssh.socket sshd.service \
-    systemd-resolved.service avahi-daemon.service avahi-daemon.socket \
-    NetworkManager.service networking.service \
+    avahi-daemon.service avahi-daemon.socket \
     systemd-networkd-wait-online.service \
     systemd-timesyncd.service chrony.service chronyd.service ntpsec.service \
     rsyslog.service syslog-ng.service syslog.socket \
@@ -121,21 +128,35 @@ done
 ```
 
 Use a minimal installation without cloud-init; if a cloud image was used,
-disable cloud-init and remove its generated network configuration. Keep udev,
+disable cloud-init and remove its generated network configuration at final
+activation. Keep udev,
 D-Bus, networkd, QGA, ttyS0 getty, tmpfiles and the kernel's network stack.
 Remove swap entries from /etc/fstab and disable any installed zram/swap generator
 in the image. Do not shrink RAM until packet forwarding and QGA have been
 measured under load. IP forwarding is off; Ethernet bridging remains enabled.
 
-Before sealing the image, remove temporary addresses from every Ethernet card
-and bridge, using serial console access. For example, for each such device:
+### Final activation: disable SSH last
+
+Finish all package installation and file transfer first. Verify QGA and the
+serial console. Remove the old persistent Ethernet configuration described
+above, then install the bridge profile and prevent the temporary services from
+starting on the next boot. Run from this recipe's directory:
 
 ```sh
-ip -4 address flush dev <interface>
-ip -6 address flush dev <interface>
+install -d /etc/systemd/network
+install -m 0644 network/* /etc/systemd/network/
+systemctl enable systemd-networkd.service
+systemctl mask networking.service NetworkManager.service systemd-resolved.service
+systemctl mask ssh.service ssh.socket sshd.service
+reboot
 ```
 
-Reboot to apply the sysctl, mount and manager settings. IPv6 is disabled on
+The final masks deliberately omit --now: the running SSH service and current
+network remain available until reboot. Do not manually flush addresses over SSH.
+After reboot the old temporary addresses are absent, networkd applies the bridge
+profile, and guest management uses QGA and the serial console.
+
+The reboot also applies the sysctl, mount and manager settings. IPv6 is disabled on
 current and future interfaces. Check /etc/fstab has no other /var/log mount.
 Remove old disk-backed logs in the offline image before final compression:
 mounting tmpfs hides existing disk files but does not reclaim their space.
