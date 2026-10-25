@@ -16,7 +16,7 @@ body.gns3lab-fullscreen{overflow:hidden}
 <script>
 const q = new URLSearchParams(location.search);
 if (q.get('theme') === 'dark') document.documentElement.setAttribute('data-bs-theme', 'dark');
-window.GNS3LAB_STUB = {lang: '{{lang}}', fast: q.has('fast'), norunning: q.has('norunning'), conflict: q.has('conflict'), observer: q.has('observer'), nofacts: q.has('nofacts'), factsempty: q.has('factsempty')};
+window.GNS3LAB_STUB = {lang: '{{lang}}', lab: '{{lab}}', fast: q.has('fast'), norunning: q.has('norunning'), conflict: q.has('conflict'), observer: q.has('observer'), nofacts: q.has('nofacts'), factsempty: q.has('factsempty')};
 requirejs.config({baseUrl: '.', paths: {mod_gns3lab: q.has('min') ? 'amd-min' : 'amd', core: 'stubs'}});
 </script>
 </head>

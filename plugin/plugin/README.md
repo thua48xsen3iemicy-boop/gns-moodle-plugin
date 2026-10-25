@@ -59,7 +59,8 @@
   билет `readonly`; сессию для фактов сервер находит сам, снимки фактов — в кэше MUC `facts` на 15 с.
 
 Пока менеджер не настроен (адрес и секрет в настройках плагина) или у активности не задан `labref`, показывается
-**демо-лаба** из `demo/` (копии `fixtures/ospf-multi-area.*`; обновлять — `devtools/sync_demo_data.sh`).
+**демо-лаба** из `demo/` (копии `fixtures/ospf-multi-area.*`; обновлять — `devtools/sync_demo_data.sh`; там же вторая,
+`linux-switch-vlan`, — Linux-коммутатор с VLAN и транком, её показывают mock-менеджер и `ui-harness`).
 Для разработки без Proxmox есть mock-менеджер: `devtools/README.md`.
 
 ## Установка
@@ -83,6 +84,19 @@
 
 Проверки кода: `phpcs` со стандартами `moodle` и `moodle-extra` — чисто; `grunt amd` (ESLint Moodle + сборка) — чисто;
 stylelint Moodle — чисто.
+
+## Как проверено (0.6.1)
+
+- `node plugin/devtools/check_facts.mjs` — девять сценариев состояния концов линка из `docs/linux-switch-integration/PLAN.md`
+  (задача Б) и режимы L2 `none` / `native: null` над настоящими функциями `facts.js`: все проходят;
+- `devtools/ui-harness`, страница `index.ru.linux-switch-vlan.html` (Chromium): после «Обновить сейчас» порт PC1 выключен,
+  порт `e1` коммутатора на схеме (L1, L2) и в карточках узла, линка — down, остальные порты up; ошибок JS нет;
+  страница `index.ru.html` (OSPF) работает как раньше.
+
+**Не проверено (0.6.1)**: `grunt amd` и `phpcs`; `amd/build` **не пересобран** — нужен `grunt amd` в dev-Moodle (или запасной
+`node build.js --amd-build --only=facts,stage,details` из `devtools/ui-harness/`) и коммит `amd/build`; без этого собранный
+код (`?min`, Moodle) остаётся от 0.6.0. `ui-harness` в этой проверке шёл с заменителями babel, mustache, requirejs и ws: настоящих
+пакетов в окружении не было; настоящий Moodle, mock-менеджер (нужен `aiohttp`) и стенд с Linux-коммутатором не запускались.
 
 ## Как проверено (0.6.0)
 

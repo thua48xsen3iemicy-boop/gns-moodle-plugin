@@ -16,7 +16,9 @@ node build.js          # → dist/
 node server.js         # → http://127.0.0.1:8123/index.ru.html
 ```
 
-Страницы: `index.ru.html`, `index.en.html`, `index.viewer.html` (пользователь без права запуска). Параметры адреса:
+Страницы: `index.ru.html`, `index.en.html`, `index.viewer.html` (пользователь без права запуска); лаба `linux-switch-vlan`
+(Linux-коммутатор с VLAN и транком; «Обновить сейчас» выключает порт PC1) — `index.ru.linux-switch-vlan.html` и
+`index.en.linux-switch-vlan.html`, остальные параметры те же. Параметры адреса:
 `?fast` — лаба запускается за секунду, `?theme=dark`, `?min` — модули из `plugin/amd/build`, `?conflict` — старт отвечает
 «уже есть другая лаба», `?observer` — чужая работающая лаба, только просмотр, `?nofacts` — сессия без фактов,
 `?factsempty` — факты ещё не собраны (rev 0). В консоли браузера `window.__stub.setNode(<node_id>, 'stopped'|'started')` меняет состояние ноды. Живые факты — демо-фикстуры: «Обновить сейчас» переключает верный конфиг и конфиг с ошибками;
