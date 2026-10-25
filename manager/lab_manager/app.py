@@ -429,7 +429,11 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if body.node_id in no_console:  # For everybody, a read-only observer too
             raise ApiError(403, "console_disabled", "The image of this node has no console for users")
         nodes, stale = await services.orchestrator.live_nodes(s)
-        if not stale and nodes.get(body.node_id, {}).get("status") != "started":
+        node = nodes.get(body.node_id, {})
+        console = node.get("console_type")
+        if console == "vnc" and body.readonly:  # A permission, so it goes before the state check below
+            raise ApiError(403, "console_disabled", "The screen of this node is visible to the session owner only")
+        if not stale and node.get("status") != "started":
             # Saves the plugin a closed WebSocket and a session re-read (П5).
             raise ApiError(409, "node_not_running", "Node is not started")
         slot = settings.slots.get(s["slot_vmid"])
@@ -438,7 +442,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         who = f"{s['id']}:{'observer' if body.readonly else 'owner'}"
         try:
             ticket = await services.gateway.issue(slot=slot.address, project_id=str(s["project_id"]),
-                                                  node_id=body.node_id, readonly=body.readonly, who=who)
+                                                  node_id=body.node_id, readonly=body.readonly, who=who,
+                                                  console="vnc" if console == "vnc" else "telnet")
         except SlotError as exc:
             raise ApiError(502, "gateway_unavailable", "Console gateway did not issue a ticket") from exc
         await store.event(s["id"], s["slot_vmid"], "console_ticket",

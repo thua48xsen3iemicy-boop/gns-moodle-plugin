@@ -291,6 +291,7 @@ class FakeSlot:
         self.student_state = student_state
         self.fence = (0, 0)
         self.facts_enabled = False  # Slot 0.6.0 serves /facts; older slots answer 404
+        self.deploy_bodies = []  # Bodies of POST /v1/labs/deploy as the slot received them
         self.facts = {}  # project_id -> {node_id: {"name", "collectors": {...}}} served by GET /facts
         self.refreshes = []  # project ids the manager asked to collect now
 
@@ -403,6 +404,7 @@ class FakeSlot:
         key = request.headers.get("Idempotency-Key")
         if path == "/v1/labs/deploy" and request.method == "POST":
             ticket = json.loads(request.content)
+            self.deploy_bodies.append(ticket)
             return self._submit("deploy", ticket["project_id"], ticket, key)
         m = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/(resume|stop|status|topology)", path)
         if m and request.method == "POST":
@@ -417,7 +419,8 @@ class FakeSlot:
             ids = self.node_ids[m.group(1)]
             status = "started" if lab["state"] == "READY" else "stopped"
             nodes = [{"node_id": ids[n["name"]], "name": n["name"], "node_type": n["kind"], "x": 0, "y": 0,
-                      "console_type": "telnet", "console": 5000,
+                      "console_type": n.get("console", "telnet"),
+                      "console": 5900 if n.get("console") == "vnc" else 5000,
                       "status": "stopped" if n["name"] in self.stopped_nodes else status,
                       "ports": [{"name": "Ethernet0", "short_name": "e0", "adapter_number": 0, "port_number": 0}],
                       "properties": {"options": "-chardev socket,path=/opt/gns3/qga/x.sock"}}

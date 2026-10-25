@@ -4,6 +4,10 @@ The administrator describes every image installed on the slots: an id for the pl
 on the slots and the node parameters that are never taken from Moodle (disk interface, CLI
 prompt, provisioning...). The plugin gets only what its lab editor needs (public()).
 
+console_type: telnet (default), vnc (QEMU screen instead of a serial console; qemu images only) or none
+(no console for anybody). A vnc image makes the manager put `console: "vnc"` into the node of the
+slot's ticket (labdef.deploy_ticket); nodes of other images get no such field.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -88,6 +92,8 @@ class Image(Strict):
                 raise ValueError("adapters must stay within 1..16")
         if self.cpus and (self.kind != "qemu" or not (1 <= self.cpus.min and self.cpus.max <= 16)):
             raise ValueError("cpus is for qemu only, within 1..16")
+        if self.console_type == "vnc" and self.kind != "qemu":
+            raise ValueError("console_type vnc is for qemu only")  # CONTRACTS 2.6
         if self.slot.cli_prompt is not None:
             try:
                 pattern = re.compile(self.slot.cli_prompt.encode())
