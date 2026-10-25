@@ -56,7 +56,9 @@ function indexFacts(m, facts){
     const f = facts.nodes[n.id]; if (!f) return;
     const ifs = Array.isArray(f.interfaces) ? f.interfaces.filter(i => i && i.name) : null;
     const rec = { id: n.id, status: f.status || null, ifs, byName: new Map(), rid: f.router_id || null,
-      adj: Array.isArray(f.adjacencies) ? f.adjacencies : [], vlans: Array.isArray(f.vlans) ? f.vlans : [] };
+      adj: Array.isArray(f.adjacencies) ? f.adjacencies : [], vlans: Array.isArray(f.vlans) ? f.vlans : [],
+      // The last collection failed: the facts beside it are the last known ones, not the current ones.
+      err: f.error && typeof f.error === "object" ? f.error : null, at: f.collected_at || null };
     (ifs || []).forEach(i => {
       rec.byName.set(i.name, i);
       if (i.port) fx.byPort.set(n.id + "|" + i.port.adapter + "/" + i.port.port, i);

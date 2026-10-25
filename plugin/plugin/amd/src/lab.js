@@ -18,7 +18,8 @@
  *
  * Layout and behaviour come from prototypes/student-ui.html (levels of detail by zoom, an action wheel, consoles as
  * a panel, a grid or windows, diving into a console on a phone). The session is the source of truth: the scheme shows
- * the reference topology until the lab runs and the live topology of the session after that.
+ * the reference topology until the lab runs and the live topology of the session after that. While the lab runs and its
+ * session reports facts, the page polls them (docs/live-state.md) and the scheme builds the layers L2, L3 and OSPF.
  *
  * Permissions are decided by the server; the flags here only choose what to draw.
  *
@@ -27,6 +28,7 @@
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+import Ajax from 'core/ajax';
 import {getStrings} from 'core/str';
 import {STRING_KEYS as CONSOLE_KEYS} from 'mod_gns3lab/console';
 import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
@@ -38,6 +40,15 @@ import {Stage} from 'mod_gns3lab/stage';
 import {Wheel} from 'mod_gns3lab/wheel';
 
 const CATEGORIES = ['router', 'switch', 'pc', 'server', 'cloud', 'firewall', 'hypervisor'];
+
+/** Poll interval of the facts of a running lab while the page is visible, ms (docs/live-state.md §6). */
+const FACTS_POLL = 30000;
+
+/** After "Refresh now" the facts are read again this much later: the collection takes a few seconds, ms. */
+const FACTS_AFTER_REFRESH = 5000;
+
+/** Codes of a failed collection with an own text. */
+const FACT_ERRORS = ['unreachable', 'timeout', 'stopped', 'unsupported', 'failed'];
 
 /** Language strings of the interface; the texts of the layers and of the details tables are in the modules. */
 const UI_KEYS = [
@@ -53,6 +64,9 @@ const UI_KEYS = [
     'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
     'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',
     'consoleneedsrunning', 'consolevnclater', 'consolenone',
+    'ui_facts_at', 'ui_facts_ago', 'ui_facts_ago_now', 'ui_facts_stale', 'ui_facts_stale_mark', 'ui_facts_nodata',
+    'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
+    ...FACT_ERRORS.map(code => 'ui_facts_err_' + code),
 ];
 
 /**
@@ -74,6 +88,14 @@ class LabPage {
         this.strings = strings;
         this.data = JSON.parse(root.dataset.json || '{}');
         this.liveKey = null;
+        this.cmid = cmid;
+        this.userid = userid;
+        // Live facts: the session they belong to, the last document and its rev, the poll timer.
+        this.factsSession = null;
+        this.factsDoc = null;
+        this.factsRev = 0;
+        this.factsTimer = null;
+        this.factsShown = '';
         const region = name => root.querySelector(`[data-region="${name}"]`);
         this.toastEl = region('toast');
         this.toastTimer = null;
@@ -85,6 +107,7 @@ class LabPage {
             host: {
                 canConsole: n => this.canConsole(n),
                 openConsole: n => this.openConsole(n),
+                refreshFacts: () => this.refreshFacts(),
             },
         });
         this.consoles = new Consoles(root, {
@@ -110,6 +133,14 @@ class LabPage {
         });
         this.hookStage();
         this.bindChrome(region);
+        // Facts are polled only while somebody looks at the page.
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearTimeout(this.factsTimer);
+            } else if (this.factsSession) {
+                this.pollFacts();
+            }
+        });
 
         // Users who may only look at the lab have no session bar.
         const controllable = !!region('start');
@@ -218,6 +249,9 @@ class LabPage {
         if (!running || (before && before.sessionid !== s.sessionid)) {
             this.consoles.closeAll();
         }
+        if (this.factsSession && (!running || s.sessionid !== this.factsSession)) {
+            this.stopFacts();
+        }
         if (running && s.topology) {
             const statuses = new Map(s.nodes.map(n => [n.nodeid, n.status]));
             const key = s.sessionid + '\n' + s.topology;
@@ -228,6 +262,7 @@ class LabPage {
                 this.details.refresh();
             }
             this.consoles.updateNodes(statuses);
+            this.followFacts(s);
         } else if (this.liveKey) {
             this.liveKey = null;
             this.preview(true);
@@ -260,8 +295,153 @@ class LabPage {
         // The project name of a session is technical (lab-…-s-…): the title stays the name of the lab.
         doc.name = this.stage.model ? this.stage.model.name : doc.name;
         this.liveKey = key;
+        const meta = this.stage.factsMeta;
         this.stage.load(doc, {statuses, keepView: true});
+        if (this.factsSession === s.sessionid) {
+            // The same session with a new topology: the facts are still those of the session.
+            this.stage.setFactsMeta(meta);
+            this.stage.setFacts(this.factsDoc);
+            this.factsShown = '';
+        }
         this.details.hide();
+    }
+
+    /* ---------------- live facts ---------------- */
+
+    /**
+     * Starts polling the facts of a running session that reports them, or stops it when the session does not.
+     *
+     * @param {object} s running session
+     */
+    followFacts(s) {
+        const on = Array.isArray(s.features) && s.features.includes('facts');
+        if (!on) {
+            if (this.factsSession) {
+                this.stopFacts();
+                this.loadLiveAgain();
+            }
+            return;
+        }
+        if (this.factsSession === s.sessionid) {
+            return;
+        }
+        this.factsSession = s.sessionid;
+        this.factsDoc = null;
+        this.factsRev = 0;
+        this.factsShown = '';
+        // Live mode without data: the demo facts of the preview are not shown on a live lab.
+        this.stage.setFacts(null);
+        this.pollFacts();
+    }
+
+    /**
+     * Stops polling the facts; the scheme keeps what it shows until it is loaded again.
+     */
+    stopFacts() {
+        clearTimeout(this.factsTimer);
+        this.factsSession = null;
+        this.factsDoc = null;
+        this.factsRev = 0;
+    }
+
+    /**
+     * Draws the live topology again without facts (the session stopped reporting them).
+     */
+    loadLiveAgain() {
+        const s = this.session && this.session.session;
+        this.liveKey = null;
+        if (s) {
+            this.stateChanged(this.session.state, s);
+        }
+    }
+
+    /**
+     * Reads the facts from the server and schedules the next read while the page is visible.
+     */
+    async pollFacts() {
+        clearTimeout(this.factsTimer);
+        const sessionid = this.factsSession;
+        if (!sessionid || document.hidden) {
+            return;
+        }
+        let result = null;
+        try {
+            [result] = await Promise.all(Ajax.call([{
+                methodname: 'mod_gns3lab_get_facts',
+                args: {cmid: this.cmid, userid: this.userid, sincerev: this.factsRev},
+            }]));
+        } catch (error) {
+            // The last facts stay on the scheme; the next read may work.
+            result = null;
+        }
+        if (sessionid !== this.factsSession) {
+            return;
+        }
+        if (result) {
+            this.takeFacts(result);
+        }
+        clearTimeout(this.factsTimer);
+        this.factsTimer = setTimeout(() => this.pollFacts(), FACTS_POLL);
+    }
+
+    /**
+     * Takes an answer of get_facts: new facts redraw the layers, the age of the old ones only the details card.
+     *
+     * @param {object} result {available, changed, rev, generatedat, ttl, facts}
+     */
+    takeFacts(result) {
+        let changed = false;
+        if (result.available && result.changed) {
+            let doc = null;
+            try {
+                doc = JSON.parse(result.facts);
+            } catch (e) {
+                doc = null;
+            }
+            if (doc && typeof doc === 'object') {
+                this.factsDoc = doc;
+                this.factsRev = result.rev;
+                changed = true;
+            }
+        } else if (!result.available && (this.factsDoc || this.factsRev)) {
+            this.factsDoc = null;
+            this.factsRev = 0;
+            changed = true;
+        }
+        const at = result.generatedat ? result.generatedat * 1000 : null;
+        const stale = !!at && Date.now() - at > result.ttl * 1000;
+        this.stage.setFactsMeta({at, stale});
+        if (changed) {
+            this.stage.setFacts(this.factsDoc);
+        }
+        // What the card says changes with the minute of the collection and with going out of date.
+        const shown = [at ? Math.floor(at / 60000) : 0, stale].join();
+        if (changed || shown !== this.factsShown) {
+            this.factsShown = shown;
+            this.details.refresh();
+        }
+    }
+
+    /**
+     * Asks the manager to collect the facts now, then reads them again a little later.
+     */
+    async refreshFacts() {
+        if (!this.factsSession) {
+            return;
+        }
+        try {
+            await Promise.all(Ajax.call([{
+                methodname: 'mod_gns3lab_refresh_facts',
+                args: {cmid: this.cmid, userid: this.userid},
+            }]));
+            this.toast(this.strings.ui_facts_refresh_sent);
+        } catch (error) {
+            this.toast(error.message || String(error));
+            this.details.refresh();
+            return;
+        }
+        clearTimeout(this.factsTimer);
+        this.factsTimer = setTimeout(() => this.pollFacts(), FACTS_AFTER_REFRESH);
     }
 
     /* ---------------- consoles: can the student open one now ---------------- */
