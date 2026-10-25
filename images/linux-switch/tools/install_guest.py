@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
+LOOPBACK_ONLY = "# Managed switch guest: Ethernet ports belong to systemd-networkd.\nauto lo\niface lo inet loopback\n"
 spec = importlib.util.spec_from_file_location("switch_preflight", SOURCE / "switch_api/preflight.py")
 preflight = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preflight)
@@ -33,6 +34,7 @@ def prepare(root, source=SOURCE):
     state.chmod(0o700)
     for name in preflight.NETWORK_FILES:
         install(source / "network" / name, root / "opt/switch-api/network-profile" / name)
+    install(source / "sysctl/90-slot-switch.conf", root / "opt/switch-api/sysctl/90-slot-switch.conf")
     preflight.check_network(root / "opt/switch-api/network-profile")
     print("Prepared API and staged all three network files. Live networking and SSH unchanged.")
     print("Next: verify QGA and console access, then run activate and reboot.")
@@ -42,7 +44,8 @@ def activate(root, command=subprocess.run):
     staged = root / "opt/switch-api/network-profile"
     preflight.check_network(staged)
     for relative in ("opt/switch-api/switch_api/server.py", "opt/switch-api/switch_api/preflight.py",
-                     "usr/local/sbin/switchctl", "etc/systemd/system/switch-api.service"):
+                     "usr/local/sbin/switchctl", "etc/systemd/system/switch-api.service",
+                     "opt/switch-api/sysctl/90-slot-switch.conf"):
         if not (root / relative).is_file():
             raise RuntimeError(f"Missing {relative}; run prepare first")
     network = root / "etc/systemd/network"
@@ -60,6 +63,22 @@ def activate(root, command=subprocess.run):
     for name in preflight.NETWORK_FILES:
         if (network / name).read_bytes() != (staged / name).read_bytes():
             raise RuntimeError(f"Installed profile verification failed: {name}")
+    # ifupdown's allow-hotplug path can run independently of networking.service.
+    # Preserve both the main file and all includes, then remove every Ethernet stanza.
+    legacy = root / "etc/network"
+    legacy.mkdir(parents=True, exist_ok=True)
+    saved_legacy = backup / "ifupdown"
+    saved_legacy.mkdir()
+    for name in ("interfaces", "interfaces.d"):
+        path = legacy / name
+        if path.exists() or path.is_symlink():
+            shutil.move(str(path), saved_legacy / name)
+    (legacy / "interfaces").write_text(LOOPBACK_ONLY)
+    (legacy / "interfaces").chmod(0o644)
+    (legacy / "interfaces.d").mkdir(mode=0o755)
+    # Apply only on the final reboot; preparation must preserve IPv6-based SSH.
+    install(root / "opt/switch-api/sysctl/90-slot-switch.conf",
+            root / "etc/sysctl.d/90-slot-switch.conf")
     cloud = root / "etc/cloud"
     if cloud.is_dir():
         (cloud / "cloud-init.disabled").touch()
@@ -67,7 +86,10 @@ def activate(root, command=subprocess.run):
     command(["systemctl", "enable", "systemd-networkd.service", "switch-api.service",
              "serial-getty@ttyS0.service"], check=True)
     command(["systemctl", "mask", "networking.service", "NetworkManager.service",
-             "systemd-resolved.service"], check=True)
+             "NetworkManager-wait-online.service", "systemd-resolved.service",
+             "ifup@.service", "ifupdown-pre.service", "ifupdown-wait-online.service",
+             "dhcpcd.service", "dhcpcd@.service", "dhclient.service", "dhclient@.service",
+             "avahi-autoipd.service", "avahi-autoipd@.service"], check=True)
     # sshd.service is a packaged alias on Debian; masking it can fail with EEXIST.
     # Mask only the actual service and socket, last, without stopping either.
     command(["systemctl", "mask", "ssh.service", "ssh.socket"], check=True)

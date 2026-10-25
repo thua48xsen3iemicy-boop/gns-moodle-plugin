@@ -1,6 +1,6 @@
 # Switch guest API contract v1
 
-Implementation version: 0.1.1. Scope: the API inside the Linux switch VM only.
+Implementation version: 0.1.2. Scope: the API inside the Linux switch VM only.
 This document does not change the Slot, Manager or Moodle Plugin wire contracts.
 
 ## Transport and trust

@@ -1,4 +1,4 @@
-# Switch API 0.1.1
+# Switch API 0.1.2
 
 Python standard-library daemon, local Unix socket and a CLI for QGA. Runtime
 dependencies inside Debian 13: python3, iproute2, tcpdump, systemd and
@@ -32,8 +32,11 @@ reboot
 
 Activation backs up existing .network/.netdev files under /var/backups/switch-network,
 installs and verifies all three staged files in /etc/systemd/network, disables
-cloud-init's future execution if installed, enables networkd/API/serial getty and
-masks the previous network managers. SSH service/socket are masked last, without
+cloud-init's future execution if installed, archives /etc/network/interfaces and
+interfaces.d, replaces them with a loopback-only file without includes, and installs
+the no-IPv6 sysctl profile for the next boot. It enables networkd/API/serial getty
+and masks previous network managers, ifupdown hotplug units and standalone DHCP/
+IPv4LL services. SSH service/socket are masked last, without
 --now. The sshd alias is deliberately not masked. The script never reboots or
 restarts networking; the administrator runs reboot after it succeeds.
 
@@ -101,3 +104,11 @@ These checks require the owner's GNS3 test environment and are not replaced by
 the unit tests. The owner verified bridge creation and status/ports/vlans in a
 Debian guest after installing the three network files. End-to-end VLAN forwarding,
 capture behavior and the new installer still require guest acceptance testing.
+
+When updating an earlier prototype, rerun prepare and activate before rebooting.
+Masking networking.service alone does not disable ifupdown's allow-hotplug path;
+the previous installer left DHCP stanzas in /etc/network/interfaces. Inspect
+`ip -br address` after reboot: only IPv4 loopback should remain. A 169.254/16
+address is IPv4 link-local, not evidence of a successful DHCP lease. If addresses
+return despite the cleaned configuration, inspect running dhclient/dhcpcd/
+avahi-autoipd processes and the owning network service before publishing the image.

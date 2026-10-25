@@ -20,12 +20,17 @@ def test_prepare_from_another_directory_keeps_network_untouched(tmp_path):
     old = root / "etc/systemd/network/old.network"
     old.parent.mkdir(parents=True)
     old.write_text("original SSH network")
+    interfaces = root / "etc/network/interfaces"
+    interfaces.parent.mkdir(parents=True)
+    interfaces.write_text("allow-hotplug ens3\niface ens3 inet dhcp\n")
     result = subprocess.run(
         [sys.executable, str(RECIPE / "tools/install_guest.py"), "prepare", "--root", str(root)],
         cwd=tmp_path, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
     assert old.read_text() == "original SSH network"
+    assert "inet dhcp" in interfaces.read_text()
+    assert not (root / "etc/sysctl.d/90-slot-switch.conf").exists()
     assert sorted(p.name for p in old.parent.iterdir()) == ["old.network"]
     check_network(root / "opt/switch-api/network-profile")
     assert (root / "usr/local/sbin/switchctl").stat().st_mode & 0o777 == 0o755
@@ -88,3 +93,27 @@ def test_offline_root_cannot_activate_host_services(tmp_path):
     )
     assert result.returncode == 2
     assert "activate must run inside the guest" in result.stderr
+
+
+def test_activation_removes_ifupdown_hotplug_and_stages_no_address_policy(tmp_path):
+    installer.prepare(tmp_path)
+    legacy = tmp_path / "etc/network"
+    (legacy / "interfaces.d").mkdir(parents=True)
+    original = "source /etc/network/interfaces.d/*\nallow-hotplug ens3\niface ens3 inet dhcp\n"
+    (legacy / "interfaces").write_text(original)
+    (legacy / "interfaces.d/extra").write_text("auto ens4\niface ens4 inet6 auto\n")
+    commands = []
+    installer.activate(tmp_path, command=lambda args, **kwargs: commands.append(args))
+    assert (legacy / "interfaces").read_text() == installer.LOOPBACK_ONLY
+    assert not list((legacy / "interfaces.d").iterdir())
+    backups = list((tmp_path / "var/backups/switch-network").glob("*/ifupdown/interfaces"))
+    assert len(backups) == 1 and backups[0].read_text() == original
+    assert (backups[0].parent / "interfaces.d/extra").read_text().startswith("auto ens4")
+    assert (tmp_path / "etc/sysctl.d/90-slot-switch.conf").read_bytes() == (RECIPE / "sysctl/90-slot-switch.conf").read_bytes()
+    masked = {unit for args in commands if args[:2] == ["systemctl", "mask"] for unit in args[2:]}
+    assert {"ifup@.service", "dhcpcd.service", "dhclient.service", "avahi-autoipd.service"} <= masked
+    assert not any("--now" in args or "sysctl" in args for args in commands)
+    # Repeated activation preserves the original recovery copy and leaves no DHCP stanza.
+    installer.activate(tmp_path, command=lambda *args, **kwargs: None)
+    assert backups[0].read_text() == original
+    assert "dhcp" not in (legacy / "interfaces").read_text()
