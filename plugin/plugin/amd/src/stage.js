@@ -190,6 +190,9 @@ export class Stage {
         this.der = null;
         this.facts = null;
         this.factsKey = 'ok';
+        this.factsLive = false;
+        this.liveDoc = null;
+        this.factsMeta = {at: null, stale: false};
         this.layer = 'l1';
         this.sel = null;
         this.view = {k: 1, tx: 0, ty: 0};
@@ -266,7 +269,7 @@ export class Stage {
      * @param {object} [options]
      * @param {Map} [options.statuses] node id → started|stopped|suspended; absent: statuses are unknown
      * @param {object} [options.guests] Proxmox guests by node id (demo)
-     * @param {object} [options.facts] {ok, broken} facts documents (demo)
+     * @param {object} [options.facts] {ok, broken} facts documents (demo); live facts come later with setFacts()
      * @param {boolean} [options.keepView] keep zoom and position
      */
     load(doc, {statuses = null, guests = null, facts = null, keepView = false} = {}) {
@@ -278,6 +281,10 @@ export class Stage {
         this.statusKnown = !!statuses;
         this.guests = guests;
         this.facts = facts && facts.ok ? facts : null;
+        this.factsKey = 'ok';
+        this.factsLive = false;
+        this.liveDoc = null;
+        this.setFactsMeta({at: null, stale: false});
         this.sel = null;
         this.derive();
         if (!this.facts) this.layer = 'l1';
@@ -295,20 +302,43 @@ export class Stage {
      * Computes the layers from the facts of the current key.
      */
     derive() {
-        const res = this.facts ? derive(this.model, this.facts[this.factsKey] || this.facts.ok) : null;
+        const doc = this.facts ? this.facts[this.factsKey] || this.facts.ok : null;
+        const res = doc ? derive(this.model, this.factsLive ? this.withLiveStatuses(doc) : doc) : null;
         this.fx = res ? res.fx : null;
         this.der = res ? res.der : null;
     }
 
     /**
-     * Updates the node statuses without redrawing the scheme.
+     * Live facts with the node statuses of the session: the status in a snapshot is for reference only
+     * and may be old (CONTRACTS §2.7).
+     *
+     * @param {object} doc facts document
+     * @returns {object} a copy with the statuses replaced
+     */
+    withLiveStatuses(doc) {
+        if (!this.statusKnown) return doc;
+        const nodes = {};
+        Object.entries(doc.nodes || {}).forEach(([id, f]) => {
+            nodes[id] = this.statuses.has(id) ? Object.assign({}, f, {status: this.statuses.get(id)}) : f;
+        });
+        return Object.assign({}, doc, {nodes});
+    }
+
+    /**
+     * Updates the node statuses without redrawing the scheme; with live facts the layers follow them.
      *
      * @param {Map} statuses node id → status
      */
     setStatuses(statuses) {
+        const before = this.statuses;
         this.statuses = statuses;
         this.statusKnown = true;
         if (!this.model) return;
+        const same = before.size === statuses.size && [...statuses].every(([id, st]) => before.get(id) === st);
+        if (this.factsLive && this.facts && !same) {
+            this.factsChanged();
+            return;
+        }
         this.model.nodes.forEach(n => this.paintStatus(n));
     }
 
@@ -349,12 +379,61 @@ export class Stage {
      */
     setFactsKey(key) {
         this.factsKey = key;
+        this.factsChanged();
+    }
+
+    /**
+     * Shows the live facts of the session, keeping the model and the view (docs/live-state.md).
+     *
+     * The layers L2, L3 and OSPF are offered as soon as a snapshot has nodes; an empty one (rev 0) means "no data".
+     *
+     * @param {object|null} doc facts document gns3lab.facts/1, null while there is none
+     */
+    setFacts(doc) {
+        this.factsLive = true;
+        this.liveDoc = doc || null;
+        this.facts = doc && doc.nodes && Object.keys(doc.nodes).length ? {ok: doc} : null;
+        this.factsKey = 'ok';
+        if (!this.facts) this.layer = 'l1';
+        this.factsChanged();
+    }
+
+    /**
+     * When the live facts were collected and whether they are out of date; the data is shown all the same.
+     *
+     * @param {object} meta {at: ms or null, stale: boolean}
+     */
+    setFactsMeta(meta) {
+        this.factsMeta = meta;
+        const seg = this.r('layerSeg');
+        if (!seg) return;
+        seg.classList.toggle('stale', !!meta.stale);
+        if (meta.stale) seg.title = this.s('ui_facts_stale_mark');
+        else seg.removeAttribute('title');
+    }
+
+    /**
+     * Derives the layers again after the facts changed and drops a selection that is gone.
+     */
+    factsChanged() {
         this.derive();
+        this.syncLayerUI();
         const s = this.sel, D = this.der;
-        if (s && D && ((s.kind === 'subnet' && !D.l3.subnets.some(x => x.key === s.id)) || (s.kind === 'vlan' && !D.l2.domains.some(x => x.id === s.id)) || (s.kind === 'adj' && !D.rt.edges.some(x => x.id === s.id)))) this.sel = null;
+        if (s && ['subnet', 'vlan', 'adj'].includes(s.kind) && (!D || (s.kind === 'subnet' && !D.l3.subnets.some(x => x.key === s.id)) || (s.kind === 'vlan' && !D.l2.domains.some(x => x.id === s.id)) || (s.kind === 'adj' && !D.rt.edges.some(x => x.id === s.id)))) this.sel = null;
         this.render();
         this.call('select', this.sel);
         this.call('layerChanged', this.layer);
+    }
+
+    /**
+     * Whether the last collection of the facts of a node failed: its facts are drawn pale.
+     *
+     * @param {string} nodeId node id
+     * @returns {boolean}
+     */
+    factsFailed(nodeId) {
+        const f = this.fx && this.fx.nodes.get(nodeId);
+        return !!(f && f.err);
     }
 
     syncLayerUI() {
@@ -368,7 +447,8 @@ export class Stage {
         });
         const fs = this.r('factsSel');
         if (fs) {
-            fs.hidden = !(has && this.facts && this.facts.broken);
+            // The demo switch between the two fixtures; live facts are what they are.
+            fs.hidden = !(has && !this.factsLive && this.facts && this.facts.broken);
             fs.value = this.factsKey;
         }
     }
@@ -431,11 +511,11 @@ export class Stage {
         }
         const d = Math.min(58, g.len * 0.36);
         [[a, ia, g.ax, g.ay, g.dx, g.dy], [b, ib, g.bx, g.by, -g.dx, -g.dy]].forEach(([e, ifc, x, y, ux, uy]) => {
-            const bad = !!(ifc && (ifc.oper === 'down' || ifc.admin === 'down'));
-            el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: 3.2, class: 'pdot l1' + (bad ? ' down' : '')}, G);
+            const bad = !!(ifc && (ifc.oper === 'down' || ifc.admin === 'down')), old = this.factsFailed(e.nodeId) ? ' fstale' : '';
+            el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: 3.2, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
             const px = x + ux * d, py = y + uy * d;
             el('text', {x: px, y: py + 3, class: 'plabel l1'}, G).textContent = e.text;
-            if (ifc && ifc.ipv4 && ifc.ipv4.length) el('text', {x: px, y: py + 3, dy: '1.35em', class: 'pip l2'}, G).textContent = ifc.ipv4[0];
+            if (ifc && ifc.ipv4 && ifc.ipv4.length) el('text', {x: px, y: py + 3, dy: '1.35em', class: 'pip l2' + old}, G).textContent = ifc.ipv4[0];
         });
     }
 
@@ -461,7 +541,7 @@ export class Stage {
         [[l.a, 1, r2.ia], [l.b, -1, r2.ib]].forEach(([e, s, i]) => {
             const fi = endIf(this.fx, e), bad = !!(fi && (fi.admin === 'down' || fi.oper === 'down'));
             const sp = i && i.switchport, text = sp ? e.text + (sp.mode === 'access' ? ' · ' + sp.vlan : ' · T') : e.text;
-            pill(this.L.labels, (s > 0 ? g.ax : g.bx) + s * g.dx * d, (s > 0 ? g.ay : g.by) + s * g.dy * d, text, 'ppill l1 dimmable' + (bad ? ' bad' : ''), l.id);
+            pill(this.L.labels, (s > 0 ? g.ax : g.bx) + s * g.dx * d, (s > 0 ? g.ay : g.by) + s * g.dy * d, text, 'ppill l1 dimmable' + (bad ? ' bad' : '') + (this.factsFailed(e.nodeId) ? ' fstale' : ''), l.id);
         });
     }
 
@@ -474,7 +554,7 @@ export class Stage {
             el('line', {class: 'hit', x1: N.cx, y1: N.cy, x2: s.x, y2: s.y}, G);
             el('line', {class: 'wire', x1: N.cx, y1: N.cy, x2: s.x, y2: s.y}, G);
             const dx = s.x - N.cx, dy = s.y - N.cy, len = Math.hypot(dx, dy) || 1, d = Math.min(dy / len > 0.5 ? 66 : 50, len * 0.5);
-            pill(this.L.labels, N.cx + dx / len * d, N.cy + dy / len * d, hostPart(mb.c), 'ppill l1 dimmable' + (mb.dup || mb.down ? ' bad' : ''), null).setAttribute('data-subnet', s.key);
+            pill(this.L.labels, N.cx + dx / len * d, N.cy + dy / len * d, hostPart(mb.c), 'ppill l1 dimmable' + (mb.dup || mb.down ? ' bad' : '') + (this.factsFailed(mb.nodeId) ? ' fstale' : ''), null).setAttribute('data-subnet', s.key);
         }));
         S.subnets.forEach(s => {
             pill(this.L.labels, s.x, s.y, (s.issues.length ? '⚠ ' : '') + s.key, 'subnet dimmable' + (s.issues.length ? ' warn' : ''), null).setAttribute('data-subnet', s.key);
@@ -510,7 +590,7 @@ export class Stage {
         this.model.nodes.forEach(n => {
             const st = this.nodeStatus(n);
             const ghost = !!D && ((L === 'l3' && !D.l3.nodes.has(n.id)) || (L === 'rt' && !D.rt.nodes.has(n.id)));
-            const g = el('g', {class: 'node dimmable st-' + (st || 'none') + (ghost ? ' ghost' : ''), transform: `translate(${n.cx} ${n.cy})`,
+            const g = el('g', {class: 'node dimmable st-' + (st || 'none') + (ghost ? ' ghost' : '') + (this.factsFailed(n.id) ? ' fstale' : ''), transform: `translate(${n.cx} ${n.cy})`,
                 'data-node': n.id, tabindex: '0', role: 'button', 'aria-label': ''}, this.L.nodes);
             n.g = g;
             g.setAttribute('aria-label', this.nodeLabel(n));

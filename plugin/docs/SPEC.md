@@ -122,10 +122,18 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
 | `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно | `{"ticket","gateway_url","expires_in"}` |
 | `mod_gns3lab_list_students` | `cmid` | observe | студенты (с учётом групп) и статус их сессий |
+| `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
+| `mod_gns3lab_refresh_facts` | `cmid`, `userid=0` | те же; только `running`-сессия | `{"requested"}`; частоту ограничивает менеджер |
 
 `nodeid` проверять: нода должна быть в топологии этой сессии (менеджер тоже проверяет, но плагин — первым).
 Возвращаемые структуры описать через `external_single_structure` строго, без «сырого» JSON, кроме `.gns3`
-(его отдавать строкой `PARAM_RAW` и парсить в JS — формат большой и меняется между версиями GNS3).
+(его отдавать строкой `PARAM_RAW` и парсить в JS — формат большой и меняется между версиями GNS3) и фактов
+`gns3lab.facts/1` (`docs/live-state.md`, по той же причине).
+
+Факты Moodle забирает у менеджера сам (`GET /api/v1/sessions/{id}/state`, CONTRACTS §2.7) и держит в кэше MUC `facts`
+15 с: свежий снимок отдаётся без запроса, более старый проверяется с `since_rev` (`304` продлевает запись), а снимок
+старше половины `ttl` перечитывается целиком — `generated_at` меняется при каждом сборе без нового `rev`.
+Страница опрашивает `get_facts` раз в 30 с, пока лаба запущена, в сессии есть `facts` и страница видна.
 
 ### 5.4. Страницы и UI
 
@@ -188,7 +196,8 @@ Moodle никогда не держит WebSocket и не видит токен�
 - CI: GitHub Actions с `moodle-plugin-ci` + тест шлюза.
 
 ### Потом (не в MVP)
-- Живое состояние лабы от lab-agent и слои схемы L1 / L2 / L3 / OSPF (черновик формата и правил — `docs/live-state.md`, эталон поведения — прототип вьюера).
+- ~~Живое состояние лабы и слои схемы L1 / L2 / L3 / OSPF~~ — сделано в 0.6.0 (`docs/live-state.md`, `get_facts`).
+  Дальше — история фактов, IPv6, L4 (`docs/live-state.md` §7).
 - noVNC для графических консолей, сниппеты из настроек активности, оценка и автопроверка, LTI-вариант.
 
 ## 7. Безопасность — чек-лист для ревью

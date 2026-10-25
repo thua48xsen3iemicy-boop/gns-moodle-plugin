@@ -29,6 +29,7 @@ use mod_gns3lab\tests\fake_manager;
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\manager_client::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\manager_exception::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\session_data::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\session_facts::class)]
 final class manager_client_test extends \advanced_testcase {
     /** @var fake_manager */
     protected fake_manager $manager;
@@ -226,5 +227,131 @@ final class manager_client_test extends \advanced_testcase {
         $this->assertTrue($this->client->supports_lab_definitions());
         $this->assertSame(30, $this->client->get_info()->limits->max_nodes);
         $this->assertSame('cisco-iou-l3', $this->client->get_images()[0]->id);
+    }
+
+    public function test_session_facts_full_and_not_modified(): void {
+        $this->manager->with_facts();
+
+        $facts = $this->client->get_session_facts('s-3f9a1c0d2b4e5f60');
+
+        $this->assertSame(5, $facts->rev);
+        $this->assertInstanceOf(\stdClass::class, $facts->nodes->{fake_manager::NODE_TELNET});
+        [$request] = $this->manager->requests_to('GET', fake_manager::STATE);
+        $this->assertSame('', $request['query']);
+        $this->assertSame('Bearer site-secret', $request['headers']['Authorization']);
+
+        $this->assertNull($this->client->get_session_facts('s-3f9a1c0d2b4e5f60', 5));
+        $this->assertSame('since_rev=5', $this->manager->requests_to('GET', fake_manager::STATE)[1]['query']);
+        $this->assertSame(5, $this->client->get_session_facts('s-3f9a1c0d2b4e5f60', 4)->rev);
+    }
+
+    public function test_session_facts_without_data_keep_nodes_an_object(): void {
+        $this->manager->on('GET', fake_manager::STATE, 200, '{"schema":"gns3lab.facts/1","rev":0,"ttl":90,"nodes":{}}');
+
+        $facts = $this->client->get_session_facts('s-3f9a1c0d2b4e5f60');
+
+        $this->assertSame(0, $facts->rev);
+        $this->assertSame('{}', json_encode($facts->nodes));
+    }
+
+    public function test_session_facts_of_another_schema_are_refused(): void {
+        $this->manager->with_facts(['schema' => 'gns3lab.facts/2'] + fake_manager::facts());
+
+        try {
+            $this->client->get_session_facts('s-3f9a1c0d2b4e5f60');
+            $this->fail('No exception');
+        } catch (manager_exception $e) {
+            $this->assertSame('badresponse', $e->remotecode);
+        }
+
+        $this->manager->on('GET', fake_manager::STATE, 200, ['schema' => 'gns3lab.facts/1', 'rev' => 1, 'nodes' => []]);
+        $this->expectException(manager_exception::class);
+        $this->client->get_session_facts('s-3f9a1c0d2b4e5f60');
+    }
+
+    public function test_304_is_an_error_unless_expected(): void {
+        $this->manager->on('GET', '/api/v1/sessions', 304, '');
+
+        $this->expectException(manager_exception::class);
+        $this->client->find_session(42, 7);
+    }
+
+    public function test_refresh_session_facts(): void {
+        $this->manager->with_facts();
+
+        $this->client->refresh_session_facts('s-3f9a1c0d2b4e5f60');
+
+        $this->assertCount(1, $this->manager->requests_to('POST', fake_manager::STATE . '/refresh'));
+
+        $this->manager->on(
+            'POST',
+            fake_manager::STATE . '/refresh',
+            409,
+            ['error' => 'session_not_running', 'message' => 'Session is not running']
+        );
+        try {
+            $this->client->refresh_session_facts('s-3f9a1c0d2b4e5f60');
+            $this->fail('No exception');
+        } catch (manager_exception $e) {
+            $this->assertSame('managererror_session_not_running', $e->errorcode);
+            $this->assertSame(409, $e->httpstatus);
+        }
+    }
+
+    public function test_session_export_of_features(): void {
+        $running = json_decode(json_encode(fake_manager::session()));
+        $this->assertSame(['consoles', 'facts'], session_data::export($running)['features']);
+
+        $old = fake_manager::session();
+        unset($old['features']);
+        $session = json_decode(json_encode($old));
+        $this->assertSame([], session_data::export($session)['features']);
+        $this->assertFalse(session_data::has_feature($session, 'facts'));
+    }
+
+    public function test_facts_cache_asks_the_manager_only_when_needed(): void {
+        $this->manager->with_facts();
+        $sessionid = 's-3f9a1c0d2b4e5f60';
+
+        $first = session_facts::get($this->client, $sessionid);
+        $second = session_facts::get($this->client, $sessionid);
+
+        $this->assertSame(5, $first->rev);
+        $this->assertSame($first->doc, $second->doc);
+        $this->assertCount(1, $this->manager->requests_to('GET', fake_manager::STATE), 'fresh entry served from the cache');
+
+        // An older entry with a recent snapshot is checked with since_rev; 304 only extends it.
+        $this->age_facts_entry($sessionid, session_facts::FRESH + 1, 0);
+        $third = session_facts::get($this->client, $sessionid);
+        $requests = $this->manager->requests_to('GET', fake_manager::STATE);
+        $this->assertSame('since_rev=5', $requests[1]['query']);
+        $this->assertSame($first->doc, $third->doc);
+        $this->assertGreaterThanOrEqual(time() - 1, $third->fetchedat);
+
+        // Half of the ttl later the snapshot is read in full: generated_at moves without a new rev.
+        $this->age_facts_entry($sessionid, session_facts::FRESH + 1, 60);
+        session_facts::get($this->client, $sessionid);
+        $this->assertSame('', $this->manager->requests_to('GET', fake_manager::STATE)[2]['query']);
+
+        session_facts::forget($sessionid);
+        session_facts::get($this->client, $sessionid);
+        $this->assertCount(4, $this->manager->requests_to('GET', fake_manager::STATE));
+    }
+
+    /**
+     * Makes the cached facts of a session look older.
+     *
+     * @param string $sessionid session id
+     * @param int $fetched seconds since the entry was read
+     * @param int $generated seconds since the snapshot was made
+     */
+    protected function age_facts_entry(string $sessionid, int $fetched, int $generated): void {
+        $cache = \cache::make('mod_gns3lab', 'facts');
+        $key = 'f' . sha1("https://manager.test\n" . $sessionid);
+        $entry = $cache->get($key);
+        $this->assertNotFalse($entry);
+        $entry->fetchedat = time() - $fetched;
+        $entry->generatedat = time() - $generated;
+        $cache->set($key, $entry);
     }
 }

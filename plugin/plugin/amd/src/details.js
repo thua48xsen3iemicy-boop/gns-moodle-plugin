@@ -28,6 +28,7 @@
 // Straight port of the first viewer; these style rules stay relaxed until the texts move to lang strings.
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 
+import {fill} from 'mod_gns3lab/dom';
 import {esc, fmtFilters, natSort} from 'mod_gns3lab/model';
 import {ipStr, v4, acolor, vcolor} from 'mod_gns3lab/facts';
 
@@ -49,6 +50,8 @@ const FACTS_NAME = { ok: "конфиг верный", broken: "конфиг с �
 const LAYER_NAME = { l1: "L1 · физика", l2: "L2 · VLAN", l3: "L3 · IP", rt: "OSPF" };
 const SEV = { bad: 0, warn: 1, info: 2 };
 const NODE_OFF = { stopped: "остановлен", suspended: "на паузе" };
+/** Codes of a failed collection with an own text (docs/live-state.md §3); any other code gets the general one. */
+const FACT_ERRORS = ["unreachable", "timeout", "stopped", "unsupported", "failed"];
 
 
 /**
@@ -56,13 +59,14 @@ const NODE_OFF = { stopped: "остановлен", suspended: "на паузе"
  *
  * @param {object} stage the stage: model, layers, statuses
  * @param {object} strings language strings
- * @param {object} host canConsole(node) tells whether a console can be opened now
+ * @param {object} host canConsole(node) tells whether a console can be opened now; refreshFacts() asks for new facts
  * @returns {object} builders: summary, node, link, subnet, vlan, adj, issues
  */
 const makeHtml = (stage, strings, host) => {
 const st = {
   get model() { return stage.model; }, get der() { return stage.der; }, get fx() { return stage.fx; },
   get layer() { return stage.layer; }, get statusOn() { return stage.statusKnown; }, get factsKey() { return stage.factsKey; },
+  get live() { return stage.factsLive; },
 };
 const nodeStatus = n => stage.nodeStatus(n);
 const guestsOf = n => (stage.statusKnown && stage.guests && stage.guests[n.id]) || null;
@@ -87,7 +91,32 @@ function issuesHTML(list, okText){
   return `<ul class="issues">${[...list].sort((a, b) => SEV[a.sev] - SEV[b.sev]).map(x =>
     `<li><button class="issue ${x.sev}" type="button" ${gotoAttr(x.go)}>${esc(x.text)}</button></li>`).join("")}</ul>`;
 }
+/* how long ago, for the time of a collection */
+function ago(ms){
+  const min = Math.floor((Date.now() - ms) / 60000);
+  return min < 1 ? strings.ui_facts_ago_now : fill(strings.ui_facts_ago, min);
+}
+/* live facts: when they were collected, whether they are out of date, and the button to collect them now */
+function liveFactsLine(){
+  const doc = stage.liveDoc, meta = stage.factsMeta, btn = host.refreshFacts
+    ? `<button class="gbtn fref" type="button" data-act="refreshfacts">${esc(strings.ui_facts_refresh)}</button>` : "";
+  if (!doc || !doc.rev || !doc.nodes || !Object.keys(doc.nodes).length) return `<p class="idline fnodata">${esc(strings.ui_facts_nodata)}</p>${btn}`;
+  const at = new Date(meta.at || doc.generated_at || NaN), known = !isNaN(at);
+  const text = fill(strings.ui_facts_at, known ? at.toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" }) : "—");
+  const old = meta.stale && known ? ` · <span class="fold">${esc(fill(strings.ui_facts_stale, ago(at.getTime())))}</span>` : "";
+  return `<p class="idline${meta.stale ? " stale" : ""}">${esc(text)}${old}</p>${btn}`;
+}
+/* the last collection of the node failed: why, and how old its facts are */
+function factsErrorHTML(n){
+  const f = st.fx && st.fx.nodes.get(n.id);
+  if (!f || !f.err) return "";
+  const code = String(f.err.code || ""), at = f.at ? Date.parse(f.at) : NaN;
+  const why = FACT_ERRORS.includes(code) ? strings["ui_facts_err_" + code] : strings.ui_facts_err_other;
+  const last = isNaN(at) ? strings.ui_facts_never : fill(strings.ui_facts_last, ago(at));
+  return `<p class="ferr">${esc(why)} ${esc(last)}</p>`;
+}
 function factsLine(){
+  if (st.live) return liveFactsLine();
   const at = st.fx && st.fx.at ? new Date(st.fx.at) : null;
   return `<p class="idline">Факты из лабы: ${esc(FACTS_NAME[st.factsKey])}${at && !isNaN(at) ? " · собраны " + at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : ""} · демо</p>`;
 }
@@ -129,7 +158,7 @@ function summaryHTML(){
   return `
     <div><p class="eyebrow">Обзор</p><h2>Состав лабы</h2></div>
     <p class="glead">Нажмите на устройство или линк, чтобы увидеть порты, соседей и параметры. Схема только для просмотра: здесь ничего нельзя сдвинуть или удалить.</p>
-    ${st.der ? `<p class="glead">Слои L2, L3 и OSPF строятся из того, как устройства реально настроены. Переключите конфиг на «с ошибками», чтобы увидеть, как ошибки выглядят на схеме.</p>${factsLine()}<h3>Проблемы L1 <span class="count">${st.der.l1.issues.length}</span></h3>${issuesHTML(st.der.l1.issues, "Все линки работают.")}` : ""}
+    ${st.der ? `${st.live ? "" : `<p class="glead">Слои L2, L3 и OSPF строятся из того, как устройства реально настроены. Переключите конфиг на «с ошибками», чтобы увидеть, как ошибки выглядят на схеме.</p>`}${factsLine()}<h3>Проблемы L1 <span class="count">${st.der.l1.issues.length}</span></h3>${issuesHTML(st.der.l1.issues, "Все линки работают.")}` : st.live ? factsLine() : ""}
     <dl class="kv">${kv}<dt>Линки</dt><dd class="mono">${m.links.length}${susp ? ` · ${susp} приост.` : ""}${filt ? ` · ${filt} с фильтрами` : ""}</dd></dl>
     <div class="legend">
       <span><i class="wirekey"></i>линк</span><span><i class="wirekey d"></i>приостановлен</span>
@@ -182,11 +211,12 @@ function nodeHTML(n){
     }
   }
   const hasConsole = n.consoleType && n.consoleType !== "none";
-  const layered = st.der && st.layer !== "l1";
+  const layered = st.der && st.layer !== "l1", ferr = factsErrorHTML(n);
   return `
     <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div></div>
     ${statusLine(n)}
-    ${layered ? nodeLayerHTML(n) : ""}
+    ${ferr}
+    ${layered ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
     <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${layered ? "" : `<h3>Интерфейсы <span class="count">${ifs.length}</span></h3>
     ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="glead">Ни один порт не подключён.</p>`}
@@ -319,7 +349,7 @@ export class Details {
      * @param {object} options
      * @param {object} options.stage the stage
      * @param {object} options.strings language strings
-     * @param {object} options.host openConsole(node) and canConsole(node)
+     * @param {object} options.host openConsole(node), canConsole(node) and, with live facts, refreshFacts()
      */
     constructor(el, {stage, strings, host}) {
         this.el = el;
@@ -469,6 +499,9 @@ export class Details {
             this.goto({kind: 'vlan', id: t.dataset.gotoVlan});
         } else if (t.dataset.gotoAdj) {
             this.goto({kind: 'adj', id: t.dataset.gotoAdj});
+        } else if (t.dataset.act === 'refreshfacts') {
+            t.disabled = true;
+            this.host.refreshFacts();
         } else if (t.dataset.act === 'close') {
             this.hide();
             this.stage.select(null);

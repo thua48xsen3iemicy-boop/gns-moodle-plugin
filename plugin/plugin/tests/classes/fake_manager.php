@@ -37,6 +37,9 @@ class fake_manager {
     /** Node with a VNC console in the running session. */
     public const NODE_VNC = '6b1f3c2e-4a7d-4e5b-9c10-000000000002';
 
+    /** Facts route of the running session. */
+    public const STATE = '/api/v1/sessions/s-3f9a1c0d2b4e5f60/state';
+
     /** @var array<string, array{int, mixed}> "METHOD /path" => [status, body] */
     protected array $routes = [];
 
@@ -73,6 +76,50 @@ class fake_manager {
     }
 
     /**
+     * Answers the facts routes of the running session like manager 0.8 (CONTRACTS §2.7).
+     *
+     * GET with since_rev equal to the rev of the snapshot gets 304 without a body.
+     *
+     * @param array|null $facts snapshot, facts() by default
+     */
+    public function with_facts(?array $facts = null): void {
+        $this->on('GET', self::STATE, 200, $facts ?? self::facts());
+        $this->on('POST', self::STATE . '/refresh', 202, '');
+    }
+
+    /**
+     * A facts snapshot gns3lab.facts/1 of the running session.
+     *
+     * @param int $rev rev of the snapshot
+     * @return array
+     */
+    public static function facts(int $rev = 5): array {
+        return [
+            'schema' => 'gns3lab.facts/1',
+            'rev' => $rev,
+            'generated_at' => gmdate('Y-m-d\\TH:i:s\\Z'),
+            'ttl' => 90,
+            'nodes' => [
+                self::NODE_TELNET => [
+                    'name' => 'SW1',
+                    'status' => 'started',
+                    'collected_at' => gmdate('Y-m-d\\TH:i:s\\Z'),
+                    'vlans' => [['id' => 10, 'name' => 'USERS']],
+                    'interfaces' => [
+                        ['name' => 'e0/0', 'kind' => 'physical', 'port' => ['adapter' => 0, 'port' => 0],
+                            'admin' => 'up', 'oper' => 'up', 'switchport' => ['mode' => 'access', 'vlan' => 10]],
+                    ],
+                ],
+                self::NODE_VNC => [
+                    'name' => 'PC1',
+                    'status' => 'started',
+                    'error' => ['code' => 'unsupported', 'message' => 'No guest agent'],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * Requests to a path, in order.
      *
      * @param string $method HTTP method
@@ -100,7 +147,7 @@ class fake_manager {
             'error' => null,
             'started_at' => '2026-10-17T10:00:00Z',
             'expires_at' => '2026-10-17T11:30:00Z',
-            'features' => $status === 'running' ? ['consoles'] : [],
+            'features' => $status === 'running' ? ['consoles', 'facts'] : [],
         ];
         if ($status === 'running') {
             $session['topology'] = [
@@ -219,6 +266,11 @@ class fake_manager {
             );
         }
         [$status, $body] = $route;
+        parse_str($request->getUri()->getQuery(), $query);
+        if (str_ends_with($request->getUri()->getPath(), '/state') && is_array($body) && isset($query['since_rev'])
+                && (int) $query['since_rev'] === ($body['rev'] ?? null)) {
+            return new Response(304);
+        }
         return new Response($status, ['Content-Type' => 'application/json'], is_string($body) ? $body : json_encode($body));
     }
 }

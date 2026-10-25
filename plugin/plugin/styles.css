@@ -1358,6 +1358,23 @@ body.gns3lab-fullscreen {
 .gns3lab-student .node.ghost {
     opacity: .32;
 }
+/* The last collection of the facts of a node failed: what is drawn is the last known state. */
+.gns3lab-student .node.fstale .nsub,
+.gns3lab-student .node.fstale .nadj,
+.gns3lab-student .pip.fstale,
+.gns3lab-student .pdot.fstale,
+.gns3lab-student .ppill.fstale {
+    opacity: .45;
+}
+.gns3lab-student .node.fstale .nsub,
+.gns3lab-student .node.fstale .nadj {
+    font-style: italic;
+}
+/* The live facts are out of date: the layers are still shown, marked. */
+.gns3lab-student .seg.stale {
+    border-style: dashed;
+    border-color: var(--warn);
+}
 .gns3lab-student .subnet {
     cursor: pointer;
 }
@@ -1992,6 +2009,26 @@ body.gns3lab-fullscreen {
     font: 400 11px var(--mono);
     color: var(--muted);
     overflow-wrap: anywhere;
+}
+.gns3lab-student .idline.stale .fold {
+    color: var(--warn);
+}
+.gns3lab-student .idline.fnodata {
+    font-style: italic;
+}
+.gns3lab-student .fref {
+    align-self: flex-start;
+}
+.gns3lab-student .ferr {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    border-left: 3px solid var(--warn);
+    padding: 4px 0 4px 10px;
+}
+.gns3lab-student .fstale {
+    opacity: .55;
 }
 .gns3lab-student .glead {
     margin: 0;
