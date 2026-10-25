@@ -116,6 +116,13 @@ class SlotClient:
     async def topology(self, project_id: str) -> dict:
         return await self._call("GET", f"/v1/labs/{project_id}/topology")
 
+    async def facts(self, project_id: str) -> dict:
+        """Latest collector results of the lab (CONTRACTS 4.6); a slot older than 0.6.0 answers 404."""
+        return await self._call("GET", f"/v1/labs/{project_id}/facts")
+
+    async def refresh_facts(self, project_id: str) -> dict:
+        return await self._call("POST", f"/v1/labs/{project_id}/facts/refresh")
+
 
 class GatewayClient:
     """POST /internal/tickets of plugin/gateway/console_gateway.py."""

@@ -51,6 +51,7 @@ import psycopg
 from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentRejected,
                            AgentSourceMissing, AgentUncertain, AgentWrongNode)
 from . import labdef
+from .facts import parse_slot_facts
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotOwnerLost, SlotUnavailable
@@ -166,6 +167,8 @@ class Orchestrator:
         self._wake = asyncio.Event()
         self._tasks: dict[str, asyncio.Task] = {}
         self._health_checked: dict[str, float] = {}
+        self._facts_next: dict[str, float] = {}  # session id -> monotonic time of the next read
+        self._facts_refreshed: dict[str, object] = {}  # session id -> facts_refresh_at already served
         self._live_cache: dict[str, tuple[float, dict]] = {}
         self.leader = False
         self.epoch = None
@@ -825,8 +828,10 @@ class Orchestrator:
         if s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]):
             reason = "maxduration" if not s["stop_requested"] else (s["stop_reason"] or "user")
             msg = "Время лабы истекло, остановка…" if reason == "maxduration" else "Остановка лабы…"
+            await self._poll_facts(s, final=True)  # How the lab looked at the end stays in the history
             return await self._goto(s, "lab_stop", msg, status="stopping", slot_state="releasing",
                                     stop_requested=True, stop_reason=reason)
+        await self._poll_facts(s)
         last = self._health_checked.get(s["id"], 0)
         if time.monotonic() - last < 30:
             return False
@@ -840,6 +845,38 @@ class Orchestrator:
             raise Failure(f"Лаба в слоте перешла в FAILED: {err.get('code', 'UNKNOWN')}: "
                           f"{err.get('message', '')}"[:500], "SLOT_LAB_FAILED", source={"error": err})
         return False
+
+    async def _poll_facts(self, s, *, final=False):
+        """Read the lab's facts from its slot and store the changes (DESIGN 6.7). Never fails the session.
+
+        Paced by settings.facts_poll_interval; a plugin request for a collection now (facts_refresh_at)
+        is passed to the slot first and read a few seconds later. A slot without the route (older than
+        0.6.0) is asked again only every five minutes.
+        """
+        sid, mono = s["id"], time.monotonic()
+        client = self._slot(s)
+        project_id = str(s["project_id"])
+        try:
+            asked = s.get("facts_refresh_at")
+            if asked is not None and self._facts_refreshed.get(sid) != asked and not final:
+                self._facts_refreshed[sid] = asked
+                await client.refresh_facts(project_id)
+                self._facts_next[sid] = mono + 3  # Time for the slot to collect
+                return
+            if not final and mono < self._facts_next.get(sid, 0):
+                return
+            self._facts_next[sid] = mono + self.settings.facts_poll_interval
+            records = parse_slot_facts(await client.facts(project_id))
+            await self.store.record_facts(sid, records)
+        except SlotOwnerLost:
+            raise  # The slot no longer accepts our token: the same handling as for any other command
+        except SlotError as exc:
+            if exc.status == 404:
+                self._facts_next[sid] = mono + 300
+            elif exc.status is not None or final:
+                log.warning("Facts of session %s: %s", sid, exc)
+        except psycopg.Error as exc:
+            log.warning("Facts of session %s were not stored: %s", sid, type(exc).__name__)
 
     # ------------------------------------------------------------------ stopping
     async def _stage_lab_stop(self, s):
@@ -979,6 +1016,8 @@ class Orchestrator:
                                             slot_state=slot_state, slot_message=slot_message,
                                             lab_failures=clean)
         self._health_checked.pop(s["id"], None)
+        self._facts_next.pop(s["id"], None)
+        self._facts_refreshed.pop(s["id"], None)
         return False
 
     # ------------------------------------------------------------------ reads for the API

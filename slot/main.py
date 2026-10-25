@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import httpx
 from api.auth import require_token
 from api.console import router as console_router
+from api.facts import router as facts_router
 from api.health import router as health_router
 from api.labs import router as labs_router
 from api.lifecycle import Lifecycle
@@ -58,6 +59,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(labs_router, dependencies=[Depends(require_token)])
 app.include_router(nodes_router, dependencies=[Depends(require_token)])
+app.include_router(facts_router, dependencies=[Depends(require_token)])
 app.include_router(console_router)  # WebSockets authenticate in their handler.
 
 app.include_router(operations_router, dependencies=[Depends(require_token)])

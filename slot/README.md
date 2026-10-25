@@ -1,4 +1,4 @@
-# Lab Slot — 0.5.1
+# Lab Slot — 0.6.0
 
 **Новый обязательный протокол:** до изменяющих запросов менеджер вызывает
 `POST /v1/fence` с `{epoch,generation}`; команды содержат `X-Lab-Epoch` и
@@ -165,6 +165,39 @@ QEMU обслуживает одного клиента на сокет QGA, а 
   (`main.py`) и запускать работу через `admitted()` (`api/nodes.py`).
 - `stop` теперь закрывает QGA-каналы остановленных нод (`QgaBroker.forget`).
 
+## Факты о нодах
+
+Слот сам собирает сетевые факты из гостей и держит последние результаты в памяти; менеджер забирает их
+(`GET /v1/labs/{project_id}/facts`) и хранит историю. Контракт — `manager/docs/CONTRACTS.md` §4.6,
+хранение — `manager/docs/DESIGN.md` §6.7, формат фактов — `plugin/docs/live-state.md`.
+
+- **Коллектор** — одна гостевая команда и разбор её вывода (`api/facts.py`). Сейчас один: `linux.net/1`
+  для QEMU-нод с QGA. Он выполняет `ip -j -d addr` и `ip -j route` одним `exec` и отдаёт `interfaces` и
+  `routes`. Описаны loopback, физические интерфейсы и подинтерфейсы 802.1Q; мосты, bond и туннели
+  пропускаются. В `data` попадают только значения состояния: сроки аренды DHCP/SLAAC, `expires` и
+  счётчики отбрасываются, иначе каждый опрос выглядел бы изменением.
+- **Не мешает остальным.** Сбор идёт фоновой задачей через `Lifecycle.qga` с `Priority.METRICS`,
+  `wait=False`: занятый канал — пропущенная попытка (не ошибка, результаты не меняются), канал в back-off —
+  `unreachable`. Вывод гостя наружу не отдаётся.
+- **Когда.** Только для лабы в `READY` и только пока у слота есть владелец (`fence`). Пока ноды грузятся,
+  сбора нет, поэтому недоступный QGA не считается ошибкой. Период — `SLOT_FACTS_INTERVAL` (30 с), таймаут
+  команды — `SLOT_FACTS_TIMEOUT` (10 с), не больше `SLOT_FACTS_CONCURRENCY` (8) нод одновременно.
+- **Ошибка сбора** (`ok: false`, `error.code`: `timeout`, `unreachable`, `stopped`, `unsupported`,
+  `failed`) не стирает прежние `data` и `observed_at`: это последние известные факты, а не текущие.
+- **Порт GNS3.** `port` интерфейса задаётся, только если его MAC в точности совпал с MAC адаптера:
+  GNS3 нумерует адаптеры от `properties.mac_address` ноды вверх. Нет базового MAC или совпадения —
+  поля `port` нет, по порядку интерфейсов слот не угадывает.
+- **Сброс.** Результаты стираются, когда меняется владелец (`POST /v1/fence`) и когда лаба выходит из
+  `READY`. Запрос о неизвестной лабе — `200` с `nodes: {}`, а не 404: 404 менеджер читает как «слот без фактов».
+- `POST /v1/labs/{project_id}/facts/refresh` (с заголовками владельца) просит собрать сейчас; чаще раза
+  в `SLOT_FACTS_MIN_REFRESH` (5 с) запросы объединяются, ответ всё равно `202`.
+
+```sh
+curl -fsS -H "Authorization: Bearer $TOKEN" "$BASE/v1/labs/$PROJECT_ID/facts"
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H "X-Lab-Epoch: $EPOCH" -H "X-Lab-Generation: $GEN" \
+  "$BASE/v1/labs/$PROJECT_ID/facts/refresh"
+```
+
 ## Преднастройка
 
 В доверенном описании ноды можно задать:
@@ -278,6 +311,14 @@ python3 slot/release.py check
 QGA гостевых VM, реальным Cisco CLI, CephFS flock, systemd/LXC, сохранность реальных
 QCOW2 или runtime-производительность. Проверка этих свойств требует стенда.
 L1-sidecar, автоматическая оценка задания, reset файлов и UI не реализованы.
+
+## Версия 0.6.0: факты о нодах
+
+- Новые маршруты `GET /v1/labs/{project_id}/facts` и `POST …/facts/refresh`, поле `collectors` и
+  возможность `collectors` в `GET /v1/capabilities` — см. «Факты о нодах».
+- Фоновый сбор `linux.net/1` через брокер QGA (`Priority.METRICS`); существующие маршруты и поведение
+  не менялись.
+- Версия закреплена в `install/lab-release.py` и в `release.py`.
 
 ## Версия 0.5.1: брокер QGA и долгие команды вне замка
 

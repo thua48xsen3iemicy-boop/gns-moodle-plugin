@@ -12,12 +12,15 @@ from release import VERSION, verify
 
 from api.auth import require_token
 from api.client import call
+from api.facts import COLLECTOR_IDS
 
 router = APIRouter(tags=["health"])
 
 
 # Manager negotiation (manager/docs/CONTRACTS.md §4.1); names are registered in its §7.
-FEATURES = ["qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1"]
+FEATURES = [
+    "qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1", "collectors",
+]
 
 
 @router.get("/healthz")
@@ -32,6 +35,7 @@ async def capabilities():
         "slot_version": VERSION,
         "deploy_schemas": ["gns3lab.deploy/1"],
         "features": FEATURES,
+        "collectors": COLLECTOR_IDS,
     }
 
 

@@ -8,9 +8,9 @@ from contextlib import asynccontextmanager
 from datetime import timezone
 
 import psycopg
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -18,6 +18,7 @@ from . import VERSION, labdef
 from .agent_client import AgentClient
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
+from .facts import build_state
 from .labs import Catalog, LabError, LabNotFound, deploy_ticket
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
@@ -209,6 +210,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def present(s):
         body = summary(s)
         body["features"] = ["consoles"] if s["status"] == "running" else []
+        if s["status"] == "running" and s["facts_polled_at"] is not None:
+            body["features"].append("facts")  # The slot of this session serves facts (CONTRACTS 2.7)
         if s["status"] == "running" and s["topology"]:
             body["topology"] = s["topology"]
             body["nodes"], stale = await services.orchestrator.live_nodes(s)
@@ -265,7 +268,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
-        features = ["consoles", "observer", "resume"]  # The next session continues the student's project
+        features = ["consoles", "observer", "resume", "facts"]  # resume: the next session continues the project
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": OPTIONS, "features": features}
         if settings.images is not None:
@@ -388,6 +391,28 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                     body["status_message"] = "Остановка…"
                 return body
         return await present(s)
+
+    @app.get("/api/v1/sessions/{session_id}/state")
+    async def session_state(session_id: str, since_rev: int | None = Query(default=None, ge=0),
+                            site=Depends(site_of)):
+        """Facts of the lab (CONTRACTS 2.7): the last stored state, also for a finished session."""
+        s = await own_session(session_id, site)
+        if since_rev is not None and since_rev == s["facts_rev"]:
+            return Response(status_code=304)
+        statuses = {}
+        if s["status"] == "running" and s["topology"]:
+            nodes, _stale = await services.orchestrator.live_nodes(s)
+            statuses = {node_id: n["status"] for node_id, n in nodes.items()}
+        return build_state(s["facts_rev"], await store.facts_rows(s["id"]), statuses, settings.facts_ttl)
+
+    @app.post("/api/v1/sessions/{session_id}/state/refresh", status_code=202)
+    async def refresh_state(session_id: str, site=Depends(site_of)):
+        s = await own_session(session_id, site)
+        if s["status"] != "running":
+            raise ApiError(409, "session_not_running", "Session is not running")
+        await store.request_facts_refresh(s["id"])
+        services.orchestrator.wake()
+        return Response(status_code=202)
 
     @app.post("/api/v1/sessions/{session_id}/console-tickets")
     async def console_ticket(session_id: str, body: TicketRequest, site=Depends(site_of)):
