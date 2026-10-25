@@ -594,7 +594,6 @@ FAILURES = [
     ({"exit_code": 0, "stdout": "garbage", "stderr": ""}, "failed"),
     ({"exit_code": 0, "stdout": json.dumps({"ports": refusal(), "vlans": refusal()}), "stderr": ""}, "failed"),
 ]
-QUIET = ("timeout", "unreachable", "stopped")
 
 
 def test_a_switch_is_published_next_to_linux_net_with_the_broker_priority_that_yields(monkeypatch):
@@ -635,7 +634,10 @@ def test_failures_before_the_first_success_are_silent_unless_the_guest_answered(
             labs["p1"]["nodes"][2]["status"] = "stopped"
         await facts.cycle()
         record = switch_of(facts)
-        if code in QUIET:
+        # Whatever the broker raised (any exchange failure, a refusal of the agent included) and a node
+        # that is not started say nothing about the role. The manager never deletes a collector's row,
+        # so a record published now would stay as a stranger's error on an ordinary host.
+        if isinstance(failure, BaseException) or failure is None:
             assert record is None and facts.absent == {("p1", "n1", "switch.net")}
             assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]  # the host is still reported
         else:  # switchctl is there but does not answer properly: the owner has to see it

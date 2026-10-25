@@ -290,8 +290,6 @@ SWITCH_NET = Collector(
     probe=True,
 )
 COLLECTORS = (LINUX_NET, SWITCH_NET)
-# Failures of a probe collector that say nothing about the role of the node.
-QUIET_CODES = ("timeout", "unreachable", "stopped")
 COLLECTOR_IDS = [collector.schema for collector in COLLECTORS]
 
 
@@ -434,6 +432,7 @@ class Facts:
             failure = None
             data = None
             absent = False
+            transport = False  # the exchange itself failed: the guest has said nothing about its role
             try:
                 if node.get("status") != "started":
                     raise FactError("stopped", "The node is not started")
@@ -460,6 +459,7 @@ class Facts:
             except FactError as exc:
                 failure = (exc.code, str(exc))
             except (QgaError, OSError) as exc:
+                transport = True
                 failure = (classify(exc), f"{type(exc).__name__}: {exc}"[:MESSAGE_LIMIT])
         if epoch != self.epoch:
             return
@@ -472,8 +472,11 @@ class Facts:
         if collector.probe:
             if failure is None:
                 self.confirmed.add(key)
-            elif failure[0] in QUIET_CODES and key not in self.confirmed:
-                return  # unknown role: a record would stay as a stranger's error on an ordinary host
+            elif (transport or failure[0] == "stopped") and key not in self.confirmed:
+                # Unknown role: the manager never deletes a collector's row, so a record published now
+                # would stay as a stranger's error on an ordinary host. Only what the guest itself said
+                # (`failed` from a switchctl that exists) is published before the first success.
+                return
         project_id, node_id, name = key
         entry = self.results.setdefault(project_id, {}).setdefault(
             node_id, {"name": node["name"], "collectors": {}}
