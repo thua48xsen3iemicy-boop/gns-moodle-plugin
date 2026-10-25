@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GNS Portal · демо входа</title>
+    <link rel="stylesheet" href="preview.css">
+    <script src="preview.js" defer></script>
+</head>
+<body>
+    <main class="shell">
+        <section class="intro">
+            <div class="brand"><span class="mark">&gt;_</span><span>GNS Portal</span></div>
+            <div class="intro-copy">
+                <span class="eyebrow">NETWORK LABS / DEMO</span>
+                <h1>Место для<br>сетевых лабораторных.</h1>
+                <p>Курсы, лабораторные и консоли устройств в одном спокойном рабочем пространстве.</p>
+                <div class="terminal"><span class="dots">● ● ●</span><code><b>$</b> learn · build · test <b>_</b></code></div>
+            </div>
+            <span class="version">GNS / PORTAL · ПРОТОТИП</span>
+        </section>
+        <section class="entry">
+            <div class="card" id="loginpanel">
+                <span class="eyebrow blue">ACCESS / LEARNING PORTAL</span>
+                <h2>Вход в портал</h2>
+                <p class="muted">Локальная симуляция. Данные никуда не отправляются.</p>
+                <form id="demoform" novalidate>
+                    <label for="username">Логин</label>
+                    <input id="username" name="username" autocomplete="off" value="demo" required>
+                    <label for="password">Пароль</label>
+                    <input id="password" name="password" type="password" autocomplete="off" placeholder="demo123" required>
+                    <label for="clientip">Тестовый IP-адрес</label>
+                    <select id="clientip" name="clientip">
+                        <option value="192.0.2.10">192.0.2.10 · разрешён</option>
+                        <option value="198.51.100.20">198.51.100.20 · разрешён</option>
+                        <option value="203.0.113.7">203.0.113.7 · заблокирован</option>
+                    </select>
+                    <label for="captcha" id="captchalabel">Проверка</label>
+                    <input id="captcha" name="captcha" inputmode="numeric" autocomplete="off" required>
+                    <p class="help">Тестовые данные: <code>demo</code> / <code>demo123</code>. Ответьте на пример выше.</p>
+                    <p class="feedback" id="feedback" role="status" aria-live="polite"></p>
+                    <button type="submit">Войти в портал <span aria-hidden="true">→</span></button>
+                </form>
+            </div>
+            <div class="workspace" id="workspace" hidden>
+                <header class="workspace-head"><span class="brand"><span class="mark">&gt;_</span> GNS Portal</span><button id="logout" type="button">Выйти</button></header>
+                <div class="workspace-body">
+                    <span class="eyebrow blue">РАБОЧЕЕ ПРОСТРАНСТВО</span>
+                    <h2>Добро пожаловать, demo</h2>
+                    <p class="muted">Пример упрощённой стартовой страницы после входа.</p>
+                    <div class="tiles">
+                        <article><span class="tile-icon">⌘</span><small>01 / КУРС</small><h3>Основы сетей</h3><p>Протоколы, адресация и маршрутизация</p><span class="tag">8 занятий</span></article>
+                        <article><span class="tile-icon">◇</span><small>02 / ЛАБОРАТОРНАЯ</small><h3>OSPF multi-area</h3><p>Топология GNS3 и консоли устройств</p><span class="tag ready">Готово к запуску</span></article>
+                        <article><span class="tile-icon">&gt;_</span><small>03 / ИНСТРУМЕНТЫ</small><h3>Консоль</h3><p>Подключение к учебным устройствам</p><span class="tag">Учебная среда</span></article>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
