@@ -12,6 +12,12 @@ from api.qga import Priority, QgaError
 router = APIRouter(prefix="/v1/labs/{project_id}/nodes", tags=["nodes"])
 
 
+async def admitted(request: Request, work):
+    """Run a guest command under the admission the middleware registered for it."""
+    admission = getattr(request.state, "admission", None)
+    return await (admission.run(work) if admission else work)
+
+
 @router.get("/{node_id}/console")
 async def console_info(request: Request, project_id: UUID, node_id: UUID):
     node = await call(request, "GET", f"projects/{project_id}/nodes/{node_id}")
@@ -32,11 +38,14 @@ async def qga_exec(
     if node.get("node_type") != "qemu" or node.get("status") != "started":
         raise HTTPException(409, "QGA command requires a running QEMU node")
     try:
-        return await get_lifecycle(request).qga.exec(
-            str(node_id),
-            ticket.command,
-            timeout=ticket.timeout_seconds,
-            priority=Priority.COMMAND,
+        return await admitted(
+            request,
+            get_lifecycle(request).qga.exec(
+                str(node_id),
+                ticket.command,
+                timeout=ticket.timeout_seconds,
+                priority=Priority.COMMAND,
+            ),
         )
     except (QgaError, OSError, ValueError) as exc:
         raise HTTPException(502, f"QGA error: {type(exc).__name__}: {exc}") from exc
@@ -49,25 +58,31 @@ async def enable_serial_getty(request: Request, project_id: UUID, node_id: UUID)
     if node.get("node_type") != "qemu" or node.get("status") != "started":
         raise HTTPException(409, "Serial getty setup requires a running QEMU node")
     qga = get_lifecycle(request).qga
-    for _ in range(45):
+
+    async def enable():
+        for _ in range(45):
+            try:
+                await qga.call(
+                    str(node_id), "guest-ping", timeout=2.0, priority=Priority.COMMAND
+                )
+                break
+            except (QgaError, OSError, ValueError):
+                await asyncio.sleep(1)
+        else:
+            raise HTTPException(504, "QGA did not become ready")
         try:
-            await qga.call(
-                str(node_id), "guest-ping", timeout=2.0, priority=Priority.COMMAND
+            return await qga.exec(
+                str(node_id),
+                "systemctl enable --now serial-getty@ttyS0.service",
+                timeout=15,
+                priority=Priority.COMMAND,
             )
-            break
-        except (QgaError, OSError, ValueError):
-            await asyncio.sleep(1)
-    else:
-        raise HTTPException(504, "QGA did not become ready")
-    try:
-        result = await qga.exec(
-            str(node_id),
-            "systemctl enable --now serial-getty@ttyS0.service",
-            timeout=15,
-            priority=Priority.COMMAND,
-        )
-    except (QgaError, OSError) as exc:
-        raise HTTPException(502, f"QGA error: {type(exc).__name__}: {exc}") from exc
+        except (QgaError, OSError) as exc:
+            raise HTTPException(
+                502, f"QGA error: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    result = await admitted(request, enable())
     if result["exit_code"] != 0:
         raise HTTPException(
             409, detail={"error": "serial-getty failed", "result": result}

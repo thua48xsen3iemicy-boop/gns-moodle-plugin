@@ -111,6 +111,36 @@ async def operation(request: Request, operation_id: str):
     return get_lifecycle(request).operation(operation_id)
 
 
+class Admission:
+    """A long command accepted under command_lock; claim() waits for it to finish.
+
+    Ownership must not move while a command is still running in a guest, and a guest
+    command cannot be killed, so claim() waits instead of cancelling.
+    """
+
+    def __init__(self, lifecycle):
+        self.attached = False
+        self.future = asyncio.get_running_loop().create_future()
+        lifecycle.commands.add(self.future)
+        self.future.add_done_callback(lifecycle.commands.discard)
+
+    def release(self):
+        if not self.future.done():
+            self.future.set_result(None)
+
+    async def run(self, work):
+        """Run `work` to the end even if the HTTP client goes away."""
+        self.attached = True
+        task = asyncio.ensure_future(work)
+        task.add_done_callback(self._finished)
+        return await asyncio.shield(task)
+
+    def _finished(self, task):
+        if not task.cancelled():
+            task.exception()  # mark retrieved: the caller may be gone
+        self.release()
+
+
 class Lifecycle:
     def __init__(self, app):
         self.request = SimpleNamespace(app=app)
@@ -130,6 +160,7 @@ class Lifecycle:
                 "CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT, PRIMARY KEY(kind,id))"
             )
             self.tasks = set()
+            self.commands = set()  # see Admission
             self.command_lock = asyncio.Lock()
             self.claimed = False
             self.boot_requires_new_owner = True
@@ -430,10 +461,16 @@ class Lifecycle:
         self.claimed = False
         self.save("authority", "slot", {"epoch": epoch, "generation": generation})
         self.boot_requires_new_owner = False
-        if self.tasks:
-            await asyncio.shield(asyncio.gather(*list(self.tasks), return_exceptions=True))
+        pending = [*self.tasks, *self.commands]
+        if pending:
+            await asyncio.shield(asyncio.gather(*pending, return_exceptions=True))
         self.claimed = True
         return {"epoch": epoch, "generation": generation}
+
+    def admit(self):
+        """Register a long command. Call under command_lock right after the owner check:
+        the lock may then be released and claim() still waits for the command."""
+        return Admission(self)
 
     def owns(self, headers):
         owner = self.get("authority", "slot")
@@ -580,7 +617,9 @@ class Lifecycle:
                 return
             if op["action"] == "stop":
                 await self.api("POST", f"projects/{pid}/nodes/stop", {})
-                await self.wait_nodes(lab, "stopped")
+                nodes = await self.wait_nodes(lab, "stopped")
+                for node in nodes:
+                    await self.qga.forget(node["node_id"])
                 self.update(lab, "STOPPED", "stopped", progress=100)
                 handle = self.project_locks.pop(pid, None)
                 if handle:
