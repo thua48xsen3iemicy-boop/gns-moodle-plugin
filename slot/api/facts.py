@@ -234,6 +234,7 @@ def switch_net_port(port, macs, members):
         if mac in macs:
             entry["port"] = {"adapter": macs[mac], "port": 0}
     entry["switchport"] = switchport_of(members.get(port["ifname"], {}))
+    entry["mirror"] = True  # nobody manages these ports: the scheme repeats the other end of the cable
     return entry
 
 

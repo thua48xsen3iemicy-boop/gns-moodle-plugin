@@ -248,6 +248,9 @@ EXPECTED_SWITCH_PORTS = [
     {"name": "ens9", "kind": "physical", "admin": "up", "oper": "down", "mac": "52:54:00:aa:bb:09",
      "switchport": {"mode": "access", "vlan": 30}},
 ]
+# The student does not manage the ports of this image: the scheme repeats the other end of the cable
+# (live-state.md 3.1, `mirror`). Only switch.net says so; a Cisco switch port never carries it.
+EXPECTED_SWITCH_PORTS = [{**port, "mirror": True} for port in EXPECTED_SWITCH_PORTS]
 
 
 def test_parse_switch_net_describes_the_ports_by_their_actual_membership():

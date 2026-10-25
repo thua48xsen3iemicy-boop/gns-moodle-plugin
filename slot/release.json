@@ -1,6 +1,6 @@
 {
   "version": "0.7.0",
-  "build_id": "sha256:1283f0541addd3de3623efb4008bc4aa98d75be56443bba18d25195dd71b934f",
+  "build_id": "sha256:8cef66979e59fbacc72e2599c983dbea419d73ab06d0beb9801a35d974f8eff2",
   "files": {
     "AGENTS.md": "411e557b8da32388d03a62137077d7359eb0381c0b1bcda0e070533e042f762a",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
@@ -10,7 +10,7 @@
     "api/cli.py": "20feb2960e769e47d24f61ce4e5818dd0f1c09f0987c32561ea343590a96a4cc",
     "api/client.py": "fbe1ce61f1a7d4b5cd7ac17b9b3081d7f05235280f5c226e3c57f0ad1cf29a11",
     "api/console.py": "49312689f4af9f4b5569b8cec09a5a55d9218899d5db405f4202e9764a2d1999",
-    "api/facts.py": "7fc1d901b4485f5ce561726cd2c79140b159ba3a3779eeb479f7743f07e77f8d",
+    "api/facts.py": "c0fbd907e2c01db14204db040182e49fedbea56fa844a85809e91fc0ccf601af",
     "api/health.py": "1650e3f2e9714f16ebd22abf5c1da8508818c200e3adbcd29e34086224bea503",
     "api/labs.py": "a728ee3565c61fd9f13aa316478e8b2d6036087148e002a9d4d104a0504eda84",
     "api/lifecycle.py": "896410aed3b07bff560fd37f329b3996f3449559d201b1d01425a745c4c4a01a",
@@ -28,7 +28,7 @@
     "tests/conftest.py": "3a9857db9f256716f1f8c40ccd1cf91d53f99b82b4d0d924ea77eda863dc94f5",
     "tests/test_admission.py": "501dceffcc9cfa1893fb585147c3868f3fafeb43900cbd8757d401c395eb5bdb",
     "tests/test_console.py": "5f54f0c1021ddd2fad7cdd6e4a8656e6e83e7e7e79373ce195687df2b8cada84",
-    "tests/test_facts.py": "b19ad0577670ff85ce1a0bf730c2e84606d11bdca6059701ce4cad67a350b0e0",
+    "tests/test_facts.py": "4a6d5f1fd56e1418d219715e97f583084b936e028d1e2b237ca31f10e4bf01b2",
     "tests/test_fencing.py": "e6671cc0b236e0cd694349636a8ccbf9d9aca7ca67ad7dd55a35796ac6b199ed",
     "tests/test_fixed_mount.py": "e9193a75a6304f8ee0fd1c8defff7e526f9a1baec0bc5ab14a412fec7f64cbd3",
     "tests/test_qga.py": "7a0818c5754f19641253bd2169915a482f200ac5d8cc46cad9faf90241721054",
