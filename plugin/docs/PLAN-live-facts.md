@@ -23,7 +23,7 @@
 3. **MUC-кэш** `facts` в `db/caches.php` (application, simplekeys, ключ — `sessionid`): `{rev, doc (JSON-строка), fetchedat}`.
    Свежая запись (моложе 15 с) отдаётся без запроса к менеджеру; старше — запрос с `since_rev=rev`, `304` продлевает запись.
 4. **External functions** (`db/services.php`, `ajax => true`, `loginrequired => true`):
-   - `mod_gns3lab_get_facts(cmid, userid = 0, sincerev = 0)` → `{available, changed, rev, facts (PARAM_RAW, JSON), }`.
+   - `mod_gns3lab_get_facts(cmid, userid = 0, sincerev = 0)` → `{available, changed, rev, facts (PARAM_RAW, JSON)}`.
      Порядок проверок как в `get_state`: `validate_parameters` → `validate_context` → `require_capability('mod/gns3lab:view')`
      → `lab_access::resolve_user()` (свои или наблюдение по группам). Сессию ищет сам сервер (`find_session`), sessionid
      из браузера не принимается. Нет сессии или нет `facts` в `features` → `available: false`.
