@@ -3,6 +3,7 @@
 //
 //   node plugin/devtools/check_facts.mjs        (Node 22; exit code 1 if a scenario fails)
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {register} from 'node:module';
 
 // amd/src imports its siblings as 'mod_gns3lab/<name>': point that prefix at the source directory.
@@ -37,7 +38,10 @@ const ifc = (name, port, extra = {}) => ({name, kind: 'physical', port: {adapter
 const node = (interfaces, status = 'started') => ({status, interfaces});
 const doc = nodes => ({schema: 'gns3lab.facts/1', generated_at: '2026-10-25T10:00:00Z', ttl: 90, nodes});
 const host = extra => node([ifc('e0', 0, {ipv4: ['10.0.10.11/24'], ...extra})]);
-const sw = (extra, sp = {mode: 'access', vlan: 10}) => node([ifc('e1', 1, {switchport: sp, ...extra})]);
+// An appliance switch port (the Linux switch image): `mirror` says the student does not manage it.
+const sw = (extra, sp = {mode: 'access', vlan: 10}) => node([ifc('e1', 1, {switchport: sp, mirror: true, ...extra})]);
+// A switch whose ports the student manages (a Cisco switch): `switchport` without `mirror`.
+const managed = extra => node([ifc('e1', 1, {switchport: {mode: 'access', vlan: 10}, ...extra})]);
 
 const state = (der, e) => {
     const s = endState(der, e);
@@ -70,10 +74,15 @@ const scenarios = [
     ['7 switch port has its own oper down', link.host, {[PC1]: host(), [SW1]: sw({oper: 'down'})}, 'up', 'up', false],
     ['7b switch port has its own admin down', link.host, {[PC1]: host(), [SW1]: sw({admin: 'down'})}, 'up', 'up', false],
     ['8 switch - switch, own oper down at both ends', link.swsw,
-        {[SW1]: node([ifc('p0', 0, {oper: 'down', switchport: {mode: 'access', vlan: 10}})]), [SW2]: sw({oper: 'down'})}, 'up', 'up', false],
+        {[SW1]: node([ifc('p0', 0, {oper: 'down', switchport: {mode: 'access', vlan: 10}, mirror: true})]), [SW2]: sw({oper: 'down'})}, 'up', 'up', false],
     ['8b switch - switch, one switch stopped', link.swsw,
-        {[SW1]: node([ifc('p0', 0, {switchport: {mode: 'access', vlan: 10}})]), [SW2]: node([], 'stopped')}, 'down', 'down', true, /SW2 остановлен/],
+        {[SW1]: node([ifc('p0', 0, {switchport: {mode: 'access', vlan: 10}, mirror: true})]), [SW2]: node([], 'stopped')}, 'down', 'down', true, /SW2 остановлен/],
     ['9 link suspended', link.suspended, {[PC1]: host(), [SW1]: sw()}, 'down', 'down', true, /приостановлен/],
+    // A switch the student manages is not a mirror: its own shutdown / carrier still drop the link, as before.
+    ['10 managed switch port admin down', link.host, {[PC1]: host(), [SW1]: managed({admin: 'down'})}, 'up', 'down', true, /SW1 e1: shutdown/],
+    ['10b managed switch port oper down', link.host, {[PC1]: host(), [SW1]: managed({oper: 'down'})}, 'up', 'down', true, /SW1 e1: нет несущей/],
+    ['10c managed switch - appliance switch, managed port admin down', link.swsw,
+        {[SW1]: node([ifc('p0', 0, {admin: 'down', switchport: {mode: 'access', vlan: 10}})]), [SW2]: sw()}, 'down', 'down', true, /SW1 p0: shutdown/],
 ];
 for (const [name, m, nodes, a, b, down, why] of scenarios) {
     check('L1 ' + name, () => {
@@ -87,7 +96,7 @@ for (const [name, m, nodes, a, b, down, why] of scenarios) {
     });
 }
 check('L1 8c switch - switch, suspended', () => {
-    const m = lab(SW1, SW2, true), {der} = derive(m, doc({[SW1]: node([ifc('p0', 0, {switchport: {mode: 'access', vlan: 10}})]), [SW2]: sw()}));
+    const m = lab(SW1, SW2, true), {der} = derive(m, doc({[SW1]: node([ifc('p0', 0, {switchport: {mode: 'access', vlan: 10}, mirror: true})]), [SW2]: sw()}));
     assert.deepEqual([state(der, m.links[0].a), state(der, m.links[0].b), der.l1.links.get('l1').down], ['down', 'down', true]);
 });
 check('L1 a switch port that is not on a link has no end state', () => {
@@ -140,8 +149,24 @@ check('L2 trunk without the native field is still native 1', () => {
     assert.equal(rec.wb.map('u'), 1);
 });
 
+// The same on the real demo lab: a student shuts down a cabled port of the Cisco switch SW1 of the OSPF lab.
+check('L1 OSPF demo: shutdown on a cabled Cisco switch port drops its link with the reason', () => {
+    const read = f => JSON.parse(fs.readFileSync(new URL('../fixtures/' + f, import.meta.url), 'utf8'));
+    const gns3 = read('ospf-multi-area.gns3'), facts = read('ospf-multi-area.facts.json');
+    const id = gns3.topology.nodes.find(n => n.name === 'SW1').node_id;
+    const port = facts.nodes[id].interfaces.find(i => i.name === 'e0/1');
+    assert.ok(port.switchport && !port.mirror);
+    port.admin = 'down';
+    const m = buildModel({name: 'x', topology: gns3.topology}), {der} = derive(m, facts);
+    const l = m.links.find(x => [x.a, x.b].some(e => e.nodeId === id && e.adapter === 0 && e.port === 1));
+    assert.equal(der.l1.links.get(l.id).down, true);
+    assert.match(der.l1.links.get(l.id).why.join(' '), /SW1 e0\/1: shutdown/);
+    assert.equal(endState(der, [l.a, l.b].find(e => e.nodeId === id)).down, true);
+});
+
 if (failures.length) {
     console.log(`\n${failures.length} failed`);
     process.exit(1);
 }
+
 console.log('\nall scenarios passed');

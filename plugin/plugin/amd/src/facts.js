@@ -98,28 +98,29 @@ export const portEnd = (der, f, i) => {
 
 /*
  * L1: линк не работает, если приостановлен, нода остановлена или интерфейс выключен / без несущей.
- * ends — состояние каждого конца линка. У конца с switchport собственные admin / oper не читаются: порт коммутатора
- * повторяет линк, который падает только по остальным причинам. Остальные концы падают, если остановлена нода или линк
- * приостановлен, либо их собственный интерфейс выключен / без несущей.
+ * ends — состояние каждого конца линка. У конца с mirror: true собственные admin / oper не читаются: порт коммутатора,
+ * которым студент не управляет, повторяет линк, который падает только по остальным причинам. Порт без mirror — в том
+ * числе порт Cisco-коммутатора с switchport — управляется на устройстве и читается как раньше. Остальные концы падают,
+ * если остановлена нода или линк приостановлен, либо их собственный интерфейс выключен / без несущей.
  */
 function deriveL1(m, fx){
   const links = new Map(), ends = new Map(), issues = [];
   m.links.forEach(l => {
-    const hard = [], soft = [], sw = [], own = [];
+    const hard = [], soft = [], mir = [], own = [];
     let cfg = false;                                   // причина в настройке устройства, а не в состоянии лабы
     let halted = !!l.suspend;                          // линк приостановлен или нода любого конца остановлена
     if (l.suspend) hard.push("линк приостановлен в GNS3");
     [l.a, l.b].forEach((e, k) => {
       const N = m.nodes.get(e.nodeId), f = fx.nodes.get(e.nodeId), i = endIf(fx, e);
-      sw[k] = !!(i && i.switchport); own[k] = false;
+      mir[k] = !!(i && i.mirror); own[k] = false;
       if (f && NODE_OFF[f.status]) { hard.push(`${N.name} ${NODE_OFF[f.status]}`); halted = true; }
-      else if (i && !sw[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = true; }
-      else if (i && !sw[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
+      else if (i && !mir[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = true; }
+      else if (i && !mir[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
     });
     const why = hard.length ? hard : soft;
     if (!hard.length && soft.length) cfg = true;
     links.set(l.id, { down: why.length > 0, why });
-    [l.a, l.b].forEach((e, k) => ends.set(endKey(e), { down: sw[k] ? why.length > 0 : halted || own[k] }));
+    [l.a, l.b].forEach((e, k) => ends.set(endKey(e), { down: mir[k] ? why.length > 0 : halted || own[k] }));
     if (why.length) issues.push({ sev: cfg ? "bad" : "info",
       text: `Линк ${epName(m, l.a)} — ${epName(m, l.b)} не работает: ${why.join("; ")}.`, go: { kind: "link", id: l.id } });
   });
