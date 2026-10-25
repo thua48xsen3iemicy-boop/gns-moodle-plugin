@@ -16,8 +16,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'theme_gnsportal';
-$plugin->version = 2026102500;
+$plugin->version = 2026102501;
 $plugin->requires = 2025092600;
 $plugin->dependencies = ['theme_boost' => 2025100600];
 $plugin->maturity = MATURITY_ALPHA;
-$plugin->release = '0.1.0';
+$plugin->release = '0.2.0';

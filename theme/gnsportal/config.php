@@ -19,7 +19,8 @@ require_once(__DIR__ . '/lib.php');
 
 $THEME->name = 'gnsportal';
 $THEME->parents = ['boost'];
-$THEME->sheets = [];
+$THEME->sheets = ['loginlab'];
+$THEME->javascripts_footer = ['loginlab'];
 $THEME->editor_sheets = [];
 $THEME->scss = function($theme) {
     return theme_gnsportal_get_main_scss_content($theme);

@@ -3,8 +3,8 @@
     'use strict';
 
     const form = document.getElementById('demoform');
-    const login = document.getElementById('loginpanel');
-    const workspace = document.getElementById('workspace');
+    const login = document.getElementById('demo-login');
+    const workspace = document.getElementById('demo-success');
     const feedback = document.getElementById('feedback');
     const captchaLabel = document.getElementById('captchalabel');
     let answer = 0;

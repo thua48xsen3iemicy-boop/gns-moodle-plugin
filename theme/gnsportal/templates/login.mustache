@@ -13,29 +13,31 @@
 {{> core/local/toast/wrapper }}
 <div id="page-wrapper">
     {{{ output.standard_top_of_body_html }}}
-    <main id="page" class="gnsportal-access">
-        <section class="gnsportal-access-intro" aria-label="{{#str}}networklabel, theme_gnsportal{{/str}}">
-            <div class="gnsportal-brand">
-                <span class="gnsportal-brand-mark" aria-hidden="true">&gt;_</span>
-                <span>{{sitename}}</span>
+    <main id="page" class="gnsportal-lab" data-demo="true">
+        <header class="gnsportal-labbar">
+            <div class="gnsportal-labbrand"><span class="gnsportal-brand-mark" aria-hidden="true">&gt;_</span><span>{{sitename}}<small>{{#str}}networklabel, theme_gnsportal{{/str}}</small></span></div>
+            <div class="gnsportal-labbar-meta"><span class="gnsportal-live">{{#str}}demostatus, theme_gnsportal{{/str}}</span><span>{{#str}}demowelcome, theme_gnsportal{{/str}}</span></div>
+            <div class="gnsportal-labbar-actions" role="group" aria-label="{{#str}}zoom, theme_gnsportal{{/str}}">
+                <button type="button" data-zoom="out" aria-label="{{#str}}zoomout, theme_gnsportal{{/str}}">−</button>
+                <button type="button" data-zoom="fit" aria-label="{{#str}}zoomfit, theme_gnsportal{{/str}}">{{#str}}fit, theme_gnsportal{{/str}}</button>
+                <button type="button" data-zoom="in" aria-label="{{#str}}zoomin, theme_gnsportal{{/str}}">+</button>
             </div>
-            <div class="gnsportal-access-message">
-                <p class="gnsportal-kicker">{{#str}}networklabel, theme_gnsportal{{/str}}</p>
-                <h2>{{#str}}tagline, theme_gnsportal{{/str}}</h2>
-                <p>{{#str}}loginintro, theme_gnsportal{{/str}}</p>
-                <div class="gnsportal-terminal" aria-hidden="true">
-                    <span class="gnsportal-terminal-dots">● ● ●</span>
-                    <span><b>$</b> {{#str}}terminaltext, theme_gnsportal{{/str}}<span class="gnsportal-cursor">_</span></span>
-                </div>
+        </header>
+        <div class="gnsportal-labscene">
+            <div class="gnsportal-lab-canvas" aria-label="{{#str}}demotopology, theme_gnsportal{{/str}}">
+                <svg class="gnsportal-topology" viewBox="0 0 1100 650" role="group" aria-label="{{#str}}demotopology, theme_gnsportal{{/str}}"><g class="gnsportal-topology-view"></g></svg>
+                <div class="gnsportal-scene-heading"><span class="gnsportal-kicker">LAB 04 / OSPF MULTI-AREA</span><h1>{{#str}}tagline, theme_gnsportal{{/str}}</h1><p>{{#str}}demohint, theme_gnsportal{{/str}}</p></div>
+                <div class="gnsportal-map-label">{{#str}}demomap, theme_gnsportal{{/str}} <span class="gnsportal-scale">100%</span></div>
             </div>
-            <div class="gnsportal-access-foot">GNS / PORTAL</div>
-        </section>
-        <section id="region-main" class="gnsportal-access-form" aria-label="{{#str}}login{{/str}}">
-            <div class="gnsportal-login-card">
-                <p class="gnsportal-kicker">{{#str}}loginkicker, theme_gnsportal{{/str}}</p>
-                {{{ output.main_content }}}
-            </div>
-        </section>
+            <section class="gnsportal-console" aria-label="{{#str}}democonsole, theme_gnsportal{{/str}}">
+                <div class="gnsportal-console-head"><span><i></i> <b class="gnsportal-console-title">R1</b> / console</span><span class="gnsportal-demo-tag">{{#str}}demostatus, theme_gnsportal{{/str}}</span></div>
+                <div class="gnsportal-console-output" role="log" aria-live="polite"></div>
+                <form class="gnsportal-console-form"><label class="visually-hidden" for="gnsportal-command">{{#str}}democommand, theme_gnsportal{{/str}}</label><span class="gnsportal-prompt">R1#</span><input id="gnsportal-command" class="gnsportal-command" autocomplete="off" spellcheck="false" placeholder="{{#str}}democommandhint, theme_gnsportal{{/str}}"><button type="submit" aria-label="{{#str}}demorun, theme_gnsportal{{/str}}">↵</button></form>
+            </section>
+            <section id="region-main" class="gnsportal-login-floating" aria-label="{{#str}}login{{/str}}">
+                <div class="gnsportal-login-card"><span class="gnsportal-card-top"><span class="gnsportal-card-icon" aria-hidden="true">⌁</span><span>{{#str}}loginboxlabel, theme_gnsportal{{/str}}</span><span class="gnsportal-card-dots" aria-hidden="true">•••</span></span><div class="gnsportal-card-content"><p class="gnsportal-kicker">{{#str}}loginkicker, theme_gnsportal{{/str}}</p>{{{ output.main_content }}}</div></div>
+            </section>
+        </div>
     </main>
     {{> theme_boost/footer }}
     {{{ output.standard_after_main_region_html }}}
