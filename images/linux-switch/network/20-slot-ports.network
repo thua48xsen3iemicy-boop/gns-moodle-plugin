@@ -1,0 +1,26 @@
+[Match]
+# Match QEMU PCI Ethernet cards, including e1000 and virtio-net.
+# Software devices such as bridge and VLAN interfaces have no PCI device path.
+Type=ether
+Path=pci-*
+
+[Link]
+ActivationPolicy=always-up
+RequiredForOnline=no
+
+[Network]
+Bridge=br0
+DHCP=no
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+ConfigureWithoutCarrier=yes
+KeepConfiguration=no
+LLDP=no
+EmitLLDP=no
+MulticastDNS=no
+LLMNR=no
+
+[Bridge]
+Learning=yes
+UnicastFlood=yes
+MulticastFlood=yes

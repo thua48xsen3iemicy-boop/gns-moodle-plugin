@@ -1,0 +1,9 @@
+[NetDev]
+Name=br0
+Kind=bridge
+
+[Bridge]
+STP=false
+VLANFiltering=true
+DefaultPVID=none
+AgeingTimeSec=300

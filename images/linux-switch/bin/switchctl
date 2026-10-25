@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH=/opt/switch-api
+exec /usr/bin/python3 -m switch_api.cli "$@"
