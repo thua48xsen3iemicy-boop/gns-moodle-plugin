@@ -4,5 +4,6 @@ Kind=bridge
 
 [Bridge]
 STP=false
-VLANFiltering=false
+VLANFiltering=true
+DefaultPVID=none
 AgeingTimeSec=300

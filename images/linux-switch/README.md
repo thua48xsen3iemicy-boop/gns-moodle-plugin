@@ -1,8 +1,10 @@
-# Linux switch guest image
+# Linux switch guest image 0.1.0
 
 Base: Debian 13 (trixie) minimal, amd64, Linux bridge, systemd-networkd and
 qemu-guest-agent from the maintained Debian repositories. These files configure
 the guest; they do not build a QCOW2 image or change the slot service.
+The guest-local service and CLI are described in [API.md](API.md), with a
+versioned [contract](docs/CONTRACTS.md). Install that service as part of the image.
 
 ## Network ownership
 
@@ -29,8 +31,9 @@ remain the responsibility of the platform; no heartbeat or remote-state detectio
 is implemented in this guest.
 
 The initial profile is one learning bridge, with a 300-second FDB ageing time.
-VLAN filtering is disabled, so there is no access/trunk policy yet. VLAN support
-can later be configured using VLANFiltering and per-port BridgeVLAN sections.
+VLAN filtering is enabled with no automatic PVID. switch-api assigns access VLAN 1
+to all ports until a saved policy exists; otherwise it applies the saved access/
+trunk policy. Ports have no VLAN connectivity until the service configures them.
 STP is disabled: the initial topology must be loop-free.
 
 ## Prepare a dedicated guest
@@ -42,7 +45,7 @@ guest still has temporary network access:
 ```sh
 apt-get update
 apt-get full-upgrade -y
-apt-get install --no-install-recommends iproute2 qemu-guest-agent systemd
+apt-get install --no-install-recommends python3 iproute2 tcpdump qemu-guest-agent systemd
 ```
 
 Reboot after the upgrade while the original network and SSH configuration are
@@ -78,7 +81,7 @@ preparation. Do not publish credentials with the image recipe.
 
 The guest has no network management endpoint: no SSH, HTTP API, DNS responder,
 DHCP client/server, LLDP advertisements, mDNS or LLMNR. Install only the minimal
-base system, iproute2 and QGA. Ethernet ports and br0 have no IPv4 or IPv6
+base system, Python, iproute2, tcpdump and QGA. Ethernet ports and br0 have no IPv4 or IPv6
 addresses. Keep the standard IPv4 loopback address 127.0.0.1: it is internal to
 the guest and is not reachable through the bridge. QGA uses virtio-serial and
 does not need an IP stack on the switch ports.
@@ -146,6 +149,7 @@ starting on the next boot. Run from this recipe's directory:
 install -d /etc/systemd/network
 install -m 0644 network/* /etc/systemd/network/
 systemctl enable systemd-networkd.service
+systemctl enable switch-api.service
 systemctl mask networking.service NetworkManager.service systemd-resolved.service
 systemctl mask ssh.service ssh.socket sshd.service
 reboot
@@ -171,7 +175,17 @@ in a diagnostic clone if boot or networkd troubleshooting is needed.
 
 ## Read data through the existing QGA broker
 
-No HTTP service is needed. Commands are local to the guest:
+Install the service using [API.md](API.md) before final activation. No HTTP
+service is needed. Use switchctl through the broker for structured requests:
+
+```sh
+switchctl status
+switchctl ports
+switchctl fdb
+switchctl vlans
+```
+
+For direct administrator diagnostics, Linux commands are also available:
 
 ```sh
 ip -j -s link show

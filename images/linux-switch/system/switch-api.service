@@ -1,0 +1,36 @@
+[Unit]
+Description=Guest-local educational Linux switch API
+Requires=systemd-networkd.service
+After=systemd-networkd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m switch_api.server
+WorkingDirectory=/opt/switch-api
+Environment=PYTHONPATH=/opt/switch-api
+User=root
+Group=root
+RuntimeDirectory=switch-api
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID
+ProtectSystem=strict
+ReadWritePaths=/etc/switch-api /run/switch-api
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_PACKET AF_INET AF_INET6
+LimitCORE=0
+TasksMax=32
+MemoryMax=64M
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target
