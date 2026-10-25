@@ -1,10 +1,10 @@
 {
-  "version": "0.5.0",
-  "build_id": "sha256:5f9fbbaed0a6e45f7dc2f4a0dfead8198f1a2472f435363d619d6fdd2e2d5f5f",
+  "version": "0.5.1",
+  "build_id": "sha256:c6aee83cf90079f4e4389c654a8609d2dd2b8fe78375449272e3d5e603230137",
   "files": {
     "AGENTS.md": "411e557b8da32388d03a62137077d7359eb0381c0b1bcda0e070533e042f762a",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
-    "README.md": "1ee4423057fcb062a8dc6a7023ac8fa3a98d8544b9427135d8d5ac0fc151ad19",
+    "README.md": "46f6b5e6846129f554fc535b7b4f5b5cfc80b8ed3df80386d70d4e93f4aab463",
     "api/__init__.py": "b61bb532c208db9570b32a1b4903291e1cb21600ea4bd89c101ca995f7ec324d",
     "api/auth.py": "3b6238c07a3068450132d3051b7cd6aa7a979381809607daf305c1203879ae9f",
     "api/cli.py": "20feb2960e769e47d24f61ce4e5818dd0f1c09f0987c32561ea343590a96a4cc",
@@ -20,7 +20,7 @@
     "examples/cisco-3x2.json": "c96f71ffb6f753998dc7bf0fbf9f5517e51a613df839f51e2cc09d167903aeab",
     "lab-slot.service": "6d4af7568b72bd18abf137d0c2659c53e39ec2433544e35a0087c382d4bfa754",
     "main.py": "3d22495698f18fb2f371b38ee4e6c4cdd0114a959a9723d9aaa44db48a99e891",
-    "release.py": "0a8e01f5a649967fe160b2b503fb5fc256f8afb9fad5f535b142ef972b7a0588",
+    "release.py": "04fd147a765f63b3269abfb8872f29027154809fb569002912afa2d090f21d7b",
     "requirements.txt": "4c096559578f14792cece3b25e61ae0df1d3589b75016be731a3dd9553994e4b",
     "run.py": "5f0776bd540d202c4b751011f438b331ca5e90aad245057b31a48c2e8242c92c",
     "slot.env.example": "6b13ffda87342983fe7eb10a4e0c9defd4385ec91b6d60af444775c410689eb1",
