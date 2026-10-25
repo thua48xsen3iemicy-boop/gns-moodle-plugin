@@ -31,4 +31,10 @@ $definitions = [
         'simplekeys' => true,
         'staticacceleration' => true,
     ],
+    // Facts snapshots of lab sessions by session (classes/local/session_facts.php), with the time they were read.
+    'facts' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'ttl' => 600,
+    ],
 ];
