@@ -58,6 +58,29 @@ curl -X POST localhost:8090/mock/stale/on
 curl -X POST localhost:8090/mock/stale/off
 ```
 
+## Живые факты лабы
+
+Mock-менеджер ведёт себя как менеджер 0.8 (CONTRACTS §2.7): у запущенной сессии `features: ["consoles", "facts"]`,
+`GET /api/v1/sessions/{id}/state` отдаёт `fixtures/ospf-multi-area.facts.json` с `node_id` живого проекта, `rev`,
+`generated_at` и `ttl: 90`; с `since_rev`, равным `rev`, — `304`. Сбор «идёт» каждые 30 с: `generated_at` сдвигается,
+`rev` — нет. `POST …/state/refresh` — `202` (у неживой сессии `409 session_not_running`), не чаще раза в 10 с: `rev`
+растёт, снимок переключается между `facts.json` и `facts-broken.json`.
+
+На странице лабы после запуска появляются слои L2 / L3 / OSPF, в «Обзоре» — «Факты собраны в …» и «Обновить сейчас»:
+через ~5 с схема показывает конфиг с ошибками, следующее нажатие возвращает верный.
+
+```bash
+# сбор с R1 не удался: R1 бледнеет, в его карточке — «Устройство не ответило вовремя…»
+curl -X POST localhost:8090/mock/facts/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/fail -d '{"code": "timeout"}'
+curl -X POST localhost:8090/mock/facts/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/ok
+# сбор встал: через ttl (90 с) факты помечаются «данные устарели», но показываются
+curl -X POST localhost:8090/mock/facts/stall/on
+curl -X POST localhost:8090/mock/facts/stall/off
+```
+
+Без Moodle то же видно в `ui-harness` (`?factsempty` — «нет данных», `?nofacts` — сессия без фактов,
+`window.__stub.facts` — сбой ноды и устаревание).
+
 ## Библиотека и редактор лаб
 
 Mock-менеджер ведёт себя как менеджер 0.5 (CONTRACTS §2.6, ветка `claude/determined-brown-lfgnxy`): объявляет

@@ -23,6 +23,15 @@
 
 Эталонные лабы — fixtures/*.gns3 (lab_ref = имя файла без .gns3), статусы нод — fixtures/<lab>.live.json.
 
+Факты о нодах (CONTRACTS §2.7 менеджера 0.8, формат plugin/docs/live-state.md):
+- у running-сессии features ["consoles", "facts"];
+- GET /api/v1/sessions/{id}/state[?since_rev=N] — fixtures/<lab>.facts.json, ноды переведены на node_id живого проекта
+  по имени, с name, status из живых статусов, collected_at; rev, generated_at, ttl FACTS_TTL; 304, если rev равен N.
+  Сбор «идёт» каждые FACTS_PERIOD с: generated_at сдвигается, rev — нет (как у менеджера: время — не изменение).
+  Сессия ещё не запускалась — rev 0, nodes {}, без generated_at;
+- POST /api/v1/sessions/{id}/state/refresh — 202 без тела (409 session_not_running у неживой); не чаще раза в 10 с
+  действительно «собирает»: rev растёт, снимок переключается между facts.json и facts-broken.json.
+
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
 консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль. Режимы IOS (enable, configure terminal,
@@ -34,6 +43,10 @@ interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашени�
     curl -X POST localhost:8090/mock/fail-next -d '{"code": "SLOT_START_FAILED", "retryable": true}'
     curl -X POST localhost:8090/mock/stale/on                 # статусы нод «устарели» (nodes_stale)
     curl -X POST localhost:8090/mock/stale/off
+    curl -X POST localhost:8090/mock/facts/nodes/<node_id>/fail -d '{"code": "timeout"}'  # сбор с ноды не удался
+    curl -X POST localhost:8090/mock/facts/nodes/<node_id>/ok
+    curl -X POST localhost:8090/mock/facts/stall/on           # сбор встал: generated_at стоит, через ttl — «устарели»
+    curl -X POST localhost:8090/mock/facts/stall/off
 
 Запуск — devtools/README.md.
 """
@@ -63,6 +76,7 @@ GW_INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "dev-internal-key")
 GW_PUBLIC_URL = os.environ.get("GW_PUBLIC_URL", "ws://127.0.0.1:8080")
 RESUME = os.environ.get("MOCK_RESUME", "1") != "0"  # менеджер 0.5.1: работа сохраняется всегда
 QUEUED_FOR, STARTING_FOR, STOPPING_FOR = 1.0, 4.0, 2.0
+FACTS_SCHEMA, FACTS_TTL, FACTS_PERIOD, FACTS_REFRESH_EVERY = "gns3lab.facts/1", 90, 30, 10  # seconds
 DEFAULT_MAX_DURATION, MAX_DURATION_LIMIT = 90, 480  # minutes
 
 log = logging.getLogger("mock-manager")
@@ -323,7 +337,12 @@ def load_labs():
         doc = json.loads(path.read_text(encoding="utf-8"))
         live = path.with_suffix(".live.json")
         statuses = json.loads(live.read_text(encoding="utf-8")).get("node_status", {}) if live.exists() else {}
-        labs[path.stem] = {"doc": doc, "statuses": statuses}
+        facts = {}
+        for variant, suffix in (("ok", ".facts.json"), ("broken", ".facts-broken.json")):
+            file = path.with_name(path.stem + suffix)
+            if file.exists():
+                facts[variant] = json.loads(file.read_text(encoding="utf-8"))
+        labs[path.stem] = {"doc": doc, "statuses": statuses, "facts": facts}
     return labs
 
 
@@ -341,6 +360,9 @@ class Session:
         self.created = time.time()
         self.stop_requested = None
         self.stopped_by_teacher = False
+        self.facts_rev = 1  # rev of the facts once the lab runs; 0 is reported before that
+        self.facts_variant = "ok"  # fixture shown: ok or broken, switched by a refresh
+        self.facts_refreshed = None  # time of the last refresh that really collected
 
     def status(self):
         return self.state()[0]
@@ -381,6 +403,9 @@ class Manager:
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
         self.stale = False
+        self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
+        self.fact_changes = 0  # changes of fact_errors: they move rev of every session
+        self.facts_stalled = None  # time the collection stopped, None while it works
 
     def live(self, site, user_id):
         return next((s for s in self.sessions if s.site == site and s.user_id == user_id
@@ -419,7 +444,7 @@ class Manager:
     def present(self, s):
         body = self.summary(s)
         status = body["status"]
-        body["features"] = ["consoles"] if status == "running" else []
+        body["features"] = ["consoles", "facts"] if status == "running" else []
         if status == "running":
             lab = self.labs[s.key]
             doc = json.loads(json.dumps(lab["doc"]))
@@ -438,6 +463,38 @@ class Manager:
             if self.stale:
                 body["nodes_stale"] = True
         return body
+
+    def facts(self, s):
+        """The gns3lab.facts/1 snapshot of a session (CONTRACTS §2.7), like build_state of the manager."""
+        lab = self.labs[s.key]
+        now = time.time()
+        if not lab["facts"] or now < s.started or s.fail:
+            return {"schema": FACTS_SCHEMA, "rev": 0, "ttl": FACTS_TTL, "nodes": {}}
+        # The slot collects every FACTS_PERIOD seconds while the lab runs and the collection is not stalled.
+        end = min(x for x in (now, s.stop_requested, self.facts_stalled) if x is not None)
+        generated = s.started + max(0, (end - s.started) // FACTS_PERIOD) * FACTS_PERIOD
+        if s.facts_refreshed and s.facts_refreshed <= end:
+            generated = max(generated, s.facts_refreshed)
+        fixture = lab["facts"].get(s.facts_variant) or lab["facts"]["ok"]
+        names = {n["node_id"]: n["name"] for n in lab["doc"]["topology"]["nodes"]}  # reference project
+        live = {n["name"]: n["node_id"] for n in lab["doc"]["topology"]["nodes"]}  # running project
+        running = s.status() == "running"
+        nodes = {}
+        for ref_id, facts in fixture["nodes"].items():
+            node_id = live.get(names.get(ref_id))
+            if node_id is None:
+                continue
+            node = json.loads(json.dumps(facts))
+            node["name"] = names[ref_id]
+            node["status"] = self.node_status(lab, node_id) if running else "stopped"
+            node["collected_at"] = iso(generated)
+            if node_id in self.fact_errors:
+                code, since = self.fact_errors[node_id]
+                node["error"] = {"code": code, "message": "mock: collection failed"}
+                node["collected_at"] = iso(min(since, generated))
+            nodes[node_id] = node
+        return {"schema": FACTS_SCHEMA, "rev": s.facts_rev + self.fact_changes, "generated_at": iso(generated),
+                "ttl": FACTS_TTL, "nodes": nodes}
 
     def node_name(self, node_id):
         for lab in self.labs.values():
@@ -619,6 +676,47 @@ async def console_ticket(request):
                               "expires_in": ticket.get("expires_in", 30)})
 
 
+async def session_facts(request):
+    s = own(request, site_of(request))
+    doc = request.app["m"].facts(s)
+    since = request.query.get("since_rev")
+    if since is not None and since.isdigit() and int(since) == doc["rev"]:
+        return web.Response(status=304)
+    return web.json_response(doc)
+
+
+async def refresh_facts(request):
+    s = own(request, site_of(request))
+    if s.status() != "running":
+        return error(409, "session_not_running", "Session is not running")
+    now = time.time()
+    # More often than every 10 s a refresh does not start a new collection, the answer is 202 all the same.
+    if s.facts_refreshed is None or now - s.facts_refreshed >= FACTS_REFRESH_EVERY:
+        s.facts_refreshed = now
+        s.facts_rev += 1
+        s.facts_variant = "broken" if s.facts_variant == "ok" else "ok"
+        log.info("session %s: facts refreshed, rev %s, %s", s.id, s.facts_rev, s.facts_variant)
+    return web.Response(status=202)
+
+
+async def mock_facts_node(request):
+    m: Manager = request.app["m"]
+    node_id, action = request.match_info["node"], request.match_info["action"]
+    body = await request.json() if (await request.text()).strip() else {}
+    if action == "fail":
+        m.fact_errors[node_id] = (str(body.get("code", "unreachable")), time.time())
+    else:
+        m.fact_errors.pop(node_id, None)
+    m.fact_changes += 1
+    return web.json_response({"node_id": node_id, "error": m.fact_errors.get(node_id, (None,))[0]})
+
+
+async def mock_facts_stall(request):
+    m: Manager = request.app["m"]
+    m.facts_stalled = time.time() if request.match_info["mode"] == "on" else None
+    return web.json_response({"stalled": m.facts_stalled is not None})
+
+
 async def mock_node(request):
     m: Manager = request.app["m"]
     node_id, action = request.match_info["node"], request.match_info["action"]
@@ -732,9 +830,13 @@ def make_apps():
     api.router.add_get("/api/v1/sessions/{sid}", get_session)
     api.router.add_post("/api/v1/sessions/{sid}/stop", stop_session)
     api.router.add_post("/api/v1/sessions/{sid}/console-tickets", console_ticket)
+    api.router.add_get("/api/v1/sessions/{sid}/state", session_facts)
+    api.router.add_post("/api/v1/sessions/{sid}/state/refresh", refresh_facts)
     api.router.add_post("/mock/nodes/{node}/{action:stop|start}", mock_node)
     api.router.add_post("/mock/fail-next", mock_fail_next)
     api.router.add_post("/mock/stale/{mode:on|off}", mock_stale)
+    api.router.add_post("/mock/facts/nodes/{node}/{action:fail|ok}", mock_facts_node)
+    api.router.add_post("/mock/facts/stall/{mode:on|off}", mock_facts_stall)
 
     async def http_session(app):
         app["http"] = ClientSession()

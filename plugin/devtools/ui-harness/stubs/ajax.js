@@ -3,6 +3,10 @@
  *
  * One lab session in memory: start → starting → running, stop → stopping → stopped. The live topology is the demo
  * lab. Tests reach into window.__stub to stop and start nodes.
+ *
+ * Live facts (get_facts, refresh_facts) are the demo fixtures: a refresh switches between the correct and the broken
+ * configuration and moves rev, like mock-manager does. window.__stub.facts changes them: empty() (rev 0, no data),
+ * fail(nodeId, code) (the last collection of a node failed), stale(true) (the collection stopped long ago).
  */
 define([], function() {
     const cfg = window.GNS3LAB_STUB || {};
@@ -10,6 +14,7 @@ define([], function() {
     let session = cfg.observer ? {status: 'running', stage: 'ready', progress: 100, at: 0, start: Math.floor(Date.now() / 1000)} : null;
     let demo = null;
     const nodeStatus = {};
+    const facts = {rev: cfg.factsempty ? 0 : 1, variant: 'ok', at: now(), stale: false, errors: {}};
 
     const loadDemo = async() => {
         if (!demo) {
@@ -53,7 +58,26 @@ define([], function() {
                 consoletype: n.console_type || 'none',
             })) : [],
             nodesstale: false,
+            features: running ? (cfg.nofacts ? ['consoles'] : ['consoles', 'facts']) : [],
         };
+    };
+
+    /** The facts document of the live session, as the manager would send it (docs/live-state.md). */
+    const factsDoc = () => {
+        const generated = facts.stale ? now() - 600 : now();
+        const doc = {schema: 'gns3lab.facts/1', rev: facts.rev, ttl: 90, nodes: {}};
+        if (!facts.rev) {
+            return doc;
+        }
+        doc.generated_at = new Date(generated * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+        doc.nodes = JSON.parse(JSON.stringify(demo.facts[facts.variant].nodes));
+        Object.entries(facts.errors).forEach(([id, err]) => {
+            if (doc.nodes[id]) {
+                doc.nodes[id].error = {code: err.code, message: 'stub'};
+                doc.nodes[id].collected_at = new Date(err.at * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+            }
+        });
+        return doc;
     };
 
     const state = async() => {
@@ -83,6 +107,32 @@ define([], function() {
             session.at = Date.now();
             return view();
         },
+        mod_gns3lab_get_facts: async args => {
+            const s = await view();
+            if (!s || !s.features.includes('facts')) {
+                return {available: false, changed: false, rev: 0, generatedat: 0, ttl: 0, facts: ''};
+            }
+            const doc = factsDoc();
+            const changed = !args.sincerev || args.sincerev !== doc.rev;
+            return {
+                available: true,
+                changed,
+                rev: doc.rev,
+                generatedat: doc.generated_at ? Math.floor(Date.parse(doc.generated_at) / 1000) : 0,
+                ttl: doc.ttl,
+                facts: changed ? JSON.stringify(doc) : '',
+            };
+        },
+        mod_gns3lab_refresh_facts: async() => {
+            const s = await view();
+            if (!s || s.status !== 'running') {
+                throw new Error('The lab is not running.');
+            }
+            facts.rev += 1;
+            facts.variant = facts.variant === 'ok' ? 'broken' : 'ok';
+            facts.stale = false;
+            return {requested: true};
+        },
         mod_gns3lab_get_console_ticket: async args => {
             await loadDemo();
             if ((nodeStatus[args.nodeid] || 'stopped') !== 'started') {
@@ -99,6 +149,22 @@ define([], function() {
             nodeStatus[id] = status;
         },
         nodeStatus,
+        facts: {
+            empty: () => {
+                facts.rev = 0;
+            },
+            fill: () => {
+                facts.rev = Math.max(1, facts.rev + 1);
+            },
+            fail: (id, code = 'unreachable') => {
+                facts.errors[id] = {code, at: now() - 240};
+                facts.rev += 1;
+            },
+            stale: on => {
+                facts.stale = !!on;
+            },
+            state: facts,
+        },
         get session() {
             return session;
         },

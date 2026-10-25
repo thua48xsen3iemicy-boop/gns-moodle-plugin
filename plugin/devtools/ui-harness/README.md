@@ -18,7 +18,11 @@ node server.js         # → http://127.0.0.1:8123/index.ru.html
 
 Страницы: `index.ru.html`, `index.en.html`, `index.viewer.html` (пользователь без права запуска). Параметры адреса:
 `?fast` — лаба запускается за секунду, `?theme=dark`, `?min` — модули из `plugin/amd/build`, `?conflict` — старт отвечает
-«уже есть другая лаба», `?observer` — чужая работающая лаба, только просмотр. В консоли браузера `window.__stub.setNode(<node_id>, 'stopped'|'started')` меняет состояние ноды.
+«уже есть другая лаба», `?observer` — чужая работающая лаба, только просмотр, `?nofacts` — сессия без фактов,
+`?factsempty` — факты ещё не собраны (rev 0). В консоли браузера `window.__stub.setNode(<node_id>, 'stopped'|'started')` меняет состояние ноды. Живые факты — демо-фикстуры: «Обновить сейчас» переключает верный конфиг и конфиг с ошибками;
+`__stub.facts.fail(<node_id>, 'timeout')` — сбор с ноды не удался, `__stub.facts.stale(true)` — сбор встал давно,
+`__stub.facts.fill()` / `empty()` — есть данные / нет данных. Опрос идёт раз в 30 с; событие `visibilitychange` на
+`document` запрашивает факты сразу.
 
 `node build.js --amd-build [--only=lab,stage]` пишет минифицированные модули и карты в `plugin/amd/build` — запасной
 вариант на случай, когда `grunt amd` недоступен. Это не замена: перед выпуском пересоберите `grunt amd` в dev-Moodle
