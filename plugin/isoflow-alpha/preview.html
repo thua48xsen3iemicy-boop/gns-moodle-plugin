@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GNS3 Isoflow alpha preview</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>body { margin: 0; padding: 24px; background: #edf2f7; }</style>
+</head>
+<body>
+  <div class="gns3isoflow-alpha" id="gns3isoflow-alpha-root"></div>
+  <script>
+    window.define = function(dependencies, factory) { window.gns3IsoflowAlpha = factory(); };
+  </script>
+  <script src="amd/build/app.min.js"></script>
+  <script>
+    fetch('demo/ospf-multi-area.gns3')
+      .then(response => response.json())
+      .then(demo => window.gns3IsoflowAlpha.init({demo}))
+      .catch(error => { document.getElementById('gns3isoflow-alpha-root').textContent = error.message; });
+  </script>
+</body>
+</html>

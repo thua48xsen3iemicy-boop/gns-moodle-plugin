@@ -1,0 +1,20 @@
+{
+  "name": "local-gns3isoflow-alpha-ui",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "build": "node ui/build.mjs",
+    "test": "node --test ui/gns3-adapter.test.js",
+    "smoke": "node ui/smoke.mjs"
+  },
+  "dependencies": {
+    "isoflow": "1.1.1",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright-core": "^1.56.1"
+  }
+}
