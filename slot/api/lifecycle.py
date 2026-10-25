@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
 from api.models import DeployTicket
-from api.nodes import exec_sync, qga_call
+from api.qga import Priority, QgaBroker
 
 TRANSITIONS = {
     None: {"DEPLOYING"},
@@ -111,6 +111,36 @@ async def operation(request: Request, operation_id: str):
     return get_lifecycle(request).operation(operation_id)
 
 
+class Admission:
+    """A long command accepted under command_lock; claim() waits for it to finish.
+
+    Ownership must not move while a command is still running in a guest, and a guest
+    command cannot be killed, so claim() waits instead of cancelling.
+    """
+
+    def __init__(self, lifecycle):
+        self.attached = False
+        self.future = asyncio.get_running_loop().create_future()
+        lifecycle.commands.add(self.future)
+        self.future.add_done_callback(lifecycle.commands.discard)
+
+    def release(self):
+        if not self.future.done():
+            self.future.set_result(None)
+
+    async def run(self, work):
+        """Run `work` to the end even if the HTTP client goes away."""
+        self.attached = True
+        task = asyncio.ensure_future(work)
+        task.add_done_callback(self._finished)
+        return await asyncio.shield(task)
+
+    def _finished(self, task):
+        if not task.cancelled():
+            task.exception()  # mark retrieved: the caller may be gone
+        self.release()
+
+
 class Lifecycle:
     def __init__(self, app):
         self.request = SimpleNamespace(app=app)
@@ -130,10 +160,12 @@ class Lifecycle:
                 "CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT, PRIMARY KEY(kind,id))"
             )
             self.tasks = set()
+            self.commands = set()  # see Admission
             self.command_lock = asyncio.Lock()
             self.claimed = False
             self.boot_requires_new_owner = True
             self.project_locks = {}
+            self.qga = QgaBroker(self.qga_socket)
             self.labs = LabStore(
                 Path(os.getenv("SLOT_LAB_STATE_DIR", LAB_STATE_DIR)) / "labs"
             )
@@ -171,6 +203,12 @@ class Lifecycle:
                 self.db.close()
             self.lock.close()
             raise
+
+    @staticmethod
+    def qga_socket(node_id):
+        from api import labs
+
+        return labs.QGA_DIR / (node_id + ".sock")
 
     def get(self, kind, ident):
         if kind == "lab":
@@ -423,10 +461,16 @@ class Lifecycle:
         self.claimed = False
         self.save("authority", "slot", {"epoch": epoch, "generation": generation})
         self.boot_requires_new_owner = False
-        if self.tasks:
-            await asyncio.shield(asyncio.gather(*list(self.tasks), return_exceptions=True))
+        pending = [*self.tasks, *self.commands]
+        if pending:
+            await asyncio.shield(asyncio.gather(*pending, return_exceptions=True))
         self.claimed = True
         return {"epoch": epoch, "generation": generation}
+
+    def admit(self):
+        """Register a long command. Call under command_lock right after the owner check:
+        the lock may then be released and claim() still waits for the command."""
+        return Admission(self)
 
     def owns(self, headers):
         owner = self.get("authority", "slot")
@@ -493,20 +537,24 @@ class Lifecycle:
             )
 
     async def provision(self, lab, node, spec, initial):
-        from api import labs
-
         deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
         while True:
             try:
                 if spec["kind"] == "qemu":
-                    sock = str(labs.QGA_DIR / (node["node_id"] + ".sock"))
-                    await asyncio.to_thread(qga_call, sock, "guest-ping", None, 2)
+                    await self.qga.call(
+                        node["node_id"],
+                        "guest-ping",
+                        timeout=2,
+                        priority=Priority.LIFECYCLE,
+                    )
                     command = (
                         "systemctl enable --now serial-getty@ttyS0.service && systemctl is-active --quiet serial-getty@ttyS0.service"
                         if initial
                         else "systemctl is-active --quiet serial-getty@ttyS0.service"
                     )
-                    result = await asyncio.to_thread(exec_sync, sock, command, 20)
+                    result = await self.qga.exec(
+                        node["node_id"], command, timeout=20, priority=Priority.LIFECYCLE
+                    )
                     if result["exit_code"] != 0:
                         raise RuntimeError("serial-getty readiness failed")
                 port = node.get("console")
@@ -537,8 +585,11 @@ class Lifecycle:
                     raise RuntimeError(
                         "NOT_SUPPORTED: Cisco CLI provisioning requires a verified prompt/command adapter"
                     )
-                result = await asyncio.to_thread(
-                    exec_sync, sock, cmd["command"], cmd["timeout_seconds"]
+                result = await self.qga.exec(
+                    node["node_id"],
+                    cmd["command"],
+                    timeout=cmd["timeout_seconds"],
+                    priority=Priority.LIFECYCLE,
                 )
                 if result["exit_code"] != 0:
                     raise RuntimeError("Mandatory provisioning command failed")
@@ -566,7 +617,9 @@ class Lifecycle:
                 return
             if op["action"] == "stop":
                 await self.api("POST", f"projects/{pid}/nodes/stop", {})
-                await self.wait_nodes(lab, "stopped")
+                nodes = await self.wait_nodes(lab, "stopped")
+                for node in nodes:
+                    await self.qga.forget(node["node_id"])
                 self.update(lab, "STOPPED", "stopped", progress=100)
                 handle = self.project_locks.pop(pid, None)
                 if handle:
@@ -683,6 +736,7 @@ class Lifecycle:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(self.monitor, *self.tasks, return_exceptions=True)
+        await self.qga.close()
         for handle in self.project_locks.values():
             handle.close()
         self.db.close()

@@ -356,13 +356,19 @@ def test_real_provision_checks_exit_codes_and_resume_does_not_replay(
         monkeypatch.setenv("SLOT_STATE_DIR", str(tmp_path))
         monkeypatch.setenv("SLOT_READY_TIMEOUT", "0")
 
-        def execute(sock, command, seconds):
-            calls.append(command)
-            return {"exit_code": 1 if command == "fail" else 0}
+        class Qga:
+            async def call(self, node_id, command, args=None, **options):
+                return {}
 
-        monkeypatch.setattr("api.lifecycle.exec_sync", execute)
-        monkeypatch.setattr("api.lifecycle.qga_call", lambda *args: {})
+            async def exec(self, node_id, command, **options):
+                calls.append(command)
+                return {"exit_code": 1 if command == "fail" else 0}
+
+            async def close(self):
+                pass
+
         service = Lifecycle(SimpleNamespace())
+        service.qga = Qga()
         node = {"node_id": str(uuid4()), "console": port, "console_type": "telnet"}
         spec = {
             "kind": "qemu",

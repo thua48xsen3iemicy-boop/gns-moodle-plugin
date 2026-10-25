@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import sqlite3
 from contextlib import asynccontextmanager
 
@@ -44,6 +45,9 @@ async def lifespan(app: FastAPI):
             app.state.initialized = False
             await app.state.lifecycle.close()
 
+
+# Guest commands can run for minutes. They are admitted under command_lock but do not hold it.
+LONG_COMMAND = re.compile(r"/v1/labs/[^/]+/nodes/[^/]+/(?:qga/exec|serial/enable)")
 
 app = FastAPI(
     title="Lab Slot API",
@@ -99,7 +103,15 @@ async def initialization_guard(request: Request, call_next):
             if request.url.path != "/v1/fence" and not lifecycle.owns(request.headers):
                 return JSONResponse(status_code=409, content={"detail": {
                     "code": "STALE_OWNER", "message": "Claim current command ownership first"}})
+            if not (request.method == "POST" and LONG_COMMAND.fullmatch(request.url.path)):
+                return await call_next(request)
+            # Registered before the lock is released, so no claim can slip in between.
+            admission = request.state.admission = lifecycle.admit()
+        try:
             return await call_next(request)
+        finally:
+            if not admission.attached:  # rejected before any guest command was started
+                admission.release()
     return await call_next(request)
 
 
