@@ -30,6 +30,10 @@ use mod_gns3lab\local\session_data;
  * The browser connects to the gateway directly with the ticket; Moodle never sees the WebSocket.
  * A ticket for another user's lab is always read only, whatever the browser asks.
  *
+ * A node with a graphical console (console_type vnc) has no read-only mode: its screen belongs to the owner of the
+ * lab. An observer gets no ticket for it, and Moodle does not even ask the manager (which would refuse too:
+ * 403 console_disabled).
+ *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -77,7 +81,11 @@ class get_console_ticket extends external_api {
             throw new \moodle_exception('nodenotinsession', 'gns3lab');
         }
         $type = session_data::console_type($session, $nodeid);
-        if ($type !== '' && $type !== 'telnet') {
+        if ($type === 'vnc') {
+            if ($readonly) {
+                throw new \moodle_exception('consolevncobserver', 'gns3lab');
+            }
+        } else if ($type !== '' && $type !== 'telnet') {
             throw new \moodle_exception('consolenotsupported', 'gns3lab');
         }
 

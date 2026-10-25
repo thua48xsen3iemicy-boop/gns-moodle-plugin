@@ -26,4 +26,40 @@
     </copyrights>
     <customised/>
   </library>
+  <library>
+    <location>amd/src/novnc.js</location>
+    <name>noVNC</name>
+    <description>RFB (VNC) client for the graphical consoles of QEMU nodes. The npm package @novnc/novnc 1.7.0 bundled into one ES module with esbuild 0.28.2 (plugin/devtools/build_novnc.mjs). Customised: the only change is one line while bundling, the top-level await in core/util/browser.js (it breaks the Babel step of grunt amd) became a promise that sets the same variable. The notices of the parts below are in the header of the file.</description>
+    <version>1.7.0</version>
+    <license>MPL-2.0</license>
+    <licenseversion>2.0</licenseversion>
+    <repository>https://github.com/novnc/noVNC</repository>
+    <copyrights>
+      <copyright>2022 The noVNC authors</copyright>
+    </copyrights>
+    <customised/>
+  </library>
+  <library>
+    <location>amd/src/novnc.js</location>
+    <name>pako (inside noVNC)</name>
+    <description>zlib inflate and deflate, vendor/pako of noVNC (an ES module port of pako 1.0.3). Part of the noVNC bundle.</description>
+    <version>1.0.3</version>
+    <license>MIT</license>
+    <repository>https://github.com/nodeca/pako</repository>
+    <copyrights>
+      <copyright>2014-2016 Vitaly Puzrin</copyright>
+    </copyrights>
+  </library>
+  <library>
+    <location>amd/src/novnc.js</location>
+    <name>DES (inside noVNC)</name>
+    <description>DES for VNC password authentication, core/crypto/des.js of noVNC: ported from Flashlight VNC, which took it from Acme.Crypto and Dave Zimmerman's DesCipher. BSD-style terms, the full attribution is in the header of the file. Part of the noVNC bundle.</description>
+    <license>BSD-style (Acme Labs, Widget Workshop, AT&amp;T)</license>
+    <repository>http://www.wizhelp.com/flashlight-vnc/</repository>
+    <copyrights>
+      <copyright>1999 AT&amp;T Laboratories Cambridge</copyright>
+      <copyright>1996 Widget Workshop, Inc.</copyright>
+      <copyright>1996 Jef Poskanzer</copyright>
+    </copyrights>
+  </library>
 </libraries>

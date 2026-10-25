@@ -135,11 +135,19 @@ define([], function() {
         },
         mod_gns3lab_get_console_ticket: async args => {
             await loadDemo();
+            const node = demo.topology.topology.nodes.find(n => n.node_id === args.nodeid);
+            if (node && node.console_type === 'vnc' && cfg.observer) {
+                // classes/external/get_console_ticket.php: the teacher does not see the screen of a student.
+                const e = new Error('The teacher does not see the graphical console of a student.');
+                e.errorcode = 'consolevncobserver';
+                throw e;
+            }
             if ((nodeStatus[args.nodeid] || 'stopped') !== 'started') {
                 const e = new Error('The device is stopped.');
                 e.errorcode = 'managererror_node_not_running';
                 throw e;
             }
+            window.__stub.tickets = (window.__stub.tickets || 0) + 1;
             return {ticket: 't' + Math.random().toString(36).slice(2), gatewayurl: `ws://${location.host}/gw`, expiresin: 30, readonly: !!cfg.observer};
         },
     };
