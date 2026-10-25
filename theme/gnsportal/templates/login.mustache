@@ -1,0 +1,50 @@
+{{!
+    This file is part of Moodle - http://moodle.org/
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    @template theme_gnsportal/login
+    The core login form remains responsible for authentication and CAPTCHA.
+}}
+{{> theme_boost/head }}
+<body {{{ bodyattributes }}}>
+{{> core/local/toast/wrapper }}
+<div id="page-wrapper">
+    {{{ output.standard_top_of_body_html }}}
+    <main id="page" class="gnsportal-access">
+        <section class="gnsportal-access-intro" aria-label="{{#str}}networklabel, theme_gnsportal{{/str}}">
+            <div class="gnsportal-brand">
+                <span class="gnsportal-brand-mark" aria-hidden="true">&gt;_</span>
+                <span>{{sitename}}</span>
+            </div>
+            <div class="gnsportal-access-message">
+                <p class="gnsportal-kicker">{{#str}}networklabel, theme_gnsportal{{/str}}</p>
+                <h2>{{#str}}tagline, theme_gnsportal{{/str}}</h2>
+                <p>{{#str}}loginintro, theme_gnsportal{{/str}}</p>
+                <div class="gnsportal-terminal" aria-hidden="true">
+                    <span class="gnsportal-terminal-dots">● ● ●</span>
+                    <span><b>$</b> {{#str}}terminaltext, theme_gnsportal{{/str}}<span class="gnsportal-cursor">_</span></span>
+                </div>
+            </div>
+            <div class="gnsportal-access-foot">GNS / PORTAL</div>
+        </section>
+        <section id="region-main" class="gnsportal-access-form" aria-label="{{#str}}login{{/str}}">
+            <div class="gnsportal-login-card">
+                <p class="gnsportal-kicker">{{#str}}loginkicker, theme_gnsportal{{/str}}</p>
+                {{{ output.main_content }}}
+            </div>
+        </section>
+    </main>
+    {{> theme_boost/footer }}
+    {{{ output.standard_after_main_region_html }}}
+</div>
+</body>
+</html>
+{{#js}}
+M.util.js_pending('theme_boost/loader');
+require(['theme_boost/loader'], function() {
+    M.util.js_complete('theme_boost/loader');
+});
+{{/js}}
