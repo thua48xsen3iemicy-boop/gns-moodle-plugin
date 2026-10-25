@@ -16,8 +16,9 @@ const dist = path.join(__dirname, 'dist');
 const port = +process.argv[2] || +process.env.PORT || 8123;
 const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json'};
 
-const demo = JSON.parse(fs.readFileSync(path.join(__dirname, '../../plugin/demo/ospf-multi-area.gns3'), 'utf8'));
-const names = new Map(demo.topology.nodes.map(n => [n.node_id, n.name]));
+const demoDir = path.join(__dirname, '../../plugin/demo');
+const names = new Map(fs.readdirSync(demoDir).filter(f => f.endsWith('.gns3'))
+    .flatMap(f => JSON.parse(fs.readFileSync(path.join(demoDir, f), 'utf8')).topology.nodes.map(n => [n.node_id, n.name])));
 
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');

@@ -72,15 +72,21 @@ for (const lang of ['en', 'ru']) {
 }
 
 // The demo data is what the activity page gets when the lab manager is not set up (classes/local/demo.php).
+// ospf-multi-area is the default lab; the other labs of plugin/demo open as index.<lang>.<lab>.html.
 const read = f => JSON.parse(fs.readFileSync(path.join(plugin, 'demo', f), 'utf8'));
-const data = {
-    topology: read('ospf-multi-area.gns3'),
-    live: read('ospf-multi-area.live.json'),
-    facts: {ok: read('ospf-multi-area.facts.json'), broken: read('ospf-multi-area.facts-broken.json')},
+const demoOf = (lab, labname) => ({
+    topology: read(`${lab}.gns3`),
+    live: read(`${lab}.live.json`),
+    facts: {ok: read(`${lab}.facts.json`), broken: read(`${lab}.facts-broken.json`)},
     source: 'demo',
-    labname: 'Lab 4',
-};
+    labname,
+});
+const EXTRA_LABS = {'linux-switch-vlan': {ru: 'Лаба 5 · Linux-коммутатор', en: 'Lab 5 · Linux switch'}};
+const data = demoOf('ospf-multi-area', 'Lab 4');
 fs.writeFileSync(path.join(dist, 'demo.json'), JSON.stringify(data));
+for (const lab of Object.keys(EXTRA_LABS)) {
+    fs.writeFileSync(path.join(dist, `demo.${lab}.json`), JSON.stringify(demoOf(lab, 'Lab 5')));
+}
 
 /**
  * Renders the real template of the lab page.
@@ -114,15 +120,17 @@ function page(lang, extra = {}) {
     };
     return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons});
 }
+const shell = (lang, lab, body) => fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
+    .replaceAll('{{lang}}', lang).replaceAll('{{lab}}', lab).replace('{{body}}', () => body);
 for (const lang of ['en', 'ru']) {
-    const body = page(lang);
-    const html = fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
-        .replaceAll('{{lang}}', lang).replace('{{body}}', () => body);
-    fs.writeFileSync(path.join(dist, `index.${lang}.html`), html);
+    fs.writeFileSync(path.join(dist, `index.${lang}.html`), shell(lang, '', page(lang)));
+    for (const [lab, names] of Object.entries(EXTRA_LABS)) {
+        const body = page(lang, {labname: names[lang], datajson: JSON.stringify(demoOf(lab, 'Lab 5'))});
+        fs.writeFileSync(path.join(dist, `index.${lang}.${lab}.html`), shell(lang, lab, body));
+    }
 }
 // A user who may only look: no session bar.
-fs.writeFileSync(path.join(dist, 'index.viewer.html'), fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
-    .replaceAll('{{lang}}', 'ru').replace('{{body}}', () => page('ru', {cancontrol: false})));
+fs.writeFileSync(path.join(dist, 'index.viewer.html'), shell('ru', '', page('ru', {cancontrol: false})));
 
 if (process.argv.includes('--amd-build')) {
     const {minify} = require('terser');

@@ -1,4 +1,4 @@
-"""Guest facts: the linux.net collector, background collection and the /facts routes."""
+"""Guest facts: the linux.net and switch.net collectors, background collection and the /facts routes."""
 
 import asyncio
 import json
@@ -14,10 +14,12 @@ from api import facts as facts_module
 from api.facts import (
     COLLECTORS,
     LINUX_NET_COMMAND,
+    SWITCH_NET_COMMAND,
     Facts,
     FactError,
     adapter_macs,
     parse_linux_net,
+    parse_switch_net,
 )
 from api.qga import Priority, QgaBusy, QgaCommandError, QgaTimeout, QgaUnavailable
 
@@ -160,17 +162,214 @@ def test_the_guest_command_prints_one_json_document_or_fails(tmp_path):
     assert broken.returncode != 0 and broken.stdout == ""
 
 
+# --- switch.net parser ------------------------------------------------------------------------
+
+SWITCH_FLAGS_UP = ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"]
+UNTAGGED_PVID = ["PVID", "Egress Untagged"]
+
+
+def switch_port(ifindex, name, mac, flags=SWITCH_FLAGS_UP, operstate="UP", traffic=0):
+    return {
+        "ifindex": ifindex, "ifname": name, "flags": flags, "mtu": 1500, "master": "br0",
+        "operstate": operstate, "link_type": "ether", "address": mac,
+        "stats64": {
+            "rx": {"bytes": traffic, "packets": traffic // 60, "errors": 0, "dropped": 0},
+            "tx": {"bytes": traffic * 2, "packets": traffic // 30, "errors": 0, "dropped": 0},
+        },
+    }
+
+
+def switch_ports(traffic=0):
+    return [
+        switch_port(2, "ens3", BASE_MAC, traffic=traffic),
+        switch_port(3, "ens4", "00:00:ab:cd:00:01", traffic=traffic),
+        switch_port(4, "ens5", "52:54:00:aa:bb:05", ["BROADCAST", "MULTICAST"], "DOWN", traffic),
+        switch_port(5, "ens6", "52:54:00:aa:bb:06", traffic=traffic),
+        switch_port(6, "ens7", "52:54:00:aa:bb:07", traffic=traffic),
+        switch_port(7, "ens8", "52:54:00:aa:bb:08", traffic=traffic),
+        switch_port(8, "ens9", "52:54:00:aa:bb:09", ["BROADCAST", "MULTICAST", "UP"], "DOWN", traffic),
+    ]
+
+
+# `bridge -j vlan show`: br0 and a port that `switchctl ports` does not list are not ports of the switch.
+SWITCH_VLANS = [
+    {"ifname": "br0", "vlans": [{"vlan": 1, "flags": UNTAGGED_PVID}]},
+    {"ifname": "ens3", "vlans": [{"vlan": 10, "flags": UNTAGGED_PVID}]},
+    {"ifname": "ens4", "vlans": [{"vlan": 10, "flags": []}, {"vlan": 20, "flags": UNTAGGED_PVID}]},
+    {"ifname": "ens5", "vlans": [{"vlan": 20, "flags": []}, {"vlan": 10}]},
+    {"ifname": "ens7", "vlans": [
+        {"vlan": 100, "vlanEnd": 102, "flags": []}, {"vlan": 200, "flags": UNTAGGED_PVID},
+    ]},
+    {"ifname": "ens8", "vlans": [{"vlan": 10, "flags": []}]},
+    {"ifname": "ens9", "vlans": [{"vlan": 30, "flags": UNTAGGED_PVID}]},
+    {"ifname": "ghost", "vlans": [{"vlan": 99, "flags": UNTAGGED_PVID}]},
+]
+
+
+def envelope(result):
+    return {"version": 1, "id": "0123", "ok": True, "observed_at": 1792800000.0, "result": result}
+
+
+def refusal(code="COMMAND_FAILED", message="bridge failed"):
+    return {"version": 1, "id": "0123", "ok": False, "error": {"code": code, "message": message}}
+
+
+def switch_document(ports=None, actual=None):
+    return {
+        "ports": ports if isinstance(ports, dict) else envelope({"ports": switch_ports() if ports is None else ports}),
+        "vlans": envelope({
+            "desired": None, "last_error": None, "applied": True,
+            "actual": SWITCH_VLANS if actual is None else actual,
+        }),
+    }
+
+
+def switch_output(**options):
+    return json.dumps(switch_document(**options))
+
+
+def switch_success():
+    return {"exit_code": 0, "stdout": switch_output(), "stderr": ""}
+
+
+EXPECTED_SWITCH_PORTS = [
+    {"name": "ens3", "kind": "physical", "admin": "up", "oper": "up", "mac": BASE_MAC,
+     "port": {"adapter": 0, "port": 0}, "switchport": {"mode": "access", "vlan": 10}},
+    {"name": "ens4", "kind": "physical", "admin": "up", "oper": "up", "mac": "00:00:ab:cd:00:01",
+     "port": {"adapter": 1, "port": 0}, "switchport": {"mode": "trunk", "allowed": [10, 20], "native": 20}},
+    {"name": "ens5", "kind": "physical", "admin": "down", "oper": "down", "mac": "52:54:00:aa:bb:05",
+     "switchport": {"mode": "trunk", "allowed": [10, 20], "native": None}},
+    {"name": "ens6", "kind": "physical", "admin": "up", "oper": "up", "mac": "52:54:00:aa:bb:06",
+     "switchport": {"mode": "none"}},
+    {"name": "ens7", "kind": "physical", "admin": "up", "oper": "up", "mac": "52:54:00:aa:bb:07",
+     "switchport": {"mode": "trunk", "allowed": [100, 101, 102, 200], "native": 200}},
+    {"name": "ens8", "kind": "physical", "admin": "up", "oper": "up", "mac": "52:54:00:aa:bb:08",
+     "switchport": {"mode": "trunk", "allowed": [10], "native": None}},
+    {"name": "ens9", "kind": "physical", "admin": "up", "oper": "down", "mac": "52:54:00:aa:bb:09",
+     "switchport": {"mode": "access", "vlan": 30}},
+]
+# The student does not manage the ports of this image: the scheme repeats the other end of the cable
+# (live-state.md 3.1, `mirror`). Only switch.net says so; a Cisco switch port never carries it.
+EXPECTED_SWITCH_PORTS = [{**port, "mirror": True} for port in EXPECTED_SWITCH_PORTS]
+
+
+def test_parse_switch_net_describes_the_ports_by_their_actual_membership():
+    # Access, trunk with and without native, no membership, a range, a lone tagged VLAN; br0 and ghost are not ports.
+    assert parse_switch_net(switch_output(), MACS) == {"interfaces": EXPECTED_SWITCH_PORTS}
+
+
+def test_switch_ports_come_in_ifindex_order_and_find_their_adapter_by_mac():
+    ports = switch_ports()
+    # The first two cards trade names: the order and the names of the guest say nothing, the MAC does.
+    ports[0], ports[1] = {**ports[0], "ifname": "eth9"}, {**ports[1], "ifname": "eth0"}
+    data = parse_switch_net(switch_output(ports=list(reversed(ports))), MACS)
+    names = [i["name"] for i in data["interfaces"]]
+    assert names == ["eth9", "eth0", "ens5", "ens6", "ens7", "ens8", "ens9"]
+    by_name = {i["name"]: i for i in data["interfaces"]}
+    assert by_name["eth9"]["port"] == {"adapter": 0, "port": 0}
+    assert by_name["eth0"]["port"] == {"adapter": 1, "port": 0}
+    assert "port" not in by_name["ens6"]
+    assert all("port" not in i for i in parse_switch_net(switch_output(), {})["interfaces"])
+
+
+def test_switch_data_does_not_move_with_the_counters():
+    quiet = parse_switch_net(switch_output(ports=switch_ports(traffic=0)), MACS)
+    busy = parse_switch_net(switch_output(ports=switch_ports(traffic=10**9)), MACS)
+    assert quiet == busy
+    assert "stats64" not in json.dumps(busy) and "bytes" not in json.dumps(busy)
+
+
+@pytest.mark.parametrize(
+    "stdout, fragment",
+    [
+        ("", "JSONDecodeError"),
+        ("not json", "JSONDecodeError"),
+        ("[]", "TypeError"),
+        ('{"ports": null, "vlans": null}', "no valid response"),
+        (switch_output(ports=refusal("CLIENT_ERROR", "no such socket")), "CLIENT_ERROR"),
+        (json.dumps({**switch_document(), "vlans": refusal("VLAN_APPLY_FAILED", "ip said no")}), "ip said no"),
+        (switch_output(ports=envelope({"nope": 1})), "KeyError"),
+        (switch_output(ports=envelope({"ports": {}})), "TypeError"),
+        (switch_output(actual=[{"ifname": "ens3", "vlans": [{"vlan": 5000}]}]), "ValueError"),
+        (switch_output(actual=[{"ifname": "ens3", "vlans": [{"vlan": 12, "vlanEnd": 10}]}]), "ValueError"),
+        (switch_output(actual={"ifname": "ens3"}), "TypeError"),
+        (switch_output(ports=[{"ifindex": 2}]), "KeyError"),
+    ],
+)
+def test_garbage_from_the_switch_is_a_failed_collection(stdout, fragment):
+    with pytest.raises(FactError) as caught:
+        parse_switch_net(stdout, MACS)
+    assert caught.value.code == "failed" and fragment in str(caught.value)
+
+
+def fake_switchctl(tmp_path, ports, vlans, status=0):
+    tool = tmp_path / "switchctl"
+    tool.write_text(
+        f'#!/bin/sh\ncase "$1" in ports) cat "$0.ports";; vlans) cat "$0.vlans";; esac\nexit {status}\n'
+    )
+    tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    (tmp_path / "switchctl.ports").write_text(ports)
+    (tmp_path / "switchctl.vlans").write_text(vlans)
+    return tool
+
+
+def run_switch_command(tool):
+    command = SWITCH_NET_COMMAND.replace("/usr/local/sbin/switchctl", str(tool))
+    assert command != SWITCH_NET_COMMAND
+    return subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True)
+
+
+def test_the_switch_command_glues_the_two_envelopes(tmp_path):
+    document = switch_document()
+    tool = fake_switchctl(tmp_path, json.dumps(document["ports"]), json.dumps(document["vlans"]))
+    done = run_switch_command(tool)
+    assert done.returncode == 0
+    assert parse_switch_net(done.stdout, MACS) == {"interfaces": EXPECTED_SWITCH_PORTS}
+
+
+def test_the_switch_command_exits_127_without_switchctl(tmp_path):
+    done = run_switch_command(tmp_path / "missing")
+    assert done.returncode == 127 and done.stdout == ""
+
+
+def test_the_switch_command_hands_over_an_error_envelope(tmp_path):
+    # switchctl prints the envelope and exits 1 when the daemon says no: the reason must survive.
+    tool = fake_switchctl(tmp_path, json.dumps(refusal("BUSY", "daemon busy")), json.dumps(refusal()), status=1)
+    done = run_switch_command(tool)
+    assert done.returncode == 0
+    with pytest.raises(FactError) as caught:
+        parse_switch_net(done.stdout, MACS)
+    assert caught.value.code == "failed" and "daemon busy" in str(caught.value)
+    # A switchctl that prints nothing at all (no Python in the guest, say) is still one document.
+    silent = run_switch_command(fake_switchctl(tmp_path, "", "", status=127))
+    assert silent.returncode == 0 and json.loads(silent.stdout) == {"ports": None, "vlans": None}
+    with pytest.raises(FactError):
+        parse_switch_net(silent.stdout, MACS)
+
+
 # --- background collection --------------------------------------------------------------------
 
 
+NOT_A_SWITCH = {"exit_code": 127, "stdout": "", "stderr": ""}  # no switchctl in the guest
+
+
 class FakeQga:
-    def __init__(self, reply):
+    """`reply` answers the linux.net command, `switch_reply` the switch.net one (an ordinary host by default)."""
+
+    def __init__(self, reply, switch_reply=NOT_A_SWITCH):
         self.reply = reply
+        self.switch_reply = switch_reply
+        self.switch_by_node = {}  # node_id -> reply: a lab with a switch next to ordinary hosts
         self.calls = []
+
+    def asked(self, command):
+        return [call for call in self.calls if call[1] == command]
 
     async def exec(self, node_id, command, **options):
         self.calls.append((node_id, command, options))
         reply = self.reply
+        if command == SWITCH_NET_COMMAND:
+            reply = self.switch_by_node.get(node_id, self.switch_reply)
         if isinstance(reply, BaseException):
             raise reply
         return reply
@@ -297,7 +496,7 @@ def test_nothing_is_collected_until_ready(monkeypatch):
             assert lifecycle.qga.calls == [] and facts.snapshot("p1")["nodes"] == {}
         labs["p1"]["state"] = "READY"
         await facts.cycle()
-        assert len(lifecycle.qga.calls) == 1
+        assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 1
         labs["p1"]["state"] = "STOPPING"  # results disappear when the lab stops being READY
         await facts.cycle()
         assert facts.snapshot("p1")["nodes"] == {} and facts.results == {}
@@ -311,6 +510,7 @@ def test_a_stopped_node_is_reported_without_touching_the_guest(monkeypatch):
         await facts.cycle()
         assert lifecycle.qga.calls == []
         assert collector_of(facts)["error"]["code"] == "stopped"
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]  # the role is unknown
 
     scenario(monkeypatch, body)
 
@@ -354,11 +554,11 @@ def test_collection_is_paced_and_refresh_forces_it(monkeypatch):
         facts.interval = 3600
         await facts.cycle()
         await facts.cycle()
-        assert len(lifecycle.qga.calls) == 1  # not due yet
+        assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 1  # not due yet
         facts.request_refresh()
         assert facts.wake.is_set()
         await facts.cycle()
-        assert len(lifecycle.qga.calls) == 2
+        assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 2
         facts.min_refresh = 3600
         facts.wake.clear()
         facts.request_refresh()
@@ -367,8 +567,227 @@ def test_collection_is_paced_and_refresh_forces_it(monkeypatch):
     scenario(monkeypatch, body)
 
 
+# --- switch.net collection --------------------------------------------------------------------
+
+SWITCH_KEY = ("p1", "n3", "switch.net")
+
+
+def add_switch(lifecycle, labs, reply=None):
+    """A QEMU node n3 next to the ordinary host n1; its guest answers the switch.net command."""
+    labs["p1"]["ticket"]["nodes"].append({"name": "SW2", "kind": "qemu", "qga": True})
+    labs["p1"]["nodes"].append(
+        {"node_id": "n3", "name": "SW2", "node_type": "qemu", "status": "started",
+         "properties": {"mac_address": BASE_MAC, "adapters": 2}}
+    )
+    lifecycle.qga.switch_by_node["n3"] = reply or switch_success()
+
+
+def switch_of(facts, node_id="n3"):
+    """The switch.net record of a node; None when the slot says nothing about it."""
+    node = facts.snapshot("p1")["nodes"].get(node_id, {})
+    return node.get("collectors", {}).get("switch.net")
+
+
+FAILURES = [
+    (QgaTimeout("slow"), "timeout"),
+    (QgaUnavailable("channel is backing off"), "unreachable"),
+    (FileNotFoundError("no socket"), "unreachable"),
+    (QgaCommandError("agent said no"), "failed"),
+    ({"exit_code": 1, "stdout": "", "stderr": "boom"}, "failed"),
+    ({"exit_code": 0, "stdout": "garbage", "stderr": ""}, "failed"),
+    ({"exit_code": 0, "stdout": json.dumps({"ports": refusal(), "vlans": refusal()}), "stderr": ""}, "failed"),
+]
+
+
+def test_a_switch_is_published_next_to_linux_net_with_the_broker_priority_that_yields(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n3"]["collectors"]
+        assert list(collectors) == ["linux.net", "switch.net"]
+        record = collectors["switch.net"]
+        assert record["schema"] == "switch.net/1" and record["ok"] is True and record["error"] is None
+        assert record["attempted_at"] == record["observed_at"] and record["attempted_at"].endswith("Z")
+        assert record["data"] == {"interfaces": EXPECTED_SWITCH_PORTS}  # no routes: linux.net owns them
+        assert collectors["linux.net"]["data"] == collector_of(facts)["data"]  # as on any other host
+        (call,) = [c for c in lifecycle.qga.asked(SWITCH_NET_COMMAND) if c[0] == "n3"]
+        assert call[2]["priority"] is Priority.METRICS and call[2]["wait"] is False and call[2]["max_age"] == 2
+        assert facts.confirmed == {SWITCH_KEY} and facts.absent == {("p1", "n1", "switch.net")}
+
+    scenario(monkeypatch, body)
+
+
+def test_an_ordinary_host_is_asked_once_and_never_gets_a_record(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        for _ in range(3):
+            await facts.cycle()
+        assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 3  # linux.net goes on as before
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 1  # the guest said it is no switch
+        assert facts.absent == {("p1", "n1", "switch.net")} and facts.confirmed == set()
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+
+    scenario(monkeypatch, body)
+
+
+@pytest.mark.parametrize("failure, code", FAILURES + [(None, "stopped")])
+def test_failures_before_the_first_success_are_silent_unless_the_guest_answered(monkeypatch, failure, code):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs, failure)
+        if failure is None:  # a node that has not started says nothing about its role either
+            labs["p1"]["nodes"][2]["status"] = "stopped"
+        await facts.cycle()
+        record = switch_of(facts)
+        # Whatever the broker raised (any exchange failure, a refusal of the agent included) and a node
+        # that is not started say nothing about the role. The manager never deletes a collector's row,
+        # so a record published now would stay as a stranger's error on an ordinary host.
+        if isinstance(failure, BaseException) or failure is None:
+            assert record is None and facts.absent == {("p1", "n1", "switch.net")}
+            assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]  # the host is still reported
+        else:  # switchctl is there but does not answer properly: the owner has to see it
+            assert record["ok"] is False and record["error"]["code"] == "failed" and record["error"]["message"]
+            assert "data" not in record and "observed_at" not in record
+        lifecycle.qga.switch_by_node["n3"] = switch_success()
+        labs["p1"]["nodes"][2]["status"] = "started"
+        await facts.cycle()
+        assert switch_of(facts)["ok"] is True and facts.confirmed == {SWITCH_KEY}
+
+    scenario(monkeypatch, body)
+
+
+@pytest.mark.parametrize("failure, code", FAILURES + [(None, "stopped")])
+def test_failures_after_the_first_success_are_published_with_the_last_data(monkeypatch, failure, code):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        first = switch_of(facts)
+        if failure is None:
+            labs["p1"]["nodes"][2]["status"] = "stopped"
+        else:
+            lifecycle.qga.switch_by_node["n3"] = failure
+        await facts.cycle()
+        record = switch_of(facts)
+        assert record["ok"] is False and record["error"]["code"] == code and record["error"]["message"]
+        assert record["data"] == first["data"] and record["observed_at"] == first["observed_at"]
+        assert record["attempted_at"] >= first["attempted_at"]
+        labs["p1"]["nodes"][2]["status"] = "started"
+        lifecycle.qga.switch_by_node["n3"] = switch_success()
+        await facts.cycle()
+        assert switch_of(facts)["ok"] is True and switch_of(facts)["error"] is None
+
+    scenario(monkeypatch, body)
+
+
+def test_a_guest_that_loses_switchctl_is_no_switch_any_more(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        assert switch_of(facts)["ok"] is True
+        lifecycle.qga.switch_by_node["n3"] = NOT_A_SWITCH
+        await facts.cycle()
+        assert switch_of(facts) is None and SWITCH_KEY in facts.absent and SWITCH_KEY not in facts.confirmed
+        assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]["ok"] is True
+        lifecycle.qga.switch_by_node["n3"] = switch_success()
+        await facts.cycle()  # not asked again: the role is remembered
+        assert switch_of(facts) is None and len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 3
+
+    scenario(monkeypatch, body)
+
+
+def test_the_role_is_remembered_until_the_owner_or_the_lab_goes(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 2
+        facts.reset()  # another owner: everything is learned again
+        assert facts.absent == set() and facts.confirmed == set()
+        await facts.cycle()
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 4 and facts.confirmed == {SWITCH_KEY}
+        labs["p1"]["state"] = "STOPPING"  # the lab leaves READY: its memory goes with its results
+        await facts.cycle()
+        assert facts.absent == set() and facts.confirmed == set() and facts.results == {}
+        labs["p1"]["state"] = "READY"
+        await facts.cycle()
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 6
+        assert facts.absent == {("p1", "n1", "switch.net")} and facts.confirmed == {SWITCH_KEY}
+        # Forgotten with the memory: a timeout of a node that has not answered yet is silent again.
+        facts.reset()
+        lifecycle.qga.switch_by_node["n3"] = QgaTimeout("slow")
+        await facts.cycle()
+        assert switch_of(facts) is None and facts.confirmed == set()
+
+    scenario(monkeypatch, body)
+
+
+def test_an_attempt_of_the_previous_owner_leaves_no_memory(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        release, entered = asyncio.Event(), asyncio.Event()
+        replies = {"n1": NOT_A_SWITCH, "n3": switch_success()}
+        asked = []
+
+        async def slow(node_id, command, **options):
+            if command == LINUX_NET_COMMAND:
+                return success()
+            asked.append(node_id)
+            if len(asked) == 2:
+                entered.set()
+            await release.wait()
+            return replies[node_id]
+
+        lifecycle.qga.exec = slow
+        running = asyncio.create_task(facts.cycle())
+        await asyncio.wait_for(entered.wait(), 5)
+        facts.reset()  # the owner changes while the guests are being asked
+        release.set()
+        await running
+        assert facts.absent == set() and facts.confirmed == set() and facts.snapshot("p1")["nodes"] == {}
+
+    scenario(monkeypatch, body)
+
+
+def test_the_collectors_of_a_node_share_its_channel_and_run_one_after_another(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        running, peak = {}, {}
+        answer = lifecycle.qga.exec
+
+        async def watched(node_id, command, **options):
+            running[node_id] = running.get(node_id, 0) + 1
+            peak[node_id] = max(peak.get(node_id, 0), running[node_id])
+            try:
+                await asyncio.sleep(0.01)
+                return await answer(node_id, command, **options)
+            finally:
+                running[node_id] -= 1
+
+        lifecycle.qga.exec = watched
+        await facts.cycle()
+        assert peak == {"n1": 1, "n3": 1}  # a second exec at once would be refused as busy
+        assert len(lifecycle.qga.calls) == 4 and switch_of(facts)["ok"] is True
+
+    scenario(monkeypatch, body)
+
+
+def test_the_collectors_fail_independently(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        lifecycle.qga.reply = {"exit_code": 1, "stdout": "", "stderr": "ip broke"}
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]["error"]["code"] == "failed"
+        assert switch_of(facts)["ok"] is True
+        lifecycle.qga.reply = success()
+        lifecycle.qga.switch_by_node["n3"] = {"exit_code": 1, "stdout": "", "stderr": "daemon down"}
+        await facts.cycle()
+        assert collector_of(facts, "n3")["ok"] is True
+        assert switch_of(facts)["ok"] is False and "daemon down" in switch_of(facts)["error"]["message"]
+
+    scenario(monkeypatch, body)
+
+
 def test_the_registry_matches_the_capabilities():
-    assert facts_module.COLLECTOR_IDS == [c.schema for c in COLLECTORS] == ["linux.net/1"]
+    ids = ["linux.net/1", "switch.net/1"]
+    assert facts_module.COLLECTOR_IDS == [c.schema for c in COLLECTORS] == ids
 
 
 # --- routes -----------------------------------------------------------------------------------
@@ -380,14 +799,14 @@ def fast_facts(monkeypatch):
     monkeypatch.setenv("SLOT_FACTS_MIN_REFRESH", "0")
 
 
-def deployed(client, monkeypatch, reply):
+def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH):
     from api.qga import QgaBroker
 
     calls = []
 
     async def exec_(self, node_id, command, **options):
         calls.append(node_id)
-        return reply
+        return switch_reply if command == SWITCH_NET_COMMAND else reply
 
     monkeypatch.setattr(QgaBroker, "exec", exec_)
     pid = str(uuid4())
@@ -428,11 +847,28 @@ def test_facts_route_serves_the_latest_results(fast_facts, mock_server, monkeypa
     assert node["name"] == "D1"
     record = node["collectors"]["linux.net"]
     assert record["ok"] is True and record["data"]["routes"][-1]["dst"] == "default"
+    assert list(node["collectors"]) == ["linux.net"]  # an ordinary host has no switch.net record
     assert "raw" not in record and "raw_sha256" not in record  # no raw output leaves the slot
     # Stopping the lab removes its facts: the Manager must not store a dead lab as current.
     stopped = client.post(f"/v1/labs/{pid}/stop", headers=HEADERS)
     assert stopped.status_code in (200, 202), stopped.text
     wait_for_facts(client, pid, lambda b: b["nodes"] == {})
+
+
+def test_facts_route_serves_the_switch_ports(fast_facts, mock_server, monkeypatch):
+    client, _projects, _nodes = mock_server
+    pid, _calls = deployed(client, monkeypatch, success(), switch_reply=switch_success())
+    body = wait_for_facts(
+        client, pid, lambda b: any("switch.net" in n["collectors"] for n in b["nodes"].values())
+    )
+    (node,) = body["nodes"].values()
+    assert list(node["collectors"]) == ["linux.net", "switch.net"]
+    record = node["collectors"]["switch.net"]
+    assert record["schema"] == "switch.net/1" and record["ok"] is True
+    assert [i["switchport"] for i in record["data"]["interfaces"]][:2] == [
+        {"mode": "access", "vlan": 10}, {"mode": "trunk", "allowed": [10, 20], "native": 20},
+    ]
+    assert set(record["data"]) == {"interfaces"} and "stats64" not in json.dumps(record)
 
 
 def test_refresh_needs_the_owner_and_a_known_lab(fast_facts, mock_server, monkeypatch):
@@ -452,5 +888,5 @@ def test_refresh_needs_the_owner_and_a_known_lab(fast_facts, mock_server, monkey
 def test_capabilities_announce_the_collectors(mock_server):
     client, _projects, _nodes = mock_server
     body = client.get("/v1/capabilities", headers=HEADERS).json()
-    assert "collectors" in body["features"] and body["collectors"] == ["linux.net/1"]
+    assert "collectors" in body["features"] and body["collectors"] == ["linux.net/1", "switch.net/1"]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"

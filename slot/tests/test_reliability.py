@@ -359,4 +359,4 @@ def test_capabilities(mock_server):
     assert set(body["features"]) == {
         "qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1", "collectors",
     }
-    assert body["collectors"] == ["linux.net/1"]
+    assert body["collectors"] == ["linux.net/1", "switch.net/1"]

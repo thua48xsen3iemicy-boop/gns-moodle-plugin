@@ -19,6 +19,9 @@ user input. Port names must be discovered from guest ports. Map topology NICs to
 guest ports by MAC, never assume eth0 ordering. Capture/packet decoding, VLAN
 semantics and Linux command construction remain inside the image.
 
+Slot 0.7.0 reads `ports` and `vlans` (read-only, METRICS priority) in its `switch.net/1` facts collector,
+see manager/docs/CONTRACTS.md section 4.6; no other guest method is used yet.
+
 ## Manager and Plugin
 
 Future integration must add its own documented contracts before implementation.
