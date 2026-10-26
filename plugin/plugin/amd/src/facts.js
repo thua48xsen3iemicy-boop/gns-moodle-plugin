@@ -14,7 +14,8 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Device facts of a lab and the layers derived from them: L1 physical, L2 VLAN, L3 IP, OSPF.
+ * Device facts of a lab and the layers derived from them: L1 physical, L2 VLAN, L3 IP, OSPF. Also the MAC table of a
+ * switch, for display only.
  *
  * Pure functions without DOM access. The format of the facts and the rules of every layer are described in
  * docs/live-state.md. The texts of the findings are still Russian literals, as they were in the first viewer;
@@ -58,7 +59,9 @@ function indexFacts(m, facts){
     const rec = { id: n.id, status: f.status || null, ifs, byName: new Map(), rid: f.router_id || null,
       adj: Array.isArray(f.adjacencies) ? f.adjacencies : [], vlans: Array.isArray(f.vlans) ? f.vlans : [],
       // The last collection failed: the facts beside it are the last known ones, not the current ones.
-      err: f.error && typeof f.error === "object" ? f.error : null, at: f.collected_at || null };
+      err: f.error && typeof f.error === "object" ? f.error : null, at: f.collected_at || null,
+      // No `mac_table` (or one without a list) means "not collected", which is not the same as an empty table.
+      macs: f.mac_table && typeof f.mac_table === "object" && Array.isArray(f.mac_table.entries) ? f.mac_table : null };
     (ifs || []).forEach(i => {
       rec.byName.set(i.name, i);
       if (i.port) fx.byPort.set(n.id + "|" + i.port.adapter + "/" + i.port.port, i);
@@ -346,6 +349,60 @@ function missReason(h, l1){
   if (String(h.ia.ospf.area) !== String(h.ib.ospf.area)) return `разные area: ${h.ia.ospf.area} и ${h.ib.ospf.area}`;
   return "по собранным фактам причина не видна — проверьте таймеры hello/dead, аутентификацию и MTU";
 }
+
+const MAC_RE = /^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i;
+const normMac = s => (typeof s === "string" && MAC_RE.test(s.trim()) ? s.trim().toLowerCase().replace(/-/g, ":") : null);
+
+/**
+ * The MAC table of a switch as the details card shows it (docs/live-state.md section 3.4).
+ *
+ * Display only: nothing here feeds the layers or the findings. The owner of an address is the other node that has an
+ * interface with this MAC; if several nodes have it, nobody is named (the collector does not guess either). Of several
+ * interfaces of one node with the same MAC (a sub-interface repeats its parent) the physical one is named.
+ *
+ * @param {object} m model from buildModel
+ * @param {object|null} fx index from derive
+ * @param {string} nodeId the switch
+ * @returns {{rows: object[], truncated: boolean}|null} null if the table was not collected; no rows is an empty table.
+ *   A row is {mac, iface, vlan, port, link, label, owner}: port is {adapter, port} of the switch interface, link the id
+ *   of the cable on it and label the name of that port on the scheme (null if unknown); owner is {nodeId, node, iface}
+ *   or null for an address nobody here has.
+ */
+export const macTable = (m, fx, nodeId) => {
+  const f = fx && fx.nodes.get(nodeId), t = f && f.macs;
+  if (!t) {
+    return null;
+  }
+  const byMac = new Map();
+  fx.nodes.forEach(o => {
+    if (o.id === nodeId) {
+      return;
+    }
+    (o.ifs || []).forEach(i => {
+      const mac = normMac(i.mac);
+      if (!mac) {
+        return;
+      }
+      const per = byMac.get(mac) || byMac.set(mac, new Map()).get(mac), cur = per.get(o.id);
+      if (!cur || (i.kind === "physical" && cur.kind !== "physical")) {
+        per.set(o.id, i);
+      }
+    });
+  });
+  const rows = t.entries.filter(e => e && typeof e.mac === "string").map(e => {
+    const mac = normMac(e.mac) || e.mac, sw = f.byName.get(e.iface), per = byMac.get(mac);
+    const port = sw && sw.port ? {adapter: sw.port.adapter, port: sw.port.port} : null;
+    const l = port && m.links.find(k => endIs(k.a, nodeId, port) || endIs(k.b, nodeId, port));
+    const end = l && (endIs(l.a, nodeId, port) ? l.a : l.b);
+    let owner = null;
+    if (per && per.size === 1) {
+      const [[id, i]] = per, N = m.nodes.get(id);
+      owner = N ? {nodeId: id, node: N.name, iface: i.name} : null;
+    }
+    return {mac, iface: e.iface, vlan: e.vlan, port, link: l ? l.id : null, label: end ? end.text : null, owner};
+  });
+  return {rows, truncated: t.truncated === true};
+};
 
 /**
  * Colour of a VLAN: starts with the second colour of the palette, the first (blue) is the selection colour.

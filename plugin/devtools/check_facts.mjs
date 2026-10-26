@@ -1,5 +1,6 @@
 // Checks the pure functions of plugin/amd/src/facts.js without Moodle or a browser: the state of the link ends
-// (docs/live-state.md §4, L1: a switch port repeats its link end) and the L2 modes `none` and `native: null` (§3.1).
+// (docs/live-state.md §4, L1: a switch port repeats its link end), the L2 modes `none` and `native: null` (§3.1) and
+// the rows of the MAC table of a switch (§3.4).
 //
 //   node plugin/devtools/check_facts.mjs        (Node 22; exit code 1 if a scenario fails)
 import assert from 'node:assert/strict';
@@ -20,7 +21,7 @@ export async function load(url, context, next) {
     return next(url, url.startsWith(src) ? {...context, format: 'module'} : context);
 }`));
 const {buildModel} = await import(srcUrl + 'model.js');
-const {derive, endState} = await import(srcUrl + 'facts.js');
+const {derive, endState, macTable} = await import(srcUrl + 'facts.js');
 
 const nid = n => `00000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;
 const PC1 = nid(1), SW1 = nid(2), SW2 = nid(3);
@@ -162,6 +163,95 @@ check('L1 OSPF demo: shutdown on a cabled Cisco switch port drops its link with 
     assert.equal(der.l1.links.get(l.id).down, true);
     assert.match(der.l1.links.get(l.id).why.join(' '), /SW1 e0\/1: shutdown/);
     assert.equal(endState(der, [l.a, l.b].find(e => e.nodeId === id)).down, true);
+});
+
+// The MAC table of a switch (§3.4): display rows, never a source of findings.
+// PC1 e0 (adapter 0 port 0) is cabled to SW1 e1 (adapter 0 port 1) by the link l1 of lab(PC1, SW1).
+const MAC_PC1 = '50:5b:3c:02:a2:00', MAC_PC2 = '50:5b:3c:02:b3:00';
+const swWith = table => ({...sw(), mac_table: table});
+const rowsOf = (facts, m = lab(PC1, SW1)) => macTable(m, derive(m, doc(facts)).fx, SW1);
+check('MAC table: no mac_table is null (not collected), an empty list is an empty table', () => {
+    assert.equal(rowsOf({[PC1]: host(), [SW1]: sw()}), null);
+    assert.deepEqual(rowsOf({[PC1]: host(), [SW1]: swWith({entries: []})}), {rows: [], truncated: false});
+    assert.equal(rowsOf({[PC1]: host()}), null, 'a switch without any facts');
+});
+check('MAC table: a table without a list of entries is "not collected", not an empty table', () => {
+    assert.equal(rowsOf({[PC1]: host(), [SW1]: swWith({truncated: false})}), null);
+    assert.equal(rowsOf({[PC1]: host(), [SW1]: swWith({entries: 'x'})}), null);
+});
+check('MAC table: truncated is passed on only when it is true', () => {
+    const t = truncated => rowsOf({[PC1]: host(), [SW1]: swWith({entries: [], ...truncated})}).truncated;
+    assert.deepEqual([t({truncated: true}), t({truncated: false}), t({})], [true, false, false]);
+});
+check('MAC table: the owner is the other node with this MAC, matched case-insensitively', () => {
+    const t = swWith({entries: [{mac: MAC_PC1, iface: 'e1', vlan: 10}, {mac: MAC_PC2, iface: 'e1', vlan: 20}]});
+    const {rows} = rowsOf({[PC1]: host({mac: MAC_PC1.toUpperCase()}), [SW1]: t});
+    assert.deepEqual(rows[0].owner, {nodeId: PC1, node: 'PC1', iface: 'e0'});
+    assert.equal(rows[0].mac, MAC_PC1);
+    assert.deepEqual([rows[0].vlan, rows[1].vlan], [10, 20]);
+    assert.equal(rows[1].owner, null, 'an address nobody here has is kept, without a name');
+});
+check('MAC table: an upper-case MAC of the entry and the dashed form still find the owner', () => {
+    const t = swWith({entries: [{mac: MAC_PC1.toUpperCase(), iface: 'e1', vlan: 10}]});
+    const {rows} = rowsOf({[PC1]: host({mac: MAC_PC1.replaceAll(':', '-')}), [SW1]: t});
+    assert.deepEqual([rows[0].mac, rows[0].owner && rows[0].owner.node], [MAC_PC1, 'PC1']);
+});
+check('MAC table: the switch itself is not the owner of what it learned', () => {
+    const t = swWith({entries: [{mac: MAC_PC1, iface: 'e1', vlan: 10}]});
+    t.interfaces[0].mac = MAC_PC1;
+    assert.equal(rowsOf({[PC1]: host(), [SW1]: t}).rows[0].owner, null);
+});
+check('MAC table: the port of the switch and the cable on it', () => {
+    const t = swWith({entries: [{mac: MAC_PC1, iface: 'e1', vlan: 10}, {mac: MAC_PC2, iface: 'nope', vlan: 10}]});
+    const {rows} = rowsOf({[PC1]: host(), [SW1]: t});
+    assert.deepEqual([rows[0].port, rows[0].link, rows[0].label], [{adapter: 0, port: 1}, 'l1', 'p1']);
+    assert.deepEqual([rows[1].port, rows[1].link, rows[1].label], [null, null, null], 'an interface the switch did not report');
+});
+check('MAC table: an interface with a port that is not on any cable has no link', () => {
+    const t = {...node([ifc('e9', 9)]), mac_table: {entries: [{mac: MAC_PC1, iface: 'e9', vlan: 1}]}};
+    const {rows} = rowsOf({[PC1]: host(), [SW1]: t});
+    assert.deepEqual([rows[0].port, rows[0].link, rows[0].label], [{adapter: 0, port: 9}, null, null]);
+});
+check('MAC table: of several interfaces of one node with the same MAC the physical one is named', () => {
+    const sub = {name: 'e0.10', kind: 'subif', parent: 'e0', dot1q: 10, admin: 'up', oper: 'up', mac: MAC_PC1};
+    const pc = node([sub, ifc('e0', 0, {mac: MAC_PC1})]);
+    const t = swWith({entries: [{mac: MAC_PC1, iface: 'e1', vlan: 10}]});
+    assert.deepEqual(rowsOf({[PC1]: pc, [SW1]: t}).rows[0].owner, {nodeId: PC1, node: 'PC1', iface: 'e0'});
+});
+check('MAC table: the same MAC on two other nodes names nobody', () => {
+    const m = lab(PC1, SW1), pc2 = host({mac: MAC_PC1});
+    m.nodes.set(SW2, {id: SW2, name: 'SW2'});
+    const t = swWith({entries: [{mac: MAC_PC1, iface: 'e1', vlan: 10}]});
+    assert.equal(rowsOf({[PC1]: host({mac: MAC_PC1}), [SW2]: pc2, [SW1]: t}, m).rows[0].owner, null);
+});
+check('MAC table: it never changes the layers or their findings', () => {
+    const t = swWith({entries: [{mac: MAC_PC1, iface: 'e1', vlan: 10}, {mac: MAC_PC2, iface: 'e1', vlan: 10}], truncated: true});
+    const layers = nodes => {
+        const {der} = derive(lab(PC1, SW1), doc(nodes));
+        return JSON.stringify([der.l1.issues, der.l2.issues, der.l3.issues, der.rt.issues, [...der.l1.ends], [...der.l2.links]]);
+    };
+    assert.equal(layers({[PC1]: host({mac: MAC_PC1}), [SW1]: t}), layers({[PC1]: host({mac: MAC_PC1}), [SW1]: sw()}));
+});
+
+// The demo lab `linux-switch-vlan`: PC1 and PC2 are learned on their access ports, SRV1 on the trunk in both VLANs,
+// one address is nobody's. The broken snapshot has the port of PC1 down: nothing is learned behind it.
+const demo = (facts) => {
+    const read = f => JSON.parse(fs.readFileSync(new URL('../fixtures/' + f, import.meta.url), 'utf8'));
+    const gns3 = read('linux-switch-vlan.gns3'), m = buildModel({name: 'x', topology: gns3.topology});
+    const id = gns3.topology.nodes.find(n => n.name === 'SW1').node_id;
+    return {m, T: macTable(m, derive(m, read(facts)).fx, id)};
+};
+check('MAC table: demo lab rows, owners and cables', () => {
+    const {m, T} = demo('linux-switch-vlan.facts.json');
+    const seen = T.rows.map(r => `${r.vlan} ${r.iface} ${r.owner ? r.owner.node + ' ' + r.owner.iface : '-'}`);
+    assert.deepEqual(seen, ['10 ens4 -', '10 ens4 PC1 ens3', '10 ens6 SRV1 ens3', '20 ens5 PC2 ens3', '20 ens6 SRV1 ens3']);
+    assert.ok(T.rows.every(r => r.link && m.links.some(l => l.id === r.link)), 'every row points at a cable');
+    assert.deepEqual(T.rows.map(r => r.label), ['e1', 'e1', 'e3', 'e2', 'e3'], 'the port as the scheme names it');
+    assert.equal(T.truncated, false);
+});
+check('MAC table: demo lab with the port of PC1 down has no entries behind that port', () => {
+    const {T} = demo('linux-switch-vlan.facts-broken.json');
+    assert.deepEqual(T.rows.map(r => r.iface), ['ens6', 'ens5', 'ens6']);
 });
 
 if (failures.length) {
