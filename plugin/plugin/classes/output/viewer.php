@@ -25,6 +25,7 @@ use mod_gns3lab\local\lab_definition;
 use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
+use mod_gns3lab\local\reveal;
 
 /**
  * The lab page of a student: the data for the full screen interface (topology, node states, facts).
@@ -84,6 +85,10 @@ class viewer implements renderable, templatable {
             $data->source = get_string('demosource', 'gns3lab');
         }
         $data->labname = $labname;
+        // What the scheme shows a student (live, seen or fog) and, for a fog, the names of the nodes it starts from.
+        $data->factsview = reveal::mode($this->instance);
+        $data->fogstart = reveal::start_names($this->instance);
+        $mode = $data->factsview;
 
         return [
             'labname' => $labname,
@@ -92,6 +97,8 @@ class viewer implements renderable, templatable {
             'previewerror' => $previewerror,
             'cancontrol' => has_capability('mod/gns3lab:use', $this->cm->context),
             'cmid' => $this->cm->id,
+            'modetag' => $mode === reveal::LIVE ? '' : get_string('ui_mode_' . $mode . '_tag', 'gns3lab'),
+            'modehelp' => $mode === reveal::LIVE ? '' : get_string('ui_mode_' . $mode . '_help', 'gns3lab'),
             'datajson' => json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ];
     }

@@ -2036,6 +2036,27 @@ body.gns3lab-fullscreen {
     background: var(--accent);
     vertical-align: middle;
 }
+/* The modes seen and fog: a device not uncovered yet, and what is still to explore. */
+.gns3lab-student .node.silhouette {
+    opacity: .72;
+}
+.gns3lab-student .node.silhouette .halo {
+    stroke: var(--wire);
+    stroke-dasharray: 4 4;
+}
+.gns3lab-student .node.silhouette .ico {
+    opacity: .8;
+}
+.gns3lab-student .node.silhouette .sdot {
+    display: none;
+}
+.gns3lab-student .unexplored {
+    font-style: italic;
+}
+.gns3lab-student .btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
+}
 .gns3lab-student .fref {
     align-self: flex-start;
 }

@@ -19,7 +19,9 @@ node build.js          # → dist/
 node server.js         # → http://127.0.0.1:8123/index.ru.html
 ```
 
-Страницы: `index.ru.html`, `index.en.html`, `index.viewer.html` (пользователь без права запуска); лаба `linux-switch-vlan`
+Страницы: `index.ru.html`, `index.en.html`, `index.viewer.html` (пользователь без права запуска); режимы схемы (`docs/lab-constructor/README.md`
+§2) — `index.<язык>.seen.html`, `index.<язык>.fog.html` (все устройства силуэтами) и `index.<язык>.fog-start.html` (туман со стартовым
+PC1); с `?observer` те же страницы открывает преподаватель: он видит всё и по кнопке «Как видит студент» — маску студента; лаба `linux-switch-vlan`
 (Linux-коммутатор с VLAN и транком; «Обновить сейчас» выключает порт PC1) — `index.ru.linux-switch-vlan.html` и
 `index.en.linux-switch-vlan.html`, остальные параметры те же. Параметры адреса:
 `?fast` — лаба запускается за секунду, `?theme=dark`, `?min` — модули из `plugin/amd/build`, `?conflict` — старт отвечает
@@ -64,6 +66,18 @@ PYTHON=python3 node check_vnc.js --shots /tmp/vnc-shots   # нужен Playwrigh
 cd plugin/devtools/ui-harness
 npm install
 node check_seen.js [--min] [--shots /tmp/seen-shots]    # нужен Playwright с Chromium; mock-менеджер не нужен
+```
+
+Проверка режимов `seen` и `fog` — `check_reveal.js`: поднимает шлюз харнесса (порт 18125), в Chromium ведёт страницы `fog`, `fog-start`,
+`seen` и преподавателя: силуэты и открытие устройства первым выводом, интерфейс и кабель, сосед, узел без консоли, выключенный и затем
+поднятый интерфейс (`__stub.facts.patch`), перезагрузка страницы (маска живёт в `sessionStorage` вкладки: заглушки `get_reveal` и
+`reveal` повторяют проверки сервера), стартовые узлы, карточки с «ещё не исследовано», переключатель преподавателя. `--min` — те же
+проверки на минифицированных модулях `amd/build`.
+
+```bash
+cd plugin/devtools/ui-harness
+npm install
+node check_reveal.js [--min] [--shots /tmp/reveal-shots]    # нужен Playwright с Chromium; mock-менеджер не нужен
 ```
 
 Не проверяет: PHP, права, настоящих менеджер и шлюз, тему Boost (в `index.template.html` — лишь несколько переменных

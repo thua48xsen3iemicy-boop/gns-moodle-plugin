@@ -23,6 +23,11 @@
  * What the student runs in a console (`show interfaces status`, `ip a` …) is parsed in the browser and laid over the
  * polled facts at once, until the polled facts of that node change (docs/live-state.md §8).
  *
+ * The activity chooses what the scheme shows (`factsview`): everything as above (`live`), only what the student's
+ * commands uncover (`seen`), or a fog that the student's actions lift node by node (`fog`). What is uncovered is kept
+ * on the server per student (`mod_gns3lab_reveal`, docs/lab-constructor/README.md §2); the page applies it with
+ * reveal.js. A teacher who looks at a student's lab sees everything, or, with a switch, what the student sees.
+ *
  * Permissions are decided by the server; the flags here only choose what to draw.
  *
  * @module     mod_gns3lab/lab
@@ -34,6 +39,9 @@ import Ajax from 'core/ajax';
 import {getStrings} from 'core/str';
 import {STRING_KEYS as CONSOLE_KEYS} from 'mod_gns3lab/console';
 import {addSeen, fingerprint, interpret, mergeSeen, pruneSeen} from 'mod_gns3lab/consolefacts';
+import {
+    MAX_PER_CALL, MODES, applyReveal, emptyMask, maskAdd, maskFromItems, maskItems, revealByCommand, sendable, settleReveal,
+} from 'mod_gns3lab/reveal';
 import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
@@ -53,6 +61,13 @@ const FACTS_AFTER_REFRESH = 5000;
 
 /** A saved configuration (`write memory`) asks for new facts at most this often, ms (docs/live-state.md §8.2). */
 const SAVE_REFRESH_GAP = 10000;
+
+/** What is uncovered is written to the server this long after the first new item, so a burst goes in one call, ms. */
+const REVEAL_DELAY = 1000;
+
+/** A write that failed is tried again after this many of these, ms; after the last try the items are dropped. */
+const REVEAL_RETRY = 5000;
+const REVEAL_TRIES = 4;
 
 /** Codes of a failed collection with an own text. */
 const FACT_ERRORS = ['unreachable', 'timeout', 'stopped', 'unsupported', 'failed'];
@@ -76,6 +91,8 @@ const UI_KEYS = [
     'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
     'ui_mac_table', 'ui_mac_col_mac', 'ui_mac_col_port', 'ui_mac_col_vlan', 'ui_mac_empty', 'ui_mac_truncated', 'ui_mac_note',
     'ui_seen_at', 'ui_seen_mark', 'ui_seen_note',
+    'ui_fog_unknown', 'ui_fog_unknown_note', 'ui_fog_unknown_count', 'ui_fog_unexplored', 'ui_fog_found_note',
+    'ui_fog_found_noconsole', 'ui_fog_no_cables', 'ui_as_student', 'ui_as_student_help',
     ...FACT_ERRORS.map(code => 'ui_facts_err_' + code),
 ];
 
@@ -108,7 +125,18 @@ class LabPage {
         this.factsShown = '';
         // Seen in the console (docs/live-state.md §8): node id → what its commands showed; not sent, not stored.
         this.seen = new Map();
+        this.liveSession = null;
         this.saveRefreshAt = 0;
+        // What the scheme shows (activity setting) and what the student has uncovered of it (docs/lab-constructor §2).
+        this.mode = MODES.includes(this.data.factsview) ? this.data.factsview : 'live';
+        this.start = Array.isArray(this.data.fogstart) ? this.data.fogstart : [];
+        this.mask = emptyMask();
+        this.maskReady = false;
+        this.asStudent = false;
+        this.pending = [];
+        this.flushTimer = null;
+        this.flushing = false;
+        this.flushFails = 0;
         const region = name => root.querySelector(`[data-region="${name}"]`);
         this.toastEl = region('toast');
         this.toastTimer = null;
@@ -134,6 +162,7 @@ class LabPage {
                 : Promise.resolve({status: null, stale: false})),
             toast: (text, ms) => this.toast(text, ms),
             onSeen: event => this.takeSeen(event),
+            onScreen: nodeId => this.takeScreen(nodeId),
         });
         this.wheel = new Wheel(region('radial'), {
             stage: this.stage,
@@ -151,6 +180,7 @@ class LabPage {
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 clearTimeout(this.factsTimer);
+                this.flush();
             } else if (this.factsSession) {
                 this.pollFacts();
             }
@@ -168,6 +198,10 @@ class LabPage {
         if (this.session) {
             this.session.render();
             this.session.refresh();
+        }
+        this.bindAsStudent(region('asStudent'));
+        if (this.uncovering && controllable) {
+            this.loadMask();
         }
     }
 
@@ -242,11 +276,14 @@ class LabPage {
         const data = this.data;
         // Statuses exist only in the demo data: the reference lab does not run anywhere.
         const live = data.live && data.live.node_status;
+        const plain = this.viewMode === 'live';
         this.stage.load(data.topology, {
             statuses: live ? new Map(Object.entries(live)) : null,
             guests: (data.live && data.live.guests) || null,
-            facts: data.facts || null,
+            // The demo facts are not filtered: a fog or `seen` shows none of them.
+            facts: plain ? data.facts || null : null,
             keepView,
+            view: plain ? null : base => this.scene(base).view,
         });
         this.details.hide();
     }
@@ -279,6 +316,8 @@ class LabPage {
             this.followFacts(s);
         } else if (this.liveKey) {
             this.liveKey = null;
+            this.liveSession = null;
+            this.seen = new Map();
             this.preview(true);
         }
     }
@@ -310,12 +349,19 @@ class LabPage {
         doc.name = this.stage.model ? this.stage.model.name : doc.name;
         this.liveKey = key;
         const meta = this.stage.factsMeta;
-        this.stage.load(doc, {statuses, keepView: true});
+        if (this.liveSession !== s.sessionid) {
+            // Another session is another project: what was seen in the consoles belongs to the old one.
+            this.liveSession = s.sessionid;
+            this.seen = new Map();
+        }
+        this.stage.load(doc, {statuses, keepView: true, view: this.viewMode === 'live' ? null : base => this.scene(base).view});
         if (this.factsSession === s.sessionid) {
             // The same session with a new topology: the facts are still those of the session.
             this.stage.setFactsMeta(meta);
             this.showFacts();
             this.factsShown = '';
+        } else if (this.viewMode !== 'live') {
+            this.showFacts();
         }
         this.details.hide();
     }
@@ -429,7 +475,10 @@ class LabPage {
         this.stage.setFactsMeta({at, stale});
         if (changed) {
             // A node whose deciding facts changed is no longer what the student saw (docs/live-state.md §8.3).
-            this.seen = pruneSeen(this.seen, this.factsDoc);
+            // Not so in seen and fog: the student keeps what was uncovered, the mask is what holds it.
+            if (this.viewMode === 'live') {
+                this.seen = pruneSeen(this.seen, this.factsDoc);
+            }
             this.showFacts();
         }
         // What the card says changes with the minute of the collection and with going out of date.
@@ -441,10 +490,174 @@ class LabPage {
     }
 
     /**
-     * Draws the layers from the polled facts with what the student saw in the consoles laid over them.
+     * Draws the layers from the polled facts with what the student saw in the consoles laid over them, and, in the
+     * modes seen and fog, only as far as the student has uncovered it.
      */
     showFacts() {
-        this.stage.setFacts(mergeSeen(this.stage.model, this.factsDoc, this.seen));
+        this.settleMask();
+        const {view, doc} = this.scene();
+        this.stage.setScene(view, doc);
+        this.consoles.refreshNames();
+        this.details.refresh();
+    }
+
+    /**
+     * The mode the scheme is drawn in: a teacher sees everything, unless the switch asks for what the student sees.
+     *
+     * @returns {string} live, seen or fog
+     */
+    get viewMode() {
+        return this.userid !== 0 && !this.asStudent ? 'live' : this.mode;
+    }
+
+    /**
+     * What the scheme shows of the lab now.
+     *
+     * @param {object} [model] model of the lab; the one on the stage by default
+     * @returns {{view: object|null, doc: object|null}} the view of reveal.js and the facts as it lets them through
+     */
+    scene(model = this.stage.base) {
+        const merged = mergeSeen(model, this.factsDoc, this.seen);
+        return applyReveal({mode: this.viewMode, model, doc: merged, mask: this.mask, start: this.start});
+    }
+
+    /* ---------------- what the student has uncovered ---------------- */
+
+    /**
+     * Whether this page uncovers things: the owner of the lab in the modes seen and fog.
+     *
+     * @returns {boolean}
+     */
+    get uncovering() {
+        return this.userid === 0 && this.mode !== 'live';
+    }
+
+    /**
+     * Reads the mask from the server: the student's own, or, for a teacher, the student's.
+     */
+    async loadMask() {
+        let result = null;
+        try {
+            [result] = await Promise.all(Ajax.call([{
+                methodname: 'mod_gns3lab_get_reveal',
+                args: {cmid: this.cmid, userid: this.userid},
+            }]));
+        } catch (error) {
+            // The scheme stays as it is; what is uncovered meanwhile is kept in the page.
+            return;
+        }
+        // What was uncovered while the answer was on its way is not lost.
+        this.mask = maskAdd(maskFromItems(result.items || []), maskItems(this.mask)).mask;
+        this.maskReady = true;
+        this.refreshScene();
+    }
+
+    /**
+     * Draws the scheme again after the mask or the mode changed.
+     */
+    refreshScene() {
+        if (this.live) {
+            this.showFacts();
+        } else if (this.stage.base) {
+            this.preview(true);
+        }
+    }
+
+    /**
+     * Adds to the mask what a command, a screen or the facts uncovered, and writes it to the server soon.
+     *
+     * @param {object[]} items {nodeid, kind, item}
+     * @returns {boolean} whether anything was new
+     */
+    addReveal(items) {
+        const step = maskAdd(this.mask, items);
+        if (!step.added.length) {
+            return false;
+        }
+        this.mask = step.mask;
+        this.pending.push(...step.added.filter(sendable));
+        this.scheduleFlush(REVEAL_DELAY);
+        return true;
+    }
+
+    /**
+     * Uncovers what the facts uncover: the cables that work and the nodes behind them.
+     */
+    settleMask() {
+        if (!this.uncovering || this.mode !== 'fog' || !this.stage.base) {
+            return;
+        }
+        const step = settleReveal({
+            mode: this.mode, model: this.stage.base, factsDoc: this.factsDoc, seen: this.seen, mask: this.mask,
+        });
+        this.addReveal(step.added);
+    }
+
+    scheduleFlush(delay) {
+        if (!this.flushTimer && this.pending.length) {
+            this.flushTimer = setTimeout(() => this.flush(), delay);
+        }
+    }
+
+    /**
+     * Writes the new items to the server in one call.
+     */
+    async flush() {
+        clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+        if (this.flushing || !this.pending.length) {
+            return;
+        }
+        const batch = this.pending.splice(0, MAX_PER_CALL);
+        this.flushing = true;
+        try {
+            await Promise.all(Ajax.call([{
+                methodname: 'mod_gns3lab_reveal',
+                args: {cmid: this.cmid, items: batch},
+            }]));
+            this.flushFails = 0;
+        } catch (error) {
+            // The lab may have stopped or the server be busy: the items wait, and after the last try they are dropped
+            // (the page still has them; a reload would show less).
+            if (++this.flushFails < REVEAL_TRIES) {
+                this.pending.unshift(...batch);
+            } else {
+                this.flushFails = 0;
+            }
+        }
+        this.flushing = false;
+        this.scheduleFlush(this.flushFails ? REVEAL_RETRY * this.flushFails : REVEAL_DELAY);
+    }
+
+    /**
+     * The switch of a teacher: what the student sees instead of everything.
+     *
+     * @param {?HTMLElement} button the button of the template
+     */
+    bindAsStudent(button) {
+        if (!button || this.userid === 0 || this.mode === 'live') {
+            return;
+        }
+        button.hidden = false;
+        button.onclick = async() => {
+            this.asStudent = !this.asStudent;
+            button.setAttribute('aria-pressed', String(this.asStudent));
+            if (this.asStudent && !this.maskReady) {
+                await this.loadMask();
+            }
+            this.refreshScene();
+        };
+    }
+
+    /**
+     * The screen of a node answered: that is all the output a screen has, so the fog lifts from the node.
+     *
+     * @param {string} nodeId node id
+     */
+    takeScreen(nodeId) {
+        if (this.uncovering && this.mode === 'fog' && this.addReveal([{nodeid: nodeId, kind: 'node', item: ''}])) {
+            this.showFacts();
+        }
     }
 
     /**
@@ -453,24 +666,35 @@ class LabPage {
      * @param {object} event {nodeId, kind, command, lines, partial}
      */
     takeSeen(event) {
-        if (!this.factsSession) {
+        const uncover = this.uncovering;
+        if (!this.factsSession && !uncover) {
             return;
         }
         const result = interpret(event.kind, event.command, event.lines, event.partial);
-        if (!result) {
-            return;
-        }
-        if (result.save) {
+        let changed = false;
+        if (result && result.save) {
             // The saved configuration is what the manager reads from a Cisco device: ask for it while it is fresh.
-            if (result.ok && Date.now() - this.saveRefreshAt >= SAVE_REFRESH_GAP) {
+            if (this.factsSession && result.ok && Date.now() - this.saveRefreshAt >= SAVE_REFRESH_GAP) {
                 this.saveRefreshAt = Date.now();
                 this.refreshFacts(true);
             }
-            return;
+        } else if (result) {
+            // Without a fingerprint a record is never dropped: seen and fog keep what was uncovered.
+            const info = {at: Date.now(), fp: this.viewMode === 'live' ? fingerprint(this.factsDoc, event.nodeId) : null};
+            this.seen = addSeen(this.seen, event.nodeId, result, info);
+            changed = true;
         }
-        const info = {at: Date.now(), fp: fingerprint(this.factsDoc, event.nodeId)};
-        this.seen = addSeen(this.seen, event.nodeId, result, info);
-        this.showFacts();
+        if (uncover) {
+            // Any command in the console of a node is output: it lifts the fog from the node (§2.2).
+            const items = revealByCommand({
+                mode: this.mode, model: this.stage.base, factsDoc: this.factsDoc, nodeId: event.nodeId,
+                result: result && !result.save ? result : null,
+            });
+            changed = this.addReveal(items) || changed;
+        }
+        if (changed) {
+            this.showFacts();
+        }
     }
 
     /**
@@ -582,6 +806,10 @@ class LabPage {
             });
         }
         items.push({id: 'info', label: s.ui_act_info, full: s.ui_act_info_full, icon: 'info'});
+        if (n.state === 'silhouette') {
+            // A device the fog has not lifted from: the console to explore it, and its card; nothing else.
+            return items;
+        }
         items.push({id: 'zoom', label: s.ui_act_zoom, full: s.ui_act_zoom_node, icon: 'zoom'});
         if (open) {
             items.push({id: 'close', label: s.ui_act_close, full: s.ui_act_close_full, icon: 'close'});

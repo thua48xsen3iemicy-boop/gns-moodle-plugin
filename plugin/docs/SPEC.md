@@ -106,8 +106,13 @@ Moodle никогда не держит WebSocket и не видит токен�
 ### 5.1. Таблица `gns3lab`
 
 Стандартные `id, course, name, intro, introformat, timecreated, timemodified` плюс:
-`labref` (char 255; в контракте с менеджером — `lab_ref`; поля БД Moodle пишутся без подчёркиваний), `maxduration` (int, минуты, 0 — по умолчанию менеджера).
+`labref` (char 255; в контракте с менеджером — `lab_ref`; поля БД Moodle пишутся без подчёркиваний), `maxduration` (int, минуты, 0 — по умолчанию менеджера),
+`factsview` (char 10: `live` — по умолчанию, `seen`, `fog`; что показывает схема студенту) и `fogstart` (text: JSON-список имён устройств,
+с которых начинается туман; пусто — все устройства силуэтами).
 Сессии в БД Moodle не храним — источник правды менеджер (не дублировать состояние).
+Таблица `gns3lab_reveal` (0.9.0): что студент открыл на схеме в режимах `seen` и `fog` — `gns3labid`, `userid`, `nodeid` (пусто у кабеля),
+`kind` (`node`, `known`, `iface`, `group`, `link`), `item` (имя интерфейса, группа `l1` / `l2` / `l3` / `routes`, id кабеля), `timecreated`;
+уникальный индекс на пять первых полей. Только идентификаторы и имена, значений нет (`docs/lab-constructor/README.md` §2.1, §12.2).
 
 ### 5.2. Права (`db/access.php`)
 
@@ -127,10 +132,12 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}` |
 | `mod_gns3lab_start_session` | `cmid` | use | сессия |
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
-| `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — только своя: чужая → отказ `consolevncobserver` без запроса к менеджеру | `{"ticket","gateway_url","expires_in"}` |
+| `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — только своя: чужая → отказ `consolevncobserver` без запроса к менеджеру; в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
 | `mod_gns3lab_list_students` | `cmid` | observe | студенты (с учётом групп) и статус их сессий |
 | `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
 | `mod_gns3lab_refresh_facts` | `cmid`, `userid=0` | те же; только `running`-сессия | `{"requested"}`; частоту ограничивает менеджер |
+| `mod_gns3lab_get_reveal` | `cmid`, `userid=0` | view; как у `get_facts`: чужой `userid` — observe + группы | `{"items": [{"nodeid","kind","item"}]}` — маска студента (§5.1, `gns3lab_reveal`) |
+| `mod_gns3lab_reveal` | `cmid`, `items` (до 500) | use; владелец запущенной сессии, другого пользователя назвать нельзя | `{"added"}`; `nodeid` и id кабеля — из живой топологии сессии, иначе отказ; только добавление, до 5000 строк на пользователя и активность (`revealfull`); строки удалённого проекта удаляются при записи |
 
 `nodeid` проверять: нода должна быть в топологии этой сессии (менеджер тоже проверяет, но плагин — первым).
 Возвращаемые структуры описать через `external_single_structure` строго, без «сырого» JSON, кроме `.gns3`
@@ -219,6 +226,8 @@ H.264 через WebCodecs) ломает Babel-шаг `grunt amd`, теперь 
   Дальше — история фактов, IPv6, L4 (`docs/live-state.md` §7).
 - ~~Слой «увидено в консоли»~~ — сделано в 0.8.0: схема сразу показывает то, что студент выполнил в консоли
   (`docs/live-state.md` §8); на оценку и менеджер не влияет.
+- ~~Режимы `seen` и `fog`, маска открытого~~ — сделано в 0.9.0 (этап 1 `docs/lab-constructor/README.md`): настройки активности
+  `factsview` и `fogstart`, таблица `gns3lab_reveal`, `mod_gns3lab_get_reveal` / `_reveal`, модуль `amd/src/reveal.js`.
 - ~~noVNC для графических консолей~~ — сделано в 0.7.0 (без просмотра экрана преподавателем).
 - Сниппеты из настроек активности, оценка и автопроверка, LTI-вариант.
 

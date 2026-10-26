@@ -59,4 +59,48 @@ final class provider_test extends \core_privacy\tests\provider_testcase {
         $this->assertEquals(get_admin()->id, lab_library::latest_version($labid)->usermodified);
         $this->assertSame([], provider::get_contexts_for_userid($author->id)->get_contextids());
     }
+
+    public function test_what_a_student_uncovered_in_an_activity(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $gen = $this->getDataGenerator();
+        $course = $gen->create_course();
+        $lab = $gen->create_module('gns3lab', ['course' => $course->id, 'factsview' => 'fog']);
+        $untouched = $gen->create_module('gns3lab', ['course' => $course->id, 'factsview' => 'fog']);
+        $student = $gen->create_and_enrol($course, 'student');
+        $other = $gen->create_and_enrol($course, 'student');
+        $context = \context_module::instance($lab->cmid);
+        $row = fn($user, string $kind, string $nodeid, string $item) => (object) [
+            'gns3labid' => $lab->id, 'userid' => $user->id, 'nodeid' => $nodeid, 'kind' => $kind, 'item' => $item,
+            'timecreated' => 1790000000,
+        ];
+        $DB->insert_records('gns3lab_reveal', [
+            $row($student, 'node', 'n-1', ''), $row($student, 'iface', 'n-1', 'ens3'), $row($other, 'node', 'n-2', ''),
+        ]);
+
+        $contextids = array_map('intval', provider::get_contexts_for_userid($student->id)->get_contextids());
+        $this->assertSame([(int) $context->id], $contextids);
+        $this->assertSame([], provider::get_contexts_for_userid($gen->create_user()->id)->get_contextids());
+        $this->assertNotContains((int) \context_module::instance($untouched->cmid)->id, $contextids);
+        $userlist = new userlist($context, 'mod_gns3lab');
+        provider::get_users_in_context($userlist);
+        $this->assertEqualsCanonicalizing([(int) $student->id, (int) $other->id], array_map('intval', $userlist->get_userids()));
+
+        provider::export_user_data(new approved_contextlist($student, 'mod_gns3lab', [$context->id]));
+        $data = writer::with_context($context)->get_data([get_string('privacy:reveal', 'gns3lab')]);
+        $this->assertCount(2, $data->uncovered);
+        $this->assertSame('ens3', $data->uncovered[1]['item']);
+
+        // One user.
+        provider::delete_data_for_user(new approved_contextlist($student, 'mod_gns3lab', [$context->id]));
+        $this->assertSame(0, $DB->count_records('gns3lab_reveal', ['userid' => $student->id]));
+        $this->assertSame(1, $DB->count_records('gns3lab_reveal', ['userid' => $other->id]));
+        // Users of the context.
+        $DB->insert_record('gns3lab_reveal', $row($student, 'node', 'n-1', ''));
+        provider::delete_data_for_users(new approved_userlist($context, 'mod_gns3lab', [$student->id]));
+        $this->assertSame(0, $DB->count_records('gns3lab_reveal', ['userid' => $student->id]));
+        // Everybody in the activity.
+        provider::delete_data_for_all_users_in_context($context);
+        $this->assertSame(0, $DB->count_records('gns3lab_reveal'));
+    }
 }

@@ -53,6 +53,7 @@ function strings(lang) {
 
 fs.rmSync(dist, {recursive: true, force: true});
 fs.mkdirSync(path.join(dist, 'amd'), {recursive: true});
+const str = (lang, key) => strings(lang)[key];
 
 const modules = fs.readdirSync(src).filter(f => f.endsWith('.js')).map(f => f.slice(0, -3));
 for (const name of modules) {
@@ -120,13 +121,27 @@ function page(lang, extra = {}) {
     };
     return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons});
 }
-const shell = (lang, lab, body) => fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
-    .replaceAll('{{lang}}', lang).replaceAll('{{lab}}', lab).replace('{{body}}', () => body);
+const shell = (lang, lab, body, mode = 'live', start = '') => fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
+    .replaceAll('{{lang}}', lang).replaceAll('{{lab}}', lab).replaceAll('{{mode}}', mode).replaceAll('{{start}}', start)
+    .replace('{{body}}', () => body);
+// The modes of the scheme (docs/lab-constructor/README.md §2): index.<lang>.seen.html, .fog.html, and .fog-start.html
+// where the fog starts from PC1 (the activity setting `fogstart`).
+const MODES = {seen: {mode: 'seen', start: []}, fog: {mode: 'fog', start: []}, 'fog-start': {mode: 'fog', start: ['PC1']}};
 for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `index.${lang}.html`), shell(lang, '', page(lang)));
     for (const [lab, names] of Object.entries(EXTRA_LABS)) {
         const body = page(lang, {labname: names[lang], datajson: JSON.stringify(demoOf(lab, 'Lab 5'))});
         fs.writeFileSync(path.join(dist, `index.${lang}.${lab}.html`), shell(lang, lab, body));
+    }
+}
+for (const lang of ['en', 'ru']) {
+    for (const [name, m] of Object.entries(MODES)) {
+        const body = page(lang, {
+            datajson: JSON.stringify({...data, factsview: m.mode, fogstart: m.start}),
+            modetag: str(lang, `ui_mode_${m.mode}_tag`),
+            modehelp: str(lang, `ui_mode_${m.mode}_help`),
+        });
+        fs.writeFileSync(path.join(dist, `index.${lang}.${name}.html`), shell(lang, '', body, m.mode, m.start.join(',')));
     }
 }
 // A user who may only look: no session bar.

@@ -14,7 +14,24 @@ define([], function() {
     let session = cfg.observer ? {status: 'running', stage: 'ready', progress: 100, at: 0, start: Math.floor(Date.now() / 1000)} : null;
     let demo = null;
     const nodeStatus = {};
-    const facts = {rev: cfg.factsempty ? 0 : 1, variant: 'ok', at: now(), stale: false, errors: {}};
+    const facts = {rev: cfg.factsempty ? 0 : 1, variant: 'ok', at: now(), stale: false, errors: {}, patches: []};
+
+    // What the student has uncovered (mod_gns3lab_reveal): kept in the tab, so that a reload shows it again.
+    const REVEAL_KEY = 'gns3lab-stub-reveal';
+    const revealed = () => {
+        try {
+            return JSON.parse(sessionStorage.getItem(REVEAL_KEY) || '[]');
+        } catch (e) {
+            return [];
+        }
+    };
+    const keepRevealed = items => {
+        try {
+            sessionStorage.setItem(REVEAL_KEY, JSON.stringify(items));
+        } catch (e) {
+            // A tab that does not keep it loses it on reload.
+        }
+    };
 
     const loadDemo = async() => {
         if (!demo) {
@@ -71,6 +88,12 @@ define([], function() {
         }
         doc.generated_at = new Date(generated * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
         doc.nodes = JSON.parse(JSON.stringify(demo.facts[facts.variant].nodes));
+        facts.patches.forEach(p => {
+            const iface = ((doc.nodes[p.nodeId] || {}).interfaces || []).find(i => i.name === p.name);
+            if (iface) {
+                Object.assign(iface, p.fields);
+            }
+        });
         Object.entries(facts.errors).forEach(([id, err]) => {
             if (doc.nodes[id]) {
                 doc.nodes[id].error = {code: err.code, message: 'stub'};
@@ -133,9 +156,53 @@ define([], function() {
             facts.stale = false;
             return {requested: true};
         },
+        // classes/external/get_reveal.php: the mask of the user (or, for a teacher, of the student).
+        mod_gns3lab_get_reveal: async() => ({items: revealed()}),
+        // classes/external/reveal.php and classes/local/reveal.php: only items of the live topology, only added.
+        mod_gns3lab_reveal: async args => {
+            await loadDemo();
+            const s = await view();
+            if (!s || s.status !== 'running') {
+                const e = new Error('The lab is not running.');
+                e.errorcode = 'sessionnotrunning';
+                throw e;
+            }
+            if (args.items.length > 500) {
+                throw new Error('Invalid parameter value detected: too many items');
+            }
+            const topo = demo.topology.topology;
+            const nodes = new Set(topo.nodes.map(n => n.node_id)), links = new Set(topo.links.map(l => l.link_id));
+            const have = revealed(), key = i => [i.nodeid, i.kind, i.item].join('\n');
+            const known = new Set(have.map(key));
+            let added = 0;
+            args.items.forEach(raw => {
+                const i = {nodeid: raw.nodeid || '', kind: raw.kind, item: raw.item || ''};
+                const ok = i.kind === 'link' ? !i.nodeid && links.has(i.item)
+                    : nodes.has(i.nodeid) && (['node', 'known'].includes(i.kind) ? i.item === ''
+                        : i.kind === 'group' ? ['l1', 'l2', 'l3', 'routes'].includes(i.item)
+                            : i.kind === 'iface' && /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/.test(i.item) && i.item.length <= 100);
+                if (!ok) {
+                    throw new Error('Invalid parameter value detected: bad reveal item ' + JSON.stringify(raw));
+                }
+                if (!known.has(key(i))) {
+                    known.add(key(i));
+                    have.push(i);
+                    added++;
+                }
+            });
+            keepRevealed(have);
+            return {added};
+        },
         mod_gns3lab_get_console_ticket: async args => {
             await loadDemo();
             const node = demo.topology.topology.nodes.find(n => n.node_id === args.nodeid);
+            // classes/local/reveal.php console_allowed(): in a fog with starting nodes a node that is not found has no ticket.
+            if (!cfg.observer && cfg.mode === 'fog' && cfg.start.length && node && cfg.start.includes(node.name)
+                === false && !revealed().some(i => i.nodeid === args.nodeid && ['node', 'known'].includes(i.kind))) {
+                const e = new Error('This device has not been found yet.');
+                e.errorcode = 'nodenotfound';
+                throw e;
+            }
             if (node && node.console_type === 'vnc' && cfg.observer) {
                 // classes/external/get_console_ticket.php: the teacher does not see the screen of a student.
                 const e = new Error('The teacher does not see the graphical console of a student.');
@@ -166,6 +233,11 @@ define([], function() {
             fill: () => {
                 facts.rev = Math.max(1, facts.rev + 1);
             },
+            // The deciding facts of an interface change (a student raised it): the next poll shows it.
+            patch: (nodeId, name, fields) => {
+                facts.patches.push({nodeId, name, fields});
+                facts.rev += 1;
+            },
             fail: (id, code = 'unreachable') => {
                 facts.errors[id] = {code, at: now() - 240};
                 facts.rev += 1;
@@ -177,6 +249,12 @@ define([], function() {
         },
         get session() {
             return session;
+        },
+        // Calls an external function the way the page does, for a test.
+        call: (name, args) => handlers[name](args),
+        reveal: {
+            items: revealed,
+            clear: () => keepRevealed([]),
         },
     };
 

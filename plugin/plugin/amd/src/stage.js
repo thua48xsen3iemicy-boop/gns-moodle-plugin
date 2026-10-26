@@ -44,6 +44,7 @@
 import {buildModel, clamp, esc, fmtFilters} from 'mod_gns3lab/model';
 import {svgEl as el, store, fill} from 'mod_gns3lab/dom';
 import {acolor, derive, endIf, endState, hostPart, vcolor} from 'mod_gns3lab/facts';
+import {drawModel, layerModel} from 'mod_gns3lab/reveal';
 
 const KMIN = 0.22, KMAX = 6;
 
@@ -185,7 +186,12 @@ export class Stage {
         this.dots = r('dots');
         this.ov = r('ov');
         this.L = {draw: r('lyrDraw'), links: r('lyrLinks'), labels: r('lyrLabels'), nodes: r('lyrNodes'), cards: r('lyrCards')};
+        // The lab as it is built from the .gns3 (`base`), as it is drawn (`model`: no hidden node, only the uncovered cables)
+        // and as the layers see it (`lmodel`: only the named nodes). They are one and the same without a fog or `seen`.
+        this.base = null;
         this.model = null;
+        this.lmodel = null;
+        this.reveal = null;
         this.fx = null;
         this.der = null;
         this.facts = null;
@@ -271,12 +277,19 @@ export class Stage {
      * @param {object} [options.guests] Proxmox guests by node id (demo)
      * @param {object} [options.facts] {ok, broken} facts documents (demo); live facts come later with setFacts()
      * @param {boolean} [options.keepView] keep zoom and position
+     * @param {object|Function} [options.view] what the modes seen and fog show of the lab (reveal.js applyReveal), or a
+     *      function that returns it for the model that was just built; absent: everything
      */
-    load(doc, {statuses = null, guests = null, facts = null, keepView = false} = {}) {
+    load(doc, {statuses = null, guests = null, facts = null, keepView = false, view = null} = {}) {
         if (!doc || typeof doc !== 'object' || !doc.topology) {
             throw new Error('Not a GNS3 topology');
         }
-        this.model = buildModel(doc);
+        this.base = buildModel(doc);
+        // A node that is not uncovered shows another name; the real one is kept for the starting nodes of a fog.
+        this.base.nodes.forEach(n => {
+            n.realName = n.name;
+        });
+        this.setReveal(typeof view === 'function' ? view(this.base) : view, false);
         this.statuses = statuses || new Map();
         this.statusKnown = !!statuses;
         this.guests = guests;
@@ -303,7 +316,7 @@ export class Stage {
      */
     derive() {
         const doc = this.facts ? this.facts[this.factsKey] || this.facts.ok : null;
-        const res = doc ? derive(this.model, this.factsLive ? this.withLiveStatuses(doc) : doc) : null;
+        const res = doc ? derive(this.lmodel, this.factsLive ? this.withLiveStatuses(doc) : doc) : null;
         this.fx = res ? res.fx : null;
         this.der = res ? res.der : null;
     }
@@ -344,14 +357,61 @@ export class Stage {
 
     paintStatus(n) {
         if (!n.g) return;
-        const st = this.nodeStatus(n);
+        // A silhouette shows no state.
+        const st = n.state === 'silhouette' ? null : this.nodeStatus(n);
         n.g.setAttribute('class', n.g.getAttribute('class').replace(/st-\w+/, 'st-' + (st || 'none')));
         n.g.setAttribute('aria-label', this.nodeLabel(n));
     }
 
     nodeLabel(n) {
+        if (n.state === 'silhouette') return this.s('ui_fog_unknown');
         const st = this.nodeStatus(n);
         return [n.name, this.s('ui_cat_' + n.cat).toLowerCase(), st ? this.s('ui_st_' + st) : null].filter(Boolean).join(', ');
+    }
+
+    /* ---------------- what the modes seen and fog show ---------------- */
+
+    /**
+     * Applies what the modes seen and fog show of the lab to the model (reveal.js applyReveal).
+     *
+     * A silhouette keeps its place and its console; its name is a question mark. A hidden node and a cable that is not
+     * uncovered are not in the model that is drawn. The layers are built from the named nodes only.
+     *
+     * @param {object|null} view the view, null: everything is shown
+     * @param {boolean} [render] draw the scheme again
+     */
+    setReveal(view, render = true) {
+        this.reveal = view || null;
+        const base = this.base;
+        if (!base) return;
+        base.nodes.forEach(n => {
+            n.state = view ? (view.states.get(n.id) || 'hidden') : 'open';
+            n.name = n.state === 'silhouette' || n.state === 'hidden' ? '?' : n.realName;
+        });
+        this.model = drawModel(base, view);
+        this.lmodel = layerModel(base, view);
+        if (render) this.factsChanged();
+    }
+
+    /**
+     * Applies the view and the facts together: one drawing for both.
+     *
+     * @param {object|null} view the view of reveal.js, null: everything is shown
+     * @param {object|null} doc the facts as the view lets them through
+     */
+    setScene(view, doc) {
+        this.setReveal(view, false);
+        this.setFacts(doc);
+    }
+
+    /**
+     * Whether the name of a port at a link end is shown: always, except in a fog where the interface is not uncovered.
+     *
+     * @param {{nodeId: string, adapter: number, port: number}} e end of a link
+     * @returns {boolean}
+     */
+    endShown(e) {
+        return !this.reveal || this.reveal.ends.has(e.nodeId + '|' + e.adapter + '/' + e.port);
     }
 
     /* ---------------- layers ---------------- */
@@ -419,7 +479,8 @@ export class Stage {
         this.derive();
         this.syncLayerUI();
         const s = this.sel, D = this.der;
-        if (s && ['subnet', 'vlan', 'adj'].includes(s.kind) && (!D || (s.kind === 'subnet' && !D.l3.subnets.some(x => x.key === s.id)) || (s.kind === 'vlan' && !D.l2.domains.some(x => x.id === s.id)) || (s.kind === 'adj' && !D.rt.edges.some(x => x.id === s.id)))) this.sel = null;
+        if (s && ((s.kind === 'node' && !this.model.nodes.has(s.id)) || (s.kind === 'link' && !this.model.links.some(l => l.id === s.id)))) this.sel = null;
+        else if (s && ['subnet', 'vlan', 'adj'].includes(s.kind) && (!D || (s.kind === 'subnet' && !D.l3.subnets.some(x => x.key === s.id)) || (s.kind === 'vlan' && !D.l2.domains.some(x => x.id === s.id)) || (s.kind === 'adj' && !D.rt.edges.some(x => x.id === s.id)))) this.sel = null;
         this.render();
         this.call('select', this.sel);
         this.call('layerChanged', this.layer);
@@ -481,6 +542,8 @@ export class Stage {
     }
 
     renderDrawings() {
+        // The shapes and labels of the lab may give away what a fog hides.
+        if (this.reveal && this.reveal.mode === 'fog') return;
         [...this.model.drawings].sort((a, b) => (a.z || 0) - (b.z || 0)).forEach(d => {
             const r = sanitizeDrawing(d.svg);
             if (!r) return;
@@ -529,6 +592,7 @@ export class Stage {
         [[a, ia, g.ax, g.ay, g.dx, g.dy], [b, ib, g.bx, g.by, -g.dx, -g.dy]].forEach(([e, ifc, x, y, ux, uy]) => {
             const bad = this.endDown(e), old = this.factsFailed(e.nodeId) ? ' fstale' : '';
             el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: 3.2, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
+            if (!this.endShown(e)) return;
             const px = x + ux * d, py = y + uy * d;
             el('text', {x: px, y: py + 3, class: 'plabel l1'}, G).textContent = e.text;
             if (ifc && ifc.ipv4 && ifc.ipv4.length) el('text', {x: px, y: py + 3, dy: '1.35em', class: 'pip l2' + old}, G).textContent = ifc.ipv4[0];
@@ -560,6 +624,7 @@ export class Stage {
         else if (r2.kind === 'trunk' && g.len > 240) pill(this.L.labels, mx, my, r2.vlans.join(' · '), 'vpill dimmable', l.id);
         const d = Math.min(46, g.len * 0.32);
         [[l.a, 1, r2.ia], [l.b, -1, r2.ib]].forEach(([e, s, i]) => {
+            if (!this.endShown(e)) return;
             const bad = this.endDown(e);
             const sp = i && i.switchport, text = sp ? e.text + (sp.mode === 'access' ? ' · ' + sp.vlan : sp.mode === 'none' ? ' · —' : ' · T') : e.text;
             pill(this.L.labels, (s > 0 ? g.ax : g.bx) + s * g.dx * d, (s > 0 ? g.ay : g.by) + s * g.dy * d, text, 'ppill l1 dimmable' + (bad ? ' bad' : '') + (this.factsFailed(e.nodeId) ? ' fstale' : ''), l.id);
@@ -609,14 +674,24 @@ export class Stage {
     renderNodes() {
         const L = this.layer, D = this.der;
         this.model.nodes.forEach(n => {
-            const st = this.nodeStatus(n);
-            const ghost = !!D && ((L === 'l3' && !D.l3.nodes.has(n.id)) || (L === 'rt' && !D.rt.nodes.has(n.id)));
-            const g = el('g', {class: 'node dimmable st-' + (st || 'none') + (ghost ? ' ghost' : '') + (this.factsFailed(n.id) ? ' fstale' : ''), transform: `translate(${n.cx} ${n.cy})`,
+            // A silhouette is a place with a console: no name, no kind, no state, no facts.
+            const sil = n.state === 'silhouette';
+            const st = sil ? null : this.nodeStatus(n);
+            const ghost = !sil && !!D && ((L === 'l3' && !D.l3.nodes.has(n.id)) || (L === 'rt' && !D.rt.nodes.has(n.id)));
+            const g = el('g', {class: 'node dimmable st-' + (st || 'none') + (sil ? ' silhouette' : '') + (ghost ? ' ghost' : '') + (this.factsFailed(n.id) ? ' fstale' : ''), transform: `translate(${n.cx} ${n.cy})`,
                 'data-node': n.id, tabindex: '0', role: 'button', 'aria-label': ''}, this.L.nodes);
             n.g = g;
             g.setAttribute('aria-label', this.nodeLabel(n));
             el('circle', {r: 31, class: 'halo'}, g);
-            el('use', {href: `#${this.prefix}-ico-${n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
+            el('use', {href: `#${this.prefix}-ico-${sil ? 'unknown' : n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
+            if (sil) {
+                const bd = el('g', {class: 'cbadge', transform: 'translate(-22 -21)'}, g);
+                el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, bd);
+                el('text', {y: 3}, bd).textContent = '>_';
+                this.paintBadge(n);
+                this.grow(n.cx - 40, n.cy - 36, n.cx + 40, n.cy + 36);
+                return;
+            }
             el('circle', {cx: 19, cy: -17, r: 5.5, class: 'sdot'}, g);
             el('text', {y: 25, class: 'nname'}, g).textContent = n.name;
             const f = this.fx && this.fx.nodes.get(n.id);
@@ -912,8 +987,9 @@ export class Stage {
             chip.hidden = true;
             return;
         }
-        const st = this.nodeStatus(n);
-        chip.innerHTML = `<b>${esc(n.name)}</b> <span>· ${esc(this.s('ui_cat_' + n.cat).toLowerCase())}${st ? ' · ' + esc(this.s('ui_st_' + st)) : ''} · ${esc(this.s(this.mobile ? 'ui_chip_touch' : 'ui_chip_mouse'))}</span>`;
+        const st = n.state === 'silhouette' ? null : this.nodeStatus(n);
+        const kind = n.state === 'silhouette' ? this.s('ui_fog_unknown') : this.s('ui_cat_' + n.cat);
+        chip.innerHTML = `<b>${esc(n.name)}</b> <span>· ${esc(kind.toLowerCase())}${st ? ' · ' + esc(this.s('ui_st_' + st)) : ''} · ${esc(this.s(this.mobile ? 'ui_chip_touch' : 'ui_chip_mouse'))}</span>`;
         chip.hidden = false;
         this.chipT = setTimeout(() => { chip.hidden = true; }, 3800);
     }
@@ -933,7 +1009,8 @@ export class Stage {
         };
         const l = this.model.links.find(x => (x.a.nodeId === nodeId && same(x.a)) || (x.b.nodeId === nodeId && same(x.b)));
         if (!l) {
-            this.call('toast', fill(this.s('ui_port_unlinked'), port));
+            // In a fog the cable may exist and not be uncovered yet: "not connected" would be a lie.
+            if (!this.reveal) this.call('toast', fill(this.s('ui_port_unlinked'), port));
             return;
         }
         if (this.layer !== 'l1' && this.layer !== 'l2') this.setLayer('l1');

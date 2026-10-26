@@ -67,6 +67,20 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_get_reveal' => [
+        'classname' => \mod_gns3lab\external\get_reveal::class,
+        'description' => 'What the user or an observed student has uncovered on the scheme in the seen and fog modes.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_reveal' => [
+        'classname' => \mod_gns3lab\external\reveal::class,
+        'description' => 'Adds what the current user has uncovered on the scheme in the seen and fog modes.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_save_lab_draft' => [
         'classname' => \mod_gns3lab\external\save_lab_draft::class,
         'description' => 'Saves the draft of a library lab from the lab editor.',
