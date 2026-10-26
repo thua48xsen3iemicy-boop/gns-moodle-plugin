@@ -1,4 +1,7 @@
-"""Guest facts: the linux.net, switch.net, switch.fdb and windows.net collectors, background collection and the /facts routes."""
+"""Guest facts: the linux.net, switch.net, switch.fdb and windows.net collectors, background collection and the /facts routes.
+
+The ios.config collector (saved configuration of IOL nodes) is in test_ios_config.py.
+"""
 
 import asyncio
 import json
@@ -627,7 +630,7 @@ def test_success_is_recorded_with_the_broker_priority_that_yields(monkeypatch):
         await facts.cycle()
         snapshot = facts.snapshot("p1")
         assert snapshot["schema"] == "gns3lab.slot-facts/1" and snapshot["project_id"] == "p1"
-        assert list(snapshot["nodes"]) == ["n1"]  # the IOU node has no applicable collector
+        assert list(snapshot["nodes"]) == ["n1"]  # the IOU node has no saved configuration yet: no record
         result = snapshot["nodes"]["n1"]
         assert result["name"] == "PC1"
         record = result["collectors"]["linux.net"]
@@ -1423,7 +1426,7 @@ def test_an_owner_change_during_the_question_leaves_no_family(monkeypatch):
 
 
 def test_the_registry_matches_the_capabilities():
-    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1"]
+    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1"]
     assert facts_module.COLLECTOR_IDS == [c.schema for c in COLLECTORS] == ids
 
 
@@ -1535,5 +1538,5 @@ def test_capabilities_announce_the_collectors(mock_server):
     client, _projects, _nodes = mock_server
     body = client.get("/v1/capabilities", headers=HEADERS).json()
     assert "collectors" in body["features"]
-    assert body["collectors"] == ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1"]
+    assert body["collectors"] == ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1"]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"

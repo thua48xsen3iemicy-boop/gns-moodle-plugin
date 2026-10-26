@@ -5,7 +5,8 @@
 ## Где что
 
 - `main.py` — FastAPI-приложение и `POST /v1/fence`; `api/` — маршруты и логика:
-  `labs.py`, `lifecycle.py`, `nodes.py`, `console.py`, `health.py`, `auth.py`, `models.py`, `qga.py`.
+  `labs.py`, `lifecycle.py`, `nodes.py`, `console.py`, `health.py`, `auth.py`, `models.py`, `qga.py`,
+  `facts.py` (сбор фактов, коллекторы), `ios_config.py` (коллектор `ios.config/1`: файлы IOL-ноды и разбор IOS).
 - `release.py`, `release.json` — проверка выпуска и версия; `tools/check_slot.py` — проверка слота на стенде.
 
 ## Правила
