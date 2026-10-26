@@ -1,4 +1,4 @@
-# Памятка оператора: разбор проблем
+# Памятка оператора
 
 Команды — от root на ноде Proxmox. `pct exec` работает только на той ноде, где живёт CT: команды
 менеджера — на ноде менеджера, команды слота — на ноде слота.
@@ -199,6 +199,139 @@ Proxmox не делает снимок CT, у которого есть bind-м�
 `mp1` и с `IMAGES_DIR` `mp2` шаг убирает сам перед снимком. Если ошибка осталась, у слота есть чужое
 bind-монтирование: шаг называет его (`has bind mounts (mp3)`), его нужно убрать из конфига слота
 (`pct set <VMID> --delete mp3`) или заменить томом хранилища. Проверка: `pct config <VMID> | grep ^mp`.
+
+## Добавить слоты на ту же ноду
+
+Пример: на ноде уже есть слоты 701 и 702 (`10.19.36.71`, `.72`), добавляем 703 и 704 (`.73`, `.74`).
+Всё — на этой ноде (на ней же менеджер). Пока работают шаги `agent` и `manager`, сессий на ноде
+быть не должно: они перезапускают агент, менеджер и шлюз консолей.
+
+**VMID.** Агент ноды принимает слоты в диапазоне от меньшего до большего VMID её слотов из `SLOTS`
+(и только CT с тегом `labslot`). VMID менеджера не может попадать в этот диапазон — скрипт
+остановится. Удобно брать следующие номера того же блока: 703, 704.
+
+### 1. Клонировать CT
+
+Источник — шаблон, из которого делали слоты, или выключенный слот. `pct clone` не копирует
+bind-монтирования (`mp0`/`mp1` — код и каталог студента, `mp2` — образы), с ними клон не
+сделать. Если клонируете слот, выведите его из работы и снимите их — агент вернёт их сам при
+следующем старте:
+
+```sh
+pct exec $MGR -- $ADM slot-maintenance 701 --message "клонирование"
+pct status 701                           # stopped
+pct set 701 --delete mp0,mp1,mp2
+```
+
+Клон, новый IP и новый MAC (строка `net0` — как у источника, меняется только `ip=`, `hwaddr` убираем,
+Proxmox выдаст новый):
+
+```sh
+for pair in 703=10.19.36.73 704=10.19.36.74; do
+  id=${pair%=*} ip=${pair#*=}
+  pct clone 701 $id --full 1 --hostname slot-$id      # --storage <rbd>, если нужно другое хранилище
+  pct set $id -net0 "$(pct config $id | sed -n 's/^net0: //p' | sed -E "s/ip=[^,]*\//ip=$ip\//; s/,?hwaddr=[^,]*//")"
+  pct config $id | grep -E '^(net0|tags|unprivileged)'   # статический ip=…, tags: labslot, unprivileged: 1
+done
+pct exec $MGR -- $ADM slot-enable 701                    # источник обратно в работу
+```
+
+Маска сети и шлюз в `net0` остаются как у источника. Адрес должен быть уникальным и доступным
+менеджеру (порт 8080).
+
+### 2. Уникализировать клоны
+
+Клон уносит machine-id, SSH-ключи и состояние Lab Slot источника (`/var/lib/lab-slot`: операции и
+ключи идемпотентности прошлых сессий). Чистим, пока CT выключен:
+
+```sh
+for id in 703 704; do
+  pct mount $id
+  R=/var/lib/lxc/$id/rootfs
+  truncate -s 0 $R/etc/machine-id                 # systemd создаст новый при старте
+  rm -f $R/var/lib/dbus/machine-id $R/etc/ssh/ssh_host_*
+  rm -rf $R/var/lib/lab-slot/* $R/var/log/journal/*
+  rm -f $R/etc/lab-slot/slot.env                  # шаг slot положит новый, с токенами этого слота
+  pct unmount $id
+done
+```
+
+SSH-ключи, если SSH в слоте нужен: после шага `slot` — `pct start 703 && pct exec 703 -- ssh-keygen -A && pct shutdown 703`.
+
+### 3. Провизия
+
+```sh
+nano /mnt/pve/cfs/secrets/lab.conf        # SLOTS="701 702 703 704"
+$P secrets                                # токены новых слотов, slots.json, пул lab-slots; старое не трогает
+$P slot 703 704                           # только новые: тег, mp2, slot.env, lab-slot-init, проверки GNS3 и uid/gid gns3
+$P agent                                  # новый диапазон VMID агента (701..704), агент перезапускается
+$P manager                                # новый slots.json и gateway.env, менеджер и шлюз перезапускаются
+$P check                                  # агент видит новые слоты, менеджер — их и Proxmox
+$P enable 703 704                         # из maintenance в free
+pct exec $MGR -- $ADM slots               # 703, 704: state free, in_config true
+```
+
+`venv slot` не повторяется: venv слота общий на CephFS.
+
+Если `slot` или `agent` ругается на uid/gid `gns3` — клон сделан не из того шаблона: каталоги
+студентов общие, uid/gid во всех слотах должны совпадать.
+
+**Память ноды.** Новые слоты делят те же лимиты размещения (`NODE_GUEST_MEMORY_MB`,
+`NODE_CPU_OVERCOMMIT` в `lab.conf`). Если лимит уже почти выбран, лишние слоты будут стоять
+свободными, а сессии ждать «Недостаточно ресурсов на узлах».
+
+## Собрать ZIP плагина и поставить в Moodle
+
+### Сборка
+
+Штатно — `plugin/devtools/prepare_zip.sh` (`plugin/devtools/README.md`): ставит в свой кеш Node 22 и исходники
+Moodle 5.1, прогоняет ESLint и `grunt amd`, обновляет `plugin/plugin/amd/build` и пишет архив. Нужны Bash, Git, curl,
+Python 3, `zip`, `flock` и доступ к GitHub и npm. Скрипт меняет файлы `amd/build` в рабочей копии, поэтому запускайте
+его в отдельном клоне, а не в checkout стенда (тот должен оставаться чистым для `git pull` и сборки выпусков):
+
+```sh
+git clone /mnt/pve/cfs/gns3-ro /root/gns3-plugin-build      # уже есть — cd туда и git pull
+cd /root/gns3-plugin-build
+bash plugin/devtools/prepare_zip.sh         # печатает путь: plugin/dist/mod_gns3lab-<release>.zip
+grep -E 'version|release' plugin/plugin/version.php
+```
+
+Скрипт кладёт `plugin/plugin/` в архив как одну папку `gns3lab/` — так ждёт установщик Moodle.
+`plugin/dist/` в `.gitignore`. Если `amd/build` в Git уже собран штатно и `amd/src` после этого не менялся, хватит
+упаковки без сборки: `sh plugin/devtools/build_zip.sh`. Для 0.8.0 так нельзя: его `amd/build` собран запасным путём.
+
+Moodle обновляет плагин, только если `$plugin->version` в `version.php` больше установленного:
+архив того же кода повторно ставить незачем. Установленная версия — «Администрирование →
+Плагины → Обзор плагинов», строка «Лаба GNS3».
+
+### Установка через веб-интерфейс
+
+1. Скачать архив с ноды к себе: `scp root@<нода>:/root/gns3-plugin-build/plugin/dist/mod_gns3lab-*.zip .`
+2. «Администрирование → Плагины → Установка плагинов» → загрузить ZIP → «Установить плагин из
+   ZIP-файла». Тип плагина Moodle определит сам (модуль деятельности).
+3. «Проверка» → «Продолжить» → «Обновить базу данных Moodle сейчас». Предупреждение про
+   `MATURITY_ALPHA` ожидаемо.
+4. Только при первой установке — настройки: «Администрирование → Плагины → Модули деятельности →
+   Лаба GNS3 → Настройки». Адрес и секрет менеджера — из `/mnt/pve/cfs/secrets/moodle/plugin.txt`
+   (`$P moodle` печатает его же).
+
+Если установщик пишет, что каталог `mod/` недоступен для записи, — веб-сервер не может писать в
+`public/mod` Moodle, тогда ставьте копированием (ниже).
+
+### Установка копированием (Moodle — LXC на этой ноде)
+
+```sh
+MOODLE=<MOODLE_VMID>; ROOT=<корень Moodle, где config.php>
+pct push $MOODLE /root/gns3-plugin-build/plugin/dist/mod_gns3lab-<release>.zip /tmp/gns3lab.zip
+pct exec $MOODLE -- sh -c "cd $ROOT/public/mod && rm -rf gns3lab && unzip -q /tmp/gns3lab.zip && chown -R www-data:www-data gns3lab"
+pct exec $MOODLE -- runuser -u www-data -- php $ROOT/admin/cli/upgrade.php --non-interactive
+```
+
+Если `admin/cli/upgrade.php` в корне нет, он в `public/admin/cli/` (раскладка Moodle 5.1).
+Пользователь веб-сервера — `www-data` в Ubuntu/Debian, у вас может быть другой.
+
+После обновления в браузере открывается старый JS — «Администрирование → Разработка → Сбросить все
+кэши» и обновить страницу с Ctrl+F5.
 
 ## Похожие коды и сообщения
 
