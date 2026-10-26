@@ -7,6 +7,7 @@
 | `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` и `fixtures/linux-switch-vlan.*` в `plugin/demo` |
 | `build_novnc.mjs` | собирает `plugin/amd/src/novnc.js` из пакета `@novnc/novnc` (esbuild, один ES-модуль); нужен только при смене версии noVNC, порядок команд — в шапке скрипта |
 | `check_facts.mjs` | проверка чистых функций `facts.js` на Node, без Moodle и браузера (раздел «Проверка слоёв без браузера») |
+| `check_consolefacts.mjs` | проверка слоя «увидено в консоли» на Node: разбор выводов, слияние с фактами, сброс по отпечатку и снятие команд с настоящего xterm.js (`docs/live-state.md` §8) |
 | `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot; у `vnc`-ноды (PVE1 эталонной лабы, образ `debian12-desktop`) — экран по RFB 3.8, билет только владельцу |
 | `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
 
@@ -181,6 +182,19 @@ node plugin/devtools/check_facts.mjs     # из корня репозитори�
 сценарии над маленькими лабами: девять сценариев задачи Б из `docs/linux-switch-integration/PLAN.md` (состояние обоих
 концов линка и самого линка: порт коммутатора повторяет линк и не читает свои `admin` / `oper`) и режимы L2 `none` и
 `native: null` (`docs/live-state.md` §3.1). Печатает `ok` / `FAIL` по каждому, при сбое выходит с кодом 1.
+
+## Проверка «увидено в консоли» без браузера
+
+```bash
+node plugin/devtools/check_consolefacts.mjs     # из корня репозитория; Node 22, зависимостей нет
+```
+
+Скрипт подключает настоящие `consolefacts.js`, `consolewatch.js`, `model.js`, `facts.js` и xterm.js из `amd/src` (без DOM:
+терминал создаётся, но не открывается) и прогоняет: узнавание команд, разбор выводов IOL L2 и L3, Debian и VPCS, слияние с
+решающими фактами, отпечаток ноды и сброс по нему, а также снятие команды и вывода с буфера терминала (перенос строк,
+`--More--`, Backspace, режим конфигурации, длинный вывод, ушедший scrollback). Выводы устройств в скрипте написаны по формату
+команд; сверка с настоящими IOL и Debian — на стенде (`docs/live-state.md` §8.4, п. 7). Сквозную проверку в браузере
+делает `ui-harness/check_seen.js`.
 
 ## Библиотека и редактор лаб
 

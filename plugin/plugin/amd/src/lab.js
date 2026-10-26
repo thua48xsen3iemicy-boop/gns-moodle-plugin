@@ -20,6 +20,8 @@
  * a panel, a grid or windows, diving into a console on a phone). The session is the source of truth: the scheme shows
  * the reference topology until the lab runs and the live topology of the session after that. While the lab runs and its
  * session reports facts, the page polls them (docs/live-state.md) and the scheme builds the layers L2, L3 and OSPF.
+ * What the student runs in a console (`show interfaces status`, `ip a` …) is parsed in the browser and laid over the
+ * polled facts at once, until the polled facts of that node change (docs/live-state.md §8).
  *
  * Permissions are decided by the server; the flags here only choose what to draw.
  *
@@ -31,6 +33,7 @@
 import Ajax from 'core/ajax';
 import {getStrings} from 'core/str';
 import {STRING_KEYS as CONSOLE_KEYS} from 'mod_gns3lab/console';
+import {addSeen, fingerprint, interpret, mergeSeen, pruneSeen} from 'mod_gns3lab/consolefacts';
 import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
@@ -47,6 +50,9 @@ const FACTS_POLL = 30000;
 
 /** After "Refresh now" the facts are read again this much later: the collection takes a few seconds, ms. */
 const FACTS_AFTER_REFRESH = 5000;
+
+/** A saved configuration (`write memory`) asks for new facts at most this often, ms (docs/live-state.md §8.2). */
+const SAVE_REFRESH_GAP = 10000;
 
 /** Codes of a failed collection with an own text. */
 const FACT_ERRORS = ['unreachable', 'timeout', 'stopped', 'unsupported', 'failed'];
@@ -69,6 +75,7 @@ const UI_KEYS = [
     'ui_facts_at', 'ui_facts_ago', 'ui_facts_ago_now', 'ui_facts_stale', 'ui_facts_stale_mark', 'ui_facts_nodata',
     'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
     'ui_mac_table', 'ui_mac_col_mac', 'ui_mac_col_port', 'ui_mac_col_vlan', 'ui_mac_empty', 'ui_mac_truncated', 'ui_mac_note',
+    'ui_seen_at', 'ui_seen_mark', 'ui_seen_note',
     ...FACT_ERRORS.map(code => 'ui_facts_err_' + code),
 ];
 
@@ -99,6 +106,9 @@ class LabPage {
         this.factsRev = 0;
         this.factsTimer = null;
         this.factsShown = '';
+        // Seen in the console (docs/live-state.md §8): node id → what its commands showed; not sent, not stored.
+        this.seen = new Map();
+        this.saveRefreshAt = 0;
         const region = name => root.querySelector(`[data-region="${name}"]`);
         this.toastEl = region('toast');
         this.toastTimer = null;
@@ -123,6 +133,7 @@ class LabPage {
                 ? this.session.freshNodeStatus(nodeId)
                 : Promise.resolve({status: null, stale: false})),
             toast: (text, ms) => this.toast(text, ms),
+            onSeen: event => this.takeSeen(event),
         });
         this.wheel = new Wheel(region('radial'), {
             stage: this.stage,
@@ -303,7 +314,7 @@ class LabPage {
         if (this.factsSession === s.sessionid) {
             // The same session with a new topology: the facts are still those of the session.
             this.stage.setFactsMeta(meta);
-            this.stage.setFacts(this.factsDoc);
+            this.showFacts();
             this.factsShown = '';
         }
         this.details.hide();
@@ -332,6 +343,7 @@ class LabPage {
         this.factsDoc = null;
         this.factsRev = 0;
         this.factsShown = '';
+        this.seen = new Map();
         // Live mode without data: the demo facts of the preview are not shown on a live lab.
         this.stage.setFacts(null);
         this.pollFacts();
@@ -345,6 +357,7 @@ class LabPage {
         this.factsSession = null;
         this.factsDoc = null;
         this.factsRev = 0;
+        this.seen = new Map();
     }
 
     /**
@@ -415,7 +428,9 @@ class LabPage {
         const stale = !!at && Date.now() - at > result.ttl * 1000;
         this.stage.setFactsMeta({at, stale});
         if (changed) {
-            this.stage.setFacts(this.factsDoc);
+            // A node whose deciding facts changed is no longer what the student saw (docs/live-state.md §8.3).
+            this.seen = pruneSeen(this.seen, this.factsDoc);
+            this.showFacts();
         }
         // What the card says changes with the minute of the collection and with going out of date.
         const shown = [at ? Math.floor(at / 60000) : 0, stale].join();
@@ -426,9 +441,44 @@ class LabPage {
     }
 
     /**
-     * Asks the manager to collect the facts now, then reads them again a little later.
+     * Draws the layers from the polled facts with what the student saw in the consoles laid over them.
      */
-    async refreshFacts() {
+    showFacts() {
+        this.stage.setFacts(mergeSeen(this.stage.model, this.factsDoc, this.seen));
+    }
+
+    /**
+     * A command was run in a console of a node (docs/live-state.md §8): what it showed reaches the scheme at once.
+     *
+     * @param {object} event {nodeId, kind, command, lines, partial}
+     */
+    takeSeen(event) {
+        if (!this.factsSession) {
+            return;
+        }
+        const result = interpret(event.kind, event.command, event.lines, event.partial);
+        if (!result) {
+            return;
+        }
+        if (result.save) {
+            // The saved configuration is what the manager reads from a Cisco device: ask for it while it is fresh.
+            if (result.ok && Date.now() - this.saveRefreshAt >= SAVE_REFRESH_GAP) {
+                this.saveRefreshAt = Date.now();
+                this.refreshFacts(true);
+            }
+            return;
+        }
+        const info = {at: Date.now(), fp: fingerprint(this.factsDoc, event.nodeId)};
+        this.seen = addSeen(this.seen, event.nodeId, result, info);
+        this.showFacts();
+    }
+
+    /**
+     * Asks the manager to collect the facts now, then reads them again a little later.
+     *
+     * @param {boolean} [auto] the page asked itself (after `write memory`): no message, a failure is not shown
+     */
+    async refreshFacts(auto = false) {
         if (!this.factsSession) {
             return;
         }
@@ -437,10 +487,14 @@ class LabPage {
                 methodname: 'mod_gns3lab_refresh_facts',
                 args: {cmid: this.cmid, userid: this.userid},
             }]));
-            this.toast(this.strings.ui_facts_refresh_sent);
+            if (!auto) {
+                this.toast(this.strings.ui_facts_refresh_sent);
+            }
         } catch (error) {
-            this.toast(error.message || String(error));
-            this.details.refresh();
+            if (!auto) {
+                this.toast(error.message || String(error));
+                this.details.refresh();
+            }
             return;
         }
         clearTimeout(this.factsTimer);

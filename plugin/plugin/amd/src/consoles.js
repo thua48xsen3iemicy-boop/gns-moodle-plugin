@@ -31,8 +31,9 @@
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 
 import {CISCO_TYPES, ConsoleConnection, KEYS, PORT_RE, THEME, loadXterm, note} from 'mod_gns3lab/console';
+import {ConsoleWatch} from 'mod_gns3lab/consolewatch';
 import {SnipMenu} from 'mod_gns3lab/snipmenu';
-import {snippetSet} from 'mod_gns3lab/snippets';
+import {kindOf, snippetSet} from 'mod_gns3lab/snippets';
 import {VncConnection, loadNovnc} from 'mod_gns3lab/vnc';
 import {svgEl as el, hel, store, fill} from 'mod_gns3lab/dom';
 import {clamp, esc} from 'mod_gns3lab/model';
@@ -384,6 +385,11 @@ class Con {
         this.addPortLinks();
         this.term.onWriteParsed(() => this.output());
         this.term.onData(() => this.activity('in'));
+        // What the student runs here also reaches the scheme as "seen in the console" (docs/live-state.md §8).
+        this.watch = new ConsoleWatch(this.term, {
+            hint: kindOf(this.n),
+            onCommand: command => o.seen({nodeId: this.n.id, ...command}),
+        });
         if (this.term.textarea) {
             this.term.textarea.addEventListener('focus', () => {
                 if (o.active !== this.n.id) {
@@ -555,6 +561,7 @@ class Con {
         this.ro.disconnect();
         clearTimeout(this.flowT);
         if (this.conn) this.conn.close();
+        if (this.watch) this.watch.dispose();
         if (this.term) this.term.dispose();
         this.host.remove();
         if (this.win) this.win.remove();
@@ -574,8 +581,9 @@ export class Consoles {
      * @param {boolean} options.readonly observer: input is disabled
      * @param {Function} options.nodeStatus async nodeId => {status, stale} from a fresh session state
      * @param {Function} options.toast shows a short message
+     * @param {Function} [options.onSeen] called with {nodeId, kind, command, lines, partial} for a command seen in a console
      */
-    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast}) {
+    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}}) {
         this.root = root;
         this.stage = stage;
         this.strings = strings;
@@ -584,6 +592,7 @@ export class Consoles {
         this.readonly = readonly;
         this.nodeStatus = nodeStatus;
         this.toast = toast;
+        this.onSeen = onSeen;
         this.xterm = null;
         this.RFB = null;
         this.cons = new Map();
@@ -619,6 +628,15 @@ export class Consoles {
 
     s(key) {
         return this.strings[key] || key;
+    }
+
+    /**
+     * A command was run in a console of a node and its output is on the screen.
+     *
+     * @param {object} event {nodeId, kind, command, lines, partial}
+     */
+    seen(event) {
+        this.onSeen(event);
     }
 
     get size() {
