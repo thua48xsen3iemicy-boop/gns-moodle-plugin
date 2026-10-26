@@ -284,18 +284,21 @@ pct exec $MGR -- $ADM slots               # 703, 704: state free, in_config true
 
 ### Сборка
 
-На ноде, из того же checkout, что и остальной стенд (нужен `zip`: `apt install zip`):
+Штатно — `plugin/devtools/prepare_zip.sh` (`plugin/devtools/README.md`): ставит в свой кеш Node 22 и исходники
+Moodle 5.1, прогоняет ESLint и `grunt amd`, обновляет `plugin/plugin/amd/build` и пишет архив. Нужны Bash, Git, curl,
+Python 3, `zip`, `flock` и доступ к GitHub и npm. Скрипт меняет файлы `amd/build` в рабочей копии, поэтому запускайте
+его в отдельном клоне, а не в checkout стенда (тот должен оставаться чистым для `git pull` и сборки выпусков):
 
 ```sh
-cd /mnt/pve/cfs/gns3-ro && git pull
-sh plugin/devtools/build_zip.sh             # печатает путь: dist/mod_gns3lab-<release>.zip
-ls -l plugin/dist/                          # архив тут: /mnt/pve/cfs/gns3-ro/plugin/dist/mod_gns3lab-<release>.zip
+git clone /mnt/pve/cfs/gns3-ro /root/gns3-plugin-build      # уже есть — cd туда и git pull
+cd /root/gns3-plugin-build
+bash plugin/devtools/prepare_zip.sh         # печатает путь: plugin/dist/mod_gns3lab-<release>.zip
 grep -E 'version|release' plugin/plugin/version.php
 ```
 
 Скрипт кладёт `plugin/plugin/` в архив как одну папку `gns3lab/` — так ждёт установщик Moodle.
-`plugin/dist/` в `.gitignore`, `git pull` он не мешает. JS (`amd/build`) уже собран и лежит в Git,
-`grunt` не нужен.
+`plugin/dist/` в `.gitignore`. Если `amd/build` в Git уже собран штатно и `amd/src` после этого не менялся, хватит
+упаковки без сборки: `sh plugin/devtools/build_zip.sh`. Для 0.8.0 так нельзя: его `amd/build` собран запасным путём.
 
 Moodle обновляет плагин, только если `$plugin->version` в `version.php` больше установленного:
 архив того же кода повторно ставить незачем. Установленная версия — «Администрирование →
@@ -303,7 +306,7 @@ Moodle обновляет плагин, только если `$plugin->version`
 
 ### Установка через веб-интерфейс
 
-1. Скачать архив с ноды к себе: `scp root@<нода>:/mnt/pve/cfs/gns3-ro/plugin/dist/mod_gns3lab-*.zip .`
+1. Скачать архив с ноды к себе: `scp root@<нода>:/root/gns3-plugin-build/plugin/dist/mod_gns3lab-*.zip .`
 2. «Администрирование → Плагины → Установка плагинов» → загрузить ZIP → «Установить плагин из
    ZIP-файла». Тип плагина Moodle определит сам (модуль деятельности).
 3. «Проверка» → «Продолжить» → «Обновить базу данных Moodle сейчас». Предупреждение про
@@ -319,7 +322,7 @@ Moodle обновляет плагин, только если `$plugin->version`
 
 ```sh
 MOODLE=<MOODLE_VMID>; ROOT=<корень Moodle, где config.php>
-pct push $MOODLE /mnt/pve/cfs/gns3-ro/plugin/dist/mod_gns3lab-<release>.zip /tmp/gns3lab.zip
+pct push $MOODLE /root/gns3-plugin-build/plugin/dist/mod_gns3lab-<release>.zip /tmp/gns3lab.zip
 pct exec $MOODLE -- sh -c "cd $ROOT/public/mod && rm -rf gns3lab && unzip -q /tmp/gns3lab.zip && chown -R www-data:www-data gns3lab"
 pct exec $MOODLE -- runuser -u www-data -- php $ROOT/admin/cli/upgrade.php --non-interactive
 ```
