@@ -23,6 +23,9 @@
 - Удаление нод без подтверждения запрещено намеренно (`README.md`, «Node Wipe»).
 - Контракт с менеджером — `../manager/docs/CONTRACTS.md` §4, сверка — `docs/ALIGNMENT.md`.
 - Версия — `release.json` и заголовок `README.md`.
+- Любая правка в `slot/`, попадающая в выпуск (`.py`, `.md`, `.json`, `.service`, `requirements.txt`,
+  `slot.env.example`), в том числе только документации, — перепечатать манифест: `python3 slot/release.py seal`.
+  Тесты слота сверяют файлы с `release.json` и иначе падают десятками.
 - `README.md` (37 КБ): актуальное — «Жизненный цикл и гарантии» и «API». Разделы «Версия 0.x» — история,
   открывай только по необходимости.
 - После правок: тесты `slot/tests` и `python3 -m compileall -q slot`.
