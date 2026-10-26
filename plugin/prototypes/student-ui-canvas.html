@@ -338,6 +338,39 @@ body{background:var(--canvas)}
 [data-factlayer="l3"] .link .wire{stroke:#73b5df}
 [data-factlayer="l4"] #vp{opacity:.54}
 [data-factlayer="l2"] .layer-vlan,[data-factlayer="l3"] .l2{visibility:visible;opacity:1}
+.l2-scene{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
+#lyrDraw,#lyrLinks,#lyrNodes,#lyrCards{transition:opacity .32s ease,visibility .32s}
+[data-factlayer="l2"] #lyrDraw,[data-factlayer="l2"] #lyrLinks,
+[data-factlayer="l2"] #lyrNodes,[data-factlayer="l2"] #lyrCards{opacity:0;visibility:hidden;pointer-events:none}
+[data-factlayer="l2"] .l2-scene{opacity:1;visibility:visible;pointer-events:auto}
+.l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:1.3;stroke-dasharray:7 5}
+.l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em}
+.l2-virtual{cursor:pointer}
+.l2-virtual rect{fill:#173747;stroke:var(--vlan-color,#79d8c6);stroke-width:2;filter:drop-shadow(0 7px 13px rgb(0 0 0 / .22))}
+.l2-virtual:hover rect,.l2-virtual.sel rect{fill:#224b59;stroke-width:3}
+.l2-virtual .vmark{fill:var(--vlan-color,#79d8c6)}
+.l2-virtual .vtitle{fill:#f2fafa;font:600 15px var(--display)}
+.l2-virtual .vsub{fill:#a6c3c9;font:500 10px var(--mono)}
+.l2-virtual:focus{outline:none}
+.l2-mac-ear{cursor:pointer}
+.l2-mac-ear rect{fill:#245364;stroke:#92d5cf;stroke-width:1}
+.l2-mac-ear text{fill:#e2fbf5;font:600 9px var(--mono);text-anchor:middle;pointer-events:none}
+.l2-mac-ear:hover rect,.l2-mac-ear:focus-visible rect{fill:#58ddcb}
+.l2-mac-ear:hover text,.l2-mac-ear:focus-visible text{fill:#102b33}
+.l2-endpoint .halo{stroke:#527886}
+.l2-endpoint .if{fill:#2b5261}
+.l2-endpoint .nname{font-size:15px}
+.l2-path{cursor:pointer}
+.l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
+.l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:3;stroke-linecap:round}
+.l2-path:hover .stroke,.l2-path.sel .stroke{stroke-width:5}
+.l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
+.l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
+  font:600 10px var(--mono);text-anchor:middle;pointer-events:none}
+.l2-path.down .caption{fill:#e49c97}
+.l2-p2p .stroke{stroke:#637e8b;stroke-width:1.8}
+.l2-p2p .caption{fill:#91aeb8}
+@media(prefers-reduced-motion:reduce){.l2-scene,#lyrDraw,#lyrLinks,#lyrNodes,#lyrCards{transition:none}}
 .layer-vlan{visibility:hidden;opacity:0;fill:#dcf8f3;stroke:var(--canvas);stroke-width:4;paint-order:stroke;
   font:600 9px var(--mono);text-anchor:middle;pointer-events:none}
 #canvasUi{font-family:var(--body)}
@@ -352,6 +385,11 @@ body{background:var(--canvas)}
 #canvasUi .layer-button.active text{fill:#09252b}
 #canvasUi .layer-button:focus{outline:none}
 #canvasUi .hud-note{fill:#8daab4;font:500 10px var(--body)}
+#canvasUi .domain-jump{cursor:pointer}
+#canvasUi .domain-jump rect{fill:#1c3c49;stroke:var(--vlan-color,#6ccdbf);stroke-width:1.2}
+#canvasUi .domain-jump text{fill:#d7edef;font:600 10px var(--mono);text-anchor:middle;dominant-baseline:middle}
+#canvasUi .domain-jump:hover rect,#canvasUi .domain-jump:focus-visible rect{fill:#315e6a;stroke-width:2}
+#canvasUi .domain-jump:focus{outline:none}
 #canvasUi .ear{cursor:pointer;filter:drop-shadow(0 5px 8px rgb(0 0 0 / .35))}
 #canvasUi .ear rect{fill:#1b4650;stroke:#76cdbf;stroke-width:1.2}
 #canvasUi .ear text{fill:#dcfff8;font:600 9px var(--mono);text-anchor:middle;dominant-baseline:middle}
@@ -380,6 +418,7 @@ body{background:var(--canvas)}
 .zoom{background:#17313e;border-radius:12px}
 .details{display:none !important}
 @media(max-width:760px){.bar{padding-block:9px}.ttl h1{font-size:17px}.zoom{bottom:10px}}
+.mob .hint{display:none}
 @media(prefers-reduced-motion:reduce){#canvasUi .info-card{filter:none}}
 </style>
 
@@ -426,6 +465,7 @@ body{background:var(--canvas)}
           <g id="lyrLinks"></g>
           <g id="lyrNodes"></g>
           <g id="lyrCards"></g>
+          <g id="lyrL2" class="l2-scene"></g>
         </g>
         <g id="canvasUi" aria-label="Слои и сведения на схеме">
           <g id="canvasHud"></g>
@@ -477,6 +517,7 @@ body{background:var(--canvas)}
         <div><b>Адреса</b>IP на портах, router-id, соседи OSPF, превью консоли.</div>
         <div><b>Консоли</b>Подробное превью. На телефоне — вход в консоль.</div>
       </div>
+      <p class="dnote">Кнопки L1–L4 переключают факты. L2 перестраивает схему: каждый VLAN коммутатора становится отдельным узлом, а широковещательные домены выводятся из работающих портов и тегов. Одинаковые номера VLAN без физической связи остаются разными доменами. OSPF area относится к L3 и сама по себе не объединяет VLAN.</p>
       <div class="cols">
         <div><h3>Телефон</h3><dl>
           <dt>Удержать узел</dt><dd>Колесо действий. Не отпуская, ведите к действию и отпустите. Отпустили сразу — колесо остаётся, выберите действие тапом.</dd>
@@ -641,6 +682,7 @@ function renderLinks(){
     }
   }
   if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
+  if (l2Model) renderCanvasL2();
 }
 function renderNodes(){
   L.nodes.textContent = "";
@@ -740,6 +782,10 @@ function nodeNear(sx, sy, maxPx){
 const ptrs = new Map();
 let gest = null, pinch = null, lpTimer = null, lastTap = null, diveCand = null;
 function targetOf(t){
+  const virtual = t.closest && t.closest(".l2-virtual");
+  if (virtual) return l2Model.virtuals.get(virtual.dataset.virtual).orig;
+  const segment = t.closest && t.closest(".l2-path");
+  if (segment) { const s = l2Model.segments.find(v => v.id === segment.dataset.segment); if (s) return s.link; }
   const n = t.closest && t.closest(".node"); if (n) return byId.get(n.dataset.id);
   const l = t.closest && t.closest(".link"); return l ? linkById.get(l.dataset.id) : null;
 }
@@ -832,6 +878,22 @@ function onTap(e, g){
   const now = performance.now(), p = relPt(e);
   const dbl = lastTap && now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30;
   lastTap = dbl ? null : { t: now, x: p.x, y: p.y };
+  const macEar = g.target.closest && g.target.closest(".l2-mac-ear");
+  if (macEar) {
+    pinInsight(l2Model.virtuals.get(macEar.dataset.virtual), "mac"); return;
+  }
+  const virtual = g.target.closest && g.target.closest(".l2-virtual");
+  if (virtual) {
+    const item = l2Model.virtuals.get(virtual.dataset.virtual);
+    if (dbl) zoomToNode(item, Math.max(2.1, view.k * 1.5));
+    pinInsight(item, "ports"); return;
+  }
+  const segment = g.target.closest && g.target.closest(".l2-path");
+  if (segment) {
+    const item = l2Model.segments.find(s => s.id === segment.dataset.segment);
+    if (dbl) zoomToNode(item, Math.max(2, view.k * 1.5));
+    pinInsight(item, "ports"); return;
+  }
   const badge = g.target.closest && g.target.closest(".cbadge");
   const nodeEl = g.target.closest && g.target.closest(".node");
   const cardEl = g.target.closest && g.target.closest(".card");
@@ -856,14 +918,26 @@ let selected = null, chipT = null;
 function select(n){
   if (n) selectLink(null);
   if (selected && selected.g) selected.g.classList.remove("sel");
+  if (selected && selected.l2g) selected.l2g.classList.remove("sel");
   selected = n;
   const chip = $("chip");
   if (!n) { chip.hidden = true; return; }
   n.g.classList.add("sel");
+  if (n.l2g) n.l2g.classList.add("sel");
   chip.innerHTML = `<b>${esc(n.name)}</b> <span>· ${esc(CAT[n.cat].toLowerCase())} · ${esc(STATUS[n.status])} · ${mobile ? "удерживайте для действий" : "правый клик — действия"}</span>`;
   chip.hidden = false; clearTimeout(chipT); chipT = setTimeout(() => { chip.hidden = true; }, 3800);
 }
 svg.addEventListener("keydown", e => {
+  const mac = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-mac-ear");
+  const virtual = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-virtual");
+  const segment = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-path");
+  if ((e.key === "Enter" || e.key === " ") && (mac || virtual || segment)) {
+    e.preventDefault();
+    if (mac) pinInsight(l2Model.virtuals.get(mac.dataset.virtual), "mac");
+    else if (virtual) pinInsight(l2Model.virtuals.get(virtual.dataset.virtual), "ports");
+    else pinInsight(l2Model.segments.find(s => s.id === segment.dataset.segment), "ports");
+    return;
+  }
   const nodeEl = document.activeElement && document.activeElement.closest && document.activeElement.closest(".node");
   const linkEl = !nodeEl && document.activeElement && document.activeElement.closest && document.activeElement.closest(".link");
   const n = nodeEl ? byId.get(nodeEl.dataset.id) : linkEl ? linkById.get(linkEl.dataset.id) : selected;
@@ -1050,6 +1124,7 @@ document.addEventListener("keydown", e => {
 });
 function setPower(n, st){
   setNodeStatus(n, st);
+  if (l2Model) renderCanvasL2();
   renderCanvasCard();
   const c = cons.get(n.id);
   if (st === "stopped") { if (c) c.sim.halt("узел остановлен"); toast(`${n.name} остановлен (демо: API плагина пока не управляет узлами)`, 3400); }
@@ -1854,20 +1929,205 @@ let lastSize = null;
 new ResizeObserver(() => {
   const r = wrap.getBoundingClientRect();
   if (lastSize && r.width && r.height) { view.tx += (r.width - lastSize.w) / 2; view.ty += (r.height - lastSize.h) / 2; applyView(); }
+  if (r.width && r.height && typeof insight !== "undefined") { renderCanvasHud(); renderCanvasCard(); }
   if (r.width && r.height) lastSize = { w: r.width, h: r.height };
 }).observe(wrap);
 mq.addEventListener("change", () => {
   mobile = mq.matches;
   if (!mobile && diving) exitDive(false);
   layout(); renderTabsAndChips();
+  requestAnimationFrame(() => animateTo(fitTarget(), 320));
 });
 
 /* ---------------- canvas facts experiment ---------------- */
+const l2Palette = { 1: "#8ba6b4", 10: "#60dfaf", 20: "#f0bd73", 30: "#8bb5fa", 99: "#da9fe8" };
+const l2Color = vlan => l2Palette[vlan] || `hsl(${(Number(vlan) * 47) % 360} 65% 70%)`;
+let l2Model = null;
+
+// A wire has on-the-wire tags; a switch maps them to its own local VLAN ID.
+function l2Wire(end){
+  const n = end.node, i = ifaceAt(n, end.adapter, end.port), f = n.facts;
+  if (!i || !f) return null;
+  const sp = i.switchport;
+  if (sp && sp.mode === "access") return {
+    iface: i, tags: new Set(["u"]), any: false,
+    vertex: t => t === "u" ? `S|${n.id}|${Number(sp.vlan)}` : null,
+    vlan: t => t === "u" ? Number(sp.vlan) : null,
+    name: () => i.name
+  };
+  if (sp && sp.mode === "trunk") {
+    const native = sp.native === null ? null : Number(sp.native == null ? 1 : sp.native);
+    const any = sp.allowed === "all" || sp.allowed == null;
+    const allowed = Array.isArray(sp.allowed) ? new Set(sp.allowed.map(Number)) : new Set();
+    const tags = new Set(native == null ? [] : ["u"]);
+    allowed.forEach(v => { if (v !== native) tags.add(v); });
+    const vlan = t => t === "u" ? native : t !== native && (any || allowed.has(t)) ? Number(t) : null;
+    return { iface: i, tags, any, vlan, vertex: t => vlan(t) == null ? null : `S|${n.id}|${vlan(t)}`, name: () => i.name };
+  }
+  if (sp) return null;
+  const subs = (f.interfaces || []).filter(s => s.parent === i.name && s.dot1q != null && s.admin !== "down");
+  const tags = new Set(subs.map(s => Number(s.dot1q)));
+  if ((i.ipv4 || []).length || !subs.length) tags.add("u");
+  const subFor = t => subs.find(s => Number(s.dot1q) === t);
+  return { iface: i, tags, any: false, vlan: () => null,
+    vertex: t => t === "u" && tags.has("u") ? `E|${n.id}|${i.name}` : subFor(t) ? `E|${n.id}|${subFor(t).name}` : null,
+    name: t => t === "u" ? i.name : subFor(t) ? subFor(t).name : i.name };
+}
+function deriveCanvasL2(){
+  const parent = new Map(), members = new Map(), segments = [], switchVlans = new Map();
+  const add = v => { if (!parent.has(v)) parent.set(v, v); };
+  const find = v => { add(v); while (parent.get(v) !== v) { parent.set(v, parent.get(parent.get(v))); v = parent.get(v); } return v; };
+  const join = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(rb, ra); };
+  const addMember = (v, n, i) => {
+    add(v); if (!members.has(v)) members.set(v, []);
+    if (!members.get(v).some(m => m.node === n && m.iface.name === i.name)) members.get(v).push({ node: n, iface: i });
+  };
+  const noteSwitch = v => {
+    if (!v || !v.startsWith("S|")) return;
+    const [, id, vlan] = v.split("|");
+    if (!switchVlans.has(id)) switchVlans.set(id, new Set());
+    switchVlans.get(id).add(Number(vlan));
+  };
+  nodes.forEach(n => (n.facts && n.facts.interfaces || []).forEach(i => {
+    if (n.status === "started" && i.kind === "svi" && i.vlan != null && i.admin !== "down") {
+      const v = `S|${n.id}|${Number(i.vlan)}`; addMember(v, n, i); noteSwitch(v);
+    }
+  }));
+  links.forEach(l => {
+    const [a, b] = l.ends, wa = l2Wire(a), wb = l2Wire(b);
+    const active = !l.suspend && a.node.status === "started" && b.node.status === "started" &&
+      [wa, wb].every(w => w && w.iface.admin !== "down" && w.iface.oper !== "down");
+    if (!wa || !wb) {
+      // Unknown facts may explain a dark access port, but never establish a domain.
+      const known = wa || wb, missing = wa ? b : a;
+      if (known && known.iface.switchport && known.iface.switchport.mode === "access") {
+        const v = known.vertex("u"); noteSwitch(v);
+        segments.push({ id: l.id + "|unknown", link: l, tag: "u", vlan: known.vlan("u"),
+          va: wa ? v : `E|${a.node.id}|${a.label}`, vb: wb ? v : `E|${b.node.id}|${b.label}`,
+          aname: wa ? wa.name("u") : a.label, bname: wb ? wb.name("u") : b.label, active: false, unknown: true });
+      }
+      return;
+    }
+    const candidates = new Set([...wa.tags, ...wb.tags]);
+    if (wa.any && wb.any) [a.node, b.node].forEach(n => (n.facts && n.facts.interfaces || []).forEach(i => {
+      if (i.switchport && i.switchport.vlan != null) candidates.add(Number(i.switchport.vlan));
+      if (i.kind === "svi" && i.vlan != null) candidates.add(Number(i.vlan));
+    }));
+    candidates.forEach(tag => {
+      const va = wa.vertex(tag), vb = wb.vertex(tag);
+      if (!va || !vb) return;
+      noteSwitch(va); noteSwitch(vb);
+      const vlan = wa.vlan(tag) == null ? wb.vlan(tag) : wa.vlan(tag);
+      const s = { id: l.id + "|" + tag, link: l, tag, vlan, va, vb,
+        aname: wa.name(tag), bname: wb.name(tag), active };
+      segments.push(s);
+      if (!active) return;
+      join(va, vb);
+      if (va.startsWith("E|")) addMember(va, a.node, (a.node.facts.interfaces || []).find(i => i.name === s.aname) || wa.iface);
+      if (vb.startsWith("E|")) addMember(vb, b.node, (b.node.facts.interfaces || []).find(i => i.name === s.bname) || wb.iface);
+    });
+  });
+  const components = new Map();
+  parent.forEach((_, v) => {
+    const root = find(v);
+    if (!components.has(root)) components.set(root, { verts: [], members: [], vlans: new Set(), links: new Set() });
+    const d = components.get(root); d.verts.push(v);
+    if (v.startsWith("S|")) d.vlans.add(Number(v.split("|")[2]));
+    d.members.push(...(members.get(v) || []));
+  });
+  const domains = [...components.values()].sort((a, b) => (Math.min(...a.vlans) || 999) - (Math.min(...b.vlans) || 999));
+  let di = 0, pi = 0;
+  domains.forEach(d => {
+    d.vlans = [...d.vlans].sort((a, b) => a - b);
+    d.id = d.vlans.length ? `D${++di}` : `P${++pi}`;
+    d.verts.forEach(v => components.set(v, d));
+  });
+  segments.forEach(s => {
+    s.domain = components.get(s.va) || components.get(s.vb) || null;
+    if (s.active && s.domain) s.domain.links.add(s.link.id);
+  });
+  const virtuals = new Map();
+  switchVlans.forEach((set, id) => {
+    const n = byId.get(id), vlans = [...set].sort((a, b) => a - b);
+    vlans.forEach((vlan, index) => {
+      const key = `S|${id}|${vlan}`;
+      virtuals.set(key, { virtual: true, id: key, orig: n, vlan, name: `${n.name} · VLAN ${vlan}`,
+        cx: n.cx + (index - (vlans.length - 1) / 2) * 152, cy: n.cy,
+        domain: components.get(key) || null });
+    });
+  });
+  segments.forEach(s => {
+    const [a, b] = s.link.ends;
+    const pa = virtuals.get(s.va) || a.node, pb = virtuals.get(s.vb) || b.node;
+    s.cx = (pa.cx + pb.cx) / 2; s.cy = (pa.cy + pb.cy) / 2;
+    s.virtualLink = true;
+  });
+  return { domains, virtuals, segments };
+}
+function renderCanvasL2(){
+  const old = insight && insight.pinned, layer = $("lyrL2");
+  l2Model = deriveCanvasL2(); layer.textContent = "";
+  const zones = el("g", {}, layer), lines = el("g", {}, layer), devices = el("g", {}, layer);
+  const groups = new Map();
+  l2Model.virtuals.forEach(v => {
+    if (!groups.has(v.orig.id)) groups.set(v.orig.id, []);
+    groups.get(v.orig.id).push(v);
+  });
+  groups.forEach(vs => {
+    const n = vs[0].orig, x0 = Math.min(...vs.map(v => v.cx)) - 66, x1 = Math.max(...vs.map(v => v.cx)) + 66;
+    const g = el("g", { class: "l2-chassis" }, zones);
+    el("rect", { x: x0, y: n.cy - 51, width: x1 - x0, height: 102, rx: 16 }, g);
+    el("text", { x: x0 + 11, y: n.cy - 60 }, g).textContent = `${n.name} · один корпус / ${vs.length} VLAN`;
+  });
+  l2Model.segments.forEach(s => {
+    const [a, b] = s.link.ends, pa = l2Model.virtuals.get(s.va) || a.node, pb = l2Model.virtuals.get(s.vb) || b.node;
+    const p2p = s.vlan == null, dx = pb.cx - pa.cx, dy = pb.cy - pa.cy;
+    const bend = p2p ? 0 : (String(s.tag) === "u" ? -7 : 7);
+    const mx = (pa.cx + pb.cx) / 2 - dy / (Math.hypot(dx, dy) || 1) * bend;
+    const my = (pa.cy + pb.cy) / 2 + dx / (Math.hypot(dx, dy) || 1) * bend;
+    const path = `M${pa.cx} ${pa.cy} Q${mx} ${my} ${pb.cx} ${pb.cy}`;
+    const g = el("g", { class: "l2-path" + (p2p ? " l2-p2p" : "") + (s.active ? "" : " down"),
+      "data-segment": s.id, role: "button", tabindex: "0", "aria-label": `${s.link.name}, ${s.vlan == null ? "точка-точка" : "VLAN " + s.vlan}` }, lines);
+    g.style.setProperty("--vlan-color", l2Color(s.vlan));
+    el("path", { d: path, class: "hit" }, g);
+    el("path", { d: path, class: "stroke" }, g);
+    const label = s.vlan == null ? "p2p" : s.unknown ? `VLAN ${s.vlan} · нет фактов` :
+      s.aname.includes(".") ? `${s.aname} · ${s.vlan}` : s.bname.includes(".") ? `${s.bname} · ${s.vlan}` : `VLAN ${s.vlan}`;
+    el("text", { x: mx, y: my - 7, class: "caption" }, g).textContent = label;
+    s.g = g;
+  });
+  nodes.filter(n => n.cat !== "switch").forEach(n => {
+    const g = el("g", { class: "node l2-endpoint st-" + n.status, transform: `translate(${n.cx} ${n.cy})`,
+      "data-id": n.id, role: "button", tabindex: "0", "aria-label": `${n.name}, ${CAT[n.cat]}` }, devices);
+    el("circle", { r: 31, class: "halo" }, g);
+    el("use", { href: "#ico-" + n.cat, x: -19, y: -19, width: 38, height: 38, class: "ico" }, g);
+    el("text", { y: 23, class: "nname" }, g).textContent = n.name;
+    n.l2g = g;
+  });
+  l2Model.virtuals.forEach(v => {
+    const g = el("g", { class: "l2-virtual", transform: `translate(${v.cx} ${v.cy})`,
+      "data-virtual": v.id, role: "button", tabindex: "0", "aria-label": `${v.name}, ${v.domain ? "домен " + v.domain.id : "без активных участников"}` }, devices);
+    g.style.setProperty("--vlan-color", l2Color(v.vlan));
+    el("rect", { x: -56, y: -30, width: 112, height: 60, rx: 12 }, g);
+    el("circle", { cx: -38, cy: -8, r: 5, class: "vmark" }, g);
+    el("text", { x: -27, y: -4, class: "vtitle" }, g).textContent = `VLAN ${v.vlan}`;
+    el("text", { x: -43, y: 18, class: "vsub" }, g).textContent = v.domain ? `${v.domain.id} · ${v.domain.members.length} участн.` : "нет связи";
+    const mac = el("g", { class: "l2-mac-ear", "data-virtual": v.id, role: "button", tabindex: "0",
+      "aria-label": `${v.orig.name}: таблица MAC` }, g);
+    el("rect", { x: 19, y: -42, width: 40, height: 20, rx: 6 }, mac);
+    el("text", { x: 39, y: -28 }, mac).textContent = "MAC";
+    v.g = g;
+  });
+  if (old && old.virtual) insight.pinned = l2Model.virtuals.get(old.id) || null;
+  if (old && old.virtualLink) insight.pinned = l2Model.segments.find(s => s.id === old.id) || null;
+  if (insight && insight.layer === "l2") renderCanvasCard();
+}
+
 const canvasUi = $("canvasUi"), canvasHud = $("canvasHud"), canvasEars = $("canvasEars"), canvasCard = $("canvasCard");
-const insight = { layer: "l2", pinned: null, hover: null, panel: "ports", ears: [], hideTimer: null };
+const insight = { layer: "l1", pinned: null, hover: null, panel: "ports", ears: [], hideTimer: null };
 const layerHelp = {
   l1: "Физика · состояние линков и портов",
-  l2: "Коммутация · VLAN, транки и MAC",
+  l2: "Каждый VLAN коммутатора — отдельный L2-узел",
   l3: "Сеть · IP-адреса и соседства",
   l4: "Транспорт · источник фактов пока пуст"
 };
@@ -1889,7 +2149,7 @@ canvasUi.addEventListener("wheel", e => e.stopPropagation());
 function renderCanvasHud(){
   canvasHud.textContent = "";
   const w = Math.max(220, Math.min(370, wrap.clientWidth - 24)), x = 14;
-  el("rect", { x, y: 14, width: w, height: 100, rx: 17, class: "hud-bg" }, canvasHud);
+  el("rect", { x, y: 14, width: w, height: insight.layer === "l2" ? 153 : 100, rx: 17, class: "hud-bg" }, canvasHud);
   uiText(canvasHud, "hud-kicker", x + 15, 36, "ТОПОЛОГИЯ / ФАКТЫ");
   uiText(canvasHud, "hud-meta", x + w - (w < 340 ? 62 : 116), 36,
     w < 340 ? `${nodes.length} / ${links.length}` : `${nodes.length} УЗЛОВ · ${links.length} ЛИНКОВ`);
@@ -1904,12 +2164,30 @@ function renderCanvasHud(){
     b.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFactLayer(layer); } });
   });
   uiText(canvasHud, "hud-note", x + 15, 95, layerHelp[insight.layer]);
+  if (insight.layer === "l2") {
+    uiText(canvasHud, "hud-note", x + 15, 115, "Пунктирная рамка = один корпус, не L2-связь");
+    const vs = [...l2Model.virtuals.values()], tabW = (w - 36 - (vs.length - 1) * 4) / vs.length;
+    vs.forEach((v, i) => {
+      const tab = el("g", { class: "domain-jump", tabindex: "0", role: "button",
+        "aria-label": `Приблизить ${v.name}, домен ${v.domain ? v.domain.id : "неизвестен"}` }, canvasHud);
+      tab.style.setProperty("--vlan-color", l2Color(v.vlan));
+      const tx = x + 15 + i * (tabW + 4);
+      el("rect", { x: tx, y: 126, width: tabW, height: 27, rx: 7 }, tab);
+      uiText(tab, "", tx + tabW / 2, 139.5, `${v.orig.name}:${v.vlan}`);
+      tab.addEventListener("click", e => { e.stopPropagation(); zoomToNode(v, mobile ? 1.25 : Math.max(view.k, 1.4)); });
+      tab.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault(); zoomToNode(v, mobile ? 1.25 : Math.max(view.k, 1.4));
+      } });
+    });
+  }
 }
 function setFactLayer(layer){
+  const crossingL2 = layer !== insight.layer && (layer === "l2" || insight.layer === "l2");
+  if (crossingL2) { closeInsight(); select(null); selectLink(null); }
   insight.layer = layer;
   insight.panel = "ports";
   svg.dataset.factlayer = layer;
-  renderCanvasHud(); renderCanvasCard();
+  renderCanvasHud(); renderCanvasCard(); positionCanvasUi();
 }
 function renderCanvasEars(){
   canvasEars.textContent = ""; insight.ears = [];
@@ -1938,7 +2216,8 @@ function positionCanvasUi(){
     const p = toScreen(n.cx, n.cy), offset = Math.min(36, Math.max(21, 34 * view.k));
     const x = p.x + offset, y = p.y - 24 + index * 26;
     g.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-    g.style.display = x < -70 || x > w + 10 || y < 112 || y > h - 28 ? "none" : "";
+    g.style.display = (insight.layer === "l2" && n.cat === "switch") ||
+      x < -70 || x > w + 10 || y < (insight.layer === "l2" ? 170 : 112) || y > h - 28 ? "none" : "";
   });
   positionCanvasCard();
 }
@@ -1954,17 +2233,51 @@ function schedulePreviewClose(){
 }
 function pinInsight(item, panel){
   clearTimeout(insight.hideTimer);
-  if (panel === "mac") setFactLayer("l2");
+  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
   insight.pinned = item; insight.hover = null; insight.panel = panel;
-  if (item.isLink) selectLink(item); else select(item);
+  if (item.virtual || item.virtualLink) {
+    select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
+  } else if (item.isLink) selectLink(item); else select(item);
   renderCanvasCard();
 }
 function closeInsight(){
   clearTimeout(insight.hideTimer);
+  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
   insight.pinned = null; insight.hover = null; canvasCard.textContent = "";
 }
 function factCardData(item){
   const layer = insight.layer;
+  if (item.virtual) {
+    if (insight.panel === "mac") {
+      const table = item.orig.facts && item.orig.facts.mac_table;
+      return { kind: table ? "L2 / ТАБЛИЦА КОММУТАЦИИ" : "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ",
+        title: item.orig.name, sub: `Выбран VLAN ${item.vlan}`,
+        heads: ["VLAN", "MAC", "ПОРТ"],
+        rows: table ? (table.entries || []).filter(e => Number(e.vlan) === item.vlan).slice(0, 6)
+          .map(e => [e.vlan, e.mac, e.iface]) : (exampleMac[item.orig.name] || []).filter(r => Number(r[0]) === item.vlan),
+        empty: table ? "В этом VLAN нет выученных MAC." : "Пример MAC-записей для VLAN не задан.",
+        foot: table ? table.truncated ? "Таблица неполная: коллектор прервал чтение." : "Выученные адреса из снимка фактов." :
+          "Учебные записи: в снимке фактов MAC-таблицы нет." };
+    }
+    const d = item.domain, people = d ? d.members : [];
+    return { kind: "L2 / ШИРОКОВЕЩАТЕЛЬНЫЙ ДОМЕН", title: item.name,
+      sub: d ? `${d.id} · VLAN ${d.vlans.join(" + ")} · ${people.length} участника` : "Нет активных участников",
+      heads: ["УЗЕЛ", "ИНТЕРФЕЙС", "IPV4"],
+      rows: people.slice(0, 6).map(m => [m.node.name, m.iface.name, (m.iface.ipv4 || []).join(" ") || "—"]),
+      empty: "Этот VLAN сейчас ни с кем не связан.",
+      foot: d && d.vlans.length > 1 ? "Внимание: разные VLAN склеены одним L2-доменом." :
+        "Связь рассчитана по тегам, портам и состоянию линков." };
+  }
+  if (item.virtualLink) {
+    const [a, b] = item.link.ends;
+    return { kind: "L2 / ЛОГИЧЕСКОЕ СОЕДИНЕНИЕ", title: `${a.node.name} ↔ ${b.node.name}`,
+      sub: `${item.domain ? item.domain.id + " · " : ""}${item.vlan == null ? "без VLAN" : "VLAN " + item.vlan} · ${item.active ? "проходит" : "не проходит"}`,
+      heads: ["УЗЕЛ", "ИНТЕРФЕЙС", "ТЕГ"],
+      rows: [[a.node.name, item.aname, item.tag === "u" ? "без тега" : item.tag],
+        [b.node.name, item.bname, item.tag === "u" ? "без тега" : item.tag]],
+      foot: item.unknown ? "Нет фактов о втором конце; домен не установлен." :
+        item.active ? "Оба конца принимают этот кадр на проводе." : "Линк или один из портов не работает." };
+  }
   if (item.isLink) {
     const [a, b] = item.ends, ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
     const base = { kind: `${layer.toUpperCase()} / СОЕДИНЕНИЕ`, title: a.node.name + " ↔ " + b.node.name,
@@ -1982,10 +2295,15 @@ function factCardData(item){
   const f = item.facts || {}, ints = f.interfaces || [];
   const base = { kind: `${layer.toUpperCase()} / ${CAT[item.cat].toUpperCase()}`, title: item.name,
     sub: `${STATUS[item.status]} · ${ints.length} интерфейсов` };
-  if (insight.panel === "mac" && item.cat === "switch") return { ...base,
-    kind: "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ", heads: ["VLAN", "MAC", "ПОРТ"],
-    rows: exampleMac[item.name] || [], empty: "Пример MAC-записей для этого узла не задан.",
-    foot: "Учебные записи: в снимке фактов MAC-таблицы нет." };
+  if (insight.panel === "mac" && item.cat === "switch") {
+    const table = f.mac_table;
+    return { ...base, kind: table ? "L2 / ТАБЛИЦА КОММУТАЦИИ" : "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ",
+      heads: ["VLAN", "MAC", "ПОРТ"],
+      rows: table ? (table.entries || []).slice(0, 6).map(e => [e.vlan, e.mac, e.iface]) : exampleMac[item.name] || [],
+      empty: table ? "Коммутатор ещё не выучил MAC-адреса." : "Пример MAC-записей для этого узла не задан.",
+      foot: table ? table.truncated ? "Таблица неполная: коллектор прервал чтение." : "Выученные адреса из снимка фактов." :
+        "Учебные записи: в снимке фактов MAC-таблицы нет." };
+  }
   if (layer === "l1") return { ...base, heads: ["ПОРТ", "АДМИН", "ЛИНК"],
     rows: ints.filter(i => i.port).slice(0, 6).map(i => [i.name, i.admin || "—", i.oper || "—"]),
     empty: "Нет данных о физических портах.", foot: "Состояния получены из снимка фактов." };
@@ -2020,7 +2338,7 @@ function renderCanvasCard(){
     close.addEventListener("click", e => { e.stopPropagation(); closeInsight(); select(null); selectLink(null); });
     close.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); closeInsight(); } });
   } else card.style.pointerEvents = "none";
-  const xs = [17, Math.round(w * .39), Math.round(w * .72)];
+  const xs = [17, Math.round(w * .37), Math.round(w * .68)];
   if (rows.length) {
     data.heads.forEach((v, i) => uiText(card, "colhead", xs[i], 119, v));
     rows.forEach((row, r) => {
@@ -2040,21 +2358,31 @@ function positionCanvasCard(){
   const c = insight.cardShape, item = insight.pinned || insight.hover;
   if (!c || c.item !== item || !item) return;
   const p = toScreen(item.cx, item.cy), ww = wrap.clientWidth, wh = wrap.clientHeight;
-  const x = p.x + c.w + 44 < ww ? p.x + 42 : p.x - c.w - 42 > 4 ? p.x - c.w - 42 : clamp(p.x - c.w / 2, 10, Math.max(10, ww - c.w - 10));
-  const y = clamp(p.y - 54, 120, Math.max(120, wh - c.h - 12));
+  const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : p.x - c.w / 2;
+  const x = clamp(rawX, 10, Math.max(10, ww - c.w - 10));
+  const vertical = ww < 600;
+  const wantedY = vertical ? p.y + c.h + 72 < wh ? p.y + 62 : p.y - c.h - 62 : p.y - 54;
+  const y = clamp(wantedY, 120, Math.max(120, wh - c.h - 12));
   c.card.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
   c.lead.setAttribute("x1", p.x); c.lead.setAttribute("y1", p.y);
   c.lead.setAttribute("x2", clamp(p.x, x, x + c.w)); c.lead.setAttribute("y2", clamp(p.y, y, y + c.h));
   c.anchor.setAttribute("cx", p.x); c.anchor.setAttribute("cy", p.y);
 }
 svg.addEventListener("pointerover", e => {
+  const mac = e.target.closest && e.target.closest(".l2-mac-ear");
+  if (mac) { previewInsight(l2Model.virtuals.get(mac.dataset.virtual), "mac"); return; }
+  const virtual = e.target.closest && e.target.closest(".l2-virtual");
+  const segment = e.target.closest && e.target.closest(".l2-path");
+  if (virtual) { previewInsight(l2Model.virtuals.get(virtual.dataset.virtual), "ports"); return; }
+  if (segment) { previewInsight(l2Model.segments.find(s => s.id === segment.dataset.segment), "ports"); return; }
   const n = e.target.closest && e.target.closest(".node");
   const l = !n && e.target.closest && e.target.closest(".link");
   if (n) previewInsight(byId.get(n.dataset.id), "ports");
   else if (l) previewInsight(linkById.get(l.dataset.id), "ports");
 });
 svg.addEventListener("pointerout", e => {
-  if (e.target.closest && (e.target.closest(".node") || e.target.closest(".link"))) schedulePreviewClose();
+  if (e.target.closest && (e.target.closest(".node") || e.target.closest(".link") ||
+    e.target.closest(".l2-virtual") || e.target.closest(".l2-path"))) schedulePreviewClose();
 });
 document.addEventListener("keydown", e => {
   if (e.altKey && /^[1-4]$/.test(e.key)) setFactLayer("l" + e.key);
@@ -2062,7 +2390,7 @@ document.addEventListener("keydown", e => {
 
 /* ---------------- start ---------------- */
 $("labTitle").textContent = GNS3.name;
-renderDrawings(); renderLinks(); renderNodes();
+renderDrawings(); renderLinks(); renderNodes(); renderCanvasL2();
 renderCanvasHud(); renderCanvasEars(); setFactLayer(insight.layer);
 fontsReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
 layout();
