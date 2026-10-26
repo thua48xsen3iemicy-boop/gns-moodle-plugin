@@ -137,6 +137,15 @@ function layerHead(eyebrow, title, lead){
     <h3>Проблемы <span class="count">${list.length}</span></h3>${issuesHTML(list, "Проблем на этом слое не найдено.")}`;
 }
 const nodeName = idv => esc((st.model.nodes.get(idv) || {}).name || "?");
+/* the modes seen and fog: the name of a port is shown only where the interface is uncovered */
+const portText = e => stage.endShown(e) ? e.text : "?";
+/* the group of data a layer shows, and whether the student has not uncovered it on this node yet */
+const LAYER_GROUP = { l1: "l1", l2: "l2", l3: "l3", rt: "routes" };
+const groupClosed = (n, layer) => {
+  const v = stage.reveal, open = v && v.groups.get(n.id);
+  return !!v && !(open && open.has(LAYER_GROUP[layer]));
+};
+const unexplored = () => `<p class="note unexplored">${esc(strings.ui_fog_unexplored)}</p>`;
 function l2SummaryHTML(){
   const D = st.der.l2, doms = D.domains.filter(d => d.shown).sort((a, b) => (b.vlans.length > 0) - (a.vlans.length > 0) || (a.vlans[0] || 0) - (b.vlans[0] || 0));
   const rows = doms.map(d => `<li><button class="rowbtn" type="button" data-goto-vlan="${d.id}"><span class="sw" style="background:${d.vlans.length ? vc(d.vlans[0]) : "var(--wire)"}"></span><span>${esc(d.label)} <small>${esc(d.where)}</small></span><small>${d.members.length} ${plural(d.members.length, ["участник", "участника", "участников"])}</small></button></li>`).join("");
@@ -157,11 +166,12 @@ function rtSummaryHTML(){
     <h3>Соседства <span class="count">${R.edges.filter(e => !e.miss).length}</span></h3><ul class="list">${rows}</ul>`;
 }
 function summaryHTML(){
-  const m = st.model, counts = {};
-  m.nodes.forEach(n => { const c = n.cat; counts[c] = (counts[c] || 0) + 1; });
+  const m = st.model, counts = {}, named = [...m.nodes.values()].filter(n => n.state !== "silhouette");
+  const unknown = m.nodes.size - named.length;
+  named.forEach(n => { const c = n.cat; counts[c] = (counts[c] || 0) + 1; });
   const order = ["router", "switch", "firewall", "hypervisor", "server", "pc", "cloud"];
   const kv = order.filter(c => counts[c]).map(c => `<dt>${CAT_NAME[c][1]}</dt><dd class="mono">${counts[c]}</dd>`).join("");
-  const nodes = [...m.nodes.values()].sort((a, b) => natSort(a.name, b.name));
+  const nodes = named.sort((a, b) => natSort(a.name, b.name));
   const rows = nodes.map(n => { const s = nodeStatus(n);
     return `<li><button class="rowbtn" type="button" data-goto-node="${esc(n.id)}"><span class="sdot ${s || ""}"></span><span>${esc(n.name)}</span><small>${esc(typeName(n.type))}</small></button></li>`; }).join("");
   const susp = m.links.filter(l => l.suspend).length, filt = m.links.filter(l => fmtFilters(l.filters).length).length;
@@ -169,24 +179,34 @@ function summaryHTML(){
     <div><p class="eyebrow">Обзор</p><h2>Состав лабы</h2></div>
     <p class="glead">Нажмите на устройство или линк, чтобы увидеть порты, соседей и параметры. Схема только для просмотра: здесь ничего нельзя сдвинуть или удалить.</p>
     ${st.der ? `${st.live ? "" : `<p class="glead">Слои L2, L3 и OSPF строятся из того, как устройства реально настроены. Переключите конфиг на «с ошибками», чтобы увидеть, как ошибки выглядят на схеме.</p>`}${factsLine()}<h3>Проблемы L1 <span class="count">${st.der.l1.issues.length}</span></h3>${issuesHTML(st.der.l1.issues, "Все линки работают.")}` : st.live ? factsLine() : ""}
-    <dl class="kv">${kv}<dt>Линки</dt><dd class="mono">${m.links.length}${susp ? ` · ${susp} приост.` : ""}${filt ? ` · ${filt} с фильтрами` : ""}</dd></dl>
+    <dl class="kv">${kv}${unknown ? `<dt>${esc(strings.ui_fog_unknown_count)}</dt><dd class="mono">${unknown}</dd>` : ""}<dt>Линки</dt><dd class="mono">${m.links.length}${susp ? ` · ${susp} приост.` : ""}${filt ? ` · ${filt} с фильтрами` : ""}</dd></dl>
     <div class="legend">
       <span><i class="wirekey"></i>линк</span><span><i class="wirekey d"></i>приостановлен</span>
       ${st.statusOn ? `<span><i class="sdot started"></i>запущено</span><span><i class="sdot stopped"></i>остановлено</span><span><i class="sdot suspended"></i>пауза</span>` : ""}
     </div>
-    <h3>Устройства <span class="count">${m.nodes.size}</span></h3>
+    <h3>Устройства <span class="count">${nodes.length}</span></h3>
     <ul class="list">${rows}</ul>`;
 }
+/* a device the student has not explored: no name, no kind, nothing but the way to its console */
+function silhouetteHTML(n){
+  const hasConsole = n.consoleType && n.consoleType !== "none";
+  return `
+    <div class="ph"><div><p class="eyebrow">${esc(strings.ui_fog_unknown)}</p><h2>${esc(n.name)}</h2></div></div>
+    <p class="glead">${esc(strings.ui_fog_unknown_note)}</p>
+    ${hasConsole ? `<div><button class="gbtn primary" type="button" data-act="console" data-node="${esc(n.id)}">${esc(strings.ui_open_console)}</button></div>` : ""}`;
+}
 function nodeHTML(n){
-  const m = st.model, p = n.props || {}, c = n.cat;
+  if (n.state === "silhouette") return silhouetteHTML(n);
+  const m = st.model, p = n.props || {}, c = n.cat, found = n.state === "known";
   const kv = [];
   const image = p.hda_disk_image || p.path || p.image || p.cdrom_image;
-  if (image) kv.push(["Образ", `<span class="mono">${esc(image)}</span>`]);
-  if (p.ram) kv.push(["RAM", `${esc(p.ram)} МБ`]);
-  if (p.cpus) kv.push(["vCPU", esc(p.cpus)]);
+  // A device that was only found by a cable is known by name and kind: what it is made of is not told yet.
+  if (image && !found) kv.push(["Образ", `<span class="mono">${esc(image)}</span>`]);
+  if (p.ram && !found) kv.push(["RAM", `${esc(p.ram)} МБ`]);
+  if (p.cpus && !found) kv.push(["vCPU", esc(p.cpus)]);
   const ad = p.adapters != null ? p.adapters : p.ethernet_adapters;
-  if (ad != null) kv.push(["Адаптеры", esc(ad) + (p.adapter_type ? ` · <span class="mono">${esc(p.adapter_type)}</span>` : "")]);
-  if (p.options) kv.push(["Опции QEMU", `<span class="mono">${esc(p.options)}</span>`]);
+  if (ad != null && !found) kv.push(["Адаптеры", esc(ad) + (p.adapter_type ? ` · <span class="mono">${esc(p.adapter_type)}</span>` : "")]);
+  if (p.options && !found) kv.push(["Опции QEMU", `<span class="mono">${esc(p.options)}</span>`]);
   if (c === "hypervisor") kv.push(["Вложенная VM", "нужна: <span class=\"mono\">-cpu host</span> и nested KVM на хосте"]);
   if (n.type === "nat") kv.push(["Назначение", "Выход в сеть хоста через NAT"]);
   if (n.type === "cloud") kv.push(["Назначение", "Мост на интерфейс хоста"]);
@@ -196,13 +216,13 @@ function nodeHTML(n){
   m.links.forEach(l => {
     const mine = l.a.nodeId === n.id ? l.a : l.b.nodeId === n.id ? l.b : null; if (!mine) return;
     const other = mine === l.a ? l.b : l.a, peer = m.nodes.get(other.nodeId);
-    ifs.push({ l, port: mine.text, peer: peer ? peer.name : "?", peerPort: other.text });
+    ifs.push({ l, port: portText(mine), peer: peer ? peer.name : "?", peerPort: portText(other) });
   });
   ifs.sort((a, b) => natSort(a.port, b.port));
   const ifRows = ifs.map(r => `<tr data-goto-link="${esc(r.l.id)}" tabindex="0"><td class="mono">${esc(r.port)}</td><td>${esc(r.peer)} <span class="mono peer">${esc(r.peerPort)}</span>${r.l.suspend ? ` <span class="count">приост.</span>` : ""}${fmtFilters(r.l.filters).length ? ` <span class="count">фильтр</span>` : ""}</td></tr>`).join("");
 
   let vlan = "";
-  if (Array.isArray(p.ports_mapping) && p.ports_mapping.length) {
+  if (Array.isArray(p.ports_mapping) && p.ports_mapping.length && !stage.reveal) {
     vlan = `<h3>Порты и VLAN</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Режим</th><th>VLAN</th></tr></thead><tbody>${
       p.ports_mapping.map(x => `<tr><td class="mono">${esc(x.name)}</td><td>${x.type === "dot1q" ? "trunk (dot1q)" : x.type === "qinq" ? "QinQ" : "access"}</td><td class="mono">${esc(x.vlan)}${x.type === "dot1q" ? " native" : ""}</td></tr>`).join("")}</tbody></table></div>`;
   }
@@ -221,17 +241,19 @@ function nodeHTML(n){
     }
   }
   const hasConsole = n.consoleType && n.consoleType !== "none";
-  const layered = st.der && st.layer !== "l1", ferr = factsErrorHTML(n), macs = macTableHTML(n);
+  const layered = st.der && st.layer !== "l1", ferr = factsErrorHTML(n), macs = stage.reveal ? "" : macTableHTML(n);
   return `
     <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div></div>
     ${statusLine(n)}
+    ${found ? `<p class="glead">${esc(hasConsole ? strings.ui_fog_found_note : strings.ui_fog_found_noconsole)}</p>` : ""}
     ${seenHTML(n)}
     ${ferr}
-    ${layered ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
+    ${layered && !found ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
     ${macs ? (ferr ? `<div class="fstale">${macs}</div>` : macs) : ""}
     <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${layered ? "" : `<h3>Интерфейсы <span class="count">${ifs.length}</span></h3>
-    ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="glead">Ни один порт не подключён.</p>`}
+    ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="glead">${esc(stage.reveal ? strings.ui_fog_no_cables : "Ни один порт не подключён.")}</p>`}
+    ${stage.reveal && groupClosed(n, "l1") ? unexplored() : ""}
     ${vlan}`}
     ${guests}
     ${hasConsole ? `<div><button class="gbtn primary" type="button" data-act="console" data-node="${esc(n.id)}">${esc(strings.ui_open_console)}</button></div>` : ""}
@@ -240,7 +262,7 @@ function nodeHTML(n){
 function linkHTML(l){
   const m = st.model, A = m.nodes.get(l.a.nodeId), B = m.nodes.get(l.b.nodeId);
   const fl = fmtFilters(l.filters);
-  const card = (N, end) => `<button class="endcard" type="button" data-goto-node="${esc(N.id)}"><b>${esc(N.name)}</b><span class="mono peer">${esc(end.text)}</span></button>`;
+  const card = (N, end) => `<button class="endcard" type="button" data-goto-node="${esc(N.id)}"><b>${esc(N.name)}</b><span class="mono peer">${esc(portText(end))}</span></button>`;
   return `
     <div class="ph"><div><p class="eyebrow">Линк · ${esc(l.type)}</p><h2>${esc(A.name)} ↔ ${esc(B.name)}</h2></div></div>
     <div class="ends">${card(A, l.a)}${card(B, l.b)}</div>
@@ -273,7 +295,7 @@ function modeText(f, i){
 }
 function linkL2HTML(l){
   const r = st.der.l2.links.get(l.id), fx = st.fx, m = st.model;
-  const row = (e, i) => `<tr><td>${esc(m.nodes.get(e.nodeId).name)} <span class="mono peer">${esc(i ? i.name : e.text)}</span></td><td class="mono">${esc(modeText(fx.nodes.get(e.nodeId), i))}${seenMark(i, "switchport", "admin", "oper")}</td></tr>`;
+  const row = (e, i) => `<tr><td>${esc(m.nodes.get(e.nodeId).name)} <span class="mono peer">${esc(stage.endShown(e) ? (i ? i.name : e.text) : "?")}</span></td><td class="mono">${esc(modeText(fx.nodes.get(e.nodeId), i))}${seenMark(i, "switchport", "admin", "oper")}</td></tr>`;
   const pass = !r.known ? "нет фактов об одном из портов" : st.der.l1.links.get(l.id).down ? "ничего — линк не работает"
     : r.tags.length ? (r.vlans.length ? r.vlans.map(v => `<span class="tag" style="border-left:3px solid ${vc(v)}">VLAN ${v}</span>`).join(" ") : "кадры без тега (точка-точка)") : `<span class="tag bad">ничего</span>`;
   return `<h3>L2 на концах</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Настройка</th></tr></thead><tbody>${row(l.a, r.ia)}${row(l.b, r.ib)}</tbody></table></div>
@@ -293,6 +315,7 @@ function macTableHTML(n){
 /* раздел ноды для текущего слоя */
 function nodeLayerHTML(n){
   const f = st.fx.nodes.get(n.id), L = st.layer, D = st.der;
+  if (groupClosed(n, L)) return unexplored();
   if (!f || !f.ifs) return `<p class="note">Фактов об интерфейсах нет${f && NODE_OFF[f.status] ? ` — узел ${NODE_OFF[f.status]}, бэкенд не может его опросить` : ""}.</p>`;
   const nodeIssues = layerIssues().filter(x => x.text.includes(n.name + " ") || (x.go && x.go.kind === "node" && x.go.id === n.id));
   const iss = nodeIssues.length ? issuesHTML(nodeIssues, "") : "";

@@ -58,6 +58,9 @@
                     {{#previewerror}}
                     <span class="demo bad" title="{{#str}}previewerror, mod_gns3lab{{/str}}">{{#str}}ui_preview_error_tag, mod_gns3lab{{/str}}</span>
                     {{/previewerror}}
+                    {{#modetag}}
+                    <span class="demo" title="{{modehelp}}">{{modetag}}</span>
+                    {{/modetag}}
                     {{#cancontrol}}
                     <span class="cmsg" data-region="message" role="alert" hidden></span>
                     {{/cancontrol}}
@@ -70,6 +73,7 @@
                 <button type="button" data-mode="grid" aria-pressed="false" title="{{#str}}ui_mode_grid_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1"/><rect x="9" y="9" width="5.5" height="5.5" rx="1"/></svg><span class="wide">{{#str}}ui_mode_grid, mod_gns3lab{{/str}}</span></button>
                 <button type="button" data-mode="windows" aria-pressed="false" title="{{#str}}ui_mode_windows_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="9" height="7" rx="1"/><rect x="5.5" y="7.5" width="9" height="7" rx="1"/></svg><span class="wide">{{#str}}ui_mode_windows, mod_gns3lab{{/str}}</span></button>
             </div>
+            <button class="btn" type="button" data-region="asStudent" aria-pressed="false" hidden title="{{#str}}ui_as_student_help, mod_gns3lab{{/str}}">{{#str}}ui_as_student, mod_gns3lab{{/str}}</button>
             <button class="btn" type="button" data-region="helpBtn" title="{{#str}}ui_help_help, mod_gns3lab{{/str}}">?<span class="wide">{{#str}}ui_help, mod_gns3lab{{/str}}</span></button>
             {{#cancontrol}}
             <button class="btn primary" type="button" data-region="start" hidden>{{#str}}startlab, mod_gns3lab{{/str}}</button>

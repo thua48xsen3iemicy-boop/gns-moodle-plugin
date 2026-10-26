@@ -455,6 +455,8 @@ class Con {
 
     setState(state) {
         this.state = state;
+        // The first picture of a screen is all the output there is (docs/lab-constructor/README.md §2.2).
+        if (state === 'open' && this.vnc) this.owner.onScreen(this.n.id);
         this.owner.paintState(this);
         this.host.querySelector('.creconnect')?.remove();
         if (state === 'failed' || state === 'stopped') {
@@ -582,8 +584,9 @@ export class Consoles {
      * @param {Function} options.nodeStatus async nodeId => {status, stale} from a fresh session state
      * @param {Function} options.toast shows a short message
      * @param {Function} [options.onSeen] called with {nodeId, kind, command, lines, partial} for a command seen in a console
+     * @param {Function} [options.onScreen] called with the node id when the screen of a node answers (a fog opens the node)
      */
-    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}}) {
+    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}}) {
         this.root = root;
         this.stage = stage;
         this.strings = strings;
@@ -593,6 +596,7 @@ export class Consoles {
         this.nodeStatus = nodeStatus;
         this.toast = toast;
         this.onSeen = onSeen;
+        this.onScreen = onScreen;
         this.xterm = null;
         this.RFB = null;
         this.cons = new Map();
@@ -739,6 +743,7 @@ export class Consoles {
         let c = this.cons.get(node.id);
         if (!c) {
             c = new Con(this, node);
+            c.titled = node.name;
             this.cons.set(node.id, c);
         }
         this.active = node.id;
@@ -788,6 +793,26 @@ export class Consoles {
         this.cons.forEach((c, id) => {
             if (c.conn) c.conn.nodeChanged(statuses.get(id) || null);
         });
+    }
+
+    /**
+     * The scheme uncovered a device whose console is open: tabs, tiles and chips show its name now, not the question mark.
+     */
+    refreshNames() {
+        const base = this.stage.base;
+        let changed = false;
+        this.cons.forEach((c, id) => {
+            // The scheme is loaded again now and then: the node of a console is a new object then.
+            const fresh = base && base.nodes.get(id);
+            if (fresh) c.n = fresh;
+            if (c.titled !== c.n.name) {
+                c.titled = c.n.name;
+                changed = true;
+            }
+        });
+        if (!changed) return;
+        if (this.stage.mobile) this.renderTabsAndChips();
+        else this.layout();
     }
 
     /* ---------------- state of a console on the screen ---------------- */
@@ -862,7 +887,8 @@ export class Consoles {
     }
 
     headHtml(c, buttons) {
-        return `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span><span class="nm">${esc(c.n.name)}<small>${esc(this.s('ui_cat_' + c.n.cat).toLowerCase())}</small></span>`
+        const kind = c.n.state === 'silhouette' ? this.s('ui_fog_unknown') : this.s('ui_cat_' + c.n.cat);
+        return `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span><span class="nm">${esc(c.n.name)}<small>${esc(kind.toLowerCase())}</small></span>`
             + `${c.unread ? `<span class="unr" title="${esc(this.s('ui_new_output'))}"></span>` : ''}${buttons}`;
     }
 

@@ -18,7 +18,8 @@
     @template mod_gns3lab/icons
 
     Device icons of the topology viewer and the lab editor: SVG symbols for a <defs> element.
-    Symbol ids are {{uniqid}}-ico-<category>: router, switch, pc, server, cloud, firewall, hypervisor.
+    Symbol ids are {{uniqid}}-ico-<category>: router, switch, pc, server, cloud, firewall, hypervisor, and unknown (a device
+    that a fog has not uncovered).
 
     Example context (json):
     {}
@@ -48,6 +49,10 @@
 <symbol id="{{uniqid}}-ico-firewall" viewBox="0 0 48 48">
 <rect style="fill:var(--ico)" x="5" y="9" width="38" height="30" rx="2.5"/>
 <path style="fill:none;stroke:var(--ico-glyph);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round" d="M5 19h38M5 29h38M18 9v10M30 9v10M12 19v10M24 19v10M36 19v10M18 29v10M30 29v10"/>
+</symbol>
+<symbol id="{{uniqid}}-ico-unknown" viewBox="0 0 48 48">
+<circle style="fill:var(--ico)" cx="24" cy="24" r="20" opacity=".55"/>
+<path style="fill:none;stroke:var(--ico-glyph);stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round" d="M18.5 19a5.5 5.5 0 1 1 8.2 4.8c-1.6.9-2.7 2-2.7 4.2M24 33.5v.5"/>
 </symbol>
 <symbol id="{{uniqid}}-ico-hypervisor" viewBox="0 0 48 48">
 <rect style="fill:var(--ico)" x="4" y="7" width="40" height="34" rx="4"/>

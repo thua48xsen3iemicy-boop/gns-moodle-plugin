@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/gns3lab/db" VERSION="20261019" COMMENT="XMLDB file for Moodle mod_gns3lab"
+<XMLDB PATH="mod/gns3lab/db" VERSION="20261027" COMMENT="XMLDB file for Moodle mod_gns3lab"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
 >
@@ -14,6 +14,8 @@
         <FIELD NAME="labref" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Reference lab on the manager (lab_ref); empty means demo topology"/>
         <FIELD NAME="maxduration" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Session limit in minutes, 0 means the manager default"/>
         <FIELD NAME="labversionid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Published lab version from the site lab library; 0 means labref is used"/>
+        <FIELD NAME="factsview" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="live" SEQUENCE="false" COMMENT="What the scheme shows a student: live, seen or fog"/>
+        <FIELD NAME="fogstart" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Names of the nodes a fog starts from as a JSON list; empty means every node is a silhouette"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
@@ -62,6 +64,25 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="labid_version" UNIQUE="true" FIELDS="labid, version"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="gns3lab_reveal" COMMENT="What a student has uncovered on the scheme in the seen and fog modes: identifiers and names only, no values">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="gns3labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Activity"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Owner of the lab"/>
+        <FIELD NAME="nodeid" TYPE="char" LENGTH="64" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Node of the live project; empty for a link"/>
+        <FIELD NAME="kind" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="node, known, iface, group or link"/>
+        <FIELD NAME="item" TYPE="char" LENGTH="100" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Interface name, data group (l1, l2, l3, routes) or link id; empty for node and known"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="gns3labid" TYPE="foreign" FIELDS="gns3labid" REFTABLE="gns3lab" REFFIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="uniqueitem" UNIQUE="true" FIELDS="gns3labid, userid, nodeid, kind, item"/>
       </INDEXES>
     </TABLE>
   </TABLES>

@@ -22,6 +22,7 @@ use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
+use mod_gns3lab\local\reveal;
 use mod_gns3lab\local\session_data;
 
 /**
@@ -33,6 +34,9 @@ use mod_gns3lab\local\session_data;
  * A node with a graphical console (console_type vnc) has no read-only mode: its screen belongs to the owner of the
  * lab. An observer gets no ticket for it, and Moodle does not even ask the manager (which would refuse too:
  * 403 console_disabled).
+ *
+ * In a fog that starts from named nodes a student gets no ticket for a node they have not found yet (the mask of
+ * mod_gns3lab_reveal, docs/lab-constructor/README.md §2.2). An observer sees everything.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -79,6 +83,9 @@ class get_console_ticket extends external_api {
         // The manager checks the node too, but the plugin does it first.
         if (!session_data::has_node($session, $nodeid)) {
             throw new \moodle_exception('nodenotinsession', 'gns3lab');
+        }
+        if (!$readonly && !reveal::console_allowed($access->instance, $userid, $session, $nodeid)) {
+            throw new \moodle_exception('nodenotfound', 'gns3lab');
         }
         $type = session_data::console_type($session, $nodeid);
         if ($type === 'vnc') {
