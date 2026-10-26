@@ -110,6 +110,18 @@ class FakeAgent:
         return line({"return": {}})
 
 
+def test_exec_arguments_pick_the_shell_of_the_guest():
+    assert qga.exec_arguments("sh", "ip -j addr") == {
+        "path": "/bin/sh", "arg": ["-c", "ip -j addr"], "capture-output": True,
+    }
+    script = "Get-NetAdapter | ConvertTo-Json  # \u041f\u0440\u0438\u0432\u0435\u0442"
+    args = qga.exec_arguments("powershell", script)
+    assert args["path"].lower().endswith("\\powershell.exe") and args["capture-output"] is True
+    assert args["arg"][:3] == ["-NoProfile", "-NonInteractive", "-EncodedCommand"]
+    assert base64.b64decode(args["arg"][3]).decode("utf-16-le") == script  # what -EncodedCommand expects
+    with pytest.raises(ValueError):
+        qga.exec_arguments("cmd", "dir")
+
 @pytest.fixture
 def sockdir():
     # AF_UNIX paths are short; keep them out of long pytest temp directories.
@@ -325,6 +337,21 @@ def test_max_age_shares_one_execution(sockdir):
 
     run(scenario, sockdir)
 
+
+def test_powershell_runs_the_encoded_script_and_has_its_own_cache(sockdir):
+    async def scenario(agent, broker):
+        script = "Get-NetAdapter"
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+        result = await broker.exec("n1", script, shell="powershell", max_age=5)
+        assert result["stdout"] == "ok:" + encoded  # the agent got the encoded script as the last argument
+        # The same text for another shell is another command: it neither hits the cache nor joins the flight.
+        assert (await broker.exec("n1", script, max_age=5))["stdout"] == "ok:" + script
+        await broker.exec("n1", script, shell="powershell", max_age=5)
+        assert agent.execs(encoded) == 1 and agent.execs(script) == 1
+        with pytest.raises(ValueError):
+            await broker.exec("n1", script, shell="cmd")
+
+    run(scenario, sockdir)
 
 def test_cancelled_caller_is_not_sent_to_the_guest(sockdir):
     async def scenario(agent, broker):

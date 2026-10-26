@@ -1,4 +1,4 @@
-"""Guest facts: the linux.net and switch.net collectors, background collection and the /facts routes."""
+"""Guest facts: the linux.net, switch.net and windows.net collectors, background collection and the /facts routes."""
 
 import asyncio
 import json
@@ -15,11 +15,14 @@ from api.facts import (
     COLLECTORS,
     LINUX_NET_COMMAND,
     SWITCH_NET_COMMAND,
+    WINDOWS_NET_COMMAND,
     Facts,
     FactError,
     adapter_macs,
+    guest_is_windows,
     parse_linux_net,
     parse_switch_net,
+    parse_windows_net,
 )
 from api.qga import Priority, QgaBusy, QgaCommandError, QgaTimeout, QgaUnavailable
 
@@ -353,23 +356,42 @@ def test_the_switch_command_hands_over_an_error_envelope(tmp_path):
 NOT_A_SWITCH = {"exit_code": 127, "stdout": "", "stderr": ""}  # no switchctl in the guest
 
 
-class FakeQga:
-    """`reply` answers the linux.net command, `switch_reply` the switch.net one (an ordinary host by default)."""
+DEBIAN = {"id": "debian", "name": "Debian GNU/Linux", "kernel-release": "6.1.0"}
+WINDOWS = {"id": "mswindows", "name": "Microsoft Windows", "version": "Microsoft Windows 10 Pro"}
 
-    def __init__(self, reply, switch_reply=NOT_A_SWITCH):
+
+class FakeQga:
+    """`reply` answers the linux.net command, `switch_reply` the switch.net one (an ordinary host by default).
+
+    `osinfo` is what `guest-get-osinfo` returns (or raises): a Debian guest unless a test says otherwise.
+    """
+
+    def __init__(self, reply, switch_reply=NOT_A_SWITCH, osinfo=DEBIAN):
         self.reply = reply
         self.switch_reply = switch_reply
+        self.osinfo = osinfo
+        self.windows_reply = None
         self.switch_by_node = {}  # node_id -> reply: a lab with a switch next to ordinary hosts
-        self.calls = []
+        self.calls = []  # exec only
+        self.osinfo_calls = []
 
     def asked(self, command):
         return [call for call in self.calls if call[1] == command]
+
+    async def call(self, node_id, command, args=None, **options):
+        assert command == "guest-get-osinfo"
+        self.osinfo_calls.append((node_id, options))
+        if isinstance(self.osinfo, BaseException):
+            raise self.osinfo
+        return self.osinfo
 
     async def exec(self, node_id, command, **options):
         self.calls.append((node_id, command, options))
         reply = self.reply
         if command == SWITCH_NET_COMMAND:
             reply = self.switch_by_node.get(node_id, self.switch_reply)
+        if command == WINDOWS_NET_COMMAND:
+            reply = self.windows_reply
         if isinstance(reply, BaseException):
             raise reply
         return reply
@@ -506,11 +528,25 @@ def test_nothing_is_collected_until_ready(monkeypatch):
 
 def test_a_stopped_node_is_reported_without_touching_the_guest(monkeypatch):
     async def body(facts, lifecycle, labs):
+        await facts.cycle()  # while it runs the guest tells what it is
+        lifecycle.qga.calls.clear()
+        lifecycle.qga.osinfo_calls.clear()
         labs["p1"]["nodes"][0]["status"] = "stopped"
         await facts.cycle()
-        assert lifecycle.qga.calls == []
+        assert lifecycle.qga.calls == [] and lifecycle.qga.osinfo_calls == []
         assert collector_of(facts)["error"]["code"] == "stopped"
-        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]  # the role is unknown
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+
+    scenario(monkeypatch, body)
+
+
+def test_a_node_that_was_never_asked_says_nothing_while_stopped(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        labs["p1"]["nodes"][0]["status"] = "stopped"
+        await facts.cycle()
+        # Linux or Windows is unknown: a `stopped` under either name would stay as a stranger's record.
+        assert lifecycle.qga.calls == [] and lifecycle.qga.osinfo_calls == []
+        assert facts.snapshot("p1")["nodes"] == {}
 
     scenario(monkeypatch, body)
 
@@ -642,7 +678,10 @@ def test_failures_before_the_first_success_are_silent_unless_the_guest_answered(
         # so a record published now would stay as a stranger's error on an ordinary host.
         if isinstance(failure, BaseException) or failure is None:
             assert record is None and facts.absent == {("p1", "n1", "switch.net")}
-            assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]  # the host is still reported
+            if failure is None:  # never asked: it is not known what it is, so nothing is published
+                assert "n3" not in facts.snapshot("p1")["nodes"]
+            else:
+                assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]  # the host is still reported
         else:  # switchctl is there but does not answer properly: the owner has to see it
             assert record["ok"] is False and record["error"]["code"] == "failed" and record["error"]["message"]
             assert "data" not in record and "observed_at" not in record
@@ -785,8 +824,270 @@ def test_the_collectors_fail_independently(monkeypatch):
     scenario(monkeypatch, body)
 
 
+# --- windows.net -------------------------------------------------------------------------------
+
+
+def windows_document(**parts):
+    document = {
+        "adapters": [
+            {"Name": "Ethernet", "Index": 12, "Mac": "00-00-AB-CD-00-00", "Status": "Up"},
+            {"Name": "Ethernet 2", "Index": 8, "Mac": "00-00-AB-CD-00-01", "Status": "Disconnected"},
+            {"Name": "Ethernet 3", "Index": 15, "Mac": "52-54-00-12-34-56", "Status": "Disabled"},
+        ],
+        "addresses": [
+            {"Index": 12, "Ip": "10.0.12.20", "Prefix": 24, "State": "Preferred"},
+            {"Index": 12, "Ip": "10.0.12.2", "Prefix": 24, "State": "Preferred"},
+            {"Index": 8, "Ip": "169.254.10.1", "Prefix": 16, "State": "Tentative"},
+            {"Index": 15, "Ip": "10.9.9.9", "Prefix": 24, "State": "Duplicate"},
+            {"Index": 1, "Ip": "127.0.0.1", "Prefix": 8, "State": "Preferred"},  # the loopback is no adapter
+        ],
+        "routes": [
+            {"Index": 12, "Dst": "0.0.0.0/0", "Next": "10.0.12.254", "Metric": 281, "Proto": "NetMgmt"},
+            {"Index": 12, "Dst": "10.0.12.0/24", "Next": "0.0.0.0", "Metric": 281, "Proto": "Local"},
+            {"Index": 12, "Dst": "10.0.12.20/32", "Next": "0.0.0.0", "Metric": 281, "Proto": "Local"},
+            {"Index": 12, "Dst": "10.0.12.255/32", "Next": "0.0.0.0", "Metric": 281, "Proto": "Local"},
+            {"Index": 12, "Dst": "224.0.0.0/4", "Next": "0.0.0.0", "Metric": 281, "Proto": "Local"},
+            {"Index": 12, "Dst": "10.1.0.0/16", "Next": "10.0.12.3", "Metric": 291, "Proto": "NetMgmt"},
+            {"Index": 1, "Dst": "127.0.0.0/8", "Next": "0.0.0.0", "Metric": 331, "Proto": "Local"},
+        ],
+    }
+    document.update(parts)
+    return json.dumps(document)
+
+
+def windows_success():
+    return {"exit_code": 0, "stdout": windows_document(), "stderr": ""}
+
+
+def test_parse_windows_net_describes_interfaces_and_routes_like_linux_net():
+    data = parse_windows_net(windows_document(), MACS)
+    assert data["interfaces"] == [
+        {"name": "Ethernet 2", "kind": "physical", "admin": "up", "oper": "down", "mac": "00:00:ab:cd:00:01",
+         "port": {"adapter": 1, "port": 0}, "ipv4": ["169.254.10.1/16"]},
+        {"name": "Ethernet", "kind": "physical", "admin": "up", "oper": "up", "mac": "00:00:ab:cd:00:00",
+         "port": {"adapter": 0, "port": 0}, "ipv4": ["10.0.12.2/24", "10.0.12.20/24"], "gateway": "10.0.12.254"},
+        {"name": "Ethernet 3", "kind": "physical", "admin": "down", "oper": "down", "mac": "52:54:00:12:34:56",
+         "ipv4": []},  # no port: the MAC is not one of the adapters of the node; a duplicate address is not listed
+    ]
+    assert data["routes"] == [
+        {"dst": "10.0.12.0/24", "dev": "Ethernet", "proto": "local", "metric": 281},
+        {"dst": "10.1.0.0/16", "via": "10.0.12.3", "dev": "Ethernet", "proto": "netmgmt", "metric": 291},
+        {"dst": "default", "via": "10.0.12.254", "dev": "Ethernet", "proto": "netmgmt", "metric": 281},
+    ]
+
+
+@pytest.mark.parametrize(
+    "status, states",
+    [
+        ("Up", ("up", "up")),
+        ("Disconnected", ("up", "down")),  # no cable: the adapter is enabled, there is no carrier
+        ("Disabled", ("down", "down")),
+        ("Not Present", ("down", "down")),
+        ("Unknown", ("up", "down")),
+    ],
+)
+def test_windows_adapter_status_becomes_admin_and_oper(status, states):
+    adapter = {"Name": "Ethernet", "Index": 5, "Mac": "00-00-AB-CD-00-00", "Status": status}
+    (entry,) = parse_windows_net(windows_document(adapters=[adapter], addresses=[], routes=[]), MACS)["interfaces"]
+    assert (entry["admin"], entry["oper"]) == states
+
+
+def test_windows_lists_are_not_confused_with_single_objects_or_missing_data():
+    adapter = {"Name": "Ethernet", "Index": 5, "Mac": "00-00-AB-CD-00-00", "Status": "Up"}
+    single = windows_document(adapters=adapter, addresses=[], routes=[])  # PowerShell unrolled a list of one
+    assert [i["name"] for i in parse_windows_net(single, MACS)["interfaces"]] == ["Ethernet"]
+    empty = windows_document(adapters=[], addresses=[], routes=[])
+    assert parse_windows_net(empty, MACS) == {"interfaces": [], "routes": []}  # empty is known, not unknown
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "",
+        "Get-NetAdapter : boom",
+        "[]",
+        json.dumps({"adapters": []}),
+        json.dumps({"adapters": "x", "addresses": [], "routes": []}),
+        json.dumps({"adapters": [{"Name": "E", "Index": "5", "Mac": "", "Status": "Up"}], "addresses": [], "routes": []}),
+        json.dumps({"adapters": [{"Name": "E", "Index": 5, "Mac": "", "Status": 2}], "addresses": [], "routes": []}),
+    ],
+)
+def test_garbage_from_windows_is_a_failed_collection(stdout):
+    with pytest.raises(FactError) as error:
+        parse_windows_net(stdout, MACS)
+    assert error.value.code == "failed"
+
+
+def test_the_windows_script_is_ascii_and_prints_one_json_document():
+    assert WINDOWS_NET_COMMAND.isascii()  # the output is escaped the same way: no code page matters
+    for cmdlet in ("Get-NetAdapter", "Get-NetIPAddress", "Get-NetRoute", "ConvertTo-Json"):
+        assert cmdlet in WINDOWS_NET_COMMAND
+
+
+@pytest.mark.parametrize(
+    "info, windows",
+    [
+        ({"id": "mswindows", "name": "Microsoft Windows"}, True),
+        ({"name": "Microsoft Windows"}, True),
+        ({"id": "debian", "name": "Debian GNU/Linux"}, False),
+        ({"id": "alpine"}, False),
+        ({}, False),
+        (None, False),
+    ],
+)
+def test_guest_is_windows_by_what_the_agent_says(info, windows):
+    assert guest_is_windows(info) is windows
+
+
+def add_windows(lifecycle, osinfo=WINDOWS, reply=None):
+    lifecycle.qga.osinfo = osinfo
+    lifecycle.qga.windows_reply = windows_success() if reply is None else reply
+
+
+def windows_of(facts, node_id="n1"):
+    return facts.snapshot("p1")["nodes"][node_id]["collectors"]["windows.net"]
+
+
+def test_a_windows_guest_gets_windows_net_through_powershell_and_only_that(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_windows(lifecycle)
+        for _ in range(3):
+            await facts.cycle()
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["windows.net"]
+        record = windows_of(facts)
+        assert record["schema"] == "windows.net/1" and record["ok"] is True
+        assert record["data"]["interfaces"][1]["port"] == {"adapter": 0, "port": 0}
+        assert set(record["data"]) == {"interfaces", "routes"}
+        assert lifecycle.qga.asked(LINUX_NET_COMMAND) == [] and lifecycle.qga.asked(SWITCH_NET_COMMAND) == []
+        asked = lifecycle.qga.asked(WINDOWS_NET_COMMAND)
+        assert len(asked) == 3
+        assert asked[0][2]["shell"] == "powershell" and asked[0][2]["priority"] is Priority.METRICS
+        assert asked[0][2]["wait"] is False
+        assert asked[0][2]["timeout"] == 3 * facts.timeout  # a cold PowerShell is slow
+        assert len(lifecycle.qga.osinfo_calls) == 1  # asked once, remembered
+        (node_id, options), = lifecycle.qga.osinfo_calls
+        assert node_id == "n1" and options["priority"] is Priority.METRICS and options["wait"] is False
+
+    scenario(monkeypatch, body)
+
+
+def test_a_linux_guest_keeps_its_collectors_and_is_never_asked_for_windows(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        await facts.cycle()
+        assert lifecycle.qga.asked(WINDOWS_NET_COMMAND) == []
+        assert lifecycle.qga.asked(LINUX_NET_COMMAND)[0][2]["shell"] == "sh"
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+
+    scenario(monkeypatch, body)
+
+
+def test_an_agent_that_does_not_know_osinfo_is_an_old_linux_agent(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        lifecycle.qga.osinfo = QgaCommandError("The command guest-get-osinfo has not been found")
+        await facts.cycle()
+        assert collector_of(facts)["ok"] is True and facts.families == {("p1", "n1"): "posix"}
+
+    scenario(monkeypatch, body)
+
+
+@pytest.mark.parametrize("failure", [QgaTimeout("slow"), QgaUnavailable("backing off"), FileNotFoundError("no socket")])
+def test_a_guest_that_cannot_be_asked_what_it_is_says_nothing_and_is_asked_again(monkeypatch, failure):
+    async def body(facts, lifecycle, labs):
+        add_windows(lifecycle, osinfo=failure)
+        await facts.cycle()
+        # Not even `unreachable`: it would be published as linux.net of what may be a Windows guest.
+        assert facts.snapshot("p1")["nodes"] == {} and lifecycle.qga.calls == [] and facts.families == {}
+        lifecycle.qga.osinfo = WINDOWS
+        await facts.cycle()
+        assert windows_of(facts)["ok"] is True and facts.families == {("p1", "n1"): "windows"}
+
+    scenario(monkeypatch, body)
+
+
+def test_a_busy_channel_postpones_the_question_without_a_failure(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_windows(lifecycle, osinfo=QgaBusy("student command in flight"))
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"] == {} and lifecycle.qga.calls == []
+        assert facts.next_due[("p1", "n1", "windows.net")] <= time.monotonic() + facts.tick
+        lifecycle.qga.osinfo = WINDOWS
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"] == {}  # looked again only after a tick, not at once
+        await asyncio.sleep(facts.tick + 0.01)
+        await facts.cycle()
+        assert windows_of(facts)["ok"] is True
+
+    scenario(monkeypatch, body)
+
+
+def test_windows_failures_are_published_after_the_family_is_known(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_windows(lifecycle)
+        await facts.cycle()
+        first = windows_of(facts)
+        lifecycle.qga.windows_reply = QgaTimeout("slow")
+        await facts.cycle()
+        record = windows_of(facts)
+        assert record["ok"] is False and record["error"]["code"] == "timeout"
+        assert record["data"] == first["data"] and "linux.net" not in facts.snapshot("p1")["nodes"]["n1"]["collectors"]
+        lifecycle.qga.windows_reply = {
+            "exit_code": 1, "stdout": "", "stderr": "The term 'Get-NetAdapter' is not recognized as the name of a cmdlet",
+        }
+        await facts.cycle()
+        assert windows_of(facts)["error"]["code"] == "unsupported"
+        lifecycle.qga.windows_reply = {"exit_code": 1, "stdout": "", "stderr": "Access is denied"}
+        await facts.cycle()
+        assert windows_of(facts)["error"]["code"] == "failed"
+        labs["p1"]["nodes"][0]["status"] = "stopped"
+        await facts.cycle()
+        assert windows_of(facts)["error"]["code"] == "stopped"
+
+    scenario(monkeypatch, body)
+
+
+def test_the_family_is_forgotten_with_the_owner_and_with_the_ready_lab(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_windows(lifecycle)
+        await facts.cycle()
+        assert facts.families == {("p1", "n1"): "windows"}
+        facts.reset()
+        assert facts.families == {}
+        await facts.cycle()
+        assert facts.families == {("p1", "n1"): "windows"}
+        labs["p1"]["state"] = "WIPING"
+        await facts.cycle()
+        assert facts.families == {}
+        # The wiped guest may be another system: it is asked again.
+        add_windows(lifecycle, osinfo=DEBIAN)
+        labs["p1"]["state"] = "READY"
+        await facts.cycle()
+        assert facts.families == {("p1", "n1"): "posix"} and collector_of(facts)["ok"] is True
+
+    scenario(monkeypatch, body)
+
+
+def test_an_owner_change_during_the_question_leaves_no_family(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        release, entered = asyncio.Event(), asyncio.Event()
+
+        async def slow(node_id, command, args=None, **options):
+            entered.set()
+            await release.wait()
+            return WINDOWS
+
+        lifecycle.qga.call = slow
+        task = asyncio.create_task(facts.cycle())
+        await entered.wait()
+        facts.reset()
+        release.set()
+        await task
+        assert facts.families == {} and facts.snapshot("p1")["nodes"] == {}
+
+    scenario(monkeypatch, body)
+
+
 def test_the_registry_matches_the_capabilities():
-    ids = ["linux.net/1", "switch.net/1"]
+    ids = ["linux.net/1", "switch.net/1", "windows.net/1"]
     assert facts_module.COLLECTOR_IDS == [c.schema for c in COLLECTORS] == ids
 
 
@@ -808,7 +1109,12 @@ def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH):
         calls.append(node_id)
         return switch_reply if command == SWITCH_NET_COMMAND else reply
 
+    async def call_(self, node_id, command, args=None, **options):
+        assert command == "guest-get-osinfo"
+        return DEBIAN
+
     monkeypatch.setattr(QgaBroker, "exec", exec_)
+    monkeypatch.setattr(QgaBroker, "call", call_)
     pid = str(uuid4())
     response = client.post(
         "/v1/labs/deploy",
@@ -888,5 +1194,5 @@ def test_refresh_needs_the_owner_and_a_known_lab(fast_facts, mock_server, monkey
 def test_capabilities_announce_the_collectors(mock_server):
     client, _projects, _nodes = mock_server
     body = client.get("/v1/capabilities", headers=HEADERS).json()
-    assert "collectors" in body["features"] and body["collectors"] == ["linux.net/1", "switch.net/1"]
+    assert "collectors" in body["features"] and body["collectors"] == ["linux.net/1", "switch.net/1", "windows.net/1"]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"

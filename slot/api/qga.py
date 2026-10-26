@@ -22,6 +22,8 @@ POLL_FIRST = 0.05  # guest-exec-status polling: quick commands finish in the fir
 POLL_MAX = 0.5
 MAX_CHANNELS = 64
 MAX_CACHED = 256
+POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+SHELLS = ("sh", "powershell")
 
 
 class Priority(IntEnum):
@@ -79,6 +81,24 @@ def decode(line):
     except ValueError:
         return None
     return message if isinstance(message, dict) else None
+
+
+def exec_arguments(shell, command):
+    """`guest-exec` arguments that run `command` in the shell of the guest family.
+
+    PowerShell takes the script as -EncodedCommand (base64 of UTF-16LE): no quoting rules of
+    the Windows command line apply to it. The execution policy governs script files, not this.
+    """
+    if shell == "sh":
+        return {"path": "/bin/sh", "arg": ["-c", command], "capture-output": True}
+    if shell == "powershell":
+        script = base64.b64encode(command.encode("utf-16-le")).decode()
+        return {
+            "path": POWERSHELL,
+            "arg": ["-NoProfile", "-NonInteractive", "-EncodedCommand", script],
+            "capture-output": True,
+        }
+    raise ValueError(f"Unknown shell: {shell}")
 
 
 class _Request:
@@ -386,30 +406,34 @@ class QgaBroker:
         priority=Priority.COMMAND,
         wait=True,
         max_age=None,
+        shell="sh",
     ):
-        """Run `/bin/sh -c command` in the guest; returns exit_code, stdout and stderr.
+        """Run `command` in the guest's `shell` (`/bin/sh -c`, or PowerShell for a Windows guest);
+        returns exit_code, stdout and stderr.
 
         With `max_age` (seconds) a result that fresh is reused and identical concurrent
         requests share one execution. Only for read-only commands.
         """
+        if shell not in SHELLS:
+            raise ValueError(f"Unknown shell: {shell}")
         if max_age is None:
-            return await self._exec(node_id, command, timeout, priority, wait)
-        hit = self._results.get((node_id, command))
+            return await self._exec(node_id, command, timeout, priority, wait, shell)
+        hit = self._results.get((node_id, shell, command))
         if hit is not None and time.monotonic() - hit[0] <= max_age:
             return dict(hit[1])
-        key = (node_id, command, priority, wait)
+        key = (node_id, shell, command, priority, wait)
         flight = self._flights.get(key)
         if flight is None:
             flight = asyncio.create_task(
-                self._exec_cached(node_id, command, timeout, priority, wait)
+                self._exec_cached(node_id, command, timeout, priority, wait, shell)
             )
             self._flights[key] = flight
             flight.add_done_callback(lambda task, k=key: self._flight_done(k, task))
         return dict(await asyncio.shield(flight))
 
-    async def _exec_cached(self, node_id, command, timeout, priority, wait):
-        result = await self._exec(node_id, command, timeout, priority, wait)
-        self._results[(node_id, command)] = (time.monotonic(), result)
+    async def _exec_cached(self, node_id, command, timeout, priority, wait, shell):
+        result = await self._exec(node_id, command, timeout, priority, wait, shell)
+        self._results[(node_id, shell, command)] = (time.monotonic(), result)
         if len(self._results) > MAX_CACHED:
             oldest = sorted(self._results, key=lambda k: self._results[k][0])
             for key in oldest[: MAX_CACHED // 4]:
@@ -422,12 +446,12 @@ class QgaBroker:
         if not task.cancelled():
             task.exception()  # mark retrieved: every waiter may have gone away
 
-    async def _exec(self, node_id, command, timeout, priority, wait):
+    async def _exec(self, node_id, command, timeout, priority, wait, shell="sh"):
         deadline = time.monotonic() + timeout
         started = await self.call(
             node_id,
             "guest-exec",
-            {"path": "/bin/sh", "arg": ["-c", command], "capture-output": True},
+            exec_arguments(shell, command),
             priority=priority,
             wait=wait,
             max_wait=timeout,

@@ -171,7 +171,7 @@ QEMU обслуживает одного клиента на сокет QGA, а 
 (`GET /v1/labs/{project_id}/facts`) и хранит историю. Контракт — `manager/docs/CONTRACTS.md` §4.6,
 хранение — `manager/docs/DESIGN.md` §6.7, формат фактов — `plugin/docs/live-state.md`.
 
-- **Коллектор** — одна гостевая команда и разбор её вывода (`api/facts.py`). Сейчас два, оба для QEMU-нод
+- **Коллектор** — одна гостевая команда и разбор её вывода (`api/facts.py`). Сейчас три, все для QEMU-нод
   с QGA, список отдаёт `GET /v1/capabilities`. `linux.net/1` выполняет `ip -j -d addr` и `ip -j route`
   одним `exec` и отдаёт `interfaces` и `routes`. Описаны loopback, физические интерфейсы и подинтерфейсы
   802.1Q; мосты, bond и туннели пропускаются. В `data` попадают только значения состояния: сроки аренды
@@ -187,6 +187,14 @@ QEMU обслуживает одного клиента на сокет QGA, а 
   сбои видны, как у `linux.net`. Ответ запоминается до смены владельца или выхода лабы из `READY`.
   `switch.net` стоит после `linux.net`, и менеджер заменяет его `interfaces` целиком (`routes` остаются).
   Коллекторы одной ноды идут по очереди: у них общий QGA-канал, а параллельная попытка получила бы `busy`.
+- **Коллектор `windows.net/1`** — гость Windows 10+ (Server 2016+). Какая ОС, слот спрашивает у гостя:
+  `guest-get-osinfo` один раз на ноду (`id: mswindows` — Windows; агент без команды — Linux), ответ помнится
+  до смены владельца или выхода лабы из `READY`. Пока ОС неизвестна, ни один коллектор для ноды не
+  работает и записей нет (чужая запись у менеджера не удаляется). Для Windows вместо `linux.net` и
+  `switch.net` идёт один запуск PowerShell (`-EncodedCommand`, `QgaBroker.exec(shell="powershell")`):
+  `Get-NetAdapter`, `Get-NetIPAddress`, `Get-NetRoute`. `data` — `interfaces` и `routes` в том же формате,
+  что у `linux.net`; `Disconnected` даёт `oper: down` при `admin: up`, `Disabled` — `admin: down`.
+  Правила — `manager/docs/CONTRACTS.md` §4.6.
 - **Не мешает остальным.** Сбор идёт фоновой задачей через `Lifecycle.qga` с `Priority.METRICS`,
   `wait=False`: занятый канал — пропущенная попытка (не ошибка, результаты не меняются), канал в back-off —
   `unreachable`. Вывод гостя наружу не отдаётся.
