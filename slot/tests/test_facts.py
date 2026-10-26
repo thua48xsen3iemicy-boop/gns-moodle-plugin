@@ -1,4 +1,4 @@
-"""Guest facts: the linux.net, switch.net and windows.net collectors, background collection and the /facts routes."""
+"""Guest facts: the linux.net, switch.net, switch.fdb and windows.net collectors, background collection and the /facts routes."""
 
 import asyncio
 import json
@@ -14,6 +14,7 @@ from api import facts as facts_module
 from api.facts import (
     COLLECTORS,
     LINUX_NET_COMMAND,
+    SWITCH_FDB_COMMAND,
     SWITCH_NET_COMMAND,
     WINDOWS_NET_COMMAND,
     Facts,
@@ -21,6 +22,7 @@ from api.facts import (
     adapter_macs,
     guest_is_windows,
     parse_linux_net,
+    parse_switch_fdb,
     parse_switch_net,
     parse_windows_net,
 )
@@ -350,6 +352,182 @@ def test_the_switch_command_hands_over_an_error_envelope(tmp_path):
         parse_switch_net(silent.stdout, MACS)
 
 
+# --- switch.fdb parser ------------------------------------------------------------------------
+
+# `bridge -j fdb show br br0` of a live switch image: five ports, two nodes, one of which has spoken.
+# The only learned row is the first. The MAC of every port comes twice (with a VLAN and without), the
+# `self` rows are group addresses of the devices, and nothing but `br0` itself has a `master` in them.
+REAL_FDB = [
+    {"mac": "50:5b:3c:02:a2:00", "ifname": "ens3", "vlan": 1, "flags": [], "master": "br0", "state": ""},
+    {"mac": "50:df:d5:02:ee:00", "ifname": "ens3", "vlan": 1, "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:00", "ifname": "ens3", "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "33:33:00:00:00:01", "ifname": "ens3", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:01", "ifname": "ens3", "flags": ["self"], "state": "permanent"},
+    {"mac": "33:33:ff:33:a1:c4", "ifname": "ens3", "flags": ["self"], "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:01", "ifname": "ens4", "vlan": 1, "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:01", "ifname": "ens4", "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "33:33:00:00:00:01", "ifname": "ens4", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:01", "ifname": "ens4", "flags": ["self"], "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:02", "ifname": "ens5", "vlan": 1, "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:02", "ifname": "ens5", "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "33:33:00:00:00:01", "ifname": "ens5", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:01", "ifname": "ens5", "flags": ["self"], "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:03", "ifname": "ens6", "vlan": 1, "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:03", "ifname": "ens6", "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "33:33:00:00:00:01", "ifname": "ens6", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:01", "ifname": "ens6", "flags": ["self"], "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:04", "ifname": "ens7", "vlan": 1, "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "50:df:d5:02:ee:04", "ifname": "ens7", "flags": [], "master": "br0", "state": "permanent"},
+    {"mac": "33:33:00:00:00:01", "ifname": "ens7", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:01", "ifname": "ens7", "flags": ["self"], "state": "permanent"},
+    {"mac": "33:33:00:00:00:01", "ifname": "br0", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:6a", "ifname": "br0", "flags": ["self"], "state": "permanent"},
+    {"mac": "33:33:00:00:00:6a", "ifname": "br0", "flags": ["self"], "state": "permanent"},
+    {"mac": "01:00:5e:00:00:01", "ifname": "br0", "flags": ["self"], "state": "permanent"},
+    {"mac": "76:61:46:f0:2f:8f", "ifname": "br0", "flags": [], "master": "br0", "state": "permanent"},
+]
+LEARNED = {"mac_table": {"entries": [{"mac": "50:5b:3c:02:a2:00", "iface": "ens3", "vlan": 1}], "truncated": False}}
+
+
+def learned_row(mac="52:54:00:aa:00:01", ifname="ens3", vlan=10, **fields):
+    return {"mac": mac, "ifname": ifname, "vlan": vlan, "flags": [], "master": "br0", "state": "", **fields}
+
+
+def fdb_envelope(rows, next_offset=None):
+    return envelope({"entries": rows, "total": len(rows), "next_offset": next_offset})
+
+
+def fdb_output(rows=None, next_offset=None, wrapped=None):
+    document = fdb_envelope(REAL_FDB if rows is None else rows, next_offset) if wrapped is None else wrapped
+    return json.dumps({"fdb": document})
+
+
+def fdb_success(**options):
+    return {"exit_code": 0, "stdout": fdb_output(**options), "stderr": ""}
+
+
+def test_parse_switch_fdb_keeps_what_the_switch_has_learned_and_drops_its_own_rows():
+    assert parse_switch_fdb(fdb_output()) == LEARNED
+    assert len(REAL_FDB) == 27  # the other 26 are the switch's, not its lessons
+
+
+@pytest.mark.parametrize(
+    "state, flags",
+    [("permanent", []), ("static", []), ("", ["self"]), ("reachable", ["self", "extern_learn"])],
+)
+def test_rows_of_the_switch_itself_are_not_lessons(state, flags):
+    row = learned_row(state=state, flags=flags)
+    assert parse_switch_fdb(fdb_output(rows=[row])) == {"mac_table": {"entries": [], "truncated": False}}
+
+
+def test_the_mac_table_has_a_fixed_order_and_only_the_three_facts():
+    rows = [
+        learned_row("52:54:00:AA:00:02", "ens4", 20, updated=3, used=9),
+        learned_row("52:54:00:aa:00:01", "ens3", 20, state="reachable"),
+        {key: value for key, value in learned_row("52:54:00:aa:00:03", "ens3", 10).items() if key != "state"},
+        *REAL_FDB[1:],
+    ]
+    data = parse_switch_fdb(fdb_output(rows=rows))
+    assert data == {"mac_table": {"entries": [
+        {"mac": "52:54:00:aa:00:03", "iface": "ens3", "vlan": 10},
+        {"mac": "52:54:00:aa:00:01", "iface": "ens3", "vlan": 20},
+        {"mac": "52:54:00:aa:00:02", "iface": "ens4", "vlan": 20},
+    ], "truncated": False}}
+    # Nothing that moves by itself: other timers and another order of the same table change nothing.
+    ticking = [dict(row, updated=99, used=77) for row in reversed(rows)]
+    assert parse_switch_fdb(fdb_output(rows=ticking)) == data
+
+
+def test_an_empty_table_is_an_empty_table():
+    assert parse_switch_fdb(fdb_output(rows=[])) == {"mac_table": {"entries": [], "truncated": False}}
+
+
+def test_a_table_longer_than_the_page_is_truncated():
+    data = parse_switch_fdb(fdb_output(next_offset=1024))
+    assert data == {"mac_table": {**LEARNED["mac_table"], "truncated": True}}
+
+
+def test_a_table_too_big_for_the_guest_is_a_fact_not_a_failure():
+    # The manager carries the `ok: false` of any collector to the `error` of the whole node.
+    refused = refusal("RESULT_TOO_LARGE", "Linux command output exceeds limit")
+    assert parse_switch_fdb(fdb_output(wrapped=refused)) == {"mac_table": {"entries": [], "truncated": True}}
+
+
+@pytest.mark.parametrize(
+    "stdout, fragment",
+    [
+        ("", "JSONDecodeError"),
+        ("not json", "JSONDecodeError"),
+        ("[]", "TypeError"),
+        ('{"fdb": null}', "no valid response"),
+        (fdb_output(wrapped=refusal("BUSY", "Too many clients")), "BUSY: Too many clients"),
+        (fdb_output(wrapped=refusal("COMMAND_FAILED", "bridge failed")), "COMMAND_FAILED"),
+        (fdb_output(wrapped=refusal("TIMEOUT", "slow")), "TIMEOUT"),
+        (fdb_output(wrapped=envelope({"nope": 1})), "KeyError"),
+        (fdb_output(wrapped=envelope({"entries": {}, "next_offset": None})), "TypeError"),
+        (fdb_output(wrapped=envelope({"entries": []})), "KeyError"),  # no next_offset: not the contract
+        (fdb_output(rows=["not a row"]), "TypeError"),
+        (fdb_output(rows=[learned_row(flags="self")]), "TypeError"),
+        (fdb_output(rows=[{k: v for k, v in learned_row().items() if k != "vlan"}]), "KeyError"),  # learned: always a VLAN
+        (fdb_output(rows=[{k: v for k, v in learned_row().items() if k != "ifname"}]), "KeyError"),
+        (fdb_output(rows=[learned_row(vlan=0)]), "ValueError"),
+        (fdb_output(rows=[learned_row(vlan=4095)]), "ValueError"),
+        (fdb_output(rows=[learned_row(vlan="10")]), "ValueError"),
+        (fdb_output(rows=[learned_row(vlan=True)]), "ValueError"),
+        (fdb_output(rows=[learned_row(mac="52:54:00:aa:00")]), "ValueError"),
+        (fdb_output(rows=[learned_row(mac="not a mac at all")]), "ValueError"),
+        (fdb_output(rows=[learned_row(mac=5254)]), "ValueError"),
+        (fdb_output(rows=[learned_row(ifname="")]), "ValueError"),
+    ],
+)
+def test_garbage_from_the_mac_table_is_a_failed_collection(stdout, fragment):
+    with pytest.raises(FactError) as caught:
+        parse_switch_fdb(stdout)
+    assert caught.value.code == "failed" and fragment in str(caught.value)
+
+
+def fake_fdb_switchctl(tmp_path, answer, status=0):
+    """A switchctl that notes its arguments and prints `answer`."""
+    tool = tmp_path / "switchctl"
+    tool.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$*" > "$0.args"\ncat "$0.out"\nexit {status}\n')
+    tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    (tmp_path / "switchctl.out").write_text(answer)
+    return tool
+
+
+def run_fdb_command(tool):
+    command = SWITCH_FDB_COMMAND.replace("/usr/local/sbin/switchctl", str(tool))
+    assert command != SWITCH_FDB_COMMAND
+    return subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True)
+
+
+def test_the_fdb_command_asks_for_one_page_and_wraps_the_envelope(tmp_path):
+    tool = fake_fdb_switchctl(tmp_path, json.dumps(fdb_envelope(REAL_FDB)))
+    done = run_fdb_command(tool)
+    assert done.returncode == 0
+    assert (tmp_path / "switchctl.args").read_text().strip() == 'fdb --params {"limit":1024}'
+    assert parse_switch_fdb(done.stdout) == LEARNED
+
+
+def test_the_fdb_command_exits_127_without_switchctl(tmp_path):
+    done = run_fdb_command(tmp_path / "missing")
+    assert done.returncode == 127 and done.stdout == ""
+
+
+def test_the_fdb_command_hands_over_an_error_envelope(tmp_path):
+    # switchctl prints the envelope and exits 1 when the daemon says no: the reason must survive.
+    done = run_fdb_command(fake_fdb_switchctl(tmp_path, json.dumps(refusal("BUSY", "daemon busy")), status=1))
+    assert done.returncode == 0
+    with pytest.raises(FactError) as caught:
+        parse_switch_fdb(done.stdout)
+    assert caught.value.code == "failed" and "daemon busy" in str(caught.value)
+    # A switchctl that prints nothing at all is still one document.
+    silent = run_fdb_command(fake_fdb_switchctl(tmp_path, "", status=127))
+    assert silent.returncode == 0 and json.loads(silent.stdout) == {"fdb": None}
+    with pytest.raises(FactError):
+        parse_switch_fdb(silent.stdout)
+
+
 # --- background collection --------------------------------------------------------------------
 
 
@@ -361,17 +539,20 @@ WINDOWS = {"id": "mswindows", "name": "Microsoft Windows", "version": "Microsoft
 
 
 class FakeQga:
-    """`reply` answers the linux.net command, `switch_reply` the switch.net one (an ordinary host by default).
+    """`reply` answers the linux.net command, `switch_reply` the switch.net one (an ordinary host by default),
+    `fdb_reply` the switch.fdb one (an ordinary host by default as well).
 
     `osinfo` is what `guest-get-osinfo` returns (or raises): a Debian guest unless a test says otherwise.
     """
 
-    def __init__(self, reply, switch_reply=NOT_A_SWITCH, osinfo=DEBIAN):
+    def __init__(self, reply, switch_reply=NOT_A_SWITCH, osinfo=DEBIAN, fdb_reply=NOT_A_SWITCH):
         self.reply = reply
         self.switch_reply = switch_reply
+        self.fdb_reply = fdb_reply
         self.osinfo = osinfo
         self.windows_reply = None
         self.switch_by_node = {}  # node_id -> reply: a lab with a switch next to ordinary hosts
+        self.fdb_by_node = {}  # the same for the MAC table
         self.calls = []  # exec only
         self.osinfo_calls = []
 
@@ -390,6 +571,8 @@ class FakeQga:
         reply = self.reply
         if command == SWITCH_NET_COMMAND:
             reply = self.switch_by_node.get(node_id, self.switch_reply)
+        if command == SWITCH_FDB_COMMAND:
+            reply = self.fdb_by_node.get(node_id, self.fdb_reply)
         if command == WINDOWS_NET_COMMAND:
             reply = self.windows_reply
         if isinstance(reply, BaseException):
@@ -606,16 +789,20 @@ def test_collection_is_paced_and_refresh_forces_it(monkeypatch):
 # --- switch.net collection --------------------------------------------------------------------
 
 SWITCH_KEY = ("p1", "n3", "switch.net")
+FDB_KEY = ("p1", "n3", "switch.fdb")
+SWITCH_ROLE = {SWITCH_KEY, FDB_KEY}  # what a working switch has confirmed
+HOST_ABSENT = {("p1", "n1", "switch.net"), ("p1", "n1", "switch.fdb")}  # what the ordinary host said
 
 
-def add_switch(lifecycle, labs, reply=None):
-    """A QEMU node n3 next to the ordinary host n1; its guest answers the switch.net command."""
+def add_switch(lifecycle, labs, reply=None, fdb_reply=None):
+    """A QEMU node n3 next to the ordinary host n1; its guest answers the switch.net and switch.fdb commands."""
     labs["p1"]["ticket"]["nodes"].append({"name": "SW2", "kind": "qemu", "qga": True})
     labs["p1"]["nodes"].append(
         {"node_id": "n3", "name": "SW2", "node_type": "qemu", "status": "started",
          "properties": {"mac_address": BASE_MAC, "adapters": 2}}
     )
     lifecycle.qga.switch_by_node["n3"] = reply or switch_success()
+    lifecycle.qga.fdb_by_node["n3"] = fdb_reply or fdb_success()
 
 
 def switch_of(facts, node_id="n3"):
@@ -640,7 +827,7 @@ def test_a_switch_is_published_next_to_linux_net_with_the_broker_priority_that_y
         add_switch(lifecycle, labs)
         await facts.cycle()
         collectors = facts.snapshot("p1")["nodes"]["n3"]["collectors"]
-        assert list(collectors) == ["linux.net", "switch.net"]
+        assert list(collectors) == ["linux.net", "switch.net", "switch.fdb"]
         record = collectors["switch.net"]
         assert record["schema"] == "switch.net/1" and record["ok"] is True and record["error"] is None
         assert record["attempted_at"] == record["observed_at"] and record["attempted_at"].endswith("Z")
@@ -648,7 +835,7 @@ def test_a_switch_is_published_next_to_linux_net_with_the_broker_priority_that_y
         assert collectors["linux.net"]["data"] == collector_of(facts)["data"]  # as on any other host
         (call,) = [c for c in lifecycle.qga.asked(SWITCH_NET_COMMAND) if c[0] == "n3"]
         assert call[2]["priority"] is Priority.METRICS and call[2]["wait"] is False and call[2]["max_age"] == 2
-        assert facts.confirmed == {SWITCH_KEY} and facts.absent == {("p1", "n1", "switch.net")}
+        assert facts.confirmed == SWITCH_ROLE and facts.absent == HOST_ABSENT
 
     scenario(monkeypatch, body)
 
@@ -659,7 +846,7 @@ def test_an_ordinary_host_is_asked_once_and_never_gets_a_record(monkeypatch):
             await facts.cycle()
         assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 3  # linux.net goes on as before
         assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 1  # the guest said it is no switch
-        assert facts.absent == {("p1", "n1", "switch.net")} and facts.confirmed == set()
+        assert facts.absent == HOST_ABSENT and facts.confirmed == set()
         assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
 
     scenario(monkeypatch, body)
@@ -677,7 +864,7 @@ def test_failures_before_the_first_success_are_silent_unless_the_guest_answered(
         # that is not started say nothing about the role. The manager never deletes a collector's row,
         # so a record published now would stay as a stranger's error on an ordinary host.
         if isinstance(failure, BaseException) or failure is None:
-            assert record is None and facts.absent == {("p1", "n1", "switch.net")}
+            assert record is None and facts.absent == HOST_ABSENT
             if failure is None:  # never asked: it is not known what it is, so nothing is published
                 assert "n3" not in facts.snapshot("p1")["nodes"]
             else:
@@ -688,7 +875,7 @@ def test_failures_before_the_first_success_are_silent_unless_the_guest_answered(
         lifecycle.qga.switch_by_node["n3"] = switch_success()
         labs["p1"]["nodes"][2]["status"] = "started"
         await facts.cycle()
-        assert switch_of(facts)["ok"] is True and facts.confirmed == {SWITCH_KEY}
+        assert switch_of(facts)["ok"] is True and facts.confirmed == SWITCH_ROLE
 
     scenario(monkeypatch, body)
 
@@ -740,17 +927,18 @@ def test_the_role_is_remembered_until_the_owner_or_the_lab_goes(monkeypatch):
         facts.reset()  # another owner: everything is learned again
         assert facts.absent == set() and facts.confirmed == set()
         await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 4 and facts.confirmed == {SWITCH_KEY}
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 4 and facts.confirmed == SWITCH_ROLE
         labs["p1"]["state"] = "STOPPING"  # the lab leaves READY: its memory goes with its results
         await facts.cycle()
         assert facts.absent == set() and facts.confirmed == set() and facts.results == {}
         labs["p1"]["state"] = "READY"
         await facts.cycle()
         assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 6
-        assert facts.absent == {("p1", "n1", "switch.net")} and facts.confirmed == {SWITCH_KEY}
+        assert facts.absent == HOST_ABSENT and facts.confirmed == SWITCH_ROLE
         # Forgotten with the memory: a timeout of a node that has not answered yet is silent again.
         facts.reset()
         lifecycle.qga.switch_by_node["n3"] = QgaTimeout("slow")
+        lifecycle.qga.fdb_by_node["n3"] = QgaTimeout("slow")
         await facts.cycle()
         assert switch_of(facts) is None and facts.confirmed == set()
 
@@ -802,7 +990,7 @@ def test_the_collectors_of_a_node_share_its_channel_and_run_one_after_another(mo
         lifecycle.qga.exec = watched
         await facts.cycle()
         assert peak == {"n1": 1, "n3": 1}  # a second exec at once would be refused as busy
-        assert len(lifecycle.qga.calls) == 4 and switch_of(facts)["ok"] is True
+        assert len(lifecycle.qga.calls) == 6 and switch_of(facts)["ok"] is True
 
     scenario(monkeypatch, body)
 
@@ -820,6 +1008,153 @@ def test_the_collectors_fail_independently(monkeypatch):
         await facts.cycle()
         assert collector_of(facts, "n3")["ok"] is True
         assert switch_of(facts)["ok"] is False and "daemon down" in switch_of(facts)["error"]["message"]
+
+    scenario(monkeypatch, body)
+
+
+# --- switch.fdb collection ---------------------------------------------------------------------
+
+
+def fdb_of(facts, node_id="n3"):
+    """The switch.fdb record of a node; None when the slot says nothing about it."""
+    node = facts.snapshot("p1")["nodes"].get(node_id, {})
+    return node.get("collectors", {}).get("switch.fdb")
+
+
+# The same exchange failures as for switch.net; the last one is a refusal in the shape of this collector.
+FDB_FAILURES = FAILURES[:-1] + [
+    ({"exit_code": 0, "stdout": json.dumps({"fdb": refusal("BUSY", "Too many clients")}), "stderr": ""}, "failed"),
+]
+
+
+def test_the_mac_table_is_a_collector_of_its_own_next_to_switch_net(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n3"]["collectors"]
+        assert list(collectors) == ["linux.net", "switch.net", "switch.fdb"]
+        record = collectors["switch.fdb"]
+        assert record["schema"] == "switch.fdb/1" and record["ok"] is True and record["error"] is None
+        assert record["attempted_at"] == record["observed_at"] and record["attempted_at"].endswith("Z")
+        assert record["data"] == LEARNED  # the table only: ports and VLANs stay with switch.net
+        assert collectors["switch.net"]["data"] == {"interfaces": EXPECTED_SWITCH_PORTS}
+        (call,) = [c for c in lifecycle.qga.asked(SWITCH_FDB_COMMAND) if c[0] == "n3"]
+        assert call[2]["priority"] is Priority.METRICS and call[2]["wait"] is False and call[2]["max_age"] == 2
+        assert FDB_KEY in facts.confirmed and ("p1", "n1", "switch.fdb") in facts.absent
+
+    scenario(monkeypatch, body)
+
+
+def test_an_ordinary_host_is_asked_for_the_mac_table_once_and_never_gets_a_record(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        for _ in range(3):
+            await facts.cycle()
+        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 1  # the guest said it has no switchctl
+        assert ("p1", "n1", "switch.fdb") in facts.absent
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+
+    scenario(monkeypatch, body)
+
+
+@pytest.mark.parametrize("failure, code", FDB_FAILURES)
+def test_mac_table_failures_before_the_first_success_are_silent_unless_the_guest_answered(monkeypatch, failure, code):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs, fdb_reply=failure)
+        await facts.cycle()
+        record = fdb_of(facts)
+        if isinstance(failure, BaseException):  # the exchange failed: the role is not known, nothing is published
+            assert record is None and FDB_KEY not in facts.absent and FDB_KEY not in facts.confirmed
+        else:  # switchctl is there but does not answer properly: the owner has to see it
+            assert record["ok"] is False and record["error"]["code"] == "failed" and record["error"]["message"]
+            assert "data" not in record and "observed_at" not in record
+        assert switch_of(facts)["ok"] is True  # the ports do not depend on the table
+        lifecycle.qga.fdb_by_node["n3"] = fdb_success()
+        await facts.cycle()
+        assert fdb_of(facts)["ok"] is True and FDB_KEY in facts.confirmed
+
+    scenario(monkeypatch, body)
+
+
+@pytest.mark.parametrize("failure, code", FDB_FAILURES + [(None, "stopped")])
+def test_mac_table_failures_after_the_first_success_are_published_with_the_last_table(monkeypatch, failure, code):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        first = fdb_of(facts)
+        if failure is None:
+            labs["p1"]["nodes"][2]["status"] = "stopped"
+        else:
+            lifecycle.qga.fdb_by_node["n3"] = failure
+        await facts.cycle()
+        record = fdb_of(facts)
+        assert record["ok"] is False and record["error"]["code"] == code and record["error"]["message"]
+        assert record["data"] == first["data"] and record["observed_at"] == first["observed_at"]
+        labs["p1"]["nodes"][2]["status"] = "started"
+        lifecycle.qga.fdb_by_node["n3"] = fdb_success()
+        await facts.cycle()
+        assert fdb_of(facts)["ok"] is True and fdb_of(facts)["error"] is None
+
+    scenario(monkeypatch, body)
+
+
+def test_a_table_too_big_for_the_guest_is_published_as_truncated_and_the_node_stays_healthy(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        refused = refusal("RESULT_TOO_LARGE", "Linux command output exceeds limit")
+        add_switch(lifecycle, labs, fdb_reply=fdb_success(wrapped=refused))
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n3"]["collectors"]
+        assert collectors["switch.fdb"]["ok"] is True and collectors["switch.fdb"]["error"] is None
+        assert collectors["switch.fdb"]["data"] == {"mac_table": {"entries": [], "truncated": True}}
+        assert all(record["ok"] for record in collectors.values())  # nothing for the manager to call an error
+
+    scenario(monkeypatch, body)
+
+
+def test_the_mac_table_and_the_ports_fail_independently(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        lifecycle.qga.fdb_by_node["n3"] = {"exit_code": 1, "stdout": "", "stderr": "bridge down"}
+        await facts.cycle()
+        assert fdb_of(facts)["ok"] is False and "bridge down" in fdb_of(facts)["error"]["message"]
+        assert switch_of(facts)["ok"] is True
+        lifecycle.qga.fdb_by_node["n3"] = fdb_success()
+        lifecycle.qga.switch_by_node["n3"] = {"exit_code": 1, "stdout": "", "stderr": "daemon down"}
+        await facts.cycle()
+        assert fdb_of(facts)["ok"] is True and switch_of(facts)["ok"] is False
+
+    scenario(monkeypatch, body)
+
+
+def test_the_table_follows_the_switch_and_a_quiet_table_is_stable(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        before = fdb_of(facts)["data"]
+        ticking = [dict(row, updated=5, used=1) for row in reversed(REAL_FDB)]
+        lifecycle.qga.fdb_by_node["n3"] = fdb_success(rows=ticking)
+        await facts.cycle()
+        assert fdb_of(facts)["data"] == before  # the manager would journal any difference
+        lifecycle.qga.fdb_by_node["n3"] = fdb_success(rows=[*REAL_FDB, learned_row("50:5b:3c:02:b3:00", "ens4", 1)])
+        await facts.cycle()
+        assert [e["iface"] for e in fdb_of(facts)["data"]["mac_table"]["entries"]] == ["ens3", "ens4"]
+
+    scenario(monkeypatch, body)
+
+
+def test_the_role_of_the_mac_table_is_forgotten_with_the_owner_and_with_the_lab(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_switch(lifecycle, labs)
+        await facts.cycle()
+        await facts.cycle()
+        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 3  # the host once, the switch every time
+        facts.reset()
+        assert facts.absent == set() and facts.confirmed == set()
+        await facts.cycle()
+        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 5 and FDB_KEY in facts.confirmed
+        labs["p1"]["state"] = "STOPPING"
+        await facts.cycle()
+        assert facts.absent == set() and facts.confirmed == set() and facts.results == {}
 
     scenario(monkeypatch, body)
 
@@ -959,6 +1294,7 @@ def test_a_windows_guest_gets_windows_net_through_powershell_and_only_that(monke
         assert record["data"]["interfaces"][1]["port"] == {"adapter": 0, "port": 0}
         assert set(record["data"]) == {"interfaces", "routes"}
         assert lifecycle.qga.asked(LINUX_NET_COMMAND) == [] and lifecycle.qga.asked(SWITCH_NET_COMMAND) == []
+        assert lifecycle.qga.asked(SWITCH_FDB_COMMAND) == []
         asked = lifecycle.qga.asked(WINDOWS_NET_COMMAND)
         assert len(asked) == 3
         assert asked[0][2]["shell"] == "powershell" and asked[0][2]["priority"] is Priority.METRICS
@@ -1087,7 +1423,7 @@ def test_an_owner_change_during_the_question_leaves_no_family(monkeypatch):
 
 
 def test_the_registry_matches_the_capabilities():
-    ids = ["linux.net/1", "switch.net/1", "windows.net/1"]
+    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1"]
     assert facts_module.COLLECTOR_IDS == [c.schema for c in COLLECTORS] == ids
 
 
@@ -1100,13 +1436,15 @@ def fast_facts(monkeypatch):
     monkeypatch.setenv("SLOT_FACTS_MIN_REFRESH", "0")
 
 
-def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH):
+def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH, fdb_reply=NOT_A_SWITCH):
     from api.qga import QgaBroker
 
     calls = []
 
     async def exec_(self, node_id, command, **options):
         calls.append(node_id)
+        if command == SWITCH_FDB_COMMAND:
+            return fdb_reply
         return switch_reply if command == SWITCH_NET_COMMAND else reply
 
     async def call_(self, node_id, command, args=None, **options):
@@ -1163,12 +1501,14 @@ def test_facts_route_serves_the_latest_results(fast_facts, mock_server, monkeypa
 
 def test_facts_route_serves_the_switch_ports(fast_facts, mock_server, monkeypatch):
     client, _projects, _nodes = mock_server
-    pid, _calls = deployed(client, monkeypatch, success(), switch_reply=switch_success())
+    pid, _calls = deployed(client, monkeypatch, success(), switch_reply=switch_success(), fdb_reply=fdb_success())
     body = wait_for_facts(
-        client, pid, lambda b: any("switch.net" in n["collectors"] for n in b["nodes"].values())
+        client, pid, lambda b: any("switch.fdb" in n["collectors"] for n in b["nodes"].values())
     )
     (node,) = body["nodes"].values()
-    assert list(node["collectors"]) == ["linux.net", "switch.net"]
+    assert list(node["collectors"]) == ["linux.net", "switch.net", "switch.fdb"]
+    table = node["collectors"]["switch.fdb"]
+    assert table["schema"] == "switch.fdb/1" and table["ok"] is True and table["data"] == LEARNED
     record = node["collectors"]["switch.net"]
     assert record["schema"] == "switch.net/1" and record["ok"] is True
     assert [i["switchport"] for i in record["data"]["interfaces"]][:2] == [
@@ -1194,5 +1534,6 @@ def test_refresh_needs_the_owner_and_a_known_lab(fast_facts, mock_server, monkey
 def test_capabilities_announce_the_collectors(mock_server):
     client, _projects, _nodes = mock_server
     body = client.get("/v1/capabilities", headers=HEADERS).json()
-    assert "collectors" in body["features"] and body["collectors"] == ["linux.net/1", "switch.net/1", "windows.net/1"]
+    assert "collectors" in body["features"]
+    assert body["collectors"] == ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1"]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"
