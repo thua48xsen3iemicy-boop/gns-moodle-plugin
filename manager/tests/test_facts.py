@@ -121,6 +121,44 @@ def test_switch_net_replaces_the_interfaces_of_linux_net_and_keeps_its_routes():
     assert build_state(1, rows[::-1], {"sw": "started"}, 90) == build_state(1, rows, {"sw": "started"}, 90)
 
 
+def test_switch_fdb_adds_the_mac_table_next_to_the_ports_of_switch_net():
+    ports = [{"name": "ens3", "kind": "physical", "admin": "up", "oper": "up", "mirror": True,
+              "switchport": {"mode": "access", "vlan": 10}}]
+    table = {"mac_table": {"entries": [{"mac": "52:54:00:aa:00:01", "iface": "ens3", "vlan": 10}],
+                           "truncated": False}}
+    rows = [row("sw", "switch.fdb", table, name="SW1"),
+            row("sw", "switch.net", {"interfaces": ports}, name="SW1"),
+            row("sw", "linux.net", DATA, name="SW1")]
+    node = build_state(1, rows, {"sw": "started"}, 90)["nodes"]["sw"]
+    assert node["mac_table"] == table["mac_table"]  # the field passes through as it is
+    assert node["interfaces"] == ports and node["routes"] == DATA["routes"]  # and takes nothing from the others
+    assert build_state(1, rows[::-1], {"sw": "started"}, 90) == build_state(1, rows, {"sw": "started"}, 90)
+    # A table that could not be read this time is the error of the node, and the last known table stays.
+    failing = row("sw", "switch.fdb", table, name="SW1", ok=False, error={"code": "failed", "message": "BUSY"})
+    node = build_state(2, [failing, *rows[1:]], {"sw": "started"}, 90)["nodes"]["sw"]
+    assert node["error"] == {"code": "failed", "message": "BUSY"} and node["mac_table"] == table["mac_table"]
+
+
+def test_a_new_lesson_of_the_switch_is_a_journal_row_of_the_table_only():
+    # The reason for a collector of its own: the manager journals the whole `data` of a collector on any change.
+    quiet = {"entries": [{"mac": "52:54:00:aa:00:01", "iface": "ens3", "vlan": 10}], "truncated": False}
+    learned = {"entries": [*quiet["entries"], {"mac": "52:54:00:aa:00:02", "iface": "ens4", "vlan": 10}],
+               "truncated": False}
+    ports = {"interfaces": DATA["interfaces"]}
+
+    def stored(table):
+        nodes = {"sw": slot_node("SW1", **{
+            "switch.net": collected(ports, schema="switch.net/1"),
+            "switch.fdb": collected({"mac_table": table}, schema="switch.fdb/1"),
+        })}
+        return {collector: record for _, _, collector, record in records(nodes)}
+
+    before, after = stored(quiet), stored(learned)
+    assert differs(before["switch.fdb"], after["switch.fdb"])
+    assert not differs(before["switch.net"], after["switch.net"])  # the ports are not copied into the journal
+    assert not differs(before["switch.fdb"], stored(quiet)["switch.fdb"])
+
+
 def test_build_state_of_a_lab_without_facts_and_of_a_stopped_one():
     assert build_state(0, [], {}, 90) == {"schema": "gns3lab.facts/1", "rev": 0, "ttl": 90, "nodes": {}}
     stopped = build_state(2, [row("n1", "linux.net", DATA)], {}, 90)
