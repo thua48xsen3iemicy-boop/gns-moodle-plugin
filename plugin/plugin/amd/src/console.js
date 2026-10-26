@@ -30,13 +30,13 @@
 import Ajax from 'core/ajax';
 
 /** Close code of the gateway: the console closed on the slot side. */
-const CLOSE_UPSTREAM = 4000;
+export const CLOSE_UPSTREAM = 4000;
 
 /** Close code of the gateway: the slot refused the console (node not ready, slot unreachable, wrong token). */
-const CLOSE_UNAVAILABLE = 4001;
+export const CLOSE_UNAVAILABLE = 4001;
 
 /** A connection that lived this long, ms, counts as working: the reconnection pauses start again from 1 s. */
-const STABLE_AFTER = 10000;
+export const STABLE_AFTER = 10000;
 
 /** Before "Connected" is printed, ms: a socket the gateway closes at once never says it. */
 const CONNECTED_NOTE_DELAY = 400;
@@ -60,7 +60,7 @@ const MAX_FRAME = 4096;
 export const CISCO_TYPES = ['iou', 'dynamips'];
 
 /** Reconnection pauses, seconds; the last one repeats. */
-const BACKOFF = [1, 2, 4, 8, 16, 30];
+export const BACKOFF = [1, 2, 4, 8, 16, 30];
 
 /** Keys for phones and for what a desktop browser keeps for itself. */
 export const KEYS = [
@@ -97,6 +97,16 @@ export const STRING_KEYS = [
     'consoleerror', 'consolecopied', 'consolecopyfailed', 'consolekeys',
     'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown', 'consoleunavailable',
 ];
+
+/**
+ * Address of a console on the gateway: the same for text and graphical consoles.
+ *
+ * @param {object} ticket answer of mod_gns3lab_get_console_ticket
+ * @param {string} nodeId node id in the live project
+ * @returns {string} wss://…/console/<node_id>?ticket=…
+ */
+export const consoleUrl = (ticket, nodeId) =>
+    `${ticket.gatewayurl}/console/${encodeURIComponent(nodeId)}?ticket=${encodeURIComponent(ticket.ticket)}`;
 
 let xtermPromise = null;
 
@@ -214,8 +224,7 @@ export class ConsoleConnection {
         }
         this.readonly = ticket.readonly;
         this.term.options.disableStdin = ticket.readonly;
-        const url = `${ticket.gatewayurl}/console/${encodeURIComponent(this.nodeId)}?ticket=${encodeURIComponent(ticket.ticket)}`;
-        const ws = new WebSocket(url);
+        const ws = new WebSocket(consoleUrl(ticket, this.nodeId));
         ws.binaryType = 'arraybuffer';
         ws.onopen = () => this.opened(ws);
         ws.onmessage = event => {

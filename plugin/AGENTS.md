@@ -34,6 +34,8 @@ docs/          SPEC.md и прочая документация
 3. **Только AMD-модули.** Никаких `<script>` через `$PAGE->requires->js()` для библиотек: на странице RequireJS,
    UMD-сборка xterm.js вызовет анонимный `define()` и сломает страницу. xterm.js и addon-fit кладутся в `amd/src/`
    как сторонние библиотеки и регистрируются в `thirdpartylibs.xml`. CSS — в `styles.css` плагина.
+   Третья сторонняя библиотека — `amd/src/novnc.js` (noVNC 1.7.0, ES-модуль; собран `devtools/build_novnc.mjs`, в сессии
+   не читай и не правь: шапка файла и `thirdpartylibs.xml` говорят, что в нём изменено).
 4. **`amd/build` коммитится** и пересобирается после каждого изменения `amd/src` (`grunt amd` в dev-Moodle).
 5. Любое изменение в `db/` (install.xml, access.php, services.php) — подними `version.php` и, если нужно, `db/upgrade.php`.
 6. SVG из `.gns3` (`topology.drawings[].svg`) — недоверенные данные. Только через санитайзер по белому списку

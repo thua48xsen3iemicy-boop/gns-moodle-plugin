@@ -37,6 +37,7 @@ import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
 import {Session, STRING_KEYS as SESSION_KEYS} from 'mod_gns3lab/session';
 import {Stage} from 'mod_gns3lab/stage';
+import {STRING_KEYS as VNC_KEYS} from 'mod_gns3lab/vnc';
 import {Wheel} from 'mod_gns3lab/wheel';
 
 const CATEGORIES = ['router', 'switch', 'pc', 'server', 'cloud', 'firewall', 'hypervisor'];
@@ -63,7 +64,7 @@ const UI_KEYS = [
     'ui_act_console', 'ui_act_console_open', 'ui_act_console_goto', 'ui_act_info', 'ui_act_info_full', 'ui_act_zoom',
     'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
     'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',
-    'consoleneedsrunning', 'consolevnclater', 'consolenone',
+    'consoleneedsrunning', 'consolenone',
     'ui_facts_at', 'ui_facts_ago', 'ui_facts_ago_now', 'ui_facts_stale', 'ui_facts_stale_mark', 'ui_facts_nodata',
     'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
     ...FACT_ERRORS.map(code => 'ui_facts_err_' + code),
@@ -466,8 +467,9 @@ class LabPage {
         if (!live.state.canuse && !live.state.readonly) {
             return this.strings.ui_why_viewer;
         }
-        if (n.consoleType === 'vnc') {
-            return this.strings.consolevnclater;
+        if (n.consoleType === 'vnc' && live.state.readonly) {
+            // The screen is the student's own: the teacher does not see it (and the server issues no ticket for it).
+            return this.strings.consolevncobserver;
         }
         if (!n.consoleType || n.consoleType === 'none') {
             return this.strings.consolenone;
@@ -580,7 +582,7 @@ export const init = async(prefix, cmid, userid = 0) => {
         return;
     }
     root.dataset.labReady = '1';
-    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...CONSOLE_KEYS, ...SNIPPET_KEYS])];
+    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...CONSOLE_KEYS, ...VNC_KEYS, ...SNIPPET_KEYS])];
     const values = await getStrings(keys.map(key => ({key, component: 'mod_gns3lab'})));
     const strings = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
     new LabPage(root, {prefix, cmid, userid, strings});

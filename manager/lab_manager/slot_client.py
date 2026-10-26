@@ -141,13 +141,13 @@ class GatewayClient:
     async def close(self):
         await self._http.aclose()
 
-    async def issue(self, *, slot: str, project_id: str, node_id: str, readonly: bool, who: str) -> dict:
+    async def issue(self, *, slot: str, project_id: str, node_id: str, readonly: bool, who: str,
+                    console: str = "telnet") -> dict:
+        body = {"slot": slot, "project_id": project_id, "nodes": [node_id], "readonly": readonly, "who": who}
+        if console != "telnet":
+            body["console"] = console  # The gateway's default is telnet: the field is sent only when it differs
         try:
-            resp = await self._http.post(
-                "/internal/tickets",
-                json={"slot": slot, "project_id": project_id, "nodes": [node_id],
-                      "readonly": readonly, "who": who},
-            )
+            resp = await self._http.post("/internal/tickets", json=body)
         except httpx.HTTPError as exc:
             raise SlotUnavailable(f"Gateway: {type(exc).__name__}") from exc
         if resp.status_code != 200:

@@ -541,15 +541,24 @@ class Lifecycle:
 
     async def provision(self, lab, node, spec, initial):
         deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
+        # A VNC node has no serial console: neither serial-getty nor a Telnet port exist, and
+        # readiness is the VNC port accepting a TCP connection. QGA does not depend on the
+        # console; it is awaited here only when the initial provisioning commands need it.
+        # Tickets stored before NodeSpec.console existed have no such key: they are telnet.
+        vnc = spec.get("console") == "vnc"
+        qga_needed = spec["kind"] == "qemu" and (
+            not vnc or bool(initial and spec.get("provisioning"))
+        )
         while True:
             try:
-                if spec["kind"] == "qemu":
+                if qga_needed:
                     await self.qga.call(
                         node["node_id"],
                         "guest-ping",
                         timeout=2,
                         priority=Priority.LIFECYCLE,
                     )
+                if spec["kind"] == "qemu" and not vnc:
                     command = (
                         "systemctl enable --now serial-getty@ttyS0.service && systemctl is-active --quiet serial-getty@ttyS0.service"
                         if initial
@@ -562,11 +571,13 @@ class Lifecycle:
                         raise RuntimeError("serial-getty readiness failed")
                 port = node.get("console")
                 if (
-                    node.get("console_type") != "telnet"
+                    node.get("console_type") != ("vnc" if vnc else "telnet")
                     or type(port) is not int
                     or not 1 <= port <= 65535
                 ):
-                    raise RuntimeError("Missing local Telnet console")
+                    raise RuntimeError(
+                        "Missing local VNC console" if vnc else "Missing local Telnet console"
+                    )
                 _, writer = await asyncio.wait_for(
                     asyncio.open_connection("127.0.0.1", port), 3
                 )

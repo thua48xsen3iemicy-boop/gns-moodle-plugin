@@ -1,9 +1,9 @@
 """Initial ticket format. A published lab template will eventually generate this ticket."""
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 
 class ProvisionCommand(BaseModel):
@@ -31,6 +31,20 @@ class NodeSpec(BaseModel):
     qga: Literal[True] = True
     l1_keepalives: bool = True
     startup_script: str = ""  # VPCS only
+    # QEMU only. "telnet" is the serial console; "vnc" is the graphic screen and the node then
+    # has no serial console at all (CONTRACTS.md 4.2).
+    console: Literal["telnet", "vnc"] = "telnet"
+
+    @model_serializer(mode="wrap")
+    def omit_default_console(self, handler) -> dict[str, Any]:
+        # The dumped ticket is the project passport (compared on every repeated deploy and
+        # stored in the lab record) and part of the idempotency fingerprint. The default
+        # "telnet" must not appear in it: records written before this field existed, and a
+        # manifest that omits it, keep their exact representation.
+        data = handler(self)
+        if isinstance(data, dict) and data.get("console") == "telnet":
+            del data["console"]
+        return data
 
     @model_validator(mode="after")
     def image_is_safe(self):
@@ -47,6 +61,8 @@ class NodeSpec(BaseModel):
                 raise ValueError("IOL commands must be single lines")
         if self.kind in ("qemu", "iou") and not self.image:
             raise ValueError(f"image is required for {self.kind}")
+        if self.console == "vnc" and self.kind != "qemu":
+            raise ValueError("console vnc is only supported for qemu nodes")
         if self.image and (
             self.image in (".", "..") or "/" in self.image or "\\" in self.image
         ):

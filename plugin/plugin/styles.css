@@ -2204,6 +2204,55 @@ body.gns3lab-fullscreen {
     bottom: 60px;
     z-index: 2;
 }
+/* the graphical console (noVNC): the screen fills the area, noVNC scales it; a message sits over it */
+.gns3lab-student .termview.vncview {
+    position: relative;
+    padding: 0;
+    background: var(--term-bg);
+}
+.gns3lab-student .vncscreen {
+    position: absolute;
+    inset: 0;
+}
+.gns3lab-student .vncscreen:focus-within {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+.gns3lab-student .vncnote {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    text-align: center;
+    color: var(--term-dim);
+    font: 13px var(--display);
+    pointer-events: none;
+}
+.gns3lab-student .vncbar {
+    justify-content: flex-start;
+}
+.gns3lab-student .vncbtn {
+    flex: none;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    background: color-mix(in srgb,var(--term-fg) 8%,transparent);
+    color: var(--term-fg);
+    font: 600 12px var(--display);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .vncbtn:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.gns3lab-student .vncbtn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
 /* the bar under a terminal: snippets menu, pinned snippets, font size */
 .gns3lab-student .tbar {
     display: flex;

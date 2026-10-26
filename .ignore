@@ -6,5 +6,6 @@ plugin/plugin/amd/build/
 # Third-party libraries.
 plugin/plugin/amd/src/xterm.js
 plugin/plugin/amd/src/xterm-addon-fit.js
+plugin/plugin/amd/src/novnc.js
 # Large UI reference prototypes.
 plugin/prototypes/*.html

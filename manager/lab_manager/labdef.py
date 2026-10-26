@@ -236,6 +236,10 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
             spec.update(cpus=values["cpus"], adapters=values["adapters"])
         elif image.kind == "iou":
             spec["ethernet_adapters"] = values["adapters"]
+        if image.console_type == "vnc":
+            # Only vnc nodes carry the field: a telnet node stays byte for byte what it was, so the
+            # canonical JSON and the lab_revision of existing labs do not change (CONTRACTS 4.2).
+            spec["console"] = "vnc"
         options = image.slot.model_dump(exclude_none=True)
         if not options.get("provisioning"):
             options.pop("provisioning", None)
