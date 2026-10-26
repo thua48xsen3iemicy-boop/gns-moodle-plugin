@@ -213,7 +213,11 @@ class Con {
         setTimeout(() => b.classList.remove('sent'), 700);
     }
 
-    /** Smaller, size, larger: the size is one for all consoles. */
+    /**
+     * Smaller, size, larger: the size is one for all consoles.
+     *
+     * @param {HTMLElement} bar Toolbar containing the font controls.
+     */
     buildFont(bar) {
         const o = this.owner, g = hel('div', 'tfont', bar);
         g.setAttribute('role', 'group');
@@ -254,7 +258,11 @@ class Con {
         }
     }
 
-    /** Ctrl + wheel over the terminal or its bar changes the font instead of zooming the page. */
+    /**
+     * Ctrl + wheel over the terminal or its bar changes the font instead of zooming the page.
+     *
+     * @param {WheelEvent} event Wheel event over the terminal or toolbar.
+     */
     wheel(event) {
         if (!(event.ctrlKey || event.metaKey)) return;
         event.preventDefault();
@@ -455,7 +463,11 @@ class Con {
         }
     }
 
-    /** The last lines of the output for the preview on the scheme. */
+    /**
+     * The last lines of the output for the preview on the scheme.
+     *
+     * @param {number} n Maximum number of lines to return.
+     */
     tail(n) {
         if (!this.term) return [];
         const buf = this.term.buffer.active, out = [];
@@ -480,7 +492,11 @@ class Con {
         }
     }
 
-    /** Typed input and output of the device in the windows arrangement: dots run along the line to the node. */
+    /**
+     * Typed input and output of the device in the windows arrangement: dots run along the line to the node.
+     *
+     * @param {string} dir Activity direction, in or out.
+     */
     activity(dir) {
         const o = this.owner;
         if (o.stage.mobile || o.mode !== 'windows' || !this.win || this.min) return;
@@ -631,7 +647,11 @@ export class Consoles {
         this.cons.forEach(c => c.applyFont());
     }
 
-    /** One step larger (1) or smaller (-1). */
+    /**
+     * One step larger (1) or smaller (-1).
+     *
+     * @param {number} dir Direction of the font size change.
+     */
     stepFont(dir) {
         const i = FONT_STEPS.indexOf(this.fontSize);
         this.setFont(FONT_STEPS[clamp(i + dir, 0, FONT_STEPS.length - 1)]);
@@ -644,7 +664,11 @@ export class Consoles {
         this.cons.forEach(c => c.applyFont());
     }
 
-    /** Ids of the snippets on the bar for this set of snippets: the choice of the student or the defaults. */
+    /**
+     * Ids of the snippets on the bar for this set of snippets: the choice of the student or the defaults.
+     *
+     * @param {object} set Snippet set with its pin key and defaults.
+     */
     pinIds(set) {
         const ids = this.pins[set.pinKey];
         return Array.isArray(ids) ? ids : set.defaults;
@@ -654,7 +678,11 @@ export class Consoles {
         return this.pinIds(set).includes(id);
     }
 
-    /** The snippets of a node that are pinned to the bar, in the order of the menu. */
+    /**
+     * The snippets of a node that are pinned to the bar, in the order of the menu.
+     *
+     * @param {object} node Node of the topology model.
+     */
     pinnedFor(node) {
         const set = snippetSet(node), ids = this.pinIds(set);
         return set.items.filter(item => ids.includes(item.id));
@@ -1111,7 +1139,11 @@ export class Consoles {
         if (c) c.refit();
     }
 
-    /** Pinch over a node that has a console: show what happens when the fingers are lifted. */
+    /**
+     * Pinch over a node that has a console: show what happens when the fingers are lifted.
+     *
+     * @param {object|null} n Candidate node, or null when no node is selected.
+     */
     diveCandidate(n) {
         if (n && !(this.diving && this.active === n.id)) this.stage.showDiveHint(fill(this.s('ui_dive_release'), n.name));
         else this.stage.showDiveHint('');
@@ -1163,7 +1195,11 @@ export class Consoles {
         }
     }
 
-    /** The page became phone sized or the other way round. */
+    /**
+     * The page became phone sized or the other way round.
+     *
+     * @param {boolean} mobile Whether the page now uses the phone layout.
+     */
     mobileChanged(mobile) {
         if (!mobile && this.diving) this.exitDive(false);
         if (!Number(store.get('termfont', 0))) {
@@ -1210,7 +1246,11 @@ export class Consoles {
         if (this.ctrlButton) this.ctrlButton.setAttribute('aria-pressed', String(on));
     }
 
-    /** The next typed letter becomes a control character while Ctrl of the strip is pressed. */
+    /**
+     * The next typed letter becomes a control character while Ctrl of the strip is pressed.
+     *
+     * @param {string} data Typed terminal input.
+     */
     applyCtrl(data) {
         if (!this.ctrl) return data;
         this.setCtrl(false);
