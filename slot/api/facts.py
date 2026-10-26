@@ -18,7 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 
 from api.client import get_lifecycle
-from api.qga import Priority, QgaBusy, QgaError, QgaTimeout, QgaUnavailable
+from api.qga import Priority, QgaBusy, QgaCommandError, QgaError, QgaTimeout, QgaUnavailable
 
 SCHEMA = "gns3lab.slot-facts/1"
 MESSAGE_LIMIT = 200
@@ -138,6 +138,16 @@ def linux_net_route(route):
     return entry
 
 
+def set_gateway(interfaces, routes):
+    """`gateway` of the interface that carries the default route with the lowest metric."""
+    defaults = [r for r in routes if r["dst"] == "default" and "via" in r and "dev" in r]
+    if defaults:
+        best = min(defaults, key=lambda r: r.get("metric", 0))
+        for entry in interfaces:
+            if entry["name"] == best["dev"]:
+                entry["gateway"] = best["via"]
+
+
 def parse_linux_net(stdout, macs):
     """Turn the output of LINUX_NET_COMMAND into a fragment of a live-state.md node.
 
@@ -160,13 +170,131 @@ def parse_linux_net(stdout, macs):
         )
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         raise FactError("failed", f"Unexpected output of ip -j: {type(exc).__name__}") from exc
-    defaults = [r for r in routes if r["dst"] == "default" and "via" in r and "dev" in r]
-    if defaults:
-        best = min(defaults, key=lambda r: r.get("metric", 0))
-        for entry in interfaces:
-            if entry["name"] == best["dev"]:
-                entry["gateway"] = best["via"]
+    set_gateway(interfaces, routes)
     return {"interfaces": interfaces, "routes": routes}
+
+
+# Windows guest (family "windows"): one PowerShell run prints one JSON document. The script is
+# ASCII-only and so is its output: non-ASCII characters of adapter names leave as \uXXXX, so the
+# console code page of the guest does not matter. Enumerations are cast to strings, ConvertTo-Json
+# would print them as numbers. `@()` keeps one-element results arrays.
+WINDOWS_NET_COMMAND = r"""$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+try {
+    $adapters = @(Get-NetAdapter | ForEach-Object {
+        [pscustomobject]@{ Name = [string]$_.Name; Index = [int]$_.ifIndex; Mac = [string]$_.MacAddress; Status = [string]$_.Status }
+    })
+    $addresses = @(Get-NetIPAddress -AddressFamily IPv4 | ForEach-Object {
+        [pscustomobject]@{ Index = [int]$_.InterfaceIndex; Ip = [string]$_.IPAddress; Prefix = [int]$_.PrefixLength; State = [string]$_.AddressState }
+    })
+    $routes = @(Get-NetRoute -AddressFamily IPv4 | ForEach-Object {
+        [pscustomobject]@{ Index = [int]$_.InterfaceIndex; Dst = [string]$_.DestinationPrefix; Next = [string]$_.NextHop; Metric = [int]$_.RouteMetric + [int]$_.InterfaceMetric; Proto = [string]$_.Protocol }
+    })
+    $json = [pscustomobject]@{ adapters = $adapters; addresses = $addresses; routes = $routes } | ConvertTo-Json -Depth 4 -Compress
+    [regex]::Replace($json, '[^\x00-\x7F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+"""
+# `Get-NetAdapter.Status` -> admin: only these are an administrative "down"; everything but Up is
+# an operational "down" (Disconnected is a cable that is not there, as `NO-CARRIER` on Linux).
+WINDOWS_ADMIN_DOWN = {"Disabled", "Not Present"}
+
+
+def as_list(value):
+    """ConvertTo-Json prints a single object, not a one-element array, if a guest PowerShell unrolls it."""
+    if isinstance(value, dict):
+        return [value]
+    if not isinstance(value, list):
+        raise TypeError("not a list")
+    return value
+
+
+def windows_net_interface(adapter, macs):
+    if type(adapter["Index"]) is not int or not isinstance(adapter["Name"], str):
+        raise TypeError("adapter without name or index")
+    status = adapter["Status"]
+    if not isinstance(status, str):
+        raise TypeError("adapter status is not a string")
+    entry = {"name": adapter["Name"], "kind": "physical"}
+    entry["admin"] = "down" if status in WINDOWS_ADMIN_DOWN else "up"
+    entry["oper"] = "up" if status == "Up" else "down"
+    mac = normalized_mac(adapter.get("Mac"))
+    if mac:
+        entry["mac"] = mac
+        if mac in macs:
+            entry["port"] = {"adapter": macs[mac], "port": 0}
+    entry["ipv4"] = []
+    return entry
+
+
+def windows_net_route(route, names):
+    """One `Get-NetRoute` entry -> a route of live-state.md 3.3, or None for what `ip route` does not show.
+
+    Windows lists host routes of its own addresses and broadcasts (`Local`, /32), multicast and the
+    loopback. They carry no information about the network and Linux keeps them in the `local` table.
+    """
+    dev = names.get(route["Index"])
+    network = ipaddress.ip_network(route["Dst"], strict=True)
+    proto = route["Proto"].lower()
+    if dev is None or network.is_multicast or (proto == "local" and network.prefixlen == 32):
+        return None
+    entry = {"dst": "default" if network.prefixlen == 0 else str(network)}
+    via = ipaddress.ip_address(route["Next"])
+    if not via.is_unspecified:
+        entry["via"] = str(via)
+    entry["dev"] = dev
+    if proto:
+        entry["proto"] = proto
+    if type(route["Metric"]) is int:
+        entry["metric"] = route["Metric"]
+    return entry
+
+
+def parse_windows_net(stdout, macs):
+    """Turn the output of WINDOWS_NET_COMMAND into `interfaces` and `routes` of a live-state.md node.
+
+    Same shape and the same rules as `parse_linux_net`: state only, nothing that changes by itself
+    (no lease times). The loopback is not an adapter for Windows, so it is not listed. An address
+    that failed duplicate detection is not in use and is left out; every other one is configured
+    and is listed, also on an adapter without a cable.
+    """
+    try:
+        document = json.loads(stdout)
+        adapters = sorted(as_list(document["adapters"]), key=lambda item: item["Index"])
+        interfaces = [windows_net_interface(adapter, macs) for adapter in adapters]
+        by_index = {adapter["Index"]: entry for adapter, entry in zip(adapters, interfaces)}
+        for address in as_list(document["addresses"]):
+            entry = by_index.get(address["Index"])
+            if entry is not None and address["State"] != "Duplicate":
+                entry["ipv4"].append(
+                    str(ipaddress.ip_interface(f"{address['Ip']}/{address['Prefix']}"))
+                )
+        for entry in interfaces:
+            entry["ipv4"].sort(key=ipaddress.ip_interface)
+        names = {index: entry["name"] for index, entry in by_index.items()}
+        routes = sorted(
+            (
+                entry
+                for route in as_list(document["routes"])
+                if (entry := windows_net_route(route, names)) is not None
+            ),
+            key=lambda e: (e["dst"], e.get("metric", 0), e.get("via", ""), e.get("dev", "")),
+        )
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise FactError(
+            "failed", f"Unexpected output of Get-NetAdapter: {type(exc).__name__}"
+        ) from exc
+    set_gateway(interfaces, routes)
+    return {"interfaces": interfaces, "routes": routes}
+
+
+def guest_is_windows(info):
+    """`guest-get-osinfo` reports `id: mswindows` for Windows; the name is the second witness."""
+    if not isinstance(info, dict):
+        return False
+    return str(info.get("id", "")).lower() == "mswindows" or "windows" in str(info.get("name", "")).lower()
 
 
 # Linux switch (images/linux-switch): one exec asks the guest API twice. No switchctl means the node
@@ -270,6 +398,11 @@ class Collector:
     # The guest tells whether it takes part: exit 127 means "not here" and nothing is published,
     # failures of the exchange stay silent until the first success (see Facts.attempt).
     probe: bool = False
+    # The guest family the collector is for: "posix" (a shell in /bin/sh) or "windows" (PowerShell).
+    # The guest tells it (Facts.detect_family); a collector never runs on the other family.
+    family: str = "posix"
+    shell: str = "sh"  # how QgaBroker.exec runs `command`
+    timeout_scale: float = 1.0  # times SLOT_FACTS_TIMEOUT; a cold PowerShell needs seconds to start
 
 
 LINUX_NET = Collector(
@@ -290,7 +423,18 @@ SWITCH_NET = Collector(
     missing="The guest has no switchctl",
     probe=True,
 )
-COLLECTORS = (LINUX_NET, SWITCH_NET)
+WINDOWS_NET = Collector(
+    name="windows.net",
+    schema="windows.net/1",
+    command=WINDOWS_NET_COMMAND,
+    applies=LINUX_NET.applies,
+    parse=lambda stdout, node: parse_windows_net(stdout, adapter_macs(node)),
+    missing="The guest has no usable Get-NetAdapter",
+    family="windows",
+    shell="powershell",
+    timeout_scale=3.0,
+)
+COLLECTORS = (LINUX_NET, SWITCH_NET, WINDOWS_NET)
 COLLECTOR_IDS = [collector.schema for collector in COLLECTORS]
 
 
@@ -306,7 +450,8 @@ def classify(exc):
 def failure_of(result, collector):
     """A guest command that ran but did not succeed."""
     stderr = (result.get("stderr") or "").strip()
-    if result.get("exit_code") == 127 or "is unknown" in stderr:  # no tool, or an `ip` without -j
+    # no tool, an `ip` without -j, or a PowerShell without the NetTCPIP cmdlets
+    if result.get("exit_code") == 127 or "is unknown" in stderr or "is not recognized" in stderr:
         return FactError("unsupported", collector.missing)
     return FactError("failed", f"Command exited with {result.get('exit_code')}: {stderr}"[:MESSAGE_LIMIT])
 
@@ -326,6 +471,10 @@ class Facts:
         # What the guests told about their role, for probe collectors; same keys as next_due.
         self.absent = set()  # the guest is not what the collector looks for: not asked again
         self.confirmed = set()  # the collector has succeeded at least once: its failures are published
+        # What the guest said about itself: (project_id, node_id) -> "posix" | "windows". Until it
+        # has, no collector of a family runs and nothing is published: a record of the wrong family
+        # would stay as a stranger's error (the manager never deletes a collector's row).
+        self.families = {}
         self.epoch = 0  # bumped by reset(): results of an attempt that started earlier are dropped
         self.force = False
         self.last_refresh = float("-inf")
@@ -339,6 +488,7 @@ class Facts:
         self.next_due.clear()
         self.absent.clear()
         self.confirmed.clear()
+        self.families.clear()
 
     def request_refresh(self):
         now = time.monotonic()
@@ -379,6 +529,8 @@ class Facts:
             del self.next_due[key]
         for memory in (self.absent, self.confirmed):
             memory.difference_update([k for k in memory if k[0] not in labs])
+        for key in [k for k in self.families if k[0] not in labs]:
+            del self.families[key]
         if not self.lc.claimed:
             return
         force, self.force = self.force, False
@@ -390,8 +542,11 @@ class Facts:
                 if spec is None:
                     continue
                 due = []
+                family = self.families.get((lab["project_id"], node["node_id"]))
                 for collector in COLLECTORS:
                     if not collector.applies(node, spec):
+                        continue
+                    if family is not None and collector.family != family:
                         continue
                     key = (lab["project_id"], node["node_id"], collector.name)
                     if key in self.absent:
@@ -407,7 +562,25 @@ class Facts:
         """The collectors of one node one after another: they share a QGA channel, and an attempt
         that finds it taken by a sibling would be skipped as busy."""
         epoch = self.epoch
+        project_id, node_id, _ = due[0][0]
+        family = self.families.get((project_id, node_id))
+        if family is None:
+            try:
+                family = await self.detect_family(due[0][1])
+            except QgaBusy:
+                for key, _, _ in due:
+                    self.next_due[key] = time.monotonic() + self.tick
+                return
+            if epoch != self.epoch:
+                return
+            if family is None:  # cannot be asked now (stopped, no answer): publish nothing, ask again later
+                for key, _, _ in due:
+                    self.next_due[key] = time.monotonic() + self.interval
+                return
+            self.families[(project_id, node_id)] = family
         for key, node, collector in due:
+            if collector.family != family:
+                continue
             if epoch != self.epoch:
                 return  # the owner changed: these nodes belong to the previous one
             try:
@@ -416,6 +589,32 @@ class Facts:
                 raise
             except Exception:  # noqa: BLE001 - a broken collector must not stop the next one.
                 pass
+
+    async def detect_family(self, node):
+        """"windows" or "posix" as the guest agent says; None while the guest cannot be asked.
+
+        An agent that does not know `guest-get-osinfo` answers with an error: that is a Linux guest
+        with an old agent, which is what every node was before this check existed. QgaBusy goes
+        to the caller: the channel is taken by someone else, look again soon.
+        """
+        if node.get("status") != "started":
+            return None
+        try:
+            async with self.slots:
+                info = await self.lc.qga.call(
+                    node["node_id"],
+                    "guest-get-osinfo",
+                    priority=Priority.METRICS,
+                    wait=False,
+                    timeout=self.timeout,
+                )
+        except QgaCommandError:
+            return "posix"
+        except QgaBusy:
+            raise
+        except (QgaError, OSError):
+            return None
+        return "windows" if guest_is_windows(info) else "posix"
 
     def drop(self, key):
         """Forget what was published for a collector, and the node if nothing else is left."""
@@ -440,10 +639,11 @@ class Facts:
                 result = await self.lc.qga.exec(
                     node["node_id"],
                     collector.command,
-                    timeout=self.timeout,
+                    timeout=self.timeout * collector.timeout_scale,
                     priority=Priority.METRICS,
                     wait=False,
                     max_age=2,
+                    shell=collector.shell,
                 )
                 if collector.probe and result.get("exit_code") == 127:
                     absent = True  # the guest does not have the tool: not a node for this collector

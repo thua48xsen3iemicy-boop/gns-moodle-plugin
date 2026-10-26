@@ -581,6 +581,21 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 | ожидание применения | `applied`, `last_error` и желаемая политика в `data` не попадают. Зависшее применение видно как `mode: "none"` или не та VLAN; отдельное поле — вместе с управлением VLAN из лабы, не сейчас |
 | с `linux.net` | на ноде работают оба коллектора, и оба отдают `interfaces`. Менеджер объединяет фрагменты в порядке имён, `switch.net` стоит после `linux.net`, поэтому его `interfaces` заменяет список целиком (не сливается по именам); `routes` остаётся от `linux.net`. Правило покрыто тестом менеджера |
 
+#### Коллектор `windows.net/1` (гость Windows)
+
+Тот же формат `data`, что у `linux.net/1`: `interfaces` и `routes`. Слот отдаёт его вместо `linux.net` и
+`switch.net` для нод, которые сами сообщили, что это Windows. Менеджер и плагин ничего не меняют: коллекторы
+не пересекаются (на ноде работает ровно одно семейство), фрагмент попадает в ноду по общему правилу.
+
+| Правило | Что значит |
+|---|---|
+| какая ОС | слот один раз на ноду вызывает `guest-get-osinfo` (QGA, без шелла): `id: mswindows` (или `Windows` в `name`) — Windows, остальное и агент без этой команды — Linux. Ответ помнится до смены владельца или выхода лабы из `READY`. Пока ОС неизвестна (нода остановлена, агент не ответил), слот не публикует **никаких** записей `linux.net`/`switch.net`/`windows.net`: запись не того семейства осталась бы чужой ошибкой навсегда (менеджер строки не удаляет). После первого ответа сбои публикуются, как у `linux.net` |
+| команда | один запуск `powershell.exe -NoProfile -NonInteractive -EncodedCommand …` через брокер (`METRICS`, `wait=False`, `max_age`): `Get-NetAdapter`, `Get-NetIPAddress -AddressFamily IPv4`, `Get-NetRoute -AddressFamily IPv4`, один JSON в ASCII (не-ASCII символы имён адаптеров идут как `\uXXXX`, кодовая страница гостя не важна). Нужен Windows 10 / Server 2016 и новее; нет `Get-NetAdapter` — `unsupported` |
+| `interfaces` | адаптеры `Get-NetAdapter` (`kind: "physical"`, скрытые и loopback не входят). `name` — имя адаптера (`Ethernet 2`), `mac` — в нижнем регистре через двоеточие, `port` — по MAC, как у `linux.net` (у Windows MAC записан через дефис, разбор это учитывает). Подинтерфейсов и других `kind` нет |
+| `admin` / `oper` | по `Status`: `Disabled` и `Not Present` — `admin: down`, остальное `admin: up`; `oper: up` только при `Up`. `Disconnected` (кабеля нет, линк в GNS3 погашен) — `admin: up`, `oper: down`: так же, как `NO-CARRIER` у Linux |
+| `ipv4` | все IPv4-адреса адаптера с маской, по возрастанию. Адрес в состоянии `Duplicate` не используется и не входит; остальные (в том числе `Tentative` и 169.254.x.x от APIPA, а также адрес на адаптере без кабеля) — то, что настроено. Сроки аренды DHCP не копируются |
+| `routes` | `Get-NetRoute`: `0.0.0.0/0` → `default`, `NextHop 0.0.0.0` → без `via`, `dev` — имя адаптера, `proto` — `Protocol` в нижнем регистре (`local`, `netmgmt`, `dhcp`), `metric` — `RouteMetric + InterfaceMetric` (как в `route print`, у Linux метрика только маршрута). Не входят то, чего нет в `ip route`: хост-маршруты `Local` с /32 (свои адреса, широковещание), мультикаст `224.0.0.0/4`, маршруты loopback. `gateway` интерфейса — по правилу `linux.net`: `default` с наименьшей метрикой |
+
 ## 5. Менеджер → агент узла
 
 Формат и доработки — `AGENT_REQUESTS.md`. Агент строгий (`extra="forbid"`, `strict=True`),
