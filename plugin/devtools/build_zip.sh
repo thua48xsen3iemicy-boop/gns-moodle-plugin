@@ -4,10 +4,14 @@
 set -e
 cd "$(dirname "$0")/.."
 release=$(sed -n "s/^\$plugin->release *= *'\(.*\)';/\1/p" plugin/version.php)
-tmp=$(mktemp -d)
+case "$release" in
+    ''|*[!a-zA-Z0-9._-]*) echo 'Invalid or missing plugin release in version.php' >&2; exit 1 ;;
+esac
+mkdir -p dist
+tmp=$(mktemp -d "$(pwd)/dist/.build-zip.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 cp -r plugin "$tmp/gns3lab"
-mkdir -p dist
-rm -f "dist/mod_gns3lab-$release.zip"
-(cd "$tmp" && zip -qr -X - gns3lab) > "dist/mod_gns3lab-$release.zip"
-echo "dist/mod_gns3lab-$release.zip"
+(cd "$tmp" && zip -qr -X - gns3lab) > "$tmp/plugin.zip"
+# Publish only a complete archive; a failed zip must not truncate the previous one.
+mv "$tmp/plugin.zip" "dist/mod_gns3lab-$release.zip"
+echo "$(pwd)/dist/mod_gns3lab-$release.zip"

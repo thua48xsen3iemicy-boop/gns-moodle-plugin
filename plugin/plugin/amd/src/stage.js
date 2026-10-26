@@ -502,7 +502,12 @@ export class Stage {
         return !!(end && end.down);
     }
 
-    /** Layer L1: wires with port names (level 1) and addresses (level 2). */
+    /**
+     * Layer L1: wires with port names (level 1) and addresses (level 2).
+     *
+     * @param {object} l Link of the topology model.
+     * @param {object} g Calculated link geometry.
+     */
     drawLink(l, g) {
         const m = this.model, fx = this.fx, a = l.a, b = l.b;
         const ia = endIf(fx, a), ib = endIf(fx, b);
@@ -530,7 +535,12 @@ export class Stage {
         });
     }
 
-    /** Layer L2: the wire has the colour of the VLAN that really passes it; several stripes mean a trunk. */
+    /**
+     * Layer L2: the wire has the colour of the VLAN that really passes it; several stripes mean a trunk.
+     *
+     * @param {object} l Link of the topology model.
+     * @param {object} g Calculated link geometry.
+     */
     drawLinkL2(l, g) {
         const D = this.der, f1 = D.l1.links.get(l.id), down = !!(f1 && f1.down);
         const r2 = D.l2.links.get(l.id);
@@ -1185,7 +1195,11 @@ export class Stage {
         }
     }
 
-    /** Zooming deep into a node on a phone opens its console. */
+    /**
+     * Zooming deep into a node on a phone opens its console.
+     *
+     * @param {object} mid Pinch midpoint in screen coordinates.
+     */
     updateDiveCandidate(mid) {
         if (!this.mobile) return;
         const n = 44 * this.view.k >= DIVE_PX ? this.nodeNear(mid.x, mid.y, 44 * this.view.k) : null;
