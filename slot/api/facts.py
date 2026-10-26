@@ -808,8 +808,9 @@ class Facts:
     async def attempt_local(self, key, node, collector):
         """A collector that reads a file: no QGA channel, so no `busy`, and the node may be stopped.
 
-        No file is no record (the node has no facts yet) unless one was published before: then the facts are
-        stale and say so.
+        Nothing saved is no record (the node has no facts yet) unless one was published before: the device
+        will boot without a configuration, so the record is emptied (`data: {}`), not kept as it was.
+        A read that failed while the source was being written is not published: look again soon.
         """
         epoch = self.epoch
         project_id, node_id, name = key
@@ -817,6 +818,10 @@ class Facts:
         snapshot = None
         try:
             snapshot = await asyncio.to_thread(collector.local, project_id, node, self.snapshots.get(key))
+        except ios_config.Changing:
+            if epoch == self.epoch:
+                self.next_due[key] = time.monotonic() + self.tick  # like a busy channel: keep what we have
+            return
         except ios_config.ConfigError as exc:
             failure = (exc.code, str(exc)[:MESSAGE_LIMIT])
         except OSError as exc:
@@ -836,7 +841,7 @@ class Facts:
             published = self.results.get(project_id, {}).get(node_id, {}).get("collectors", {})
             if name not in published:
                 return
-            failure = ("failed", "The saved configuration is gone")
+            data = {}  # a configuration without interfaces is `interfaces: []`; no configuration has no fields
         self.record(key, node, collector, data, failure)
 
     async def stop(self):

@@ -15,3 +15,12 @@ def projects_dir(tmp_path, monkeypatch):
     path = tmp_path / "projects"
     monkeypatch.setenv("SLOT_PROJECTS_DIR", str(path))
     return path
+
+
+@pytest.fixture(autouse=True)
+def no_iou_export(tmp_path, monkeypatch):
+    """No iou_export.py of the GNS3 venv (/opt/gns3-server) unless a test names one."""
+    from api import ios_config
+
+    monkeypatch.delenv("SLOT_IOU_EXPORT", raising=False)
+    monkeypatch.setattr(ios_config, "DEFAULT_EXPORT", str(tmp_path / "no-gns3" / "iou_export.py"))

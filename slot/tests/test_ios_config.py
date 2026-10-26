@@ -5,8 +5,12 @@ catalog (L2 and L3) come from the stand and are added next to them. NVRAM is exe
 the iou_export.py of gns3server: its real format is checked on the stand.
 """
 
+import asyncio
+import copy
+import importlib.util
 import json
 import os
+import time
 
 import pytest
 from api import ios_config
@@ -509,6 +513,62 @@ def test_an_unreadable_file_is_not_remembered(projects_dir):
     assert collect("p1", NODE, None).error is None
 
 
+# --- a source that is being written ----------------------------------------------------------
+
+
+def torn_once(monkeypatch, path, rewritten):
+    """The first read of `path` gets the old text, then the file is rewritten (the writer is at work)."""
+    real = ios_config.read_text
+
+    def read(read_path, info):
+        text = real(read_path, info)
+        monkeypatch.setattr(ios_config, "read_text", real)
+        before = read_path.stat()
+        read_path.write_text(rewritten)
+        os.utime(read_path, ns=(before.st_atime_ns, before.st_mtime_ns + 10**9))
+        return text
+
+    monkeypatch.setattr(ios_config, "read_text", read)
+
+
+BROKEN = "interface Ethernet0/0\n ip address 10.0.0.1 255.0.255.0\n"
+
+
+@pytest.mark.parametrize("rewritten", [L3, BROKEN.replace("255.0.255.0", "255.255.0.0")], ids=["other size", "same size"])
+def test_a_read_that_failed_under_a_writer_is_not_a_verdict(projects_dir, monkeypatch, rewritten):
+    path = node_dir(projects_dir) / "startup-config.cfg"
+    path.write_text(BROKEN)
+    torn_once(monkeypatch, path, rewritten)
+    with pytest.raises(ios_config.Changing):
+        collect("p1", NODE, None)
+    assert collect("p1", NODE, None).error is None  # the next collection reads what is there
+
+
+def test_a_broken_configuration_that_stays_put_is_still_a_failure(projects_dir):
+    (node_dir(projects_dir) / "startup-config.cfg").write_text(BROKEN)
+    assert collect("p1", NODE, None).error is not None
+
+
+def test_an_nvram_torn_by_the_writer_is_not_a_verdict_either(projects_dir, export):
+    path = node_dir(projects_dir) / "nvram_00001"
+    path.write_bytes(b"\xab\xcd!half a write")
+    real = ios_config.read_nvram
+
+    def read(read_path):
+        try:
+            return real(read_path)
+        finally:
+            before = read_path.stat()
+            read_path.write_bytes(nvram_of(L3))
+            os.utime(read_path, ns=(before.st_atime_ns, before.st_mtime_ns + 10**9))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ios_config, "read_nvram", read)
+        with pytest.raises(ios_config.Changing):
+            collect("p1", NODE, None)
+    assert collect("p1", NODE, None).data == parse_ios_config(L3, {})
+
+
 # --- NVRAM ------------------------------------------------------------------------------------
 
 # The same contract as the nvram_export of gns3server: (startup, private) or ValueError.
@@ -620,6 +680,35 @@ def test_without_the_export_code_the_slot_says_it_cannot(projects_dir, tmp_path,
     monkeypatch.setenv("SLOT_IOU_EXPORT", str(broken))
     with pytest.raises(ios_config.Unsupported):
         collect("p1", NODE, None)
+
+
+def test_the_venv_of_the_slot_template_is_where_the_export_code_is_expected(projects_dir, tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("fresh_ios_config", ios_config.__file__)
+    fresh = importlib.util.module_from_spec(spec)  # the one in use has the default replaced by conftest
+    spec.loader.exec_module(fresh)
+    assert fresh.DEFAULT_EXPORT == (
+        "/opt/gns3-server/lib/python3.12/site-packages/gns3server/compute/iou/utils/iou_export.py"
+    )
+    venv = tmp_path / "gns3-venv" / "iou_export.py"
+    venv.parent.mkdir()
+    venv.write_text(EXPORT)
+    monkeypatch.setattr(ios_config, "DEFAULT_EXPORT", str(venv))
+    (node_dir(projects_dir) / "nvram_00001").write_bytes(nvram_of(L3))
+    assert collect("p1", NODE, None).data == parse_ios_config(L3, {})  # no SLOT_IOU_EXPORT needed
+    broken = tmp_path / "broken.py"
+    broken.write_text("def nvram_export(:\n")
+    monkeypatch.setenv("SLOT_IOU_EXPORT", str(broken))  # what the administrator names wins
+    with pytest.raises(ios_config.Unsupported):
+        collect("p1", NODE, None)
+
+
+@pytest.mark.parametrize("answer", ["(None, None)", "(bytearray(), None)", "(bytearray(b'\\n  \\n'), None)", "(b'', b'')"])
+def test_whatever_an_erased_nvram_exports_to_is_no_configuration(projects_dir, tmp_path, monkeypatch, answer):
+    path = tmp_path / "erased_export.py"
+    path.write_text(f"def nvram_export(nvram):\n    return {answer}\n")
+    monkeypatch.setenv("SLOT_IOU_EXPORT", str(path))
+    (node_dir(projects_dir) / "nvram_00001").write_bytes(b"\xab\xcd" + bytes(100))
+    assert collect("p1", NODE, None) is None
 
 
 def test_a_config_file_needs_no_export_code(projects_dir, monkeypatch):
@@ -773,20 +862,21 @@ def test_a_broken_configuration_is_published_even_before_the_first_success(monke
     scenario(monkeypatch, body)
 
 
-def test_a_file_that_goes_away_leaves_stale_facts_that_say_so(monkeypatch, projects_dir):
+def test_a_file_that_goes_away_empties_the_record(monkeypatch, projects_dir):
     async def body(facts, lifecycle, labs):
         path = config_path(projects_dir)
         path.write_text(L3)
         await facts.cycle()
         first = saved_of(facts)
+        assert first["data"]["interfaces"]
         path.unlink()
         await facts.cycle()
         record = saved_of(facts)
-        assert record["ok"] is False and record["error"]["code"] == "failed"
-        assert record["data"] == first["data"] and record["observed_at"] == first["observed_at"]
+        assert record["ok"] is True and record["error"] is None and record["data"] == {}
+        assert record["observed_at"] >= first["observed_at"]
         path.write_text(L3)
         await facts.cycle()
-        assert saved_of(facts)["ok"] is True
+        assert saved_of(facts)["data"] == first["data"]
 
     scenario(monkeypatch, body)
 
@@ -895,14 +985,81 @@ def test_a_slot_that_cannot_export_says_unsupported_and_recovers(monkeypatch, pr
     scenario(monkeypatch, body)
 
 
-def test_an_erased_nvram_leaves_stale_facts_that_say_so(monkeypatch, projects_dir, export):
+def test_write_erase_empties_the_record_and_is_not_a_failure(monkeypatch, projects_dir, export):
     async def body(facts, lifecycle, labs):
         path = node_dir(projects_dir) / "nvram_00001"
         path.write_bytes(nvram_of(L3))
         await facts.cycle()
-        path.write_bytes(b"\x00" * 4096)  # write erase and a reload
+        assert saved_of(facts)["data"]["interfaces"]
+        path.write_bytes(b"\x00" * 4096)  # write erase: the device will boot without a configuration
         await facts.cycle()
         record = saved_of(facts)
-        assert record["ok"] is False and record["error"]["code"] == "failed" and record["data"]
+        assert record["ok"] is True and record["error"] is None and record["data"] == {}
+        path.write_bytes(nvram_of(L2))  # and saves again
+        await facts.cycle()
+        assert saved_of(facts)["data"]["interfaces"]
+
+    scenario(monkeypatch, body)
+
+
+def test_no_configuration_and_a_configuration_without_interfaces_are_told_apart(monkeypatch, projects_dir, export):
+    async def body(facts, lifecycle, labs):
+        path = node_dir(projects_dir) / "nvram_00001"
+        await facts.cycle()
+        assert "n2" not in facts.snapshot("p1")["nodes"]  # never anything saved: no record at all
+        path.write_bytes(nvram_of("!\nhostname R1\nend\n"))
+        await facts.cycle()
+        assert saved_of(facts)["data"] == {"interfaces": []}  # a configuration that has no interfaces
+        path.write_bytes(bytes(4096))
+        await facts.cycle()
+        assert saved_of(facts)["data"] == {}  # no configuration at all
+
+    scenario(monkeypatch, body)
+
+
+def test_a_node_erased_before_it_was_ever_seen_has_no_record(monkeypatch, projects_dir, export):
+    async def body(facts, lifecycle, labs):
+        (node_dir(projects_dir) / "nvram_00001").write_bytes(bytes(4096))
+        await facts.cycle()
+        await facts.cycle()
+        assert "n2" not in facts.snapshot("p1")["nodes"]
+
+    scenario(monkeypatch, body)
+
+
+def test_a_failure_while_the_source_is_written_is_not_published_and_is_retried_soon(monkeypatch, projects_dir):
+    async def body(facts, lifecycle, labs):
+        facts.interval, facts.tick = 3600, 0.01
+        path = config_path(projects_dir)
+        path.write_text(BROKEN)
+        torn_once(monkeypatch, path, L3)
+        await facts.cycle()
+        assert "n2" not in facts.snapshot("p1")["nodes"]  # nothing: neither a record nor a failure
+        soon = facts.next_due[("p1", "n2", "ios.config")] - time.monotonic()
+        assert 0 < soon < 1  # not in an hour
+        await asyncio.sleep(0.05)
+        await facts.cycle()
+        assert saved_of(facts)["ok"] is True and saved_of(facts)["data"] == parse_ios_config(L3, {})
+
+    scenario(monkeypatch, body)
+
+
+def test_a_failure_while_the_source_is_written_leaves_the_record_as_it_was(monkeypatch, projects_dir):
+    async def body(facts, lifecycle, labs):
+        facts.interval, facts.tick = 3600, 0.01
+        path = config_path(projects_dir)
+        path.write_text(L3)
+        await facts.cycle()
+        before = copy.deepcopy(facts.snapshot("p1"))
+        path.write_text(BROKEN)  # the writer is at work: a broken half
+        os.utime(path, ns=(0, path.stat().st_mtime_ns + 10**9))
+        facts.request_refresh()
+        torn_once(monkeypatch, path, L3.replace("10.0.12.1", "10.0.12.9"))
+        await facts.cycle()
+        assert facts.snapshot("p1") == before  # not even attempted_at moved
+        await asyncio.sleep(0.05)
+        await facts.cycle()
+        after = saved_of(facts)
+        assert after["ok"] is True and "10.0.12.9/30" in json.dumps(after["data"])
 
     scenario(monkeypatch, body)

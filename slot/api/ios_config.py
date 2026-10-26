@@ -26,6 +26,8 @@ NVRAM = re.compile(r"nvram_\d{5}")
 SIZE_LIMIT = 1 << 20  # a saved configuration is tens of KiB; more than this is not one
 NVRAM_LIMIT = 4 << 20  # the slot creates IOL nodes with 256 KiB of it
 EXPORT_PATH = "compute/iou/utils/iou_export.py"  # in the gns3server package
+# GNS3 lives in its own venv in the slot template (install/slot-template-setup); the venv of the slot cannot see it.
+DEFAULT_EXPORT = "/opt/gns3-server/lib/python3.12/site-packages/gns3server/" + EXPORT_PATH
 VLAN_IDS = range(1, 4095)
 ALL_VLANS = frozenset(VLAN_IDS)
 UNIQUE = re.compile(r"[0-9A-Za-z_-]+")
@@ -45,6 +47,11 @@ class ConfigError(ValueError):
 
 class Unreadable(ConfigError):
     """A file could not be read now. Unlike a file that does not parse, this may pass without a change of it."""
+
+
+class Changing(Exception):
+    """The source changed under the read that failed: IOL writes NVRAM and GNS3 writes the file in place.
+    Not a failure of the configuration; the next collection reads the source again."""
 
 
 class Unsupported(Unreadable):
@@ -148,11 +155,13 @@ _exporters = {}  # path of iou_export.py -> its nvram_export
 def exporter():
     """`nvram_export` of the iou_export.py of the installed gns3server.
 
-    The module uses nothing but the standard library, and gns3server may well be installed for another
-    interpreter than the slot's, so the file is loaded on its own instead of importing the package.
-    `SLOT_IOU_EXPORT` names it; otherwise it is looked for in the gns3server this interpreter can see.
+    The module uses nothing but the standard library, and gns3server is installed for another interpreter
+    than the slot's (its own venv), so the file is loaded on its own instead of importing the package. Where:
+    `SLOT_IOU_EXPORT`, else the venv of the slot template, else the gns3server this interpreter can see.
     """
     path = os.getenv("SLOT_IOU_EXPORT")
+    if not path and os.path.isfile(DEFAULT_EXPORT):
+        path = DEFAULT_EXPORT
     if not path:
         try:
             package = importlib.util.find_spec("gns3server")
@@ -181,12 +190,21 @@ def read_nvram(path):
     export = exporter()
     try:
         startup, _private = export(raw)  # the private config (keys) is not looked at
+        text = bytes(startup or b"").rstrip(b"\x00")
     except (ValueError, IndexError, TypeError) as exc:
-        if str(exc) == "no startup config":  # the device has never saved one
+        if str(exc) == "no startup config":  # never saved, or erased
             return None
         raise ConfigError(f"Cannot export the configuration from NVRAM: {type(exc).__name__}") from exc
-    text = bytes(startup).rstrip(b"\x00")
     return text.decode("utf-8", errors="replace") if text.strip() else None
+
+
+def moved(path, info):
+    """The source is not what `info` described any more (or is not there): somebody wrote to it."""
+    try:
+        now = os.lstat(path)
+    except OSError:
+        return True
+    return (now.st_size, now.st_mtime_ns) != (info.st_size, info.st_mtime_ns)
 
 
 def port_map(node):
@@ -209,6 +227,7 @@ def collect(project_id, node, previous):
 
     None: nothing is saved (yet). A source is parsed again only when its size or modification time changed,
     or when the ports of the node did; a configuration that did not parse is not parsed again either.
+    Changing is raised when the read failed and the source is not what it was at the start of it: a torn read.
     """
     directory = node_directory(project_id, node)
     source = find_source(directory, node) if directory is not None else None
@@ -228,6 +247,8 @@ def collect(project_id, node, previous):
     except Unreadable:
         raise  # may pass without a change of the file: nothing to remember
     except ConfigError as exc:
+        if moved(path, info):
+            raise Changing(str(exc)) from exc
         return Snapshot(stamp, error=str(exc))
 
 
