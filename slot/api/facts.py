@@ -10,6 +10,7 @@ import copy
 import ipaddress
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -387,6 +388,74 @@ def parse_switch_net(stdout, macs):
     return {"interfaces": interfaces}
 
 
+# The MAC table of the same switch (switch.fdb/1): one page of `switchctl fdb`, wrapped like the
+# switch.net answers so that its envelope is read by the same code. One page is a slice of a single
+# kernel dump; the next page would come from another dump.
+FDB_LIMIT = 1024
+SWITCH_FDB_COMMAND = (
+    "c=/usr/local/sbin/switchctl; [ -x \"$c\" ] || exit 127; "
+    f"f=$(\"$c\" fdb --params '{{\"limit\":{FDB_LIMIT}}}'); "
+    "printf '{\"fdb\":%s}' \"${f:-null}\""
+)
+FDB_STATIC_STATES = ("permanent", "static")
+MAC_FORM = re.compile(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}")
+
+
+def fdb_entry(row):
+    """A row of `bridge -j fdb show br br0` -> `{mac, iface, vlan}`, None for a service row.
+
+    Learned rows have no `permanent`/`static` state and are not the device's own (`self`): the
+    port MACs, the group addresses and whatever an administrator added are not the switch's lessons.
+    Of the learned row only the three facts are kept, so timers that iproute2 may add stay out.
+    """
+    if not isinstance(row, dict):
+        raise TypeError("fdb row is not an object")
+    flags = row.get("flags") or []
+    if not isinstance(flags, list):
+        raise TypeError("flags is not a list")
+    if row.get("state") in FDB_STATIC_STATES or "self" in flags:
+        return None
+    mac, iface, vlan = row["mac"], row["ifname"], row["vlan"]  # the bridge always filters by VLAN
+    if not isinstance(mac, str) or not MAC_FORM.fullmatch(mac.lower()):
+        raise ValueError("MAC address does not parse")
+    if not isinstance(iface, str) or not iface:
+        raise ValueError("port name is empty")
+    if type(vlan) is not int or not 1 <= vlan <= MAX_VLAN:
+        raise ValueError("VLAN id out of range")
+    return {"mac": mac.lower(), "iface": iface, "vlan": vlan}
+
+
+def fdb_too_large(envelope):
+    """The guest refused the table because it is big: a property of the table, not a failed collection."""
+    if not isinstance(envelope, dict) or envelope.get("ok") is not False:
+        return False
+    error = envelope.get("error")
+    return isinstance(error, dict) and error.get("code") == "RESULT_TOO_LARGE"
+
+
+def parse_switch_fdb(stdout):
+    """Turn the output of SWITCH_FDB_COMMAND into the `mac_table` of a live-state.md node.
+
+    A table that does not fit the guest's limits is published as `truncated` and empty: the manager
+    carries any failed collector to the `error` of the node, and a switch that is merely busy with a
+    big table would look broken for good.
+    """
+    try:
+        document = json.loads(stdout)
+        if fdb_too_large(document["fdb"]):
+            return {"mac_table": {"entries": [], "truncated": True}}
+        result = switch_net_result(document, "fdb")
+        rows = result["entries"]
+        if not isinstance(rows, list):
+            raise TypeError("entries is not a list")
+        truncated = result["next_offset"] is not None
+        learned = [entry for entry in map(fdb_entry, rows) if entry is not None]
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise FactError("failed", f"Unexpected output of switchctl: {type(exc).__name__}") from exc
+    learned.sort(key=lambda entry: (entry["vlan"], entry["mac"], entry["iface"]))
+    return {"mac_table": {"entries": learned, "truncated": truncated}}
+
+
 @dataclass(frozen=True)
 class Collector:
     name: str  # key in the response; the schema carries the version
@@ -423,6 +492,17 @@ SWITCH_NET = Collector(
     missing="The guest has no switchctl",
     probe=True,
 )
+# Its own role memory: the table changes with every lesson of the switch, ports and VLANs hardly ever,
+# and the manager journals the whole `data` of a collector whenever it changes.
+SWITCH_FDB = Collector(
+    name="switch.fdb",
+    schema="switch.fdb/1",
+    command=SWITCH_FDB_COMMAND,
+    applies=LINUX_NET.applies,
+    parse=lambda stdout, node: parse_switch_fdb(stdout),
+    missing="The guest has no switchctl",
+    probe=True,
+)
 WINDOWS_NET = Collector(
     name="windows.net",
     schema="windows.net/1",
@@ -434,7 +514,7 @@ WINDOWS_NET = Collector(
     shell="powershell",
     timeout_scale=3.0,
 )
-COLLECTORS = (LINUX_NET, SWITCH_NET, WINDOWS_NET)
+COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET)
 COLLECTOR_IDS = [collector.schema for collector in COLLECTORS]
 
 

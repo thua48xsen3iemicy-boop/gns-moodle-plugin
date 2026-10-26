@@ -30,7 +30,7 @@
 
 import {fill} from 'mod_gns3lab/dom';
 import {esc, fmtFilters, natSort} from 'mod_gns3lab/model';
-import {ipStr, v4, acolor, vcolor, portEnd} from 'mod_gns3lab/facts';
+import {ipStr, v4, acolor, vcolor, portEnd, macTable} from 'mod_gns3lab/facts';
 
 const GiB = 1024 ** 3, MiB = 1024 ** 2;
 
@@ -211,12 +211,13 @@ function nodeHTML(n){
     }
   }
   const hasConsole = n.consoleType && n.consoleType !== "none";
-  const layered = st.der && st.layer !== "l1", ferr = factsErrorHTML(n);
+  const layered = st.der && st.layer !== "l1", ferr = factsErrorHTML(n), macs = macTableHTML(n);
   return `
     <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div></div>
     ${statusLine(n)}
     ${ferr}
     ${layered ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
+    ${macs ? (ferr ? `<div class="fstale">${macs}</div>` : macs) : ""}
     <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${layered ? "" : `<h3>Интерфейсы <span class="count">${ifs.length}</span></h3>
     ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="glead">Ни один порт не подключён.</p>`}
@@ -267,6 +268,16 @@ function linkL2HTML(l){
   return `<h3>L2 на концах</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Настройка</th></tr></thead><tbody>${row(l.a, r.ia)}${row(l.b, r.ib)}</tbody></table></div>
     <dl class="kv"><dt>Проходит</dt><dd>${pass}</dd></dl>
     ${r.issues.length ? issuesHTML(r.issues.map(text => ({ sev: "warn", text })), "") : ""}`;
+}
+/* таблица MAC коммутатора: только показ, на слои и находки она не влияет */
+function macTableHTML(n){
+  const T = macTable(st.model, st.fx, n.id);
+  if (!T) return "";
+  const rows = T.rows.map(r => `<tr${r.link ? ` data-goto-link="${esc(r.link)}" tabindex="0"` : ""}><td class="mono">${esc(r.mac)}${r.owner ? ` <span class="peer">${esc(r.owner.node)} ${esc(r.owner.iface)}</span>` : ""}</td><td class="mono">${esc(r.iface)}${r.label && r.label !== r.iface ? ` <span class="peer">${esc(r.label)}</span>` : ""}</td><td class="mono">${esc(r.vlan)}</td></tr>`).join("");
+  return `<h3>${esc(strings.ui_mac_table)} <span class="count">${T.rows.length}</span></h3>
+    ${T.rows.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>${esc(strings.ui_mac_col_mac)}</th><th>${esc(strings.ui_mac_col_port)}</th><th>${esc(strings.ui_mac_col_vlan)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="glead">${esc(strings.ui_mac_empty)}</p>`}
+    ${T.truncated ? `<p class="note">${esc(strings.ui_mac_truncated)}</p>` : ""}
+    <p class="note">${esc(strings.ui_mac_note)}</p>`;
 }
 /* раздел ноды для текущего слоя */
 function nodeLayerHTML(n){
