@@ -3,6 +3,8 @@
 A collector is one guest command plus the parser of its output. It runs through the QGA broker at
 METRICS priority, so it yields to student and Manager commands. Results live in memory only: the
 Manager polls them and keeps the history. Nothing here ever runs a command that changes a guest.
+The exception to "a guest command" is `ios.config`: Cisco IOL has no guest to ask, so it reads the saved
+configuration GNS3 keeps in the node directory and never touches the student's console.
 """
 
 import asyncio
@@ -18,6 +20,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
+from api import ios_config
 from api.client import get_lifecycle
 from api.qga import Priority, QgaBusy, QgaCommandError, QgaError, QgaTimeout, QgaUnavailable
 
@@ -460,10 +463,13 @@ def parse_switch_fdb(stdout):
 class Collector:
     name: str  # key in the response; the schema carries the version
     schema: str
-    command: str
     applies: Callable[[dict, dict], bool]  # (GNS3 node, its ticket spec)
-    parse: Callable[[str, dict], dict]
-    missing: str  # the failure message when the guest lacks the tool
+    command: str = ""
+    parse: Callable[[str, dict], dict] | None = None
+    missing: str = ""  # the failure message when the guest lacks the tool
+    # A collector that reads files of the slot's host instead of asking the guest: (project_id, node,
+    # previous snapshot) -> snapshot or None. It needs no QGA channel, no guest family and no running node.
+    local: Callable[[str, dict, object], object] | None = None
     # The guest tells whether it takes part: exit 127 means "not here" and nothing is published,
     # failures of the exchange stay silent until the first success (see Facts.attempt).
     probe: bool = False
@@ -514,7 +520,14 @@ WINDOWS_NET = Collector(
     shell="powershell",
     timeout_scale=3.0,
 )
-COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET)
+# Cisco IOL: what the device boots with, from startup-config.cfg or NVRAM (api/ios_config.py).
+IOS_CONFIG = Collector(
+    name="ios.config",
+    schema="ios.config/1",
+    applies=lambda node, spec: node.get("node_type") == "iou",
+    local=ios_config.collect,
+)
+COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET, IOS_CONFIG)
 COLLECTOR_IDS = [collector.schema for collector in COLLECTORS]
 
 
@@ -555,6 +568,7 @@ class Facts:
         # has, no collector of a family runs and nothing is published: a record of the wrong family
         # would stay as a stranger's error (the manager never deletes a collector's row).
         self.families = {}
+        self.snapshots = {}  # same keys: the outcome for the last version of a file (local collectors)
         self.epoch = 0  # bumped by reset(): results of an attempt that started earlier are dropped
         self.force = False
         self.last_refresh = float("-inf")
@@ -569,6 +583,7 @@ class Facts:
         self.absent.clear()
         self.confirmed.clear()
         self.families.clear()
+        self.snapshots.clear()
 
     def request_refresh(self):
         now = time.monotonic()
@@ -609,8 +624,9 @@ class Facts:
             del self.next_due[key]
         for memory in (self.absent, self.confirmed):
             memory.difference_update([k for k in memory if k[0] not in labs])
-        for key in [k for k in self.families if k[0] not in labs]:
-            del self.families[key]
+        for memory in (self.families, self.snapshots):
+            for key in [k for k in memory if k[0] not in labs]:
+                del memory[key]
         if not self.lc.claimed:
             return
         force, self.force = self.force, False
@@ -626,7 +642,7 @@ class Facts:
                 for collector in COLLECTORS:
                     if not collector.applies(node, spec):
                         continue
-                    if family is not None and collector.family != family:
+                    if collector.local is None and family is not None and collector.family != family:
                         continue
                     key = (lab["project_id"], node["node_id"], collector.name)
                     if key in self.absent:
@@ -642,6 +658,18 @@ class Facts:
         """The collectors of one node one after another: they share a QGA channel, and an attempt
         that finds it taken by a sibling would be skipped as busy."""
         epoch = self.epoch
+        for key, node, collector in [d for d in due if d[2].local is not None]:
+            if epoch != self.epoch:
+                return
+            try:
+                await self.attempt_local(key, node, collector)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - a broken collector must not stop the next one.
+                pass
+        due = [d for d in due if d[2].local is None]
+        if not due:
+            return
         project_id, node_id, _ = due[0][0]
         family = self.families.get((project_id, node_id))
         if family is None:
@@ -758,6 +786,10 @@ class Facts:
                 # would stay as a stranger's error on an ordinary host. Only what the guest itself said
                 # (`failed` from a switchctl that exists) is published before the first success.
                 return
+        self.record(key, node, collector, data, failure)
+
+    def record(self, key, node, collector, data, failure):
+        """Publish the outcome of an attempt: the data, or the failure next to the last known data."""
         project_id, node_id, name = key
         entry = self.results.setdefault(project_id, {}).setdefault(
             node_id, {"name": node["name"], "collectors": {}}
@@ -772,6 +804,45 @@ class Facts:
         else:
             record.update(ok=False, error={"code": failure[0], "message": failure[1]})
         entry["collectors"][name] = record
+
+    async def attempt_local(self, key, node, collector):
+        """A collector that reads a file: no QGA channel, so no `busy`, and the node may be stopped.
+
+        Nothing saved is no record (the node has no facts yet) unless one was published before: the device
+        will boot without a configuration, so the record is emptied (`data: {}`), not kept as it was.
+        A read that failed while the source was being written is not published: look again soon.
+        """
+        epoch = self.epoch
+        project_id, node_id, name = key
+        failure = None
+        snapshot = None
+        try:
+            snapshot = await asyncio.to_thread(collector.local, project_id, node, self.snapshots.get(key))
+        except ios_config.Changing:
+            if epoch == self.epoch:
+                self.next_due[key] = time.monotonic() + self.tick  # like a busy channel: keep what we have
+            return
+        except ios_config.ConfigError as exc:
+            failure = (exc.code, str(exc)[:MESSAGE_LIMIT])
+        except OSError as exc:
+            failure = ("failed", f"{type(exc).__name__}: {exc}"[:MESSAGE_LIMIT])
+        if epoch != self.epoch:
+            return
+        self.next_due[key] = time.monotonic() + self.interval
+        data = None
+        if snapshot is not None:
+            self.snapshots[key] = snapshot
+            if snapshot.error is None:
+                data = snapshot.data
+            else:
+                failure = ("failed", snapshot.error[:MESSAGE_LIMIT])
+        elif failure is None:
+            self.snapshots.pop(key, None)
+            published = self.results.get(project_id, {}).get(node_id, {}).get("collectors", {})
+            if name not in published:
+                return
+            data = {}  # a configuration without interfaces is `interfaces: []`; no configuration has no fields
+        self.record(key, node, collector, data, failure)
 
     async def stop(self):
         self.task.cancel()
