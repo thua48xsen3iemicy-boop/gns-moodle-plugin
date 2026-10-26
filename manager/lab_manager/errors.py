@@ -15,6 +15,7 @@ SESSION_ERRORS: dict[str, bool] = {
     "SLOT_STOP_FAILED": True,
     "SLOT_PROJECT_UNKNOWN": True,
     "SLOT_REJECTED": True,
+    "SLOT_OWNER_LOST": True,
     "SLOT_NOT_CONFIGURED": True,
     "WRONG_STUDENT_MOUNT": True,
     "CT_SIZE_NOT_APPLIED": True,

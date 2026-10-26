@@ -5,12 +5,12 @@ Moodle-плагин для лабораторных работ в GNS3: схем
 | Папка | Что там |
 |---|---|
 | `plugin/` | сам плагин `mod_gns3lab` (пишется по `docs/SPEC.md`; установка — `plugin/README.md`) |
-| `devtools/` | `build_zip.sh` — ZIP для установки через интерфейс Moodle, `sync_demo_data.sh` — демо-лаба в плагин, `mock-manager/` — менеджер лаб для разработки (`devtools/README.md`) |
-| `prototypes/` | рабочие прототипы UI: вьюер `.gns3` и консоль с имитатором IOS (открываются в браузере как есть) |
+| `devtools/` | `build_zip.sh` — ZIP для установки через интерфейс Moodle, `sync_demo_data.sh` — демо-лаба в плагин, `mock-manager/` — менеджер лаб для разработки, `ui-harness/` — интерфейс студента в браузере без Moodle (`devtools/README.md`) |
+| `prototypes/` | рабочие прототипы UI. `student-ui.html` — **интерфейс студента, перенесённый в плагин** (уровни детализации при зуме, колесо действий, консоли панелью, сеткой или окнами; на телефоне — вход в консоль зумом); `topology-viewer.html` и `console.html` — прототипы прежних версий. Открываются в браузере как есть |
 | `fixtures/` | пример топологии и демо «живых» данных |
 | `docs/` | ТЗ (`SPEC.md`), первый промпт для Claude Code (`FIRST_PROMPT.md`), просьбы и вопросы к менеджеру (`MANAGER_REQUESTS.md`) |
 
-Правила для Claude Code — в `CLAUDE.md`.
+Правила для ИИ-агентов — в `AGENTS.md` (Claude Code читает его через `CLAUDE.md`).
 
 ## Шлюз консолей
 

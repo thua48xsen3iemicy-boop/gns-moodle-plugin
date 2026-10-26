@@ -43,6 +43,9 @@ class manager_client {
     /** How soon a failed GET /api/v1/info is asked again, seconds. */
     public const INFO_RETRY = 30;
 
+    /** Format of the facts snapshot the plugin reads (docs/live-state.md). */
+    public const FACTS_SCHEMA = 'gns3lab.facts/1';
+
     /** @var int timeout of one request, seconds */
     protected int $timeout;
 
@@ -314,15 +317,59 @@ class manager_client {
     }
 
     /**
+     * The last facts snapshot of a session (CONTRACTS §2.7, format gns3lab.facts/1 of docs/live-state.md).
+     *
+     * The manager answers for a stopped session too: then it is the last saved state.
+     * A session without any data yet comes back with rev 0 and no nodes.
+     *
+     * @param string $sessionid session id
+     * @param int|null $sincerev rev the caller already has: the manager answers 304 if nothing changed since
+     * @return \stdClass|null snapshot with schema, rev, generated_at, ttl, nodes; null if rev is still $sincerev
+     */
+    public function get_session_facts(string $sessionid, ?int $sincerev = null): ?\stdClass {
+        $query = $sincerev !== null ? ['since_rev' => $sincerev] : [];
+        $data = $this->request('GET', '/api/v1/sessions/' . rawurlencode($sessionid) . '/state', null, $query, true);
+        if ($data === null) {
+            return null;
+        }
+        $facts = $this->expect_object($data);
+        if (($facts->schema ?? null) !== self::FACTS_SCHEMA) {
+            throw new manager_exception('badresponse', 200, 'unsupported facts schema');
+        }
+        if (!($facts->nodes ?? null) instanceof \stdClass) {
+            throw new manager_exception('badresponse', 200, 'facts without nodes');
+        }
+        return $facts;
+    }
+
+    /**
+     * Asks the manager to collect the facts of a running session now (CONTRACTS §2.7).
+     *
+     * The manager limits how often it really collects; a session that is not running is session_not_running.
+     *
+     * @param string $sessionid session id
+     */
+    public function refresh_session_facts(string $sessionid): void {
+        $this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/state/refresh');
+    }
+
+    /**
      * Sends one request and decodes the JSON answer.
      *
      * @param string $method HTTP method
      * @param string $path path below the base URL, starting with /
      * @param array|null $body JSON body
      * @param array $query query parameters
+     * @param bool $notmodified a 304 answer is expected (conditional GET): it is returned as null
      * @return mixed decoded JSON
      */
-    protected function request(string $method, string $path, ?array $body = null, array $query = []): mixed {
+    protected function request(
+        string $method,
+        string $path,
+        ?array $body = null,
+        array $query = [],
+        bool $notmodified = false
+    ): mixed {
         global $CFG;
 
         if ($this->baseurl === '' || $this->secret === '') {
@@ -352,6 +399,10 @@ class manager_client {
         }
 
         $status = $response->getStatusCode();
+        if ($status === 304 && $notmodified) {
+            // Not modified has no body.
+            return null;
+        }
         $raw = (string) $response->getBody();
         try {
             $data = $raw === '' ? null : json_decode($raw, false, 512, JSON_THROW_ON_ERROR);

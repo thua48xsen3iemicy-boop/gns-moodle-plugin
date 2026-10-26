@@ -23,10 +23,28 @@
 
 Эталонные лабы — fixtures/*.gns3 (lab_ref = имя файла без .gns3), статусы нод — fixtures/<lab>.live.json.
 
+Факты о нодах (CONTRACTS §2.7 менеджера 0.8, формат plugin/docs/live-state.md):
+- у running-сессии features ["consoles", "facts"];
+- GET /api/v1/sessions/{id}/state[?since_rev=N] — fixtures/<lab>.facts.json, ноды переведены на node_id живого проекта
+  по имени, с name, status из живых статусов, collected_at; rev, generated_at, ttl FACTS_TTL; 304, если rev равен N.
+  Сбор «идёт» каждые FACTS_PERIOD с: generated_at сдвигается, rev — нет (как у менеджера: время — не изменение).
+  Сессия ещё не запускалась — rev 0, nodes {}, без generated_at;
+- POST /api/v1/sessions/{id}/state/refresh — 202 без тела (409 session_not_running у неживой); не чаще раза в 10 с
+  действительно «собирает»: rev растёт, снимок переключается между facts.json и facts-broken.json.
+
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
 консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль. Режимы IOS (enable, configure terminal,
 interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашение — для клавиатуры консоли.
+
+Графическая консоль (CONTRACTS §2.4, §2.6, §6 менеджера): у ноды с console_type "vnc" вместо терминала экран.
+- билет на такую ноду получает только владелец сессии; readonly: true — 403 console_disabled, шлюз не вызывается;
+  в тело /internal/tickets для vnc-ноды добавляется "console": "vnc" (для остальных поля нет, как у менеджера);
+- поддельный Lab Slot на такой ноде отдаёт сырой поток RFB 3.8 двоичными кадрами: security None, экран 320×200
+  (цветные полосы и буквы VNC), на FramebufferUpdateRequest — raw-прямоугольник. Нажатие клавиши рисует цветной
+  квадрат внизу, движение мыши — жёлтый перекрёстный маркер, щелчок — красный квадрат, ClientCutText — голубой;
+- GET /mock/vnc/<node_id> — что дошло до экрана: счётчики и последние события (проверка без глаз).
+Образ debian12-desktop каталога — с console_type "vnc"; в эталонной лабе ospf-multi-area это нода PVE1.
 
 Управление для ручных проверок:
     curl -X POST localhost:8090/mock/nodes/<node_id>/stop    # нода остановлена: консоль закроется
@@ -34,6 +52,10 @@ interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашени�
     curl -X POST localhost:8090/mock/fail-next -d '{"code": "SLOT_START_FAILED", "retryable": true}'
     curl -X POST localhost:8090/mock/stale/on                 # статусы нод «устарели» (nodes_stale)
     curl -X POST localhost:8090/mock/stale/off
+    curl -X POST localhost:8090/mock/facts/nodes/<node_id>/fail -d '{"code": "timeout"}'  # сбор с ноды не удался
+    curl -X POST localhost:8090/mock/facts/nodes/<node_id>/ok
+    curl -X POST localhost:8090/mock/facts/stall/on           # сбор встал: generated_at стоит, через ttl — «устарели»
+    curl -X POST localhost:8090/mock/facts/stall/off
 
 Запуск — devtools/README.md.
 """
@@ -45,6 +67,7 @@ import math
 import os
 import re
 import secrets
+import struct
 import time
 import uuid
 from datetime import datetime, timezone
@@ -63,6 +86,7 @@ GW_INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "dev-internal-key")
 GW_PUBLIC_URL = os.environ.get("GW_PUBLIC_URL", "ws://127.0.0.1:8080")
 RESUME = os.environ.get("MOCK_RESUME", "1") != "0"  # менеджер 0.5.1: работа сохраняется всегда
 QUEUED_FOR, STARTING_FOR, STOPPING_FOR = 1.0, 4.0, 2.0
+FACTS_SCHEMA, FACTS_TTL, FACTS_PERIOD, FACTS_REFRESH_EVERY = "gns3lab.facts/1", 90, 30, 10  # seconds
 DEFAULT_MAX_DURATION, MAX_DURATION_LIMIT = 90, 480  # minutes
 
 log = logging.getLogger("mock-manager")
@@ -121,6 +145,10 @@ IMAGES = [
      "symbol": ":/symbols/server.svg", "console_type": "telnet",
      "ram_mb": {"default": 2048, "min": 1024, "max": 8192}, "cpus": {"default": 2, "min": 1, "max": 4},
      "adapters": {"default": 2, "min": 1, "max": 8}, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
+    {"id": "debian12-desktop", "title": "Debian 12 (рабочий стол)", "kind": "qemu", "category": "host",
+     "symbol": ":/symbols/computer.svg", "console_type": "vnc",
+     "ram_mb": {"default": 2048, "min": 1024, "max": 4096}, "cpus": {"default": 2, "min": 1, "max": 4},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
     {"id": "vpcs", "title": "VPCS", "kind": "vpcs", "category": "host",
      "symbol": ":/symbols/vpcs_guest.svg", "console_type": "telnet",
      "ram_mb": None, "cpus": None, "adapters": None, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
@@ -323,7 +351,12 @@ def load_labs():
         doc = json.loads(path.read_text(encoding="utf-8"))
         live = path.with_suffix(".live.json")
         statuses = json.loads(live.read_text(encoding="utf-8")).get("node_status", {}) if live.exists() else {}
-        labs[path.stem] = {"doc": doc, "statuses": statuses}
+        facts = {}
+        for variant, suffix in (("ok", ".facts.json"), ("broken", ".facts-broken.json")):
+            file = path.with_name(path.stem + suffix)
+            if file.exists():
+                facts[variant] = json.loads(file.read_text(encoding="utf-8"))
+        labs[path.stem] = {"doc": doc, "statuses": statuses, "facts": facts}
     return labs
 
 
@@ -341,6 +374,9 @@ class Session:
         self.created = time.time()
         self.stop_requested = None
         self.stopped_by_teacher = False
+        self.facts_rev = 1  # rev of the facts once the lab runs; 0 is reported before that
+        self.facts_variant = "ok"  # fixture shown: ok or broken, switched by a refresh
+        self.facts_refreshed = None  # time of the last refresh that really collected
 
     def status(self):
         return self.state()[0]
@@ -381,6 +417,9 @@ class Manager:
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
         self.stale = False
+        self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
+        self.fact_changes = 0  # changes of fact_errors: they move rev of every session
+        self.facts_stalled = None  # time the collection stopped, None while it works
 
     def live(self, site, user_id):
         return next((s for s in self.sessions if s.site == site and s.user_id == user_id
@@ -419,7 +458,7 @@ class Manager:
     def present(self, s):
         body = self.summary(s)
         status = body["status"]
-        body["features"] = ["consoles"] if status == "running" else []
+        body["features"] = ["consoles", "facts"] if status == "running" else []
         if status == "running":
             lab = self.labs[s.key]
             doc = json.loads(json.dumps(lab["doc"]))
@@ -439,12 +478,52 @@ class Manager:
                 body["nodes_stale"] = True
         return body
 
+    def facts(self, s):
+        """The gns3lab.facts/1 snapshot of a session (CONTRACTS §2.7), like build_state of the manager."""
+        lab = self.labs[s.key]
+        now = time.time()
+        if not lab["facts"] or now < s.started or s.fail:
+            return {"schema": FACTS_SCHEMA, "rev": 0, "ttl": FACTS_TTL, "nodes": {}}
+        # The slot collects every FACTS_PERIOD seconds while the lab runs and the collection is not stalled.
+        end = min(x for x in (now, s.stop_requested, self.facts_stalled) if x is not None)
+        generated = s.started + max(0, (end - s.started) // FACTS_PERIOD) * FACTS_PERIOD
+        if s.facts_refreshed and s.facts_refreshed <= end:
+            generated = max(generated, s.facts_refreshed)
+        fixture = lab["facts"].get(s.facts_variant) or lab["facts"]["ok"]
+        names = {n["node_id"]: n["name"] for n in lab["doc"]["topology"]["nodes"]}  # reference project
+        live = {n["name"]: n["node_id"] for n in lab["doc"]["topology"]["nodes"]}  # running project
+        running = s.status() == "running"
+        nodes = {}
+        for ref_id, facts in fixture["nodes"].items():
+            node_id = live.get(names.get(ref_id))
+            if node_id is None:
+                continue
+            node = json.loads(json.dumps(facts))
+            node["name"] = names[ref_id]
+            node["status"] = self.node_status(lab, node_id) if running else "stopped"
+            node["collected_at"] = iso(generated)
+            if node_id in self.fact_errors:
+                code, since = self.fact_errors[node_id]
+                node["error"] = {"code": code, "message": "mock: collection failed"}
+                node["collected_at"] = iso(min(since, generated))
+            nodes[node_id] = node
+        return {"schema": FACTS_SCHEMA, "rev": s.facts_rev + self.fact_changes, "generated_at": iso(generated),
+                "ttl": FACTS_TTL, "nodes": nodes}
+
     def node_name(self, node_id):
         for lab in self.labs.values():
             for n in lab["doc"]["topology"]["nodes"]:
                 if n["node_id"] == node_id:
                     return n["name"], lab
         return None, None
+
+    def node_console(self, node_id):
+        """console_type of a node in the lab documents: telnet, vnc, or none for everything else."""
+        for lab in self.labs.values():
+            for n in lab["doc"]["topology"]["nodes"]:
+                if n["node_id"] == node_id:
+                    return n.get("console_type") if n.get("console_type") in ("telnet", "vnc") else "none"
+        return "none"
 
 
 def site_of(request):
@@ -605,8 +684,14 @@ async def console_ticket(request):
     if not m.stale and node_id in m.stopped_nodes:
         return error(409, "node_not_running", "Node is not running")
     readonly = bool(body.get("readonly"))
+    screen = m.node_console(node_id) == "vnc"
+    if screen and readonly:
+        # The manager does not show the screen of a student to the teacher (CONTRACTS §2.4).
+        return error(403, "console_disabled", "The screen of a node is shown to the owner of the lab only")
     grant = {"slot": SLOT_ADDRESS, "project_id": s.project_id, "nodes": [node_id], "readonly": readonly,
              "who": f"{s.id}:{'observer' if readonly else 'owner'}"}
+    if screen:
+        grant["console"] = "vnc"  # CONTRACTS §6: only for vnc, the tickets of text consoles stay as they were
     try:
         async with request.app["http"].post(f"{GW_INTERNAL_URL}/internal/tickets", json=grant,
                                             headers={"X-Internal-Key": GW_INTERNAL_KEY}) as resp:
@@ -617,6 +702,47 @@ async def console_ticket(request):
         return error(502, "gateway_unavailable", f"Gateway: {type(exc).__name__}")
     return web.json_response({"ticket": ticket["ticket"], "gateway_url": GW_PUBLIC_URL,
                               "expires_in": ticket.get("expires_in", 30)})
+
+
+async def session_facts(request):
+    s = own(request, site_of(request))
+    doc = request.app["m"].facts(s)
+    since = request.query.get("since_rev")
+    if since is not None and since.isdigit() and int(since) == doc["rev"]:
+        return web.Response(status=304)
+    return web.json_response(doc)
+
+
+async def refresh_facts(request):
+    s = own(request, site_of(request))
+    if s.status() != "running":
+        return error(409, "session_not_running", "Session is not running")
+    now = time.time()
+    # More often than every 10 s a refresh does not start a new collection, the answer is 202 all the same.
+    if s.facts_refreshed is None or now - s.facts_refreshed >= FACTS_REFRESH_EVERY:
+        s.facts_refreshed = now
+        s.facts_rev += 1
+        s.facts_variant = "broken" if s.facts_variant == "ok" else "ok"
+        log.info("session %s: facts refreshed, rev %s, %s", s.id, s.facts_rev, s.facts_variant)
+    return web.Response(status=202)
+
+
+async def mock_facts_node(request):
+    m: Manager = request.app["m"]
+    node_id, action = request.match_info["node"], request.match_info["action"]
+    body = await request.json() if (await request.text()).strip() else {}
+    if action == "fail":
+        m.fact_errors[node_id] = (str(body.get("code", "unreachable")), time.time())
+    else:
+        m.fact_errors.pop(node_id, None)
+    m.fact_changes += 1
+    return web.json_response({"node_id": node_id, "error": m.fact_errors.get(node_id, (None,))[0]})
+
+
+async def mock_facts_stall(request):
+    m: Manager = request.app["m"]
+    m.facts_stalled = time.time() if request.match_info["mode"] == "on" else None
+    return web.json_response({"stalled": m.facts_stalled is not None})
 
 
 async def mock_node(request):
@@ -643,6 +769,220 @@ async def mock_stale(request):
     return web.json_response({"nodes_stale": request.app["m"].stale})
 
 
+# ---------------------------------------------------------------- поддельный экран VNC (RFB 3.8)
+class ProtocolError(Exception):
+    pass
+
+
+class FakeRfb:
+    """A minimal RFB 3.8 server for the graphical console: security None, a small screen, raw rectangles.
+
+    feed() takes the bytes that came from the browser and returns the frames to send back. The picture is made to be
+    recognised on a screenshot, and input shows on it: a key press adds a coloured square along the bottom, the pointer
+    is a yellow cross, a click leaves a red square, ClientCutText a cyan one. Everything that arrived is also kept in
+    `events` (GET /mock/vnc/<node_id>).
+    """
+    W, H = 320, 200
+    # noVNC asks for 32 bits per pixel, little endian, red shift 0, green 8, blue 16: the bytes of a pixel are R, G, B, 0.
+    FONT = {  # 5x7 letters of the logo
+        "V": ["X...X", "X...X", "X...X", "X...X", "X...X", ".X.X.", "..X.."],
+        "N": ["X...X", "XX..X", "X.X.X", "X..XX", "X...X", "X...X", "X...X"],
+        "C": [".XXX.", "X...X", "X....", "X....", "X....", "X...X", ".XXX."],
+    }
+    BARS = [(235, 235, 235), (235, 235, 16), (16, 235, 235), (16, 235, 16), (235, 16, 235), (235, 16, 16), (16, 16, 235),
+            (16, 16, 16)]
+
+    def __init__(self, name):
+        self.name = name
+        self.stage = "version"
+        self.inbuf = bytearray()
+        self.base = bytearray(self.W * self.H * 4)
+        self.want = False  # an incremental request waits for a change
+        self.dirty = None  # [x0, y0, x1, y1] of what changed since the last update
+        self.cross = None
+        self.keys = 0
+        self.counts = {"key": 0, "pointer": 0, "click": 0, "cut": 0}
+        self.events = []
+        self.mask = 0
+        self.draw_logo()
+        self.fb = bytearray(self.base)
+
+    # -------- drawing
+    def fill(self, buf, x, y, w, h, rgb):
+        x0, y0, x1, y1 = max(0, x), max(0, y), min(self.W, x + w), min(self.H, y + h)
+        if x1 <= x0 or y1 <= y0:
+            return
+        row = bytes((rgb[0], rgb[1], rgb[2], 0)) * (x1 - x0)
+        for yy in range(y0, y1):
+            buf[(yy * self.W + x0) * 4:(yy * self.W + x1) * 4] = row
+
+    def draw_logo(self):
+        for yy in range(self.H):  # a dark blue gradient
+            self.fill(self.base, 0, yy, self.W, 1, (10, 24 + yy // 8, 48 + yy // 4))
+        bar = self.W // len(self.BARS)
+        for i, rgb in enumerate(self.BARS):
+            self.fill(self.base, i * bar, 0, bar, 60, rgb)
+        scale, gap, top = 8, 8, 76
+        left = (self.W - (3 * 5 * scale + 2 * gap)) // 2
+        for n, letter in enumerate("VNC"):
+            for row, line in enumerate(self.FONT[letter]):
+                for col, ch in enumerate(line):
+                    if ch == "X":
+                        self.fill(self.base, left + n * (5 * scale + gap) + col * scale, top + row * scale, scale, scale,
+                                  (250, 250, 250))
+        self.fill(self.base, 0, 0, self.W, 2, (255, 140, 0))  # the frame
+        self.fill(self.base, 0, self.H - 2, self.W, 2, (255, 140, 0))
+        self.fill(self.base, 0, 0, 2, self.H, (255, 140, 0))
+        self.fill(self.base, self.W - 2, 0, 2, self.H, (255, 140, 0))
+
+    def touch(self, x0, y0, x1, y1):
+        x0, y0, x1, y1 = max(0, x0), max(0, y0), min(self.W, x1), min(self.H, y1)
+        d = self.dirty
+        self.dirty = [x0, y0, x1, y1] if d is None else [min(d[0], x0), min(d[1], y0), max(d[2], x1), max(d[3], y1)]
+
+    def mark(self, x, y, size, rgb):
+        """A square that stays on the picture."""
+        self.fill(self.base, x, y, size, size, rgb)
+        self.fill(self.fb, x, y, size, size, rgb)
+        self.touch(x, y, x + size, y + size)
+
+    def move_cross(self, x, y):
+        if self.cross:  # put back what the old cross covered
+            ox, oy = self.cross
+            for yy in range(max(0, oy - 7), min(self.H, oy + 8)):
+                a, b = (yy * self.W + max(0, ox - 7)) * 4, (yy * self.W + min(self.W, ox + 8)) * 4
+                self.fb[a:b] = self.base[a:b]
+            self.touch(ox - 7, oy - 7, ox + 8, oy + 8)
+        self.cross = (x, y)
+        self.fill(self.fb, x - 6, y - 1, 13, 3, (255, 230, 0))
+        self.fill(self.fb, x - 1, y - 6, 3, 13, (255, 230, 0))
+        self.touch(x - 7, y - 7, x + 8, y + 8)
+
+    # -------- protocol
+    def record(self, kind, **fields):
+        self.counts[kind] += 1
+        self.events.append({"type": kind, **fields})
+        del self.events[:-200]
+
+    def update(self, x, y, w, h):
+        x, y = max(0, min(x, self.W)), max(0, min(y, self.H))
+        w, h = min(w, self.W - x), min(h, self.H - y)
+        head = struct.pack(">BxH", 0, 1) + struct.pack(">HHHHi", x, y, w, h, 0)
+        rows = b"".join(bytes(self.fb[(yy * self.W + x) * 4:(yy * self.W + x + w) * 4]) for yy in range(y, y + h))
+        self.dirty, self.want = None, False
+        return head + rows
+
+    def feed(self, data):
+        self.inbuf += data
+        out = []
+        while True:
+            buf = self.inbuf
+            if self.stage == "version":
+                if len(buf) < 12:
+                    break
+                if bytes(buf[:12]) != b"RFB 003.008\n":
+                    raise ProtocolError(f"unexpected protocol version {bytes(buf[:12])!r}")
+                del buf[:12]
+                out.append(bytes([1, 1]))  # one security type: None
+                self.stage = "security"
+            elif self.stage == "security":
+                if len(buf) < 1:
+                    break
+                if buf[0] != 1:
+                    raise ProtocolError(f"security type {buf[0]} chosen")
+                del buf[:1]
+                out.append(struct.pack(">I", 0))  # SecurityResult: ok
+                self.stage = "init"
+            elif self.stage == "init":
+                if len(buf) < 1:
+                    break
+                del buf[:1]  # the shared flag
+                name = f"Mock {self.name}".encode()
+                pixel_format = struct.pack(">BBBBHHHBBB3x", 32, 24, 0, 1, 255, 255, 255, 0, 8, 16)
+                out.append(struct.pack(">HH", self.W, self.H) + pixel_format + struct.pack(">I", len(name)) + name)
+                self.stage = "ready"
+            else:
+                if not buf:
+                    break
+                size = {0: 20, 3: 10, 4: 8, 5: 6}.get(buf[0])
+                if buf[0] == 2 and len(buf) >= 4:
+                    size = 4 + 4 * struct.unpack(">H", bytes(buf[2:4]))[0]
+                elif buf[0] == 6 and len(buf) >= 8:
+                    size = 8 + struct.unpack(">I", bytes(buf[4:8]))[0]
+                elif buf[0] not in (2, 6) and size is None:
+                    raise ProtocolError(f"client message {buf[0]} is not supported")
+                if size is None or len(buf) < size:
+                    break
+                msg = bytes(buf[:size])
+                del buf[:size]
+                out.extend(self.message(msg))
+        return out
+
+    def message(self, msg):
+        kind = msg[0]
+        if kind == 3:  # FramebufferUpdateRequest
+            incremental, x, y, w, h = struct.unpack(">BHHHH", msg[1:10])
+            if not incremental:
+                return [self.update(x, y, w, h)]
+            if self.dirty:
+                x0, y0, x1, y1 = self.dirty
+                return [self.update(x0, y0, x1 - x0, y1 - y0)]
+            self.want = True
+        elif kind == 4:  # KeyEvent
+            down, keysym = struct.unpack(">B2xI", msg[1:8])
+            self.record("key", down=bool(down), keysym=keysym)
+            log.info("vnc %s: key %#x %s", self.name, keysym, "down" if down else "up")
+            if down:
+                i = self.keys % 28
+                self.keys += 1
+                self.mark(6 + i * 11, 170, 10, ((keysym * 37) % 200 + 55, (keysym * 91) % 200 + 55, (keysym * 53) % 200 + 55))
+        elif kind == 5:  # PointerEvent
+            mask, x, y = struct.unpack(">BHH", msg[1:6])
+            self.record("pointer", mask=mask, x=x, y=y)
+            if mask & 1 and not self.mask & 1:
+                self.counts["click"] += 1
+                log.info("vnc %s: click at %d,%d", self.name, x, y)
+                self.mark(x - 6, y - 6, 12, (230, 30, 30))
+            self.mask = mask
+            self.move_cross(x, y)
+        elif kind == 6:  # ClientCutText
+            text = msg[8:].decode("latin-1")
+            self.record("cut", text=text)
+            log.info("vnc %s: clipboard %r", self.name, text)
+            self.mark(self.W - 18, 66, 12, (0, 220, 220))
+        if self.want and self.dirty:
+            x0, y0, x1, y1 = self.dirty
+            return [self.update(x0, y0, x1 - x0, y1 - y0)]
+        return []
+
+
+async def vnc_screen(request, ws, node_id, name):
+    """The console of a node with console_type vnc: the raw RFB stream in binary frames, both ways."""
+    rfb = FakeRfb(name)
+    request.app["vnc"][node_id] = rfb
+    await ws.send_bytes(b"RFB 003.008\n")
+    async for msg in ws:
+        if msg.type != WSMsgType.BINARY:
+            continue  # RFB has no text frames
+        try:
+            frames = rfb.feed(msg.data)
+        except ProtocolError as exc:
+            log.warning("vnc %s: %s", name, exc)
+            await ws.close(code=1002)
+            break
+        for frame in frames:
+            await ws.send_bytes(frame)
+    return ws
+
+
+async def mock_vnc(request):
+    rfb = request.app["vnc"].get(request.match_info["node"])
+    if rfb is None:
+        return error(404, "node_not_found", "No screen was opened on this node yet")
+    return web.json_response({"stage": rfb.stage, "size": [rfb.W, rfb.H], "keys": rfb.keys, "counts": rfb.counts,
+                              "events": rfb.events[-50:]})
+
+
 # ---------------------------------------------------------------- поддельный Lab Slot
 async def slot_console(request):
     m: Manager = request.app["m"]
@@ -655,6 +995,11 @@ async def slot_console(request):
     ws = web.WebSocketResponse(protocols=("lab-slot",))
     await ws.prepare(request)
     request.app["consoles"].setdefault(node_id, set()).add(ws)
+    if m.node_console(node_id) == "vnc":
+        try:
+            return await vnc_screen(request, ws, node_id, name)
+        finally:
+            request.app["consoles"][node_id].discard(ws)
     # Режимы IOS настолько, насколько их видит клавиатура консоли: приглашение меняется, команды — эхо.
     modes = [""]  # "", "config", "config-if", "config-router"...
     priv = [True]
@@ -721,7 +1066,8 @@ def make_apps():
     manager = Manager()
     consoles = {}
     api = web.Application()
-    api["m"], api["consoles"] = manager, consoles
+    vnc = {}  # node_id → FakeRfb of the last screen opened on it
+    api["m"], api["consoles"], api["vnc"] = manager, consoles, vnc
     api.router.add_get("/api/v1/info", info)
     api.router.add_get("/api/v1/labs", list_labs)
     api.router.add_get("/api/v1/images", images)
@@ -732,9 +1078,14 @@ def make_apps():
     api.router.add_get("/api/v1/sessions/{sid}", get_session)
     api.router.add_post("/api/v1/sessions/{sid}/stop", stop_session)
     api.router.add_post("/api/v1/sessions/{sid}/console-tickets", console_ticket)
+    api.router.add_get("/api/v1/sessions/{sid}/state", session_facts)
+    api.router.add_post("/api/v1/sessions/{sid}/state/refresh", refresh_facts)
     api.router.add_post("/mock/nodes/{node}/{action:stop|start}", mock_node)
     api.router.add_post("/mock/fail-next", mock_fail_next)
     api.router.add_post("/mock/stale/{mode:on|off}", mock_stale)
+    api.router.add_post("/mock/facts/nodes/{node}/{action:fail|ok}", mock_facts_node)
+    api.router.add_post("/mock/facts/stall/{mode:on|off}", mock_facts_stall)
+    api.router.add_get("/mock/vnc/{node}", mock_vnc)
 
     async def http_session(app):
         app["http"] = ClientSession()
@@ -743,7 +1094,7 @@ def make_apps():
 
     api.cleanup_ctx.append(http_session)
     slot = web.Application()
-    slot["m"], slot["consoles"] = manager, consoles
+    slot["m"], slot["consoles"], slot["vnc"] = manager, consoles, vnc
     slot.router.add_get("/v1/console/{project}/{node}", slot_console)
     return api, slot
 

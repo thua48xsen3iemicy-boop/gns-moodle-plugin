@@ -144,7 +144,7 @@ class Settings:
     agent_students_dir: str = "gns3-rw/students"  # LAB_STUDENTS_DIR of the agents, relative to the root
     slot_code_revision: str | None = None  # None: shared <ceph>/<code dir>, else <code dir>/<revision>
     agent_start_actions: tuple[str, ...] = ("init_slot",)
-    placeholder_student_key: str | None = None  # Mounted read-only into a released slot
+    placeholder_student_key: str = "placeholder"  # Mandatory on every release
     node_memory_reserve_mb: int = 2048
     node_guest_memory_mb: int = 0  # Memory limits of all guests of a node, MiB; 0: no limit
     node_cpu_overcommit: float = 0.0  # vCPUs of all guests of a node per node CPU; 0: no limit
@@ -162,14 +162,28 @@ class Settings:
     slot_ready_timeout: float = 300.0
     lab_op_timeout: float = 1800.0
     queue_timeout: float = 600.0  # Seconds a session may wait for a slot; 0 = no limit
+    slot_lab_failure_limit: int = 3  # Different students whose labs fail in a row before a slot is held; 0 = off
     images: dict | None = None  # Image catalog by id (IMAGES_FILE); None: no labs from Moodle
     lab_memory_overhead_mb: int = 1024  # Added to node memory when sizing a CT for a lab definition
     default_max_duration: int = 180  # Minutes
     max_duration_limit: int = 480  # Minutes; upper bound for options.max_duration from the plugin
     worker_interval: float = 2.0
+    facts_poll_interval: float = 15.0  # Seconds between reads of a running lab's facts from its slot
+    facts_ttl: int = 90  # Seconds after which the plugin treats facts as stale (3 collection periods)
+    slot_scheme: str = "https"
+    slot_ca_file: Path | None = None
+    allow_plaintext_slots: bool = False
 
     def site(self, url: str | None) -> SiteConfig | None:
         return self.sites.get((url or "").rstrip("/"))
+
+    def __post_init__(self):
+        if not self.placeholder_student_key or not KEY_RE.fullmatch(self.placeholder_student_key):
+            raise ConfigError("PLACEHOLDER_STUDENT_KEY must be a non-empty safe directory name")
+        if self.slot_scheme not in ("https", "http"):
+            raise ConfigError("SLOT_SCHEME must be https or http")
+        if self.slot_scheme == "http" and not self.allow_plaintext_slots:
+            raise ConfigError("HTTP slots require explicit ALLOW_PLAINTEXT_SLOTS=1 and verified network isolation")
 
 
 def _key(env, name, default=""):
@@ -260,8 +274,8 @@ def load(env=None, check_mode=True) -> Settings:
                 raise ConfigError(f"Site {site.slug}: limits.images lists unknown images {unknown}")
 
     gateway_public = required("GATEWAY_PUBLIC_URL").rstrip("/")
-    if not gateway_public.startswith(("wss://", "ws://")):
-        raise ConfigError("GATEWAY_PUBLIC_URL must be a ws:// or wss:// URL")
+    if not gateway_public.startswith("wss://"):
+        raise ConfigError("GATEWAY_PUBLIC_URL must be a wss:// URL")
     return Settings(
         database_url=required("DATABASE_URL"),
         sites={s.url: s for s in sites},
@@ -299,9 +313,15 @@ def load(env=None, check_mode=True) -> Settings:
         slot_ready_timeout=_int(env, "SLOT_READY_TIMEOUT", 300, 10, 3600),
         lab_op_timeout=_int(env, "LAB_OPERATION_TIMEOUT", 1800, 30, 86400),
         queue_timeout=_int(env, "QUEUE_TIMEOUT", 600, 0, 86400),
+        slot_lab_failure_limit=_int(env, "SLOT_LAB_FAILURE_LIMIT", 3, 0, 1000),
         images=images,
         lab_memory_overhead_mb=_int(env, "LAB_MEMORY_OVERHEAD_MB", 1024, 0, 65536),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),
         max_duration_limit=_int(env, "MAX_DURATION_LIMIT", 480, 1, 7 * 24 * 60),
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),
+        facts_poll_interval=float(_int(env, "FACTS_POLL_INTERVAL", 15, 1, 300)),
+        facts_ttl=_int(env, "FACTS_TTL", 90, 30, 3600),
+        slot_scheme=env.get("SLOT_SCHEME", "https"),
+        slot_ca_file=Path(env["SLOT_CA_FILE"]) if env.get("SLOT_CA_FILE") else None,
+        allow_plaintext_slots=env.get("ALLOW_PLAINTEXT_SLOTS", "0") == "1",
     )

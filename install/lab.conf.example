@@ -39,3 +39,38 @@ MOODLE_URL=https://moodle.example.edu
 MOODLE_IP=10.10.12.60
 MOODLE_VMID=
 SITE_SLUG=main
+
+# ---- CTs the script creates itself (steps template, create, deploy). Optional: without these
+# variables the CTs above must exist already, as before. An existing CT is never recreated.
+# Storage of the CT root disks. Slots on other nodes are cloned there, so it must be shared (RBD).
+CT_STORAGE=ceph-ct
+CT_BRIDGE=vmbr0
+CT_CIDR=24
+CT_GATEWAY=10.10.12.1
+CT_NAMESERVER=10.10.12.1
+#CT_SEARCHDOMAIN=lab.local
+#CT_VLAN=
+# Ubuntu 24.04 image (pveam). Empty: the newest ubuntu-24.04-standard, downloaded to 'local'.
+#CT_OSTEMPLATE=local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+
+# Manager CT: <node>:<IP>; MANAGER_VMID is its VMID. PostgreSQL, nginx and the services go inside.
+#CREATE_MANAGER="pve1:10.10.12.50"
+#MANAGER_CORES=2
+#MANAGER_MEMORY_MB=4096
+#MANAGER_DISK_GB=16
+
+# Slot template: <vmid>=<node>:<IP or dhcp>, outside the slot VMID ranges. The script builds it once:
+# Ubuntu 24.04, GNS3 2.2.61, QEMU/KVM, ubridge, VPCS, IOU libraries, user gns3 (SLOT_GNS3_ID).
+# The node needs /dev/kvm. IOU license: put it into $SECRETS_DIR/slot/iourc, the slot step installs it.
+#SLOT_TEMPLATE="2000=pve1:dhcp"
+#SLOT_GNS3_ID=1500
+#SLOT_DISK_GB=32
+# Slots cloned from the template: <vmid>=<node>:<IP>, every VMID also in SLOTS.
+#CREATE_SLOTS="2001=pve1:10.10.12.101 2002=pve1:10.10.12.102"
+# Kind of the slot clones. full (default): copies the whole disk, slow. linked: shares the template's
+# disk (a snapshot on RBD), seconds, but the template cannot be removed or rebuilt while clones exist
+# (make a new template under a new VMID instead), and the clones must stay on the template's storage.
+#SLOT_CLONE=full
+# Name of the snapshot a slot is rolled back to after every session (the agent's LAB_CLEAN_SNAPSHOT). A letter,
+# then letters, digits, _ and -. 'slot' and 'snapshot' take it, 'agent' passes the name to the agent.
+#CLEAN_SNAPSHOT=lab-clean

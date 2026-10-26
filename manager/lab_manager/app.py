@@ -8,9 +8,9 @@ from contextlib import asynccontextmanager
 from datetime import timezone
 
 import psycopg
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -18,7 +18,8 @@ from . import VERSION, labdef
 from .agent_client import AgentClient
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
-from .labs import Catalog, LabError, LabNotFound
+from .facts import build_state
+from .labs import Catalog, LabError, LabNotFound, deploy_ticket
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
@@ -101,6 +102,7 @@ class Services:
         )
         self.slots = {
             vmid: SlotClient(s.address, s.port, s.api_token, timeout=settings.slot_timeout,
+                             scheme=settings.slot_scheme, ca_file=settings.slot_ca_file,
                              transport=slot_transport)
             for vmid, s in settings.slots.items()
         }
@@ -208,6 +210,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def present(s):
         body = summary(s)
         body["features"] = ["consoles"] if s["status"] == "running" else []
+        if s["status"] == "running" and s["facts_polled_at"] is not None:
+            body["features"].append("facts")  # The slot of this session serves facts (CONTRACTS 2.7)
         if s["status"] == "running" and s["topology"]:
             body["topology"] = s["topology"]
             body["nodes"], stale = await services.orchestrator.live_nodes(s)
@@ -239,7 +243,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         task = getattr(app.state, "orchestrator_task", None)
         alive = task is not None and not task.done()
         fresh = orch.last_tick is not None and time.monotonic() - orch.last_tick < 60
-        checks["orchestrator"] = {"ok": alive, "leader": orch.leader, "fresh": fresh}
+        checks["orchestrator"] = {"ok": alive and orch.leader and fresh,
+                                   "leader": orch.leader, "fresh": fresh}
         try:
             checks["labs"] = {"ok": settings.labs_dir.is_dir()}
         except OSError:
@@ -263,7 +268,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
-        features = ["consoles", "observer", "resume"]  # The next session continues the student's project
+        features = ["consoles", "observer", "resume", "facts"]  # resume: the next session continues the project
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": OPTIONS, "features": features}
         if settings.images is not None:
@@ -334,8 +339,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 raise conflict(existing)
             return JSONResponse(status_code=200, content=await present(existing))  # options not re-applied
         try:
-            resources = checked.resources if checked else (
-                await asyncio.to_thread(services.catalog.get, body.lab_ref)).resources
+            lab = None if checked else await asyncio.to_thread(services.catalog.get, body.lab_ref)
+            resources = checked.resources if checked else lab.resources
+            if not resources or not all(resources.get(k, 0) > 0 for k in ("cores", "memory_mb")):
+                raise LabError("Explicit cores and memory_mb are required for resource reservations")
             key = student_key(site.slug, body.user_id)
         except LabNotFound as exc:
             raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
@@ -350,6 +357,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
             student_key=key, resources=resources,
             lab_def=lab_def, definition=checked.definition if checked else None,
+            ticket_factory=lambda pid, name: (
+                labdef.deploy_ticket(checked.definition, site_images(site), project_id=pid, project_name=name)
+                if checked else deploy_ticket(lab, project_id=pid, project_name=name)),
         )
         if not created and not same(s):
             raise conflict(s)  # A concurrent POST for another activity won
@@ -382,6 +392,28 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 return body
         return await present(s)
 
+    @app.get("/api/v1/sessions/{session_id}/state")
+    async def session_state(session_id: str, since_rev: int | None = Query(default=None, ge=0),
+                            site=Depends(site_of)):
+        """Facts of the lab (CONTRACTS 2.7): the last stored state, also for a finished session."""
+        s = await own_session(session_id, site)
+        if since_rev is not None and since_rev == s["facts_rev"]:
+            return Response(status_code=304)
+        statuses = {}
+        if s["status"] == "running" and s["topology"]:
+            nodes, _stale = await services.orchestrator.live_nodes(s)
+            statuses = {node_id: n["status"] for node_id, n in nodes.items()}
+        return build_state(s["facts_rev"], await store.facts_rows(s["id"]), statuses, settings.facts_ttl)
+
+    @app.post("/api/v1/sessions/{session_id}/state/refresh", status_code=202)
+    async def refresh_state(session_id: str, site=Depends(site_of)):
+        s = await own_session(session_id, site)
+        if s["status"] != "running":
+            raise ApiError(409, "session_not_running", "Session is not running")
+        await store.request_facts_refresh(s["id"])
+        services.orchestrator.wake()
+        return Response(status_code=202)
+
     @app.post("/api/v1/sessions/{session_id}/console-tickets")
     async def console_ticket(session_id: str, body: TicketRequest, site=Depends(site_of)):
         s = await own_session(session_id, site)
@@ -390,8 +422,18 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         node_ids = {n["node_id"] for n in s["topology"]["topology"]["nodes"]}
         if body.node_id not in node_ids:
             raise ApiError(404, "node_not_found", "Node does not belong to this session")
+        try:
+            no_console = await services.orchestrator.consoleless(s)
+        except (LabError, KeyError) as exc:  # Fail closed: not knowing is not a reason to hand out a console
+            raise ApiError(503, "console_unavailable", "Cannot tell whether this node has a console") from exc
+        if body.node_id in no_console:  # For everybody, a read-only observer too
+            raise ApiError(403, "console_disabled", "The image of this node has no console for users")
         nodes, stale = await services.orchestrator.live_nodes(s)
-        if not stale and nodes.get(body.node_id, {}).get("status") != "started":
+        node = nodes.get(body.node_id, {})
+        console = node.get("console_type")
+        if console == "vnc" and body.readonly:  # A permission, so it goes before the state check below
+            raise ApiError(403, "console_disabled", "The screen of this node is visible to the session owner only")
+        if not stale and node.get("status") != "started":
             # Saves the plugin a closed WebSocket and a session re-read (П5).
             raise ApiError(409, "node_not_running", "Node is not started")
         slot = settings.slots.get(s["slot_vmid"])
@@ -400,7 +442,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         who = f"{s['id']}:{'observer' if body.readonly else 'owner'}"
         try:
             ticket = await services.gateway.issue(slot=slot.address, project_id=str(s["project_id"]),
-                                                  node_id=body.node_id, readonly=body.readonly, who=who)
+                                                  node_id=body.node_id, readonly=body.readonly, who=who,
+                                                  console="vnc" if console == "vnc" else "telnet")
         except SlotError as exc:
             raise ApiError(502, "gateway_unavailable", "Console gateway did not issue a ticket") from exc
         await store.event(s["id"], s["slot_vmid"], "console_ticket",

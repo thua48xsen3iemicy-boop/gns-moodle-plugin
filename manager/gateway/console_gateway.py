@@ -14,11 +14,16 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
     (токен слота в браузер не попадает никогда);
   * подключается к WebSocket консоли Slot с консольным токеном этого слота
     (субпротоколы ["lab-slot", "bearer.<токен>"]; см. slot/README.md);
-  * пересылает вывод как есть: Slot уже вырезал согласование telnet (IAC …),
-    повторная фильтрация испортила бы байт 0xFF в данных;
-  * пропускает от браузера только текстовые кадры (ввод с клавиатуры). Бинарные кадры,
-    в том числе {"cols": N, "rows": M}, отбрасываются: Slot пока не передаёт размер окна (telnet NAWS);
-  * режим наблюдателя: вывод идёт, ввод отбрасывается;
+  * тип консоли задаёт билет (поле `console`, его ставит менеджер по живому типу ноды):
+      - `telnet` (по умолчанию):
+          · пересылает вывод как есть: Slot уже вырезал согласование telnet (IAC …),
+            повторная фильтрация испортила бы байт 0xFF в данных;
+          · пропускает от браузера только текстовые кадры (ввод с клавиатуры). Бинарные кадры,
+            в том числе {"cols": N, "rows": M}, отбрасываются: Slot пока не передаёт размер окна (telnet NAWS);
+          · режим наблюдателя: вывод идёт, ввод отбрасывается;
+      - `vnc` (экран QEMU, в браузере noVNC): по соединению идёт сырой RFB. Двоичные кадры идут в обе стороны
+        без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателя у экрана нет
+        (его видит только владелец сессии): билет с `console: "vnc"` и `readonly: true` не выдаётся (400);
   * коды закрытия для браузера: 4000 — консоль закрылась на стороне слота, 4001 — слот не пустил к консоли
     (нода не готова, слот недоступен, неверный токен в GW_SLOTS);
   * WebSocket только с сайтов из GW_ALLOWED_ORIGINS: без этой настройки шлюз не запускается.
@@ -31,17 +36,21 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
 
 Билет (вызывает менеджер, не браузер):
     curl -s -X POST localhost:8080/internal/tickets -H 'X-Internal-Key: секрет' \
-      -d '{"slot":"10.19.36.216","project_id":"<uuid>","nodes":["<uuid>"],"readonly":false}'
+      -d '{"slot":"10.19.36.216","project_id":"<uuid>","nodes":["<uuid>"],"readonly":false,"console":"telnet"}'
     → {"ticket": "…", "expires_in": 30}
+`console` необязательно: "telnet" (по умолчанию) или "vnc"; любое другое значение, как и "vnc" вместе
+с "readonly": true, — 400.
 
 Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>
 """
 import asyncio
+import base64
 import hmac
 import json
 import logging
 import os
 import secrets
+import ssl
 import time
 import uuid
 
@@ -50,11 +59,22 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 LISTEN_HOST = os.environ.get("GW_HOST", "127.0.0.1")  # Наружу — только через nginx, только /console/
 LISTEN_PORT = int(os.environ.get("GW_PORT", "8080"))
 SLOT_PORT = int(os.environ.get("GW_SLOT_PORT", "8080"))
+SLOT_SCHEME = os.environ.get("GW_SLOT_SCHEME", "wss")
+SLOT_CA_FILE = os.environ.get("GW_SLOT_CA_FILE") or None
+SLOT_CA_B64 = os.environ.get("GW_SLOT_CA_B64") or None  # PEM of the slot CA, base64 (gateway-env writes it)
+ALLOW_PLAINTEXT = os.environ.get("GW_ALLOW_PLAINTEXT_SLOTS") == "1"
 INTERNAL_KEY = os.environ.get("GW_INTERNAL_KEY", "")
 ALLOWED_ORIGINS = {o for o in os.environ.get("GW_ALLOWED_ORIGINS", "").split(",") if o}
 SLOTS = json.loads(os.environ.get("GW_SLOTS", "{}"))  # {"адрес слота": "консольный токен Slot"}
 TICKET_TTL = 30          # секунд; билет одноразовый
-MAX_MSG = 64 * 1024      # максимум байт в одном сообщении от браузера
+CONSOLES = ("telnet", "vnc")
+MAX_MSG = 64 * 1024      # максимум байт в одном сообщении от браузера (нажатия, мышь, буфер обмена RFB — с запасом)
+MAX_MSG_SLOT = {         # максимум байт в одном сообщении от слота; больше — слот закрывается с 1009
+    "telnet": 1 << 20,
+    # Кадр экрана без сжатия: 2560x1440 по 4 байта = 14,1 МиБ. 16 МиБ вмещает такой кадр одним сообщением,
+    # даже если слот не режет поток RFB на куски (размер куска в контракте не задан).
+    "vnc": 16 << 20,
+}
 HEARTBEAT = 25           # ping каждые 25 с, чтобы прокси и NAT не рвали тихую консоль
 
 log = logging.getLogger("console-gw")
@@ -97,8 +117,14 @@ async def issue_ticket(request: web.Request):
     node_ids = {canonical_uuid(n) for n in nodes} if isinstance(nodes, list) else set()
     if g.get("slot") not in SLOTS or not project_id or not node_ids or None in node_ids:
         raise web.HTTPBadRequest(text="нужны slot (из GW_SLOTS), project_id и nodes (UUID)")
-    grant = {"slot": g["slot"], "project_id": project_id, "nodes": node_ids,
-             "readonly": bool(g.get("readonly")), "who": g.get("who", "")}
+    console_type = g.get("console", "telnet")
+    if console_type not in CONSOLES:  # Не только незнакомое имя: null и другой регистр тоже
+        raise web.HTTPBadRequest(text='console: "telnet" или "vnc"')
+    readonly = bool(g.get("readonly"))
+    if console_type == "vnc" and readonly:
+        raise web.HTTPBadRequest(text="у экрана vnc нет режима просмотра: readonly недопустим")
+    grant = {"slot": g["slot"], "project_id": project_id, "nodes": node_ids, "console": console_type,
+             "readonly": readonly, "who": g.get("who", "")}
     return web.json_response({"ticket": request.app["tickets"].issue(grant), "expires_in": TICKET_TTL})
 
 
@@ -113,10 +139,11 @@ async def console(request: web.Request):
 
     http: ClientSession = request.app["http"]
     slot = g["slot"]
-    url = f"ws://{slot}:{SLOT_PORT}/v1/console/{g['project_id']}/{node_id}"
+    vnc = g["console"] == "vnc"
+    url = f"{SLOT_SCHEME}://{slot}:{SLOT_PORT}/v1/console/{g['project_id']}/{node_id}"
     try:
-        up = await http.ws_connect(url, protocols=("lab-slot", "bearer." + SLOTS[slot]),
-                                   heartbeat=HEARTBEAT, max_msg_size=1 << 20)
+        up = await http.ws_connect(url, protocols=("lab-slot", "bearer." + SLOTS[slot]), heartbeat=HEARTBEAT,
+                                   max_msg_size=MAX_MSG_SLOT[g["console"]], ssl=request.app["slot_tls"])
     except (ClientError, asyncio.TimeoutError) as exc:
         # Slot отказывает до рукопожатия: нода не запущена, нет telnet-консоли, неверный токен.
         up = None
@@ -129,18 +156,24 @@ async def console(request: web.Request):
         await browser.close(code=4001, message=b"upstream unavailable")
         log.info("консоль недоступна: %s %s/%s (%s)", g["who"], slot, node_id, upstream_error)
         return browser
-    log.info("консоль открыта: %s %s/%s%s", g["who"], slot, node_id, " (наблюдатель)" if g["readonly"] else "")
+    log.info("консоль открыта: %s %s/%s%s%s", g["who"], slot, node_id,
+             " (vnc)" if vnc else "", " (наблюдатель)" if g["readonly"] else "")
 
     async def from_browser():
         async for m in browser:
-            if not g["readonly"] and m.type == WSMsgType.TEXT:
+            if g["readonly"]:
+                continue  # У vnc такого билета нет (400 при выдаче); проверка остаётся на случай ошибки в коде
+            if vnc:
+                if m.type == WSMsgType.BINARY:  # RFB: байты клиента как есть
+                    await up.send_bytes(m.data)
+            elif m.type == WSMsgType.TEXT:
                 await up.send_str(m.data)
 
     async def to_browser():
         async for m in up:
             if m.type == WSMsgType.BINARY:
                 await browser.send_bytes(m.data)
-            elif m.type == WSMsgType.TEXT:
+            elif m.type == WSMsgType.TEXT and not vnc:  # RFB двоичный: текстового кадра от слота в нём не бывает
                 await browser.send_bytes(m.data.encode())
 
     tasks = [asyncio.create_task(from_browser()), asyncio.create_task(to_browser())]
@@ -159,7 +192,28 @@ async def console(request: web.Request):
     return browser
 
 
+def slot_tls_context() -> ssl.SSLContext:
+    """Trust for the slots' certificates: GW_SLOT_CA_B64 and/or GW_SLOT_CA_FILE, else the system store.
+
+    The unit hides /etc/lab-manager from the gateway's dynamic user, so `gateway-env` inlines the CA
+    into gateway.env instead of pointing at SLOT_CA_FILE there.
+    """
+    try:
+        cadata = base64.b64decode(SLOT_CA_B64, validate=True).decode("ascii") if SLOT_CA_B64 else None
+        return ssl.create_default_context(cafile=SLOT_CA_FILE, cadata=cadata)
+    except ValueError as exc:
+        raise RuntimeError(f"GW_SLOT_CA_B64 is not base64 of a PEM certificate: {exc}") from exc
+    except ssl.SSLError as exc:
+        raise RuntimeError(f"slot CA is not a valid PEM certificate: {exc}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"cannot read GW_SLOT_CA_FILE={SLOT_CA_FILE} as the gateway user: {exc}; "
+                           "regenerate gateway.env with `lab-manager-admin gateway-env`") from exc
+
+
 async def on_startup(app):
+    if SLOT_SCHEME not in ("wss", "ws") or (SLOT_SCHEME == "ws" and not ALLOW_PLAINTEXT):
+        raise RuntimeError("Use WSS or explicitly approve isolated plaintext slots")
+    app["slot_tls"] = slot_tls_context()
     app["http"] = ClientSession(timeout=ClientTimeout(total=None, connect=10))
     app["tickets"] = Tickets()
 

@@ -27,7 +27,7 @@ use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
 
 /**
- * Topology viewer, inline on the activity page or full screen.
+ * The lab page of a student: the data for the full screen interface (topology, node states, facts).
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -39,15 +39,12 @@ class viewer implements renderable, templatable {
      *
      * @param \cm_info $cm course module
      * @param \stdClass $instance gns3lab record
-     * @param bool $fullscreen true for the full screen page
      */
     public function __construct(
         /** @var \cm_info course module */
         protected \cm_info $cm,
         /** @var \stdClass gns3lab record */
-        protected \stdClass $instance,
-        /** @var bool full screen page */
-        protected bool $fullscreen
+        protected \stdClass $instance
     ) {
     }
 
@@ -89,15 +86,12 @@ class viewer implements renderable, templatable {
         $data->labname = $labname;
 
         return [
-            'fullscreen' => $this->fullscreen,
             'labname' => $labname,
-            'fullscreenurl' => (new url('/mod/gns3lab/lab.php', ['id' => $this->cm->id]))->out(false),
             'backurl' => (new url('/mod/gns3lab/view.php', ['id' => $this->cm->id]))->out(false),
             'isdemo' => $isdemo && !$previewerror,
             'previewerror' => $previewerror,
             'cancontrol' => has_capability('mod/gns3lab:use', $this->cm->context),
             'cmid' => $this->cm->id,
-            'labref' => $this->instance->labref,
             'datajson' => json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ];
     }

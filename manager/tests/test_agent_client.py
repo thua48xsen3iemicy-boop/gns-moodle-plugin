@@ -47,6 +47,7 @@ async def test_requests_match_agent_api():
     (409, "Another operation on this slot is in progress", AgentBusy),
     (409, "Slot must be stopped to change mount points", AgentNotStopped),
     (409, "Proxmox command failed: CT 2001 already running", AgentCommandFailed),
+    (409, "Existing student directory has a different owner", AgentRejected),
     (422, "Required CephFS directory does not exist", AgentSourceMissing),
     (422, "Mount ancestor is not administrator-controlled", AgentRejected),
     (503, "CephFS is not mounted at its expected root", AgentUncertain),
@@ -92,7 +93,7 @@ async def test_ensure_student():
     agent = client(handler)
     assert await agent.ensure_student("pve1", "main-42") == {"student_key": "main-42", "ready": True}
     assert seen == [("PUT", "/students/main-42", b"")]
-    with pytest.raises(AgentCommandFailed):
+    with pytest.raises(AgentRejected):
         await agent.ensure_student("pve1", "main-7")
     await agent.close()
 
@@ -111,3 +112,35 @@ def test_mtls_material_is_required(tmp_path):
     with pytest.raises((OSError, TypeError, ValueError)):
         AgentClient("https://{node}:8443", ca_file=tmp_path / "missing.pem",
                     cert_file=tmp_path / "c", key_file=tmp_path / "k")
+
+
+async def test_reset_request_and_error_codes():
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.host, request.method, request.url.path, json.loads(request.content),
+                     request.extensions["timeout"]["read"]))
+        return httpx.Response(200, json={"vmid": 2001, "state": "stopped", "reset": True, "snapshot": "lab-clean"})
+
+    agent = client(handler)
+    assert (await agent.reset("pve2", 2001))["snapshot"] == "lab-clean"
+    assert seen == [("pve2.mgmt", "POST", "/slots/2001/reset", {}, 270)]
+    await agent.close()
+    assert CODES["SNAPSHOT_MISSING"] is AgentRejected and CODES["SNAPSHOT_UNSAFE"] is AgentRejected
+
+
+async def test_reset_on_an_agent_without_the_route_is_rejected_not_a_migration():
+    agent = client(lambda request: httpx.Response(404, json={"detail": "Not Found"}))
+    with pytest.raises(AgentRejected) as err:
+        await agent.reset("pve2", 2001)
+    assert err.value.code == "RESET_UNSUPPORTED"
+    # A real "CT is not on this node" still means a migration.
+    agent = client(lambda request: httpx.Response(404, json={"detail": {"code": "CT_NOT_ON_NODE", "message": "x"}}))
+    with pytest.raises(AgentWrongNode):
+        await agent.reset("pve2", 2001)
+
+
+async def test_reset_answer_must_confirm_the_rollback():
+    agent = client(lambda request: httpx.Response(200, json={"vmid": 2001, "state": "stopped"}))
+    with pytest.raises(AgentUncertain):
+        await agent.reset("pve2", 2001)

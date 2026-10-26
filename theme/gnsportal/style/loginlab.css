@@ -1,0 +1,525 @@
+/* Public interactive preview on the login page. Scoped to the theme layout. */
+body.gnsportal-login #page-wrapper {
+    background: #0e1418;
+}
+
+.gnsportal-lab {
+    min-height: 100vh;
+    color: #e2e8ed;
+    background: #111b22;
+    font-family: var(--gns-body, system-ui, sans-serif);
+}
+
+.gnsportal-labbar {
+    position: relative;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    height: 68px;
+    padding: 0 clamp(1rem, 2.4vw, 2.5rem);
+    border-bottom: 1px solid #2a3742;
+    background: #172129;
+}
+
+.gnsportal-labbrand {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    min-width: 0;
+    color: #f0f5f8;
+    font: 600 1.04rem/1.15 var(--gns-display, system-ui, sans-serif);
+    white-space: nowrap;
+}
+
+.gnsportal-labbrand small {
+    display: block;
+    margin-top: .22rem;
+    color: #8094a4;
+    font: 500 .57rem var(--gns-mono, monospace);
+    letter-spacing: .09em;
+}
+
+.gnsportal-labbar-meta,
+.gnsportal-labbar-actions {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+}
+
+.gnsportal-labbar-meta {
+    color: #a6b4bf;
+    font-size: .78rem;
+}
+
+.gnsportal-live {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .33rem .55rem;
+    border: 1px solid #326246;
+    border-radius: 4px;
+    background: #173728;
+    color: #72dfa1;
+    font: 600 .6rem var(--gns-mono, monospace);
+    letter-spacing: .04em;
+    white-space: nowrap;
+}
+
+.gnsportal-live::before,
+.gnsportal-console-head i {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #3cc47a;
+    box-shadow: 0 0 10px #3cc47a;
+}
+
+.gnsportal-labbar-actions {
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid #344451;
+    border-radius: 6px;
+}
+
+.gnsportal-labbar-actions button {
+    min-width: 36px;
+    height: 34px;
+    padding: 0 .65rem;
+    border: 0;
+    border-right: 1px solid #344451;
+    background: #1c2a34;
+    color: #e2e8ed;
+    font: 600 .72rem var(--gns-mono, monospace);
+    cursor: pointer;
+}
+
+.gnsportal-labbar-actions button:last-child {
+    border-right: 0;
+}
+
+.gnsportal-labbar-actions button:hover {
+    background: #2b465b;
+}
+
+.gnsportal-labscene {
+    position: relative;
+    min-height: calc(100vh - 68px);
+    overflow: hidden;
+    background: radial-gradient(circle at 34% 42%, #1d2c36, #111b22 72%);
+}
+
+.gnsportal-lab-canvas {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.gnsportal-topology {
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.gnsportal-topology:active {
+    cursor: grabbing;
+}
+
+.gnsportal-grid {
+    opacity: .14;
+}
+
+.gnsportal-area-label,
+.gnsportal-node-name,
+.gnsportal-node-ip {
+    font-family: var(--gns-mono, monospace);
+    font-weight: 600;
+    letter-spacing: .04em;
+}
+
+.gnsportal-area-label {
+    font-size: 10px;
+}
+
+.gnsportal-wire {
+    stroke: #8094a4;
+    stroke-width: 2;
+    opacity: .72;
+}
+
+.gnsportal-wire-packet {
+    fill: #5aa8f2;
+    filter: drop-shadow(0 0 5px #5aa8f2);
+}
+
+.gnsportal-node {
+    cursor: pointer;
+}
+
+.gnsportal-node-halo {
+    fill: transparent;
+    stroke: transparent;
+    stroke-width: 2;
+}
+
+.gnsportal-node:hover .gnsportal-node-halo,
+.gnsportal-node.selected .gnsportal-node-halo,
+.gnsportal-node:focus-visible .gnsportal-node-halo {
+    fill: #5aa8f218;
+    stroke: #5aa8f2;
+}
+
+.gnsportal-node:focus-visible {
+    outline: none;
+}
+
+.gnsportal-node-body {
+    fill: #24445a;
+    stroke: #5b829d;
+    stroke-width: 1.5;
+}
+
+.gnsportal-node.selected .gnsportal-node-body {
+    fill: #1f6fc5;
+    stroke: #90cbff;
+}
+
+.gnsportal-node-glyph {
+    fill: #eaf5ff;
+    font: 600 25px var(--gns-display, system-ui, sans-serif);
+    text-anchor: middle;
+    pointer-events: none;
+}
+
+.gnsportal-node-status {
+    fill: #3cc47a;
+    stroke: #15232c;
+    stroke-width: 2;
+}
+
+.gnsportal-node-stand {
+    stroke: #9fc4df;
+    stroke-width: 3;
+}
+
+.gnsportal-node-name {
+    fill: #e2e8ed;
+    font-size: 13px;
+    text-anchor: middle;
+}
+
+.gnsportal-node-ip {
+    fill: #8094a4;
+    font-size: 9px;
+    text-anchor: middle;
+}
+
+.gnsportal-scene-heading {
+    position: absolute;
+    top: clamp(1.5rem, 4vh, 3rem);
+    left: clamp(1.2rem, 3vw, 3rem);
+    width: min(28rem, 40vw);
+    pointer-events: none;
+}
+
+.gnsportal-scene-heading h1 {
+    margin: .5rem 0 .6rem;
+    color: #f0f5f8;
+    font: 600 clamp(1.5rem, 2.6vw, 2.8rem)/1.05 var(--gns-display, system-ui, sans-serif);
+}
+
+.gnsportal-scene-heading p {
+    max-width: 23rem;
+    color: #a6b4bf;
+    font-size: .79rem;
+    line-height: 1.5;
+}
+
+.gnsportal-map-label {
+    position: absolute;
+    right: clamp(1rem, 2vw, 2rem);
+    bottom: 1rem;
+    color: #8094a4;
+    font: 600 .66rem var(--gns-mono, monospace);
+    letter-spacing: .06em;
+    pointer-events: none;
+}
+
+.gnsportal-scale {
+    margin-left: .65rem;
+    color: #5aa8f2;
+}
+
+.gnsportal-console {
+    position: absolute;
+    z-index: 2;
+    bottom: clamp(1rem, 3vh, 2rem);
+    left: clamp(1rem, 3vw, 3rem);
+    display: flex;
+    flex-direction: column;
+    width: min(500px, 43vw);
+    height: clamp(200px, 28vh, 280px);
+    overflow: hidden;
+    border: 1px solid #385063;
+    border-radius: 9px;
+    background: #0a1014;
+    box-shadow: 0 20px 55px #0007;
+}
+
+.gnsportal-console-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 38px;
+    padding: 0 .8rem;
+    border-bottom: 1px solid #2a3742;
+    background: #172129;
+    color: #ccd9e2;
+    font: 600 .72rem var(--gns-mono, monospace);
+}
+
+.gnsportal-console-head > span:first-child {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.gnsportal-demo-tag {
+    color: #72dfa1;
+    font-size: .6rem;
+}
+
+.gnsportal-console-output {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: .7rem .9rem;
+    color: #d6dee5;
+    font: .72rem/1.5 var(--gns-mono, monospace);
+    white-space: pre-wrap;
+    scrollbar-color: #344451 #0a1014;
+}
+
+.gnsportal-console-line.info {
+    color: #8094a4;
+}
+
+.gnsportal-console-line.prompt {
+    color: #5aa8f2;
+}
+
+.gnsportal-console-line.error {
+    color: #ee6b62;
+}
+
+.gnsportal-console-form {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    min-height: 38px;
+    padding: 0 .65rem 0 .9rem;
+    border-top: 1px solid #2a3742;
+    color: #5aa8f2;
+    font: .72rem var(--gns-mono, monospace);
+}
+
+.gnsportal-command {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #e2e8ed;
+    font: inherit;
+}
+
+.gnsportal-command::placeholder {
+    color: #738695;
+}
+
+.gnsportal-command:focus-visible {
+    outline: 2px solid #5aa8f2;
+}
+
+.gnsportal-console-form button {
+    border: 0;
+    background: transparent;
+    color: #5aa8f2;
+    cursor: pointer;
+}
+
+.gnsportal-login-floating {
+    position: absolute;
+    z-index: 3;
+    top: 50%;
+    right: clamp(1.2rem, 3vw, 3rem);
+    width: min(415px, 34vw);
+    transform: translateY(-50%);
+}
+
+.gnsportal-login-floating::before {
+    content: "";
+    position: absolute;
+    top: 27%;
+    right: 100%;
+    width: 7rem;
+    border-top: 2px dashed #5aa8f2;
+    filter: drop-shadow(0 0 4px #5aa8f2);
+    opacity: .8;
+}
+
+.gnsportal-login-floating::after {
+    content: "";
+    position: absolute;
+    top: calc(27% - 4px);
+    right: calc(100% + 7rem);
+    width: 10px;
+    height: 10px;
+    border: 2px solid #5aa8f2;
+    border-radius: 50%;
+    background: #172129;
+}
+
+.gnsportal-login-floating .gnsportal-login-card {
+    width: 100%;
+    max-height: calc(100vh - 100px);
+    padding: 0;
+    overflow: auto;
+    border: 1px solid #869dad;
+    border-radius: 10px;
+    background: var(--gns-panel, #fff);
+    color: var(--gns-fg, #16212b);
+    box-shadow: 0 26px 80px #0008, 0 0 0 5px #5aa8f21a;
+}
+
+.gnsportal-card-top {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    height: 42px;
+    padding: 0 1rem;
+    border-bottom: 1px solid var(--gns-line, #cad2d9);
+    background: var(--gns-canvas, #f4f6f8);
+    color: var(--gns-muted, #57656f);
+    font: 600 .64rem var(--gns-mono, monospace);
+    letter-spacing: .08em;
+}
+
+.gnsportal-card-icon {
+    display: grid;
+    place-items: center;
+    width: 21px;
+    height: 21px;
+    border-radius: 4px;
+    background: #1f6fc5;
+    color: #fff;
+    font-size: 1rem;
+}
+
+.gnsportal-card-dots {
+    margin-left: auto;
+    color: #8294a1;
+    letter-spacing: .2em;
+}
+
+.gnsportal-card-content {
+    padding: clamp(1.25rem, 2.5vw, 2rem);
+}
+
+.gnsportal-card-content .login-heading {
+    margin-bottom: 1rem !important;
+}
+
+.gnsportal-card-content .loginform .form-control,
+.gnsportal-card-content .loginform .btn-lg {
+    min-height: 44px;
+    font-size: .95rem;
+}
+
+@media (max-width: 1050px) {
+    .gnsportal-labbar-meta > span:last-child {
+        display: none;
+    }
+
+    .gnsportal-login-floating {
+        width: min(390px, 43vw);
+    }
+
+    .gnsportal-console {
+        width: min(440px, 48vw);
+    }
+}
+
+@media (max-width: 720px) {
+    .gnsportal-labbar {
+        height: 58px;
+    }
+
+    .gnsportal-labbar-meta {
+        display: none;
+    }
+
+    .gnsportal-labscene {
+        min-height: 0;
+        overflow: visible;
+        padding-top: 350px;
+        background: #111b22;
+    }
+
+    .gnsportal-lab-canvas {
+        height: 350px;
+        bottom: auto;
+    }
+
+    .gnsportal-scene-heading {
+        top: 1rem;
+        width: 65%;
+    }
+
+    .gnsportal-scene-heading h1 {
+        font-size: 1.45rem;
+    }
+
+    .gnsportal-scene-heading p,
+    .gnsportal-map-label {
+        display: none;
+    }
+
+    .gnsportal-console,
+    .gnsportal-login-floating {
+        position: relative;
+        inset: auto;
+        width: auto;
+        transform: none;
+    }
+
+    .gnsportal-console {
+        height: 190px;
+        margin: 0 1rem 1rem;
+    }
+
+    .gnsportal-login-floating {
+        margin: 0 1rem 2rem;
+    }
+
+    .gnsportal-login-floating::before,
+    .gnsportal-login-floating::after {
+        display: none;
+    }
+
+    .gnsportal-login-floating .gnsportal-login-card {
+        max-height: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gnsportal-wire-packet {
+        filter: none;
+    }
+}

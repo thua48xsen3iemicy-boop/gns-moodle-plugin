@@ -53,6 +53,20 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_get_facts' => [
+        'classname' => \mod_gns3lab\external\get_facts::class,
+        'description' => 'Facts about the devices of the running lab of the user or of an observed student.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_refresh_facts' => [
+        'classname' => \mod_gns3lab\external\refresh_facts::class,
+        'description' => 'Asks the lab manager to collect the facts of the running lab now.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_save_lab_draft' => [
         'classname' => \mod_gns3lab\external\save_lab_draft::class,
         'description' => 'Saves the draft of a library lab from the lab editor.',

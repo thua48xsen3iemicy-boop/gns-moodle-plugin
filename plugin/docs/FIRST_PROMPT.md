@@ -6,7 +6,7 @@
 
 Ты работаешь над Moodle-плагином mod_gns3lab. Общайся со мной по-русски.
 
-1. Прочитай `CLAUDE.md` и `docs/SPEC.md` целиком.
+1. Прочитай `AGENTS.md` и `docs/SPEC.md` целиком.
 2. Изучи прототипы `prototypes/topology-viewer.html` и `prototypes/console.html` (открой их и прочитай код),
    фикстуры в `fixtures/`. Шлюз консолей с тестом теперь ведёт менеджер (`manager/gateway/`, MANAGER_REQUESTS §12).
 3. Прежде чем писать код, пришли мне:

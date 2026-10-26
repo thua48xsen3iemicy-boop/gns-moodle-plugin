@@ -12,8 +12,9 @@ for cert in server.crt server.key manager-ca.crt; do
 done
 install -d -m 0700 /opt/lab-node-agent /etc/lab-node-agent
 install -m 0644 agent.py requirements.txt /opt/lab-node-agent/
+install -m 0644 ../constraints-tested.txt /opt/lab-node-agent/constraints-tested.txt
 python3 -m venv /opt/lab-node-agent/venv
-/opt/lab-node-agent/venv/bin/pip install --disable-pip-version-check -r /opt/lab-node-agent/requirements.txt
+/opt/lab-node-agent/venv/bin/pip install --disable-pip-version-check -r /opt/lab-node-agent/requirements.txt -c /opt/lab-node-agent/constraints-tested.txt
 install -m 0644 lab-node-agent.service /etc/systemd/system/lab-node-agent.service
 chown -R root:root /opt/lab-node-agent /etc/lab-node-agent
 chmod 0700 /etc/lab-node-agent

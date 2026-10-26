@@ -21,10 +21,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakes import FakeAgent, FakeGateway, FakePve, FakeSlot, MultiTransport  # noqa: E402
 
 from lab_manager.config import Settings, SiteConfig, SlotConfig  # noqa: E402
+from lab_manager.ownership import command_scope
 
 SITE_URL = "https://moodle.example.edu"
 SITE_SECRET = "s" * 40
 SLOT_TOKEN = "a" * 40
+
+
+@pytest.fixture(autouse=True)
+def command_authority():
+    with command_scope(1, 1):
+        yield
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -79,6 +86,7 @@ def make_settings(tmp_path, dsn="postgresql:///unused", *, vmids=(201, 202), **o
         pve_retry_after=60,
         slot_ready_timeout=60,
         worker_interval=1,
+        slot_scheme="http", allow_plaintext_slots=True,
     )
     values.update(overrides)
     return Settings(**values)
@@ -122,6 +130,8 @@ async def make_env(tmp_path, dsn, *, vmids=(201, 202), nodes_of=None, student_st
     env.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=env.app), base_url="http://manager",
                                    headers={"Authorization": "Bearer " + SITE_SECRET, "X-Moodle-Site": SITE_URL})
     env.orch = env.services.orchestrator
+    env.orch.leader = True
+    env.orch.epoch = await env.services.store.next_epoch()
 
     async def run(rounds=30):
         """Drive the orchestrator until nothing moves (bounded)."""

@@ -90,6 +90,10 @@ def mock_server(tmp_path, monkeypatch):
         return reply(404, {"message": "Unknown endpoint"})
 
     with TestClient(app) as client:
+        client.headers.update({"X-Lab-Epoch": "1", "X-Lab-Generation": "1"})
+        claimed = client.post("/v1/fence", json={"epoch": 1, "generation": 1},
+                              headers={"Authorization": "Bearer test-token"})
+        assert claimed.status_code == 200, claimed.text
         fake = httpx.AsyncClient(
             transport=httpx.MockTransport(respond), base_url="http://127.0.0.1:3080/v2/"
         )
@@ -352,13 +356,19 @@ def test_real_provision_checks_exit_codes_and_resume_does_not_replay(
         monkeypatch.setenv("SLOT_STATE_DIR", str(tmp_path))
         monkeypatch.setenv("SLOT_READY_TIMEOUT", "0")
 
-        def execute(sock, command, seconds):
-            calls.append(command)
-            return {"exit_code": 1 if command == "fail" else 0}
+        class Qga:
+            async def call(self, node_id, command, args=None, **options):
+                return {}
 
-        monkeypatch.setattr("api.lifecycle.exec_sync", execute)
-        monkeypatch.setattr("api.lifecycle.qga_call", lambda *args: {})
+            async def exec(self, node_id, command, **options):
+                calls.append(command)
+                return {"exit_code": 1 if command == "fail" else 0}
+
+            async def close(self):
+                pass
+
         service = Lifecycle(SimpleNamespace())
+        service.qga = Qga()
         node = {"node_id": str(uuid4()), "console": port, "console_type": "telnet"}
         spec = {
             "kind": "qemu",

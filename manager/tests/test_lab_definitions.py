@@ -6,6 +6,8 @@ from conftest import SITE_SECRET, SITE_URL, make_env
 from test_labdef import IMAGES, LAB
 
 from lab_manager.config import SiteConfig, SiteLimits
+from lab_manager.images import Image
+from lab_manager.orchestrator import consoleless_names
 
 
 def limited_sites(**limits):
@@ -138,3 +140,67 @@ async def test_resume_workspace_follows_lab_def(tmp_path, dsn):
         a, b, c = [await store.session(x) for x in (first, second, third)]
         assert a["project_id"] == b["project_id"] != c["project_id"]
         assert c["status"] == "running"
+
+
+# --- images without a console (the Linux switch: nobody manages it, whatever the login is) ---------
+
+SWITCH_IMAGE = Image.model_validate({
+    "id": "linux-switch", "title": "Linux Switch", "kind": "qemu", "category": "switch", "console_type": "none",
+    "symbol": ":/symbols/ethernet_switch.svg", "file": "linux-switch.qcow2",
+    "ram_mb": {"default": 512, "min": 256, "max": 2048}, "cpus": {"default": 1, "min": 1, "max": 2},
+    "adapters": {"default": 5, "min": 1, "max": 16}, "slot": {"disk_interface": "virtio"},
+})
+
+
+def ticket_of(env, sid, node_id, readonly=False):
+    return env.client.post(f"/api/v1/sessions/{sid}/console-tickets",
+                           json={"node_id": node_id, "readonly": readonly, "issued_for_user_id": 42})
+
+
+def test_consoleless_names_follow_the_image_file_not_its_id():
+    ticket = {"nodes": [{"name": "SW", "image": "linux-switch.qcow2"}, {"name": "PC1", "image": "debian12.qcow2"},
+                        {"name": "PC2"}]}  # VPCS has no image
+    assert consoleless_names(ticket, {"linux-switch": SWITCH_IMAGE, **IMAGES}) == {"SW"}
+    plain = {k: v for k, v in IMAGES.items() if v.console_type != "none"}
+    assert consoleless_names(ticket, plain) == set()  # nothing declared without a console
+    assert consoleless_names({}, {"linux-switch": SWITCH_IMAGE}) == set()
+
+
+async def test_a_moodle_lab_with_the_linux_switch_hands_out_no_console_for_it(tmp_path, dsn):
+    lab = copy.deepcopy(LAB)
+    lab["nodes"].append({"name": "SW3", "image": "linux-switch", "x": 0, "y": -160})
+    lab["links"].append({"a": {"node": "SW3", "adapter": 0, "port": 0}, "b": {"node": "SW1", "adapter": 1, "port": 0}})
+    async with make_env(tmp_path, dsn, images={**IMAGES, "linux-switch": SWITCH_IMAGE}) as env:
+        r = await start_def(env, lab)
+        assert r.status_code == 201, r.text
+        sid = r.json()["session_id"]
+        await env.run()
+        s = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
+        assert s["status"] == "running", s["status_message"]
+        ids = {n["name"]: n["node_id"] for n in s["topology"]["topology"]["nodes"]}
+        assert s["nodes"][ids["SW3"]]["console_type"] == "none"  # The plugin hides it and refuses on its side
+        assert s["nodes"][ids["PC1"]]["console_type"] == "telnet"  # Everything else is as before
+
+        for readonly in (False, True):  # The owner and a read-only observer alike
+            r = await ticket_of(env, sid, ids["SW3"], readonly)
+            assert r.status_code == 403 and r.json()["error"] == "console_disabled", r.text
+        assert env.gateway.requests == []  # Nothing reached the gateway
+        assert (await ticket_of(env, sid, ids["PC1"])).status_code == 200
+        assert len(env.gateway.requests) == 1
+
+
+async def test_a_reference_lab_follows_the_image_of_its_nodes_too(tmp_path, dsn):
+    iou = IMAGES["cisco-iou-l2"]  # x86_64_crb_linux_l2-adventerprisek9-ms.bin: the file the IOU nodes of cisco-3x2 use
+    hidden = iou.model_copy(update={"console_type": "none"})
+    async with make_env(tmp_path, dsn, images={**IMAGES, "cisco-iou-l2": hidden}) as env:
+        r = await env.client.post("/api/v1/sessions", json={"user_id": 42, "instance_id": 1, "lab_ref": "cisco-3x2"})
+        sid = r.json()["session_id"]
+        await env.run()
+        s = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
+        assert s["status"] == "running", s["status_message"]
+        types = {n["name"]: s["nodes"][n["node_id"]]["console_type"] for n in s["topology"]["topology"]["nodes"]}
+        assert {t for name, t in types.items() if name.startswith("SW")} == {"none"}  # The IOU switches
+        assert {t for name, t in types.items() if not name.startswith("SW")} == {"telnet"}
+        router = next(n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"].startswith("SW"))
+        r = await ticket_of(env, sid, router)
+        assert r.status_code == 403 and r.json()["error"] == "console_disabled"

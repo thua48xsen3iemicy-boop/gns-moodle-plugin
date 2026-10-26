@@ -10,7 +10,7 @@ import sys
 from importlib.metadata import version
 from pathlib import Path
 
-VERSION = "0.4.1"
+VERSION = "0.9.0"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -90,6 +90,7 @@ def preflight():
             "api.nodes",
             "api.console",
             "api.health",
+            "api.facts",
         ):
             module = importlib.import_module(name)
             if not Path(module.__file__).resolve().is_relative_to(ROOT):

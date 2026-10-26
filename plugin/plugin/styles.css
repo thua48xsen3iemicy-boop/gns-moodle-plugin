@@ -1,9 +1,10 @@
 /**
- * Topology viewer of mod_gns3lab.
+ * Styles of mod_gns3lab: the lab editor (.gns3lab-app) and the student interface (.gns3lab-student).
  *
- * Plugin styles.css is loaded on every Moodle page, so every rule is scoped to .gns3lab-app.
+ * Plugin styles.css is loaded on every Moodle page, so every rule is scoped to .gns3lab-app or .gns3lab-student.
  * Colours follow the theme through Bootstrap variables; own tokens only where Bootstrap has none.
  */
+
 .gns3lab-app {
     --bg: var(--bs-secondary-bg, #e8ecef);
     --canvas: var(--bs-tertiary-bg, #f4f6f8);
@@ -48,14 +49,6 @@
     --c5: #e879b9;
     --c6: #4ec3cc;
 }
-/* inline on the activity page / full screen page */
-.gns3lab-app.is-inline {
-    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-    height: min(78vh, 860px);
-    min-height: 420px;
-    border: 1px solid var(--line);
-    border-radius: .5rem;
-}
 body.gns3lab-fullscreen {
     overflow: hidden;
 }
@@ -81,11 +74,6 @@ body.gns3lab-fullscreen {
 .gns3lab-app h2,
 .gns3lab-app h3 {
     color: var(--fg);
-}
-.gns3lab-app .panelbody {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
 }
 /* Layout: one-screen tool — toolbar on top, pannable lab canvas, read-only info panel on the right (bottom sheet on phones) */
 .gns3lab-app {
@@ -130,27 +118,11 @@ body.gns3lab-fullscreen {
     gap: 4px 10px;
     align-items: center;
 }
-.gns3lab-app .src {
-    font: 500 11px var(--mono);
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: var(--chip);
-    color: var(--muted);
-}
 .gns3lab-app .tools {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
-}
-.gns3lab-app .ro {
-    font: 500 10.5px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    color: var(--muted);
-    border: 1px dashed var(--line);
-    padding: 5px 8px;
-    border-radius: 5px;
 }
 .gns3lab-app .gbtn {
     font: 500 13px/1 var(--body);
@@ -169,9 +141,7 @@ body.gns3lab-fullscreen {
     border-color: var(--wire);
 }
 .gns3lab-app .gbtn:focus-visible,
-.gns3lab-app .rowbtn:focus-visible,
-.gns3lab-app .ifs tr:focus-visible,
-.gns3lab-app .endcard:focus-visible {
+.gns3lab-app .rowbtn:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
@@ -180,69 +150,7 @@ body.gns3lab-fullscreen {
     border-color: var(--accent);
     color: var(--accent-ink);
 }
-.gns3lab-app .zoomgrp {
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--canvas);
-}
-.gns3lab-app .zoomgrp .gbtn {
-    border: 0;
-    background: transparent;
-    width: 32px;
-    padding: 0;
-    justify-content: center;
-    font-size: 17px;
-}
-.gns3lab-app .zoomgrp output {
-    font: 500 12px var(--mono);
-    min-width: 44px;
-    text-align: center;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-}
-.gns3lab-app .vh {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-}
-.gns3lab-app .seg {
-    display: inline-flex;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--canvas);
-    overflow: hidden;
-}
-.gns3lab-app .seg button {
-    font: 600 12.5px/1 var(--mono);
-    height: 30px;
-    min-width: 40px;
-    padding: 0 9px;
-    border: 0;
-    border-left: 1px solid var(--line);
-    background: transparent;
-    color: var(--fg);
-    cursor: pointer;
-}
-.gns3lab-app .seg button:first-child {
-    border-left: 0;
-}
-.gns3lab-app .seg button[aria-pressed="true"] {
-    background: var(--accent);
-    color: var(--accent-ink);
-}
-.gns3lab-app .seg button:disabled {
-    color: var(--muted);
-    opacity: .45;
-    cursor: not-allowed;
-}
-.gns3lab-app .seg button:focus-visible,
-.gns3lab-app .sel:focus-visible,
-.gns3lab-app .issue:focus-visible {
+.gns3lab-app .sel:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
@@ -352,12 +260,6 @@ body.gns3lab-fullscreen {
     stroke: var(--accent);
     stroke-dasharray: 4 3;
 }
-.gns3lab-app .nname-g {
-    cursor: pointer;
-}
-.gns3lab-app .nname-g.ghost {
-    opacity: .32;
-}
 .gns3lab-app .nname {
     font: 600 13px var(--display);
     fill: var(--fg);
@@ -365,19 +267,6 @@ body.gns3lab-fullscreen {
     stroke: var(--canvas);
     stroke-width: 5px;
     stroke-linejoin: round;
-}
-.gns3lab-app .led {
-    stroke: var(--canvas);
-    stroke-width: 2.5;
-}
-.gns3lab-app .led-started {
-    fill: var(--ok);
-}
-.gns3lab-app .led-stopped {
-    fill: var(--bad);
-}
-.gns3lab-app .led-suspended {
-    fill: var(--warn);
 }
 .gns3lab-app .link {
     cursor: pointer;
@@ -397,10 +286,6 @@ body.gns3lab-fullscreen {
 .gns3lab-app .link:hover .wire {
     stroke: var(--fg);
 }
-.gns3lab-app .link.susp .wire {
-    stroke-dasharray: 6 5;
-    opacity: .65;
-}
 .gns3lab-app .link.sel .wire {
     stroke: var(--accent);
     stroke-width: 3.2;
@@ -419,144 +304,11 @@ body.gns3lab-fullscreen {
 .gns3lab-app .plabel.on rect {
     stroke: var(--accent);
 }
-.gns3lab-app .fpill rect {
-    fill: var(--chip);
-    stroke: var(--warn);
-}
-.gns3lab-app .fpill text {
-    font: 500 10px var(--mono);
-    fill: var(--fg);
-}
-.gns3lab-app .gpill rect {
-    fill: var(--panel);
-    stroke: var(--accent);
-}
-.gns3lab-app .gpill text {
-    font: 500 10.5px var(--mono);
-    fill: var(--accent);
-}
-.gns3lab-app .gs {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-}
-.gns3lab-app .dimmable {
-    transition: opacity .15s;
-}
-.gns3lab-app .has-sel .dimmable:not(.on) {
-    opacity: .22;
-}
-/* слои L1/L2/L3/маршрутизация */
-.gns3lab-app .wire.ghost {
-    opacity: .2;
-    stroke-width: 1.5;
-    pointer-events: none;
-}
-.gns3lab-app .link.down .wire {
-    stroke: var(--bad);
-    stroke-dasharray: 3 5;
-}
-.gns3lab-app .link.dead .wire {
-    stroke-dasharray: 2 6;
-    opacity: .7;
-}
-.gns3lab-app .link .wire.vl {
-    stroke-width: 2.6;
-}
-.gns3lab-app .link.trunk .wire.vl {
-    stroke-width: 2.4;
-}
-.gns3lab-app .link.sel .wire.vl {
-    stroke-width: 3.4;
-}
 .gns3lab-app .plabel.bad rect {
     stroke: var(--bad);
 }
 .gns3lab-app .plabel.bad text {
     fill: var(--bad);
-}
-.gns3lab-app .wpill rect {
-    fill: var(--panel);
-    stroke: var(--warn);
-    stroke-width: 1.5;
-}
-.gns3lab-app .wpill text {
-    font: 600 10.5px var(--mono);
-    fill: var(--fg);
-}
-.gns3lab-app .bpill rect {
-    fill: var(--panel);
-    stroke: var(--bad);
-    stroke-width: 1.5;
-}
-.gns3lab-app .bpill text {
-    font: 600 10.5px var(--mono);
-    fill: var(--bad);
-}
-.gns3lab-app .vpill rect {
-    fill: var(--panel);
-    stroke: var(--line);
-}
-.gns3lab-app .vpill text {
-    font: 600 10.5px var(--mono);
-    fill: var(--fg);
-}
-.gns3lab-app .rpill rect {
-    fill: var(--panel);
-    stroke: var(--line);
-}
-.gns3lab-app .rpill text {
-    font: 500 10px var(--mono);
-    fill: var(--muted);
-}
-.gns3lab-app .node.ghost {
-    opacity: .32;
-}
-.gns3lab-app .subnet {
-    cursor: pointer;
-}
-.gns3lab-app .subnet rect {
-    fill: var(--panel);
-    stroke: var(--accent);
-    stroke-width: 1.6;
-}
-.gns3lab-app .subnet text {
-    font: 600 11px var(--mono);
-    fill: var(--fg);
-}
-.gns3lab-app .subnet.warn rect {
-    stroke: var(--warn);
-    stroke-width: 2.2;
-}
-.gns3lab-app .subnet.sel rect {
-    fill: color-mix(in srgb, var(--accent) 14%, var(--panel));
-}
-.gns3lab-app .edge,
-.gns3lab-app .adj {
-    cursor: pointer;
-}
-.gns3lab-app .edge .wire {
-    stroke: var(--accent);
-    stroke-width: 1.8;
-}
-.gns3lab-app .edge.down .wire {
-    stroke-dasharray: 3 4;
-    opacity: .6;
-}
-.gns3lab-app .edge.dup .wire {
-    stroke: var(--bad);
-}
-.gns3lab-app .adj .wire {
-    stroke-width: 3.5;
-}
-.gns3lab-app .adj.miss .wire {
-    stroke: var(--bad);
-    stroke-dasharray: 7 6;
-    stroke-width: 2.5;
-}
-.gns3lab-app .adj.sel .wire {
-    stroke-width: 5;
 }
 /* panel */
 .gns3lab-app .panel {
@@ -572,9 +324,6 @@ body.gns3lab-fullscreen {
     display: flex;
     flex-direction: column;
     gap: 14px;
-}
-.gns3lab-app .handle {
-    display: none;
 }
 .gns3lab-app .ph {
     display: flex;
@@ -636,93 +385,12 @@ body.gns3lab-fullscreen {
     border-radius: 50%;
     background: var(--muted);
 }
-.gns3lab-app .st-started::before {
-    background: var(--ok);
-}
-.gns3lab-app .st-stopped::before {
-    background: var(--bad);
-}
-.gns3lab-app .st-suspended::before {
-    background: var(--warn);
-}
-.gns3lab-app .st-none {
-    color: var(--muted);
-}
-.gns3lab-app .kv {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 7px 14px;
-    margin: 0;
-    font-size: 13.5px;
-}
-.gns3lab-app .kv dt {
-    color: var(--muted);
-}
-.gns3lab-app .kv dd {
-    margin: 0;
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
 .gns3lab-app .mono {
     font-family: var(--mono);
     font-size: 12.5px;
 }
-.gns3lab-app .tblwrap {
-    overflow-x: auto;
-}
-.gns3lab-app .ifs {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}
-.gns3lab-app .ifs th {
-    text-align: left;
-    font: 500 11px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    color: var(--muted);
-    padding: 4px 6px;
-    border-bottom: 1px solid var(--line);
-}
-.gns3lab-app .ifs td {
-    padding: 7px 6px;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-}
-.gns3lab-app .ifs tr[data-goto-link] {
-    cursor: pointer;
-}
-.gns3lab-app .ifs tr[data-goto-link]:hover td {
-    background: var(--chip);
-}
 .gns3lab-app .peer {
     color: var(--muted);
-}
-.gns3lab-app .ends {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-}
-.gns3lab-app .endcard {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    text-align: left;
-    padding: 10px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--canvas);
-    color: var(--fg);
-    cursor: pointer;
-    font: inherit;
-    min-width: 0;
-}
-.gns3lab-app .endcard:hover {
-    border-color: var(--wire);
-}
-.gns3lab-app .endcard b {
-    font: 600 15px var(--display);
-    overflow-wrap: anywhere;
 }
 .gns3lab-app .gbtn.primary {
     background: var(--accent);
@@ -731,33 +399,6 @@ body.gns3lab-fullscreen {
     height: 38px;
     justify-content: center;
     width: 100%;
-}
-.gns3lab-app .note {
-    margin: 8px 0 0;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--muted);
-    background: var(--chip);
-    padding: 10px 12px;
-    border-radius: 7px;
-}
-.gns3lab-app .note code {
-    font-family: var(--mono);
-    font-size: 11.5px;
-    color: var(--fg);
-    overflow-wrap: anywhere;
-}
-.gns3lab-app .idline {
-    margin: 0;
-    font: 400 11px var(--mono);
-    color: var(--muted);
-    overflow-wrap: anywhere;
-}
-.gns3lab-app .glead {
-    margin: 0;
-    font-size: 13.5px;
-    line-height: 1.55;
-    color: var(--muted);
 }
 .gns3lab-app .list {
     display: flex;
@@ -790,60 +431,1704 @@ body.gns3lab-fullscreen {
     color: var(--muted);
     font-size: 12px;
 }
-.gns3lab-app .sdot {
+.gns3lab-app .tag {
+    font: 500 11px var(--mono);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--chip);
+    color: var(--fg);
+    white-space: nowrap;
+}
+.gns3lab-app .tag.bad {
+    color: var(--bad);
+}
+@media (max-width: 760px) {
+    .gns3lab-app .panel {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: auto;
+            max-height: 58%;
+            border-left: 0;
+            border-top: 1px solid var(--line);
+            border-radius: 14px 14px 0 0;
+            box-shadow: 0 -10px 28px rgb(0 0 0 / .14);
+            padding-top: 0;
+            /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+            padding-left: max(16px, env(safe-area-inset-left, 0px));
+            /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+            padding-right: max(16px, env(safe-area-inset-right, 0px));
+            /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
+            padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+            transform: translateY(calc(100% - 50px));
+            transition: transform .22s ease;
+    }
+    .gns3lab-app .panel.dragging {
+            transition: none;
+    }
+    .gns3lab-app .hint {
+            bottom: 62px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-app .panel {
+            transition: none;
+    }
+}
+.gns3lab-app .gbtn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+.gns3lab-app .gbtn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+/* lab editor: image palette on the left, canvas, properties on the right; on phones palette on top, properties below */
+.gns3lab-editor .ed-palette {
+    width: 196px;
+    flex: none;
+    overflow: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gns3lab-editor .ed-img {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: none;
+    color: var(--fg);
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.25;
+    cursor: grab;
+}
+.gns3lab-editor .ed-img:hover,
+.gns3lab-editor .ed-img:focus-visible {
+    border-color: var(--line);
+    background: var(--chip);
+}
+.gns3lab-editor .ed-img svg {
+    width: 30px;
+    height: 30px;
+    flex: none;
+}
+.gns3lab-editor .ed-note {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+}
+.gns3lab-editor .ed-field {
+    display: grid;
+    grid-template-columns: 8em 1fr;
+    align-items: center;
+    gap: 2px 8px;
+    margin: 0;
+    font-size: 13px;
+}
+.gns3lab-editor .ed-field small {
+    grid-column: 2;
+    color: var(--muted);
+}
+.gns3lab-editor .ed-error {
+    color: var(--bad);
+    font-size: 13px;
+    margin: 0;
+}
+.gns3lab-editor .ed-ok {
+    color: var(--ok);
+    margin: 0;
+}
+.gns3lab-editor .ed-ports {
+    width: 100%;
+    font-size: 13px;
+}
+.gns3lab-editor .ed-ports td {
+    padding: 2px 4px;
+    vertical-align: top;
+}
+.gns3lab-editor .ed-problems {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gns3lab-editor .ed-problems .rowbtn {
+    border-left: 3px solid var(--bad);
+}
+.gns3lab-editor .muted {
+    color: var(--muted);
+}
+.gns3lab-editor .gns3lab-svg.linking .node {
+    cursor: crosshair;
+}
+.gns3lab-editor .node.from .halo {
+    stroke: var(--accent);
+    stroke-dasharray: 5 4;
+}
+.gns3lab-editor .node.bad .halo {
+    stroke: var(--bad);
+    fill: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+.gns3lab-editor .node.unknown use {
+    opacity: .45;
+}
+.gns3lab-editor .link.bad .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 6 4;
+}
+.gns3lab-editor .plabel {
+    pointer-events: none;
+}
+.gns3lab-editor .gtoast.ok {
+    border-color: var(--accent);
+}
+.gns3lab-editor .tools .gbtn.primary {
+    width: auto;
+    height: 32px;
+}
+@media (max-width: 760px) {
+    .gns3lab-editor .stage {
+            flex-direction: column;
+    }
+    .gns3lab-editor .ed-palette {
+            width: auto;
+            flex-direction: row;
+            border-right: 0;
+            border-bottom: 1px solid var(--line);
+            padding: 6px 8px;
+    }
+    .gns3lab-editor .ed-palette .eyebrow {
+            display: none;
+    }
+    .gns3lab-editor .ed-img {
+            width: auto;
+            flex: none;
+            white-space: nowrap;
+    }
+    .gns3lab-editor .hint {
+            display: none;
+    }
+    .gns3lab-editor .panel.ed-props {
+            position: static;
+            max-height: 40%;
+            transform: none;
+            border-radius: 0;
+            box-shadow: none;
+            padding-top: 12px;
+    }
+}
+
+/* Student interface: the lab page (prototypes/student-ui.html). Modern CSS (min(), max(), env(), color-mix) is
+   unknown to the bundled validator. */
+/* stylelint-disable csstree/validator */
+
+.gns3lab-student {
+    --bg: var(--bs-secondary-bg,#e8ecef);
+    --canvas: var(--bs-tertiary-bg,#f4f6f8);
+    --panel: var(--bs-body-bg,#fff);
+    --fg: var(--bs-body-color,#16212b);
+    --muted: var(--bs-secondary-color,#57656f);
+    --line: var(--bs-border-color,#cad2d9);
+    --grid: #c9d2da;
+    --wire: #566878;
+    --accent: var(--bs-primary,#1f6fc5);
+    --accent-ink: #fff;
+    --ico: #2c4a63;
+    --ico-glyph: #f4f6f8;
+    --chip: var(--bs-secondary-bg,#e4eaef);
+    --ok: var(--bs-success,#1e8e4f);
+    --warn: #ad7f08;
+    --bad: var(--bs-danger,#c8423a);
+    --off: #8a97a1;
+    --c1: #2f6fd0;
+    --c2: #1e8e4f;
+    --c3: #b5730a;
+    --c4: #8e44ad;
+    --c5: #b83280;
+    --c6: #0e7c86;
+    --term-bg: #0f171d;
+    --term-fg: #d6dee5;
+    --term-dim: #7f909c;
+    --term-line: #24323c;
+    --shadow: 0 10px 30px rgb(16 33 43 / .16);
+    --display: var(--bs-body-font-family,system-ui,sans-serif);
+    --body: var(--bs-body-font-family,system-ui,sans-serif);
+    --mono: var(--bs-font-monospace,ui-monospace,monospace);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    line-height: 1.4;
+    overflow: hidden;
+}
+[data-bs-theme="dark"] .gns3lab-student {
+    --grid: #24313b;
+    --wire: #8094a4;
+    --accent-ink: #0e1418;
+    --ico: #8aafcc;
+    --ico-glyph: #121a20;
+    --off: #5e6e7a;
+    --warn: #e0b13a;
+    --c1: #6aa6f5;
+    --c2: #4cc98a;
+    --c3: #e6b64a;
+    --c4: #c08be0;
+    --c5: #e879b9;
+    --c6: #4ec3cc;
+    --term-bg: #0a1014;
+    --term-line: #22303a;
+    --shadow: 0 10px 30px rgb(0 0 0 / .45);
+}
+.gns3lab-student.is-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+    height: 100dvh;
+}
+.gns3lab-student [hidden] {
+    display: none !important;
+}
+.gns3lab-student button,
+.gns3lab-student select {
+    font-family: inherit;
+}
+/* session bar */
+.gns3lab-student .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding-block: 9px;
+    padding-left: max(16px,env(safe-area-inset-left,0px));
+    padding-right: max(16px,env(safe-area-inset-right,0px));
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: none;
+}
+.gns3lab-student .ttl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.gns3lab-student .ttlbox {
+    min-width: 0;
+}
+.gns3lab-student .back {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 17px;
+    text-decoration: none;
+}
+.gns3lab-student .back:hover {
+    border-color: var(--wire);
+    color: var(--fg);
+    text-decoration: none;
+}
+.gns3lab-student .ttl-h {
+    margin: 0;
+    font: 600 18px/1.2 var(--display);
+    color: var(--fg);
+    text-wrap: balance;
+}
+.gns3lab-student .meta {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-student .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: 600 11.5px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+}
+.gns3lab-student .pill::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentcolor;
+}
+.gns3lab-student .pill[data-status="running"] {
+    color: var(--ok);
+}
+.gns3lab-student .pill[data-status="queued"],
+.gns3lab-student .pill[data-status="starting"],
+.gns3lab-student .pill[data-status="stopping"] {
+    color: var(--warn);
+}
+.gns3lab-student .pill[data-status="failed"] {
+    color: var(--bad);
+}
+.gns3lab-student .demo {
+    font: 500 10.5px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.gns3lab-student .demo.bad {
+    color: var(--bad);
+    border-color: var(--bad);
+}
+.gns3lab-student .cmsg {
+    color: var(--bad);
+}
+.gns3lab-student .cmsg a {
+    color: inherit;
+    text-decoration: underline;
+}
+.gns3lab-student .tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.gns3lab-student .btn {
+    font: 500 13px/1 var(--body);
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    background: var(--canvas);
+    color: var(--fg);
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+}
+.gns3lab-student .btn:hover {
+    border-color: var(--wire);
+    color: var(--fg);
+}
+.gns3lab-student .btn:disabled {
+    opacity: .5;
+    cursor: default;
+}
+.gns3lab-student .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+.gns3lab-student .btn.danger {
+    color: var(--bad);
+}
+.gns3lab-student .btn:focus-visible,
+.gns3lab-student .seg button:focus-visible,
+.gns3lab-student .tab:focus-visible,
+.gns3lab-student .ib:focus-visible,
+.gns3lab-student .key:focus-visible,
+.gns3lab-student .dchip:focus-visible,
+.gns3lab-student .back:focus-visible,
+.gns3lab-student .fsel:focus-visible,
+.gns3lab-student .rowbtn:focus-visible,
+.gns3lab-student .issue:focus-visible,
+.gns3lab-student .endcard:focus-visible,
+.gns3lab-student .ifs tr:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.gns3lab-student .seg {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    overflow: hidden;
+}
+.gns3lab-student .seg button {
+    font: 500 13px/1 var(--body);
+    height: 30px;
+    padding: 0 11px;
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.gns3lab-student .seg button:first-child {
+    border-left: 0;
+}
+.gns3lab-student .seg button[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
+}
+.gns3lab-student .seg button:disabled {
+    opacity: .4;
+    cursor: default;
+}
+.gns3lab-student .seg svg,
+.gns3lab-student .btn svg {
+    width: 15px;
+    height: 15px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .fsel {
+    height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font: 500 13px var(--body);
+    padding: 0 8px;
+}
+.gns3lab-student .narrow {
+    display: none;
+}
+.gns3lab-student.mob .wide,
+.gns3lab-student.mob .demo {
+    display: none;
+}
+.gns3lab-student.mob .narrow {
+    display: inline;
+}
+.gns3lab-student.mob .bar {
+    flex-wrap: nowrap;
+    padding-block: 7px;
+}
+.gns3lab-student.mob .ttl {
+    flex: 1;
+    min-width: 0;
+}
+.gns3lab-student.mob .ttl-h {
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gns3lab-student.mob .tools {
+    flex-wrap: nowrap;
+}
+.gns3lab-student.mob [data-region="modes"] {
+    display: none;
+}
+.gns3lab-student.mob [data-region="layerSeg"] button {
+    padding: 0 9px;
+}
+/* stage and its three desktop arrangements */
+.gns3lab-student .stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    position: relative;
+}
+.gns3lab-student .wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    background: var(--canvas);
+    overflow: hidden;
+}
+.gns3lab-student .grid,
+.gns3lab-student .dock,
+.gns3lab-student .splitter {
+    display: none;
+}
+.gns3lab-student .stage[data-mode="panel"].has-cons .splitter {
+    display: block;
+    flex: none;
+    width: 9px;
+    margin: 0 -4px;
+    z-index: 5;
+    cursor: col-resize;
+    position: relative;
+    touch-action: none;
+}
+.gns3lab-student .stage[data-mode="panel"].has-cons .splitter::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--line);
+}
+.gns3lab-student .stage[data-mode="panel"] .splitter:hover::after,
+.gns3lab-student .splitter.drag::after {
+    background: var(--accent);
+    width: 2px;
+}
+.gns3lab-student .stage[data-mode="panel"].has-cons .dock {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: var(--dockw,44%);
+    min-width: 320px;
+    max-width: 72%;
+    background: var(--term-bg);
+}
+.gns3lab-student .stage[data-mode="grid"] {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    grid-auto-rows: minmax(0,1fr);
+}
+.gns3lab-student .stage[data-mode="grid"] .grid {
+    display: contents;
+}
+.gns3lab-student .stage[data-mode="grid"] .wrap {
+    order: -1;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+.gns3lab-student .stage[data-mode="grid"] .hint {
+    display: none;
+}
+/* topology */
+.gns3lab-student .scene {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+.gns3lab-student .scene.dragging {
+    cursor: grabbing;
+}
+.gns3lab-student .scene:focus {
+    outline: none;
+}
+.gns3lab-student .dots {
+    fill: var(--grid);
+}
+.gns3lab-student .dtext {
+    font-family: var(--display);
+}
+.gns3lab-student .drawings text {
+    font-family: var(--display);
+}
+.gns3lab-student .wire {
+    stroke: var(--wire);
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+}
+.gns3lab-student .link {
+    cursor: pointer;
+}
+.gns3lab-student .link:focus {
+    outline: none;
+}
+.gns3lab-student .hit {
+    stroke: transparent;
+    stroke-width: calc(18px * var(--inv,1));
+    fill: none;
+    pointer-events: stroke;
+}
+.gns3lab-student .link.down .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 5 5;
+}
+.gns3lab-student .link.sel .wire,
+.gns3lab-student .link:focus-visible .wire {
+    stroke: var(--accent);
+    stroke-width: calc(3.5px * min(1, var(--inv,1) * 1.6));
+}
+.gns3lab-student .link.sel.down .wire {
+    stroke: var(--bad);
+}
+.gns3lab-student .link.sel .l1,
+.gns3lab-student .link.sel .l2 {
+    opacity: 1;
+    visibility: visible;
+}
+.gns3lab-student .link.sel .plabel,
+.gns3lab-student .link.sel .pip {
+    fill: var(--fg);
+    font-weight: 600;
+}
+.gns3lab-student .link.suspended .wire {
+    stroke-dasharray: 2 6;
+    opacity: .6;
+}
+.gns3lab-student .filt {
+    fill: var(--canvas);
+    stroke: var(--warn);
+    stroke-width: 1.6;
+}
+.gns3lab-student .filt-t {
+    font: 600 8px var(--mono);
+    fill: var(--warn);
+    text-anchor: middle;
+}
+.gns3lab-student .pdot {
+    fill: var(--ok);
+    stroke: var(--canvas);
+    stroke-width: 1.5;
+}
+.gns3lab-student .pdot.down {
+    fill: var(--bad);
+}
+.gns3lab-student .plabel {
+    font: 500 9px var(--mono);
+    font-size: clamp(calc(9.5px * var(--inv,1)),9px,calc(12px * var(--inv,1)));
+    fill: var(--muted);
+    text-anchor: middle;
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+.gns3lab-student .pip {
+    font: 500 7.5px var(--mono);
+    font-size: clamp(calc(9px * var(--inv,1)),7.5px,calc(11.5px * var(--inv,1)));
+    fill: var(--fg);
+    text-anchor: middle;
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+.gns3lab-student .node {
+    cursor: pointer;
+    -webkit-touch-callout: none;
+}
+.gns3lab-student .node:focus {
+    outline: none;
+}
+.gns3lab-student .halo {
+    fill: transparent;
+    stroke: transparent;
+    stroke-width: 2;
+}
+.gns3lab-student .node.sel .halo {
+    stroke: var(--accent);
+    fill: color-mix(in srgb,var(--accent) 12%,transparent);
+}
+.gns3lab-student .node:focus-visible .halo {
+    stroke: var(--accent);
+    stroke-dasharray: 3 3;
+}
+.gns3lab-student .node.on .halo {
+    stroke: var(--accent);
+}
+.gns3lab-student .st-stopped .ico {
+    opacity: .38;
+}
+.gns3lab-student .st-suspended .ico {
+    opacity: .6;
+}
+.gns3lab-student .sdot {
+    fill: var(--ok);
+    stroke: var(--canvas);
+    stroke-width: 2;
+}
+.gns3lab-student .st-none .sdot {
+    display: none;
+}
+.gns3lab-student .st-suspended .sdot {
+    fill: var(--warn);
+}
+.gns3lab-student .st-stopped .sdot {
+    fill: var(--off);
+}
+.gns3lab-student .nname {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)));
+    fill: var(--fg);
+    text-anchor: middle;
+    dominant-baseline: hanging;
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+.gns3lab-student .nsub {
+    font: 500 8px var(--mono);
+    font-size: min(8px,calc(12px * var(--inv,1)));
+    fill: var(--muted);
+    text-anchor: middle;
+    dominant-baseline: hanging;
+}
+.gns3lab-student .nadj {
+    font: 600 7px var(--mono);
+    font-size: min(7px,calc(11px * var(--inv,1)));
+    text-anchor: middle;
+    dominant-baseline: hanging;
+    fill: var(--ok);
+}
+.gns3lab-student .nadj.warn {
+    fill: var(--warn);
+}
+.gns3lab-student .cbadge {
+    display: none;
+}
+.gns3lab-student .has-con .cbadge {
+    display: inline;
+}
+.gns3lab-student .cbadge rect {
+    fill: var(--term-bg);
+    stroke: var(--canvas);
+    stroke-width: 1.5;
+}
+.gns3lab-student .cbadge text {
+    font: 600 8px var(--mono);
+    fill: var(--term-fg);
+    text-anchor: middle;
+}
+.gns3lab-student .unread .cbadge rect {
+    fill: var(--accent);
+    animation: gns3lab-pulse 1.2s ease-in-out infinite;
+}
+.gns3lab-student .unread .cbadge text {
+    fill: var(--accent-ink);
+}
+.gns3lab-student .minimized .cbadge rect {
+    stroke: var(--accent);
+    stroke-width: 2;
+}
+@keyframes gns3lab-pulse {
+    50% {
+        opacity: .45;
+    }
+}
+.gns3lab-student .card {
+    cursor: pointer;
+}
+.gns3lab-student .card .cbg {
+    fill: var(--term-bg);
+    stroke: var(--term-line);
+}
+.gns3lab-student .card .chd {
+    fill: var(--term-dim);
+    font-family: var(--mono);
+    font-weight: 600;
+}
+.gns3lab-student .card .cln {
+    fill: var(--term-fg);
+    font-family: var(--mono);
+    white-space: pre;
+}
+.gns3lab-student .card .cpt {
+    fill: var(--wire);
+}
+.gns3lab-student .l1,
+.gns3lab-student .l2,
+.gns3lab-student .l3,
+.gns3lab-student .l2x {
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .22s ease,visibility .22s;
+}
+.gns3lab-student [data-lod="1"] .l1,
+.gns3lab-student [data-lod="2"] .l1,
+.gns3lab-student [data-lod="3"] .l1,
+.gns3lab-student [data-lod="2"] .l2,
+.gns3lab-student [data-lod="3"] .l2,
+.gns3lab-student [data-lod="3"] .l3,
+.gns3lab-student [data-lod="2"] .l2x {
+    opacity: 1;
+    visibility: visible;
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-student .l1,
+    .gns3lab-student .l2,
+    .gns3lab-student .l3,
+    .gns3lab-student .l2x {
+        transition: none;
+    }
+    .gns3lab-student .unread .cbadge rect {
+        animation: none;
+    }
+}
+/* layers L2, L3 and OSPF */
+.gns3lab-student .dimmable {
+    transition: opacity .15s;
+}
+.gns3lab-student .has-sel .dimmable:not(.on) {
+    opacity: .22;
+}
+.gns3lab-student .wire.ghost {
+    opacity: .2;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+.gns3lab-student .link.dead .wire {
+    stroke-dasharray: 2 6;
+    opacity: .7;
+}
+.gns3lab-student .link .wire.vl {
+    stroke-width: 2.6;
+}
+.gns3lab-student .link.trunk .wire.vl {
+    stroke-width: 2.4;
+}
+.gns3lab-student .link.sel .wire.vl {
+    stroke-width: 3.4;
+}
+.gns3lab-student .ppill rect {
+    fill: var(--panel);
+    stroke: var(--line);
+}
+.gns3lab-student .ppill text {
+    font: 500 10px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-student .ppill.on text {
+    font-weight: 700;
+}
+.gns3lab-student .ppill.on rect {
+    stroke: var(--accent);
+}
+.gns3lab-student .ppill.bad rect {
+    stroke: var(--bad);
+}
+.gns3lab-student .ppill.bad text {
+    fill: var(--bad);
+}
+.gns3lab-student .wpill rect {
+    fill: var(--panel);
+    stroke: var(--warn);
+    stroke-width: 1.5;
+}
+.gns3lab-student .wpill text {
+    font: 600 10.5px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-student .bpill rect {
+    fill: var(--panel);
+    stroke: var(--bad);
+    stroke-width: 1.5;
+}
+.gns3lab-student .bpill text {
+    font: 600 10.5px var(--mono);
+    fill: var(--bad);
+}
+.gns3lab-student .vpill rect {
+    fill: var(--panel);
+    stroke: var(--line);
+}
+.gns3lab-student .vpill text {
+    font: 600 10.5px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-student .rpill rect,
+.gns3lab-student .gpill rect {
+    fill: var(--panel);
+    stroke: var(--line);
+}
+.gns3lab-student .rpill text,
+.gns3lab-student .gpill text {
+    font: 500 10px var(--mono);
+    fill: var(--muted);
+}
+.gns3lab-student .node.ghost {
+    opacity: .32;
+}
+/* The last collection of the facts of a node failed: what is drawn is the last known state. */
+.gns3lab-student .node.fstale .nsub,
+.gns3lab-student .node.fstale .nadj,
+.gns3lab-student .pip.fstale,
+.gns3lab-student .pdot.fstale,
+.gns3lab-student .ppill.fstale {
+    opacity: .45;
+}
+.gns3lab-student .node.fstale .nsub,
+.gns3lab-student .node.fstale .nadj {
+    font-style: italic;
+}
+/* The live facts are out of date: the layers are still shown, marked. */
+.gns3lab-student .seg.stale {
+    border-style: dashed;
+    border-color: var(--warn);
+}
+.gns3lab-student .subnet {
+    cursor: pointer;
+}
+.gns3lab-student .subnet rect {
+    fill: var(--panel);
+    stroke: var(--accent);
+    stroke-width: 1.6;
+}
+.gns3lab-student .subnet text {
+    font: 600 11px var(--mono);
+    fill: var(--fg);
+}
+.gns3lab-student .subnet.warn rect {
+    stroke: var(--warn);
+    stroke-width: 2.2;
+}
+.gns3lab-student .subnet.sel rect {
+    fill: color-mix(in srgb,var(--accent) 14%,var(--panel));
+}
+.gns3lab-student .edge,
+.gns3lab-student .adj {
+    cursor: pointer;
+}
+.gns3lab-student .edge .wire {
+    stroke: var(--accent);
+    stroke-width: 1.8;
+}
+.gns3lab-student .edge.down .wire {
+    stroke-dasharray: 3 4;
+    opacity: .6;
+}
+.gns3lab-student .edge.dup .wire {
+    stroke: var(--bad);
+}
+.gns3lab-student .adj .wire {
+    stroke-width: 3.5;
+}
+.gns3lab-student .adj.miss .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 7 6;
+    stroke-width: 2.5;
+}
+.gns3lab-student .adj.sel .wire {
+    stroke-width: 5;
+}
+/* overlays on the topology */
+.gns3lab-student .ov {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 3;
+}
+.gns3lab-student .ov .fl-base {
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 4;
+    opacity: .35;
+    transition: opacity .25s;
+}
+.gns3lab-student .ov .hover .fl-base {
+    opacity: .9;
+}
+.gns3lab-student .ov .fl-in,
+.gns3lab-student .ov .fl-out {
+    stroke-width: 2.6;
+    stroke-linecap: round;
+    stroke-dasharray: 1.5 10;
+    opacity: 0;
+    transition: opacity .3s;
+}
+.gns3lab-student .ov .fl-in {
+    stroke: var(--accent);
+    animation: gns3lab-flow-in .45s linear infinite;
+}
+.gns3lab-student .ov .fl-out {
+    stroke: var(--ok);
+    animation: gns3lab-flow-out .45s linear infinite;
+}
+.gns3lab-student .ov .on {
+    opacity: 1;
+}
+.gns3lab-student .ov .fl-node {
+    fill: var(--accent);
+}
+.gns3lab-student .ov .ping {
+    fill: none;
+    stroke-width: 2;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: gns3lab-ping .6s ease-out forwards;
+}
+.gns3lab-student .ov .ping.in {
+    stroke: var(--accent);
+}
+.gns3lab-student .ov .ping.out {
+    stroke: var(--ok);
+}
+@keyframes gns3lab-flow-in {
+    from {
+        stroke-dashoffset: 11.5;
+    }
+    to {
+        stroke-dashoffset: 0;
+    }
+}
+@keyframes gns3lab-flow-out {
+    from {
+        stroke-dashoffset: 0;
+    }
+    to {
+        stroke-dashoffset: 11.5;
+    }
+}
+@keyframes gns3lab-ping {
+    from {
+        transform: scale(.2);
+        opacity: .95;
+    }
+    to {
+        transform: scale(1);
+        opacity: 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-student .ov .fl-in,
+    .gns3lab-student .ov .fl-out,
+    .gns3lab-student .ov .ping {
+        animation: none;
+    }
+    .gns3lab-student .ov .fl-in,
+    .gns3lab-student .ov .fl-out {
+        stroke-dasharray: none;
+    }
+}
+.gns3lab-student .hint {
+    position: absolute;
+    left: max(12px,env(safe-area-inset-left,0px));
+    bottom: 12px;
+    margin: 0;
+    max-width: calc(100% - 210px);
+    font-size: 12px;
+    color: var(--muted);
+    background: color-mix(in srgb,var(--canvas) 88%,transparent);
+    padding: 5px 9px;
+    border-radius: 6px;
+    pointer-events: none;
+    z-index: 2;
+}
+.gns3lab-student.mob .hint {
+    bottom: 112px;
+    max-width: calc(100% - 24px);
+}
+.gns3lab-student .layerbox {
+    position: absolute;
+    left: max(12px,env(safe-area-inset-left,0px));
+    top: 12px;
+    z-index: 4;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    max-width: calc(100% - 24px);
+}
+.gns3lab-student .layerbox .btn,
+.gns3lab-student .layerbox .seg,
+.gns3lab-student .layerbox .fsel {
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .zoom {
+    position: absolute;
+    right: max(12px,env(safe-area-inset-right,0px));
+    bottom: 12px;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .zoom button {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    font: 500 18px/1 var(--body);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+}
+.gns3lab-student .zoom button svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .zoom output {
+    font: 600 10.5px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--muted);
+    min-width: 76px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: center;
+}
+.gns3lab-student .lodbar {
+    display: flex;
+    gap: 3px;
+}
+.gns3lab-student .lodbar i {
+    width: 12px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line);
+}
+.gns3lab-student .lodbar i.on {
+    background: var(--accent);
+}
+.gns3lab-student .toast {
+    position: absolute;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    max-width: min(460px,calc(100% - 32px));
+    background: var(--fg);
+    color: var(--bg);
+    padding: 9px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .chip {
+    position: absolute;
+    left: 50%;
+    bottom: calc(60px + env(safe-area-inset-bottom,0px));
+    transform: translateX(-50%);
+    z-index: 4;
+    max-width: calc(100% - 24px);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13px;
+    box-shadow: var(--shadow);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gns3lab-student .chip b {
+    font-family: var(--display);
+    font-weight: 600;
+}
+.gns3lab-student .chip span {
+    color: var(--muted);
+}
+.gns3lab-student .dhint {
+    position: absolute;
+    left: 50%;
+    top: 14px;
+    transform: translateX(-50%);
+    z-index: 9;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font: 600 13px var(--body);
+    padding: 8px 14px;
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+    white-space: nowrap;
+}
+/* action wheel */
+.gns3lab-student .radial {
+    position: absolute;
+    width: 236px;
+    height: 236px;
+    margin: -118px 0 0 -118px;
+    z-index: 8;
+    pointer-events: none;
+    transform-origin: 50% 50%;
+}
+.gns3lab-student .radial.in {
+    animation: gns3lab-wheel-in .16s ease-out;
+}
+@keyframes gns3lab-wheel-in {
+    from {
+        transform: scale(.55);
+        opacity: 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-student .radial.in {
+        animation: none;
+    }
+}
+.gns3lab-student .radial svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+.gns3lab-student .radial .wedge path {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1;
+}
+.gns3lab-student .radial.pinned .wedge {
+    pointer-events: auto;
+    cursor: pointer;
+}
+.gns3lab-student .radial .wedge .wi {
+    stroke: var(--fg);
+    fill: none;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .radial .wedge text {
+    font: 600 10.5px var(--body);
+    fill: var(--fg);
+    text-anchor: middle;
+}
+.gns3lab-student .radial .wedge.hi path {
+    fill: var(--accent);
+    stroke: var(--accent);
+}
+.gns3lab-student .radial .wedge.hi .wi {
+    stroke: var(--accent-ink);
+}
+.gns3lab-student .radial .wedge.hi text {
+    fill: var(--accent-ink);
+}
+.gns3lab-student .radial .wedge.danger .wi {
+    stroke: var(--bad);
+}
+.gns3lab-student .radial .wedge.danger text {
+    fill: var(--bad);
+}
+.gns3lab-student .radial .wedge.off {
+    opacity: .42;
+}
+.gns3lab-student .radial .wedge.free path {
+    stroke-dasharray: 3 3;
+}
+.gns3lab-student .radial .wedge.free.hi path {
+    fill: var(--panel);
+    stroke: var(--wire);
+}
+.gns3lab-student .radial .wedge.free.hi .wi {
+    stroke: var(--fg);
+}
+.gns3lab-student .radial .wedge.free.hi text {
+    fill: var(--fg);
+}
+.gns3lab-student .radial .hub {
+    fill: var(--panel);
+    stroke: var(--accent);
+    stroke-width: 2;
+    filter: drop-shadow(0 4px 10px rgb(0 0 0 / .2));
+}
+.gns3lab-student .radial .ring {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1;
+}
+.gns3lab-student .radial .hubt {
+    font: 600 12px var(--display);
+    fill: var(--fg);
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+.gns3lab-student .rcap {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 4px);
+    transform: translateX(-50%);
+    background: var(--fg);
+    color: var(--bg);
+    font: 600 13px var(--body);
+    padding: 6px 11px;
+    border-radius: 7px;
+    white-space: nowrap;
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .rcap small {
+    font-weight: 400;
+    opacity: .75;
+    margin-left: 6px;
+}
+/* details card: node, link, subnet, domain, adjacency, overview */
+.gns3lab-student .details {
+    position: absolute;
+    top: 12px;
+    right: max(12px,env(safe-area-inset-right,0px));
+    width: min(360px,calc(100% - 24px));
+    max-height: calc(100% - 70px);
+    overflow: auto;
+    z-index: 7;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 14px 16px 16px;
+}
+.gns3lab-student.mob .details {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 62%;
+    border-radius: 14px 14px 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom,0px));
+    padding-left: max(16px,env(safe-area-inset-left,0px));
+    padding-right: max(16px,env(safe-area-inset-right,0px));
+}
+.gns3lab-student .dcontent {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.gns3lab-student .details>.x {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+.gns3lab-student .ph {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding-right: 36px;
+}
+.gns3lab-student .eyebrow {
+    margin: 0 0 3px;
+    font: 500 11px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+}
+.gns3lab-student .details h2 {
+    margin: 0;
+    font: 600 21px/1.15 var(--display);
+    color: var(--fg);
+    text-wrap: balance;
+    word-break: break-word;
+}
+.gns3lab-student .details h3 {
+    margin: 4px 0 0;
+    font: 600 14px var(--display);
+    color: var(--fg);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.gns3lab-student .count {
+    font: 500 11px var(--mono);
+    background: var(--chip);
+    color: var(--muted);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.gns3lab-student .x {
+    border: 0;
+    background: var(--chip);
+    color: var(--fg);
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    flex: none;
+}
+.gns3lab-student .st {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    margin: 0;
+}
+.gns3lab-student .st::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+.gns3lab-student .st-started::before {
+    background: var(--ok);
+}
+.gns3lab-student .st-stopped::before {
+    background: var(--bad);
+}
+.gns3lab-student .st-suspended::before {
+    background: var(--warn);
+}
+.gns3lab-student .st-none {
+    color: var(--muted);
+}
+.gns3lab-student .kv {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 14px;
+    margin: 0;
+    font-size: 13.5px;
+}
+.gns3lab-student .kv dt {
+    color: var(--muted);
+}
+.gns3lab-student .kv dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .mono {
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+.gns3lab-student .tblwrap {
+    overflow-x: auto;
+}
+.gns3lab-student .ifs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.gns3lab-student .ifs th {
+    text-align: left;
+    font: 500 11px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+}
+.gns3lab-student .ifs td {
+    padding: 7px 6px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+.gns3lab-student .ifs tr[data-goto-link],
+.gns3lab-student .ifs tr[data-goto-adj],
+.gns3lab-student .ifs tr[data-goto-node] {
+    cursor: pointer;
+}
+.gns3lab-student .ifs tr[data-goto-link]:hover td {
+    background: var(--chip);
+}
+.gns3lab-student .peer {
+    color: var(--muted);
+}
+.gns3lab-student .ends {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.gns3lab-student .endcard {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--fg);
+    cursor: pointer;
+    font: inherit;
+    min-width: 0;
+}
+.gns3lab-student .endcard:hover {
+    border-color: var(--wire);
+}
+.gns3lab-student .endcard b {
+    font: 600 15px var(--display);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .gbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font: 500 13px var(--body);
+    cursor: pointer;
+}
+.gns3lab-student .gbtn:hover {
+    border-color: var(--wire);
+}
+.gns3lab-student .gbtn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    height: 38px;
+    justify-content: center;
+    width: 100%;
+}
+.gns3lab-student .dacts {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.gns3lab-student .note {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    background: var(--chip);
+    padding: 10px 12px;
+    border-radius: 7px;
+}
+.gns3lab-student .note code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .idline {
+    margin: 0;
+    font: 400 11px var(--mono);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .idline.stale .fold {
+    color: var(--warn);
+}
+.gns3lab-student .idline.fnodata {
+    font-style: italic;
+}
+.gns3lab-student .fref {
+    align-self: flex-start;
+}
+.gns3lab-student .ferr {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    border-left: 3px solid var(--warn);
+    padding: 4px 0 4px 10px;
+}
+.gns3lab-student .fstale {
+    opacity: .55;
+}
+.gns3lab-student .glead {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--muted);
+}
+.gns3lab-student .list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-student .rowbtn {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 13.5px;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-student .rowbtn:hover {
+    background: var(--chip);
+}
+.gns3lab-student .rowbtn small {
+    color: var(--muted);
+    font-size: 12px;
+}
+.gns3lab-student .details .sdot {
+    display: inline-block;
     width: 9px;
     height: 9px;
     border-radius: 50%;
     background: var(--line);
+    fill: none;
+    stroke: none;
 }
-.gns3lab-app .sdot.started,
-.gns3lab-app .sdot.running {
+.gns3lab-student .details .sdot.started,
+.gns3lab-student .details .sdot.running {
     background: var(--ok);
 }
-.gns3lab-app .sdot.stopped {
+.gns3lab-student .details .sdot.stopped {
     background: var(--bad);
 }
-.gns3lab-app .sdot.suspended,
-.gns3lab-app .sdot.paused {
+.gns3lab-student .details .sdot.suspended,
+.gns3lab-student .details .sdot.paused {
     background: var(--warn);
 }
-.gns3lab-app .legend {
+.gns3lab-student .gs {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.gns3lab-student .legend {
     display: flex;
     flex-wrap: wrap;
     gap: 6px 14px;
     font-size: 12.5px;
     color: var(--muted);
 }
-.gns3lab-app .legend span {
+.gns3lab-student .legend span {
     display: inline-flex;
     align-items: center;
     gap: 6px;
 }
-.gns3lab-app .wirekey {
+.gns3lab-student .wirekey {
     display: inline-block;
     width: 22px;
     border-top: 2px solid var(--wire);
 }
-.gns3lab-app .wirekey.d {
+.gns3lab-student .wirekey.d {
     border-top-style: dashed;
 }
-.gns3lab-app .wirekey.t {
+.gns3lab-student .wirekey.t {
     border-top: 6px double var(--c2);
 }
-.gns3lab-app .wirekey.bad {
+.gns3lab-student .wirekey.bad {
     border-top: 2px dashed var(--bad);
 }
-.gns3lab-app .wirekey.acc {
+.gns3lab-student .wirekey.acc {
     border-top: 2px solid var(--accent);
 }
-.gns3lab-app .sw {
+.gns3lab-student .sw {
     display: inline-block;
     width: 12px;
     height: 12px;
     border-radius: 3px;
     background: var(--wire);
 }
-.gns3lab-app .issues {
+.gns3lab-student .issues {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -851,7 +2136,7 @@ body.gns3lab-fullscreen {
     padding: 0;
     list-style: none;
 }
-.gns3lab-app .issue {
+.gns3lab-student .issue {
     display: block;
     width: 100%;
     text-align: left;
@@ -866,24 +2151,24 @@ body.gns3lab-fullscreen {
     line-height: 1.45;
     cursor: pointer;
 }
-.gns3lab-app .issue:hover {
+.gns3lab-student .issue:hover {
     border-color: var(--wire);
     border-left-color: var(--warn);
 }
-.gns3lab-app .issue.bad,
-.gns3lab-app .issue.bad:hover {
+.gns3lab-student .issue.bad,
+.gns3lab-student .issue.bad:hover {
     border-left-color: var(--bad);
 }
-.gns3lab-app .issue.info,
-.gns3lab-app .issue.info:hover {
+.gns3lab-student .issue.info,
+.gns3lab-student .issue.info:hover {
     border-left-color: var(--accent);
 }
-.gns3lab-app .okline {
+.gns3lab-student .okline {
     margin: 0;
     font-size: 13px;
     color: var(--ok);
 }
-.gns3lab-app .tag {
+.gns3lab-student .tag {
     font: 500 11px var(--mono);
     padding: 1px 5px;
     border-radius: 4px;
@@ -891,540 +2176,984 @@ body.gns3lab-fullscreen {
     color: var(--fg);
     white-space: nowrap;
 }
-.gns3lab-app .tag.bad {
+.gns3lab-student .tag.bad {
     color: var(--bad);
 }
-
-@media (max-width: 760px) {
-    .gns3lab-app .panel {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: auto;
-        max-height: 58%;
-        border-left: 0;
-        border-top: 1px solid var(--line);
-        border-radius: 14px 14px 0 0;
-        box-shadow: 0 -10px 28px rgb(0 0 0 / .14);
-        padding-top: 0;
-        /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-        padding-left: max(16px, env(safe-area-inset-left, 0px));
-        /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-        padding-right: max(16px, env(safe-area-inset-right, 0px));
-        /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-        transform: translateY(calc(100% - 50px));
-        transition: transform .22s ease;
+/* consoles */
+.gns3lab-student .termhost {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+.gns3lab-student .termview {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    padding: 6px 4px 4px 10px;
+}
+.gns3lab-student .termhost .xterm {
+    height: 100%;
+}
+.gns3lab-student .creconnect {
+    position: absolute;
+    right: 14px;
+    bottom: 60px;
+    z-index: 2;
+}
+/* the graphical console (noVNC): the screen fills the area, noVNC scales it; a message sits over it */
+.gns3lab-student .termview.vncview {
+    position: relative;
+    padding: 0;
+    background: var(--term-bg);
+}
+.gns3lab-student .vncscreen {
+    position: absolute;
+    inset: 0;
+}
+.gns3lab-student .vncscreen:focus-within {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+.gns3lab-student .vncnote {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    text-align: center;
+    color: var(--term-dim);
+    font: 13px var(--display);
+    pointer-events: none;
+}
+.gns3lab-student .vncbar {
+    justify-content: flex-start;
+}
+.gns3lab-student .vncbtn {
+    flex: none;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    background: color-mix(in srgb,var(--term-fg) 8%,transparent);
+    color: var(--term-fg);
+    font: 600 12px var(--display);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .vncbtn:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.gns3lab-student .vncbtn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+/* the bar under a terminal: snippets menu, pinned snippets, font size */
+.gns3lab-student .tbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    padding: 6px 8px;
+    background: var(--term-bg);
+    border-top: 1px solid var(--term-line);
+}
+.gns3lab-student [data-g="inspect"] {
+    --sg: #5aa8f2;
+}
+.gns3lab-student [data-g="routing"] {
+    --sg: #3cc47a;
+}
+.gns3lab-student [data-g="switching"] {
+    --sg: #4fc1c9;
+}
+.gns3lab-student [data-g="tools"] {
+    --sg: #e0b13a;
+}
+.gns3lab-student [data-g="config"] {
+    --sg: #c792ea;
+}
+.gns3lab-student .snipbtn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 32px;
+    padding: 0 10px 0 9px;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    background: color-mix(in srgb,var(--term-fg) 8%,transparent);
+    color: var(--term-fg);
+    font: 600 12px var(--display);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .snipbtn svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .snipbtn i {
+    width: 6px;
+    height: 6px;
+    margin-left: 1px;
+    border-right: 1.6px solid currentcolor;
+    border-bottom: 1.6px solid currentcolor;
+    transform: translateY(1px) rotate(-135deg);
+    transition: transform .15s;
+}
+.gns3lab-student .snipbtn:hover,
+.gns3lab-student .snipbtn.open {
+    border-color: var(--accent);
+    background: color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.gns3lab-student .snipbtn.open i {
+    transform: translateY(-1px) rotate(45deg);
+}
+.gns3lab-student .snips {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 2px 0;
+    scrollbar-width: none;
+}
+.gns3lab-student .snips.more {
+    mask-image: linear-gradient(to right,#000 calc(100% - 28px),transparent);
+}
+.gns3lab-student .snips.less {
+    mask-image: linear-gradient(to right,transparent,#000 28px);
+}
+.gns3lab-student .snips.more.less {
+    mask-image: linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent);
+}
+.gns3lab-student .snips .nopins {
+    color: var(--term-dim);
+    font: 11.5px var(--display);
+    white-space: nowrap;
+}
+.gns3lab-student .snip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 32px;
+    padding: 0 11px 0 9px;
+    border: 1px solid var(--term-line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--term-fg);
+    font: 500 11.5px var(--mono);
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: border-color .15s, background-color .15s, transform .15s;
+}
+.gns3lab-student .sdot {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--sg, var(--term-dim));
+    transition: box-shadow .15s;
+}
+.gns3lab-student .snip:hover {
+    border-color: var(--sg);
+    background: color-mix(in srgb,var(--sg) 14%,transparent);
+    transform: translateY(-1px);
+}
+.gns3lab-student .snip:hover .sdot {
+    box-shadow: 0 0 0 3px color-mix(in srgb,var(--sg) 30%,transparent);
+}
+.gns3lab-student .snip:active {
+    background: color-mix(in srgb,var(--sg) 28%,transparent);
+    transform: none;
+}
+.gns3lab-student .snip.sent {
+    animation: gns3lab-snip-sent .7s ease-out;
+}
+.gns3lab-student .snip:focus-visible,
+.gns3lab-student .snipbtn:focus-visible,
+.gns3lab-student .tf-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+@keyframes gns3lab-snip-sent {
+    from {
+        background: color-mix(in srgb,var(--sg) 55%,transparent);
     }
-    .gns3lab-app .panel.open {
+    to {
+        background: transparent;
+    }
+}
+.gns3lab-student .tfont {
+    flex: none;
+    display: inline-flex;
+    align-items: stretch;
+    overflow: hidden;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+}
+.gns3lab-student .tf-btn {
+    min-width: 30px;
+    height: 30px;
+    padding: 0 7px;
+    border: 0;
+    background: transparent;
+    color: var(--term-fg);
+    font: 600 12px var(--mono);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .tf-btn:hover {
+    background: var(--term-line);
+}
+.gns3lab-student .tf-dec {
+    font-size: 11px;
+}
+.gns3lab-student .tf-inc {
+    font-size: 15px;
+}
+.gns3lab-student .tf-val {
+    min-width: 34px;
+    border-right: 1px solid var(--term-line);
+    border-left: 1px solid var(--term-line);
+    color: var(--term-dim);
+    font-weight: 500;
+}
+.gns3lab-student .tf-val.custom {
+    color: var(--accent);
+}
+.gns3lab-student .tf-btn[aria-disabled="true"] {
+    opacity: .35;
+    cursor: default;
+}
+.gns3lab-student .tf-btn[aria-disabled="true"]:hover {
+    background: transparent;
+}
+/* the snippet menu and the hint over a pinned snippet: dark in both themes, like the terminal */
+.gns3lab-student .snipmenu,
+.gns3lab-student .snip-tip {
+    --menu-bg: color-mix(in srgb,var(--term-bg) 90%,#fff);
+    background: var(--menu-bg);
+    color: var(--term-fg);
+    border: 1px solid color-mix(in srgb,var(--term-fg) 22%,var(--term-line));
+    box-shadow: 0 18px 48px rgb(0 0 0 / .45);
+}
+.gns3lab-student .snipmenu [hidden],
+.gns3lab-student .snip-tip[hidden] {
+    display: none !important;
+}
+.gns3lab-student .snipmenu {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    overflow: hidden;
+    animation: gns3lab-snip-in .12s ease-out;
+}
+@keyframes gns3lab-snip-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
         transform: none;
     }
-    .gns3lab-app .handle {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        margin: 0 -2px;
-        min-height: 50px;
-        border: 0;
-        background: var(--panel);
-        color: var(--fg);
-        font: 600 14px var(--display);
-        cursor: pointer;
-        padding: 0 2px;
-        touch-action: none;
+}
+.gns3lab-student .sm-head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--term-line);
+}
+.gns3lab-student .sm-search {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    padding: 0 11px;
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    background: var(--term-bg);
+    color: var(--term-fg);
+    font: 13px var(--display);
+}
+.gns3lab-student .sm-search::placeholder {
+    color: var(--term-dim);
+}
+.gns3lab-student .sm-search:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+}
+.gns3lab-student .sm-x,
+.gns3lab-student .sm-act {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--term-dim);
+    cursor: pointer;
+}
+.gns3lab-student .sm-x:hover,
+.gns3lab-student .sm-act:hover {
+    background: color-mix(in srgb,var(--term-fg) 14%,transparent);
+    color: var(--term-fg);
+}
+.gns3lab-student .sm-x svg,
+.gns3lab-student .sm-act svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .sm-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 6px 6px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--term-line) transparent;
+}
+.gns3lab-student .sm-gh {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 8px 5px;
+    background: var(--menu-bg);
+    color: var(--sg);
+    font: 600 10.5px var(--display);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.gns3lab-student .sm-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 8px;
+    border-left: 3px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.gns3lab-student .sm-item.active {
+    border-left-color: var(--sg);
+    background: color-mix(in srgb,var(--sg) 15%,transparent);
+}
+.gns3lab-student .sm-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.gns3lab-student .sm-cmd {
+    color: var(--term-fg);
+    font: 600 12.5px var(--mono);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .sm-arg {
+    margin-left: 2px;
+    color: var(--sg);
+}
+.gns3lab-student .sm-desc {
+    color: var(--term-dim);
+    font: 12px/1.3 var(--display);
+}
+.gns3lab-student .sm-acts {
+    display: flex;
+    flex: none;
+    align-items: center;
+}
+.gns3lab-student .sm-act {
+    opacity: 0;
+}
+.gns3lab-student .sm-item:hover .sm-act,
+.gns3lab-student .sm-item.active .sm-act,
+.gns3lab-student .sm-act:focus-visible,
+.gns3lab-student .sm-pin[aria-pressed="true"] {
+    opacity: 1;
+}
+.gns3lab-student .sm-pin[aria-pressed="true"] {
+    color: var(--sg);
+}
+.gns3lab-student .sm-pin[aria-pressed="true"] svg {
+    fill: currentcolor;
+}
+.gns3lab-student .sm-none {
+    margin: 0;
+    padding: 22px 12px;
+    color: var(--term-dim);
+    font: 13px var(--display);
+    text-align: center;
+}
+.gns3lab-student .sm-foot {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px 9px;
+    border-top: 1px solid var(--term-line);
+}
+.gns3lab-student .sm-prev {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: var(--term-bg);
+    font: 12.5px var(--mono);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .sm-p {
+    flex: none;
+    color: #3cc47a;
+}
+.gns3lab-student .sm-t {
+    color: var(--term-fg);
+}
+.gns3lab-student .sm-ret {
+    color: var(--term-dim);
+}
+.gns3lab-student .sm-caret {
+    align-self: center;
+    width: .55em;
+    height: 1.1em;
+    background: var(--term-fg);
+    animation: gns3lab-caret 1s steps(2, start) infinite;
+}
+@keyframes gns3lab-caret {
+    to {
+        visibility: hidden;
     }
-    .gns3lab-app .handle::before {
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: 6px;
-        width: 36px;
-        height: 4px;
-        margin-left: -18px;
-        border-radius: 2px;
-        background: var(--line);
+}
+.gns3lab-student .sm-note {
+    color: var(--term-dim);
+    font: 11.5px/1.35 var(--display);
+}
+.gns3lab-student .sm-keys {
+    color: var(--term-dim);
+    font: 10.5px var(--display);
+    opacity: .8;
+}
+.gns3lab-student .snip-tip {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 300px;
+    padding: 8px 11px 9px;
+    border-top: 2px solid var(--sg);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgb(0 0 0 / .4);
+    pointer-events: none;
+}
+.gns3lab-student .st-cmd {
+    color: var(--term-fg);
+    font: 600 12px var(--mono);
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .st-desc {
+    color: #c3cdd4;
+    font: 12px/1.35 var(--display);
+}
+.gns3lab-student .st-hint {
+    color: var(--sg);
+    font: 11px var(--display);
+}
+@media (pointer: coarse) {
+    .gns3lab-student .snip,
+    .gns3lab-student .snipbtn {
+        min-height: 38px;
     }
-    .gns3lab-app .panel.dragging {
-        transition: none;
+    .gns3lab-student .tf-btn {
+        min-width: 36px;
+        height: 36px;
     }
-    .gns3lab-app .handle::after {
-        content: "";
-        width: 9px;
-        height: 9px;
-        border-right: 2px solid var(--muted);
-        border-top: 2px solid var(--muted);
-        transform: rotate(-45deg);
-        margin-right: 6px;
-        transition: transform .2s;
+    .gns3lab-student .sm-item {
+        padding: 8px 4px 8px 8px;
     }
-    .gns3lab-app .panel.open .handle::after {
-        transform: rotate(135deg);
+    .gns3lab-student .sm-x,
+    .gns3lab-student .sm-act {
+        width: 38px;
+        height: 38px;
     }
-    .gns3lab-app .hint {
-        bottom: 62px;
+    .gns3lab-student .sm-act {
+        opacity: 1;
     }
-    .gns3lab-app .ends {
-        grid-template-columns: 1fr;
-    }
-    .gns3lab-app .ro {
+    .gns3lab-student .sm-keys {
         display: none;
     }
 }
-
 @media (prefers-reduced-motion: reduce) {
-    .gns3lab-app .panel,
-    .gns3lab-app .dimmable,
-    .gns3lab-app .handle::after {
+    .gns3lab-student .snip,
+    .gns3lab-student .snipbtn i,
+    .gns3lab-student .sdot {
         transition: none;
     }
+    .gns3lab-student .snip:hover {
+        transform: none;
+    }
+    .gns3lab-student .snip.sent,
+    .gns3lab-student .snipmenu,
+    .gns3lab-student .sm-caret {
+        animation: none;
+    }
 }
-
-/* Fonts named in .gns3 drawings are not loaded in Moodle: use the theme font. */
-.gns3lab-app .drawings text {
-    font-family: var(--display);
-}
-
-/* Session bar: status, time left, start and stop */
-.gns3lab-app .ctl {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 14px;
-    padding-block: 7px;
-    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-    padding-left: max(16px, env(safe-area-inset-left, 0px));
-    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-    padding-right: max(16px, env(safe-area-inset-right, 0px));
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-    font-size: 13.5px;
-}
-.gns3lab-app .cstatus {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    font-weight: 500;
-}
-.gns3lab-app .cstatus::before {
-    content: "";
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--muted);
-}
-.gns3lab-app .cstatus[data-status="running"]::before {
-    background: var(--ok);
-}
-.gns3lab-app .cstatus[data-status="queued"]::before,
-.gns3lab-app .cstatus[data-status="starting"]::before,
-.gns3lab-app .cstatus[data-status="stopping"]::before {
-    background: var(--warn);
-}
-.gns3lab-app .cstatus[data-status="failed"]::before {
-    background: var(--bad);
-}
-.gns3lab-app .ctime {
-    font: 500 12.5px var(--mono);
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-}
-.gns3lab-app .cmsg {
-    color: var(--bad);
-    flex: 1 1 240px;
-}
-.gns3lab-app .cbtns {
-    display: flex;
-    gap: 8px;
-    margin-left: auto;
-}
-.gns3lab-app .gbtn.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-ink);
-}
-.gns3lab-app .gbtn:disabled {
-    opacity: .5;
-    cursor: not-allowed;
-}
-
-/* Device consoles under the topology; the terminal stays dark in both themes */
-.gns3lab-app.is-inline.has-consoles {
-    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-    height: min(94vh, 1180px);
-}
-.gns3lab-consoles {
-    --t-bg: #0f1720;
-    --t-fg: #d6dee5;
-    --t-dim: #7d8b97;
-    --t-bar: #15202a;
-    --t-line: #26333f;
-    --t-key: #1f2c38;
-    --t-keyhi: #2c3d4c;
-    --t-accent: #5aa8f2;
-    flex: 0 0 46%;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--t-bg);
-    border-top: 1px solid var(--line);
-}
-.gns3lab-consoles[hidden] {
-    display: none;
-}
-.gns3lab-consoles .ctabs {
+.gns3lab-student .tabs {
     display: flex;
     gap: 2px;
+    padding: 6px 6px 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
     overflow-x: auto;
-    padding: 4px 6px 0;
-    background: var(--t-bar);
-    scrollbar-width: none;
-}
-.gns3lab-consoles .ctab {
     flex: none;
-    display: flex;
-    align-items: center;
-    border-radius: 6px 6px 0 0;
-    background: transparent;
+    scrollbar-width: thin;
 }
-.gns3lab-consoles .ctab:has([aria-selected="true"]) {
-    background: var(--t-bg);
-}
-.gns3lab-consoles .ctab-name,
-.gns3lab-consoles .ctab-x {
-    border: 0;
-    background: transparent;
-    color: var(--t-dim);
-    font: 600 13px var(--display);
-    cursor: pointer;
-}
-.gns3lab-consoles .ctab-name {
+.gns3lab-student .tab {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 7px 4px 7px 12px;
+    height: 32px;
+    padding: 0 6px 0 11px;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: 7px 7px 0 0;
+    background: transparent;
+    color: var(--muted);
+    font: 600 13px var(--display);
+    cursor: pointer;
+    white-space: nowrap;
 }
-.gns3lab-consoles .ctab-name[aria-selected="true"] {
-    color: var(--t-fg);
+.gns3lab-student .tab[aria-selected="true"] {
+    background: var(--term-bg);
+    color: var(--term-fg);
+    border-color: var(--term-line);
 }
-.gns3lab-consoles .ctab-x {
-    padding: 4px 9px;
-    font-size: 16px;
-    line-height: 1;
+.gns3lab-student .tab .x {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    display: grid;
+    place-items: center;
+    opacity: .6;
+    background: transparent;
+    color: inherit;
 }
-.gns3lab-consoles .ctab-x:hover,
-.gns3lab-consoles .ctab-name:hover {
-    color: var(--t-fg);
+.gns3lab-student .tab .x:hover {
+    opacity: 1;
+    background: color-mix(in srgb,var(--muted) 25%,transparent);
 }
-.gns3lab-consoles .cdot {
+.gns3lab-student .tab .x svg,
+.gns3lab-student .thead svg,
+.gns3lab-student .dhead svg,
+.gns3lab-student .ib svg {
+    width: 12px;
+    height: 12px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .dotst {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--t-dim);
+    background: var(--ok);
+    flex: none;
 }
-.gns3lab-consoles .ctab[data-state="open"] .cdot {
-    background: #3cc47a;
+.gns3lab-student .dotst.wait {
+    background: var(--warn);
 }
-.gns3lab-consoles .ctab[data-state="connecting"] .cdot,
-.gns3lab-consoles .ctab[data-state="waiting"] .cdot {
-    background: #e0b13a;
+.gns3lab-student .dotst.off {
+    background: var(--off);
 }
-.gns3lab-consoles .ctab[data-state="failed"] .cdot {
-    background: #ee6b62;
+.gns3lab-student .dotst.bad {
+    background: var(--bad);
 }
-.gns3lab-consoles .obsbar {
-    margin: 0;
-    padding: 6px 12px;
-    font-size: 12.5px;
-    color: var(--t-bg);
-    background: var(--t-accent);
+.gns3lab-student .unr {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: gns3lab-pulse 1.2s infinite;
 }
-.gns3lab-consoles .ctermhost {
+.gns3lab-student .dockbody {
     flex: 1;
     min-height: 0;
     position: relative;
 }
-.gns3lab-consoles .cterm {
-    position: absolute;
-    top: 8px;
-    right: 4px;
-    bottom: 6px;
-    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-    left: max(10px, env(safe-area-inset-left, 0px));
-}
-.gns3lab-consoles .creconnect {
-    position: absolute;
-    right: 14px;
-    bottom: 10px;
-    z-index: 11;
-}
-.gns3lab-consoles .ctoast {
-    position: absolute;
-    right: 14px;
-    top: 10px;
-    z-index: 12;
-    background: var(--t-accent);
-    color: var(--t-bg);
-    font-size: 12.5px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    pointer-events: none;
-}
-.gns3lab-consoles .strip {
+.gns3lab-student .tile,
+.gns3lab-student .win {
     display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    align-items: center;
-    padding: 6px 10px;
-    background: var(--t-bar);
-    border-top: 1px solid var(--t-line);
-    scrollbar-width: none;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--term-bg);
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    overflow: hidden;
 }
-.gns3lab-consoles .k {
+.gns3lab-student .tile.focus,
+.gns3lab-student .win.focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+.gns3lab-student .tile.max {
+    position: absolute;
+    inset: 8px;
+    z-index: 6;
+}
+.gns3lab-student .thead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 4px 0 11px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
     flex: none;
-    min-width: 40px;
-    height: 36px;
-    padding: 0 11px;
-    border: 1px solid var(--t-line);
-    border-radius: 7px;
-    background: var(--t-key);
-    color: var(--t-fg);
-    font: 500 13.5px var(--mono);
-    cursor: pointer;
-    touch-action: manipulation;
+    font: 600 13px var(--display);
+    color: var(--fg);
     user-select: none;
     -webkit-user-select: none;
 }
-.gns3lab-consoles .k:hover {
-    background: var(--t-keyhi);
-}
-.gns3lab-consoles .k[aria-pressed="true"] {
-    background: var(--t-accent);
-    border-color: var(--t-accent);
-    color: var(--t-bg);
-}
-.gns3lab-consoles .k:disabled {
-    opacity: .4;
-    cursor: not-allowed;
-}
-/* console keyboard: input line, port chips and the command panel */
-.gns3lab-consoles .cinput {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    background: var(--t-bar);
-    border-top: 1px solid var(--t-line);
-}
-.gns3lab-consoles .cinput[hidden],
-.gns3lab-consoles .ctoggle[hidden] {
-    display: none;
-}
-.gns3lab-consoles .cline {
+.gns3lab-student .thead .nm {
     flex: 1;
     min-width: 0;
-    height: 38px;
-    padding: 0 14px;
-    border: 1px solid var(--t-line);
-    border-radius: 19px;
-    background: var(--t-bg);
-    color: var(--t-fg);
-    font: 14px var(--mono);
-    outline: none;
-}
-.gns3lab-consoles .cline::placeholder {
-    color: var(--t-dim);
-}
-.gns3lab-consoles .cline:focus {
-    border-color: var(--t-accent);
-}
-.gns3lab-consoles .ctoggle,
-.gns3lab-consoles .csend {
-    min-width: 38px;
-    width: 38px;
-    height: 38px;
-    padding: 0;
-    border-radius: 50%;
-    font-size: 17px;
-}
-.gns3lab-consoles .ctoggle.on,
-.gns3lab-consoles .csend {
-    background: var(--t-accent);
-    border-color: var(--t-accent);
-    color: var(--t-bg);
-}
-.gns3lab-consoles .cmode {
-    flex: none;
-    max-width: 40%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 3px 9px;
-    border: 1px solid currentcolor;
-    border-radius: 11px;
-    font: 600 12px var(--mono);
-    color: var(--t-dim);
 }
-.gns3lab-consoles .cmode[data-mode="priv"] {
-    color: #3cc47a;
+.gns3lab-student .thead .nm small {
+    font: 500 11px var(--mono);
+    color: var(--muted);
+    margin-left: 6px;
 }
-.gns3lab-consoles .cmode[data-mode="config"],
-.gns3lab-consoles .cmode[data-mode="sub"] {
-    color: #e0b13a;
-}
-.gns3lab-consoles .cmode[data-mode="if"],
-.gns3lab-consoles .cmode[data-mode="router"] {
-    color: #c792ea;
-}
-.gns3lab-consoles .csuggest[hidden],
-.gns3lab-consoles .cmdpad[hidden] {
-    display: none;
-}
-.gns3lab-consoles .cport {
-    flex: none;
-    display: inline-flex;
-    align-items: baseline;
-    gap: 6px;
-    height: 32px;
-    padding: 0 12px;
-    border: 1px dashed var(--t-line);
-    border-radius: 16px;
+.gns3lab-student .thead button {
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: 5px;
     background: transparent;
-    color: var(--t-fg);
-    font: 13px var(--mono);
-    line-height: 30px;
+    color: var(--muted);
     cursor: pointer;
+    display: grid;
+    place-items: center;
 }
-.gns3lab-consoles .cport.linked {
-    border-style: solid;
-    border-color: var(--t-accent);
+.gns3lab-student .thead button:hover {
+    background: var(--chip);
+    color: var(--fg);
 }
-.gns3lab-consoles .cport span {
-    color: var(--t-dim);
-    font-size: 12px;
+.gns3lab-student .tbody {
+    flex: 1;
+    min-height: 0;
+    position: relative;
 }
-.gns3lab-consoles .cmdpad {
-    flex: none;
-    max-height: 230px;
+.gns3lab-student .wins {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+.gns3lab-student .win {
+    position: absolute;
+    pointer-events: auto;
+    resize: both;
+    min-width: 300px;
+    min-height: 170px;
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .win .thead {
+    cursor: move;
+    touch-action: none;
+}
+.gns3lab-student .win.anim {
+    transition: transform .26s ease,opacity .26s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-student .win.anim {
+        transition: none;
+    }
+}
+/* phone: diving into a console */
+.gns3lab-student .dive {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 72%;
+    z-index: 20;
     display: flex;
     flex-direction: column;
-    background: var(--t-bar);
-    border-top: 1px solid var(--t-line);
+    background: var(--term-bg);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -10px 30px rgb(0 0 0 / .3);
+    overflow: hidden;
 }
-.gns3lab-consoles .cgroups {
+.gns3lab-student .dive.in {
+    animation: gns3lab-dive-in .24s ease-out;
+}
+@keyframes gns3lab-dive-in {
+    from {
+        transform: translateY(40%);
+        opacity: .3;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-student .dive.in {
+        animation: none;
+    }
+}
+.gns3lab-student .dhead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-block: 7px;
+    padding-left: max(10px,env(safe-area-inset-left,0px));
+    padding-right: max(10px,env(safe-area-inset-right,0px));
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: none;
+}
+.gns3lab-student .dback {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font: 500 13px var(--body);
+    cursor: pointer;
+}
+.gns3lab-student .dback svg {
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-student .dchips {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.gns3lab-student .dchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--canvas);
+    color: var(--fg);
+    font: 600 13px var(--display);
+    white-space: nowrap;
+    cursor: pointer;
+}
+.gns3lab-student .dchip[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+.gns3lab-student .dchip[aria-pressed="true"] .dotst {
+    box-shadow: 0 0 0 1.5px var(--accent-ink);
+}
+.gns3lab-student .ib {
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    flex: none;
+}
+.gns3lab-student .dbody {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+.gns3lab-student .keys {
     display: flex;
     gap: 6px;
     overflow-x: auto;
-    padding: 8px 10px 4px;
-    scrollbar-width: none;
-}
-.gns3lab-consoles .cgroup {
+    padding-block: 7px;
+    padding-left: max(10px,env(safe-area-inset-left,0px));
+    padding-right: max(10px,env(safe-area-inset-right,0px));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
     flex: none;
-    height: 30px;
-    padding: 0 13px;
-    border: 0;
-    border-radius: 15px;
-    background: var(--t-key);
-    color: var(--t-dim);
-    font: 600 12.5px var(--display);
-    cursor: pointer;
+    scrollbar-width: none;
+    padding-bottom: calc(7px + env(safe-area-inset-bottom,0px));
 }
-.gns3lab-consoles .cgroup[aria-selected="true"] {
-    background: var(--t-accent);
-    color: var(--t-bg);
-}
-.gns3lab-consoles .cgrid {
-    display: grid;
-    /* stylelint-disable-next-line csstree/validator -- modern CSS the bundled validator does not know. */
-    grid-template-columns: repeat(auto-fill, minmax(min(190px, 46%), 1fr));
-    gap: 6px;
-    padding: 6px 10px 10px;
-    overflow-y: auto;
-}
-.gns3lab-consoles .kcmd {
-    min-height: 40px;
-    padding: 6px 10px;
-    border: 1px solid var(--t-line);
-    border-radius: 8px;
-    background: var(--t-key);
-    color: var(--t-fg);
-    font: 12.5px/1.25 var(--mono);
-    text-align: left;
-    overflow-wrap: anywhere;
+.gns3lab-student .key {
+    flex: none;
+    min-width: 44px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font: 600 13px var(--mono);
     cursor: pointer;
     touch-action: manipulation;
-    user-select: none;
-    -webkit-user-select: none;
 }
-.gns3lab-consoles .kcmd:hover,
-.gns3lab-consoles .cport:hover {
-    background: var(--t-keyhi);
+.gns3lab-student .key:active,
+.gns3lab-student .key[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
 }
-.gns3lab-consoles .kcmd:active {
-    background: var(--t-accent);
-    color: var(--t-bg);
+.gns3lab-student .key:disabled {
+    opacity: .4;
 }
-.gns3lab-consoles .kcmd.partial {
-    border-style: dashed;
-    color: var(--t-accent);
+/* gesture sheet */
+.gns3lab-student .help {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb,#000 45%,transparent);
+    padding: 16px;
 }
-.gns3lab-consoles .k:focus-visible,
-.gns3lab-consoles .kcmd:focus-visible,
-.gns3lab-consoles .cgroup:focus-visible,
-.gns3lab-consoles .cport:focus-visible,
-.gns3lab-consoles .ctab-name:focus-visible,
-.gns3lab-consoles .ctab-x:focus-visible {
-    outline: 2px solid var(--t-accent);
-    outline-offset: 2px;
+.gns3lab-student .helpcard {
+    background: var(--panel);
+    color: var(--fg);
+    border-radius: 12px;
+    max-width: 720px;
+    width: 100%;
+    max-height: 100%;
+    overflow: auto;
+    padding: 20px 22px;
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .helpcard h2 {
+    margin: 0 0 4px;
+    font: 600 21px var(--display);
+    color: var(--fg);
+}
+.gns3lab-student .helpcard>.dh p,
+.gns3lab-student .helpcard .dh p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+}
+.gns3lab-student .helpcard .dh {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+.gns3lab-student .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 14px;
+}
+.gns3lab-student .cols h3 {
+    margin: 0 0 8px;
+    font: 600 10.5px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    color: var(--muted);
+}
+.gns3lab-student .cols dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 12px;
+    font-size: 13.5px;
+}
+.gns3lab-student .cols dt {
+    font-weight: 600;
+}
+.gns3lab-student .cols dd {
+    margin: 0;
+    color: var(--muted);
+}
+.gns3lab-student .lvls {
+    display: grid;
+    grid-template-columns: repeat(4,1fr);
+    gap: 8px;
+    margin-top: 16px;
+}
+.gns3lab-student .lvls div {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+}
+.gns3lab-student .lvls b {
+    display: block;
+    color: var(--fg);
+    font: 600 14px var(--display);
+    margin-bottom: 2px;
+}
+@media (max-width:620px) {
+    .gns3lab-student .cols {
+        grid-template-columns: 1fr;
+    }
+    .gns3lab-student .lvls {
+        grid-template-columns: 1fr 1fr;
+    }
 }
 
-@media (max-width: 760px) {
-    .gns3lab-consoles {
-        flex-basis: 55%;
-    }
-    /* The collapsed details sheet hangs below the stage; it must not cover the console tabs. */
-    .gns3lab-app.has-consoles .stage {
-        overflow: hidden;
-    }
-    /* Typing or the command panel: the consoles take the whole screen, like a messenger. */
-    .gns3lab-app.kb-open .bar,
-    .gns3lab-app.kb-open .ctl,
-    .gns3lab-app.kb-open .stage {
-        display: none;
-    }
-    .gns3lab-app.kb-open .gns3lab-consoles {
-        flex: 1 1 auto;
-    }
-    /* 16px keeps iOS from zooming into the line. */
-    .gns3lab-consoles .cline {
-        font-size: 16px;
-    }
-    .gns3lab-consoles .cmdpad {
-        max-height: 44%;
-    }
-}
+/* stylelint-enable csstree/validator */
 
 /* xterm.js 5.5.0 (MIT, https://github.com/xtermjs/xterm.js), css/xterm.css scoped to the console section */
-.gns3lab-consoles .xterm {
+.gns3lab-student .xterm {
     cursor: text;
     position: relative;
     user-select: none;
     -ms-user-select: none;
     -webkit-user-select: none;
 }
-.gns3lab-consoles .xterm.focus,
-.gns3lab-consoles .xterm:focus {
+.gns3lab-student .xterm.focus,
+.gns3lab-student .xterm:focus {
     outline: none;
 }
-.gns3lab-consoles .xterm .xterm-helpers {
+.gns3lab-student .xterm .xterm-helpers {
     position: absolute;
     top: 0;
     z-index: 5;
 }
-.gns3lab-consoles .xterm .xterm-helper-textarea {
+.gns3lab-student .xterm .xterm-helper-textarea {
     padding: 0;
     border: 0;
     margin: 0;
@@ -1439,7 +3168,7 @@ body.gns3lab-fullscreen {
     overflow: hidden;
     resize: none;
 }
-.gns3lab-consoles .xterm .composition-view {
+.gns3lab-student .xterm .composition-view {
     background: #000;
     color: #fff;
     display: none;
@@ -1447,10 +3176,10 @@ body.gns3lab-fullscreen {
     white-space: nowrap;
     z-index: 1;
 }
-.gns3lab-consoles .xterm .composition-view.active {
+.gns3lab-student .xterm .composition-view.active {
     display: block;
 }
-.gns3lab-consoles .xterm .xterm-viewport {
+.gns3lab-student .xterm .xterm-viewport {
     background-color: #000;
     overflow-y: scroll;
     cursor: default;
@@ -1460,18 +3189,18 @@ body.gns3lab-fullscreen {
     top: 0;
     bottom: 0;
 }
-.gns3lab-consoles .xterm .xterm-screen {
+.gns3lab-student .xterm .xterm-screen {
     position: relative;
 }
-.gns3lab-consoles .xterm .xterm-screen canvas {
+.gns3lab-student .xterm .xterm-screen canvas {
     position: absolute;
     left: 0;
     top: 0;
 }
-.gns3lab-consoles .xterm .xterm-scroll-area {
+.gns3lab-student .xterm .xterm-scroll-area {
     visibility: hidden;
 }
-.gns3lab-consoles .xterm-char-measure-element {
+.gns3lab-student .xterm-char-measure-element {
     display: inline-block;
     visibility: hidden;
     position: absolute;
@@ -1479,18 +3208,18 @@ body.gns3lab-fullscreen {
     left: -9999em;
     line-height: normal;
 }
-.gns3lab-consoles .xterm.enable-mouse-events {
+.gns3lab-student .xterm.enable-mouse-events {
     cursor: default;
 }
-.gns3lab-consoles .xterm.xterm-cursor-pointer,
-.gns3lab-consoles .xterm .xterm-cursor-pointer {
+.gns3lab-student .xterm.xterm-cursor-pointer,
+.gns3lab-student .xterm .xterm-cursor-pointer {
     cursor: pointer;
 }
-.gns3lab-consoles .xterm.column-select.focus {
+.gns3lab-student .xterm.column-select.focus {
     cursor: crosshair;
 }
-.gns3lab-consoles .xterm .xterm-accessibility:not(.debug),
-.gns3lab-consoles .xterm .xterm-message {
+.gns3lab-student .xterm .xterm-accessibility:not(.debug),
+.gns3lab-student .xterm .xterm-message {
     position: absolute;
     left: 0;
     top: 0;
@@ -1500,79 +3229,79 @@ body.gns3lab-fullscreen {
     color: transparent;
     pointer-events: none;
 }
-.gns3lab-consoles .xterm .xterm-accessibility-tree:not(.debug) *::selection {
+.gns3lab-student .xterm .xterm-accessibility-tree:not(.debug) *::selection {
     color: transparent;
 }
-.gns3lab-consoles .xterm .xterm-accessibility-tree {
+.gns3lab-student .xterm .xterm-accessibility-tree {
     user-select: text;
     white-space: pre;
 }
-.gns3lab-consoles .xterm .live-region {
+.gns3lab-student .xterm .live-region {
     position: absolute;
     left: -9999px;
     width: 1px;
     height: 1px;
     overflow: hidden;
 }
-.gns3lab-consoles .xterm-dim {
+.gns3lab-student .xterm-dim {
     /* stylelint-disable-next-line declaration-no-important -- as in xterm.css: dim must not fade the background. */
     opacity: 1 !important;
 }
-.gns3lab-consoles .xterm-underline-1 {
+.gns3lab-student .xterm-underline-1 {
     text-decoration: underline;
 }
-.gns3lab-consoles .xterm-underline-2 {
+.gns3lab-student .xterm-underline-2 {
     text-decoration: double underline;
 }
-.gns3lab-consoles .xterm-underline-3 {
+.gns3lab-student .xterm-underline-3 {
     text-decoration: wavy underline;
 }
-.gns3lab-consoles .xterm-underline-4 {
+.gns3lab-student .xterm-underline-4 {
     text-decoration: dotted underline;
 }
-.gns3lab-consoles .xterm-underline-5 {
+.gns3lab-student .xterm-underline-5 {
     text-decoration: dashed underline;
 }
-.gns3lab-consoles .xterm-overline {
+.gns3lab-student .xterm-overline {
     text-decoration: overline;
 }
-.gns3lab-consoles .xterm-overline.xterm-underline-1 {
+.gns3lab-student .xterm-overline.xterm-underline-1 {
     text-decoration: overline underline;
 }
-.gns3lab-consoles .xterm-overline.xterm-underline-2 {
+.gns3lab-student .xterm-overline.xterm-underline-2 {
     /* stylelint-disable-next-line csstree/validator -- valid CSS the bundled validator does not know. */
     text-decoration: overline double underline;
 }
-.gns3lab-consoles .xterm-overline.xterm-underline-3 {
+.gns3lab-student .xterm-overline.xterm-underline-3 {
     /* stylelint-disable-next-line csstree/validator -- valid CSS the bundled validator does not know. */
     text-decoration: overline wavy underline;
 }
-.gns3lab-consoles .xterm-overline.xterm-underline-4 {
+.gns3lab-student .xterm-overline.xterm-underline-4 {
     /* stylelint-disable-next-line csstree/validator -- valid CSS the bundled validator does not know. */
     text-decoration: overline dotted underline;
 }
-.gns3lab-consoles .xterm-overline.xterm-underline-5 {
+.gns3lab-student .xterm-overline.xterm-underline-5 {
     /* stylelint-disable-next-line csstree/validator -- valid CSS the bundled validator does not know. */
     text-decoration: overline dashed underline;
 }
-.gns3lab-consoles .xterm-strikethrough {
+.gns3lab-student .xterm-strikethrough {
     text-decoration: line-through;
 }
-.gns3lab-consoles .xterm-screen .xterm-decoration-container .xterm-decoration {
+.gns3lab-student .xterm-screen .xterm-decoration-container .xterm-decoration {
     z-index: 6;
     position: absolute;
 }
-.gns3lab-consoles .xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer {
+.gns3lab-student .xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer {
     z-index: 7;
 }
-.gns3lab-consoles .xterm-decoration-overview-ruler {
+.gns3lab-student .xterm-decoration-overview-ruler {
     z-index: 8;
     position: absolute;
     top: 0;
     right: 0;
     pointer-events: none;
 }
-.gns3lab-consoles .xterm-decoration-top {
+.gns3lab-student .xterm-decoration-top {
     z-index: 2;
     position: relative;
 }

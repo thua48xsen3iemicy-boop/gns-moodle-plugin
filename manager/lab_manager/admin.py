@@ -9,7 +9,9 @@ Commands never print secrets, except `gateway-env`, which writes the gateway's e
 
 import argparse
 import asyncio
+import base64
 import json
+import ssl
 import sys
 from urllib.parse import urlsplit
 
@@ -56,6 +58,19 @@ def cmd_check_config(args):
     }, ensure_ascii=False))
 
 
+def _slot_ca_b64(path) -> str:
+    """The slot CA as one base64 line. The gateway's unit hides /etc/lab-manager from its dynamic
+    user, so a path to SLOT_CA_FILE in gateway.env would be unreadable there."""
+    try:
+        pem = path.read_text("ascii")
+        if "-----BEGIN CERTIFICATE-----" not in pem:
+            raise ValueError("no PEM certificate in it")
+        ssl.create_default_context(cadata=pem)
+    except (OSError, ValueError) as exc:  # ssl.SSLError is an OSError
+        raise SystemExit(f"CONFIG_ERROR: SLOT_CA_FILE {path} is not a readable PEM CA: {exc}") from exc
+    return base64.b64encode(pem.encode("ascii")).decode("ascii")
+
+
 def gateway_env(s) -> str:
     """Env file of the console gateway from the manager's own config: one source for the slot
     console tokens, the ticket key and the Moodle origins (README §1.1)."""
@@ -73,6 +88,9 @@ def gateway_env(s) -> str:
         "GW_INTERNAL_KEY": s.gateway_internal_key,
         "GW_ALLOWED_ORIGINS": ",".join(origins),
         "GW_SLOTS": json.dumps(slots, separators=(",", ":")),
+        "GW_SLOT_SCHEME": "wss" if s.slot_scheme == "https" else "ws",
+        "GW_SLOT_CA_B64": _slot_ca_b64(s.slot_ca_file) if s.slot_ca_file else "",
+        "GW_ALLOW_PLAINTEXT_SLOTS": "1" if s.allow_plaintext_slots else "0",
     }
     if any("'" in v or "\n" in v for v in values.values()):
         raise SystemExit("CONFIG_ERROR: gateway values must not contain quotes or newlines")
@@ -96,8 +114,8 @@ def cmd_slots(args):
     async def run(services):
         rows = await services.store.slots()
         for r in rows:
-            print(json.dumps({k: r[k] for k in ("vmid", "address", "state", "generation",
-                                                "session_id", "student_key", "in_config", "state_message")},
+            print(json.dumps({k: r[k] for k in ("vmid", "address", "state", "generation", "session_id",
+                                                "student_key", "in_config", "state_message", "lab_failures")},
                              ensure_ascii=False, default=str))
 
     asyncio.run(_with_services(run))
@@ -107,12 +125,35 @@ def cmd_slot_state(args):
     """enable: maintenance/failed -> free, after the operator checked the CT and its lab."""
 
     async def run(services):
-        if args.state == "free":
-            node = await services.pve.find_ct_node(args.vmid)
-            state = await services.agent.status(node, args.vmid)
-            if state != "stopped":
-                raise SystemExit(f"CT {args.vmid} is {state} on {node}; stop it first")
-        await services.store.set_slot_admin_state(args.vmid, args.state, args.message)
+        from .agent_client import AgentError
+        from .ownership import command_scope
+
+        async with services.store.allocation_guard():
+            slot = await services.store.slot(args.vmid)
+            if slot is None or slot["state"] not in ("free", "failed", "maintenance"):
+                raise SystemExit("Slot is in use or unknown")
+            if args.state == "free":
+                epoch = await services.store.current_epoch()
+                with command_scope(epoch, 2 * slot["generation"] + 1):
+                    node = await services.pve.find_ct_node(args.vmid)
+                    await services.agent.claim(node, args.vmid)
+                    state = await services.agent.status(node, args.vmid)
+                    if state != "stopped":
+                        raise SystemExit(f"CT {args.vmid} is {state} on {node}; stop it first")
+                    # Whatever the operator found in the guest, the slot goes back to work clean.
+                    try:
+                        await services.agent.reset(node, args.vmid)
+                    except AgentError as exc:
+                        raise SystemExit(f"CT {args.vmid} was not reset, the slot remains unavailable: {exc}")
+                    key = services.settings.placeholder_student_key
+                    await services.agent.set_mounts(node, args.vmid, student_key=key, data_mode="ro",
+                                                   code_revision=services.settings.slot_code_revision)
+                    config = await services.pve.ct_config(args.vmid)
+                    if not services.orchestrator.mounts_ok(config, key, read_only=True):
+                        raise SystemExit("Parking not confirmed; slot remains unavailable")
+                    await services.store.set_slot_admin_state(args.vmid, args.state, args.message, check_epoch=True)
+            else:
+                await services.store.set_slot_admin_state(args.vmid, args.state, args.message)
         print(json.dumps({"vmid": args.vmid, "state": args.state}))
 
     asyncio.run(_with_services(run))

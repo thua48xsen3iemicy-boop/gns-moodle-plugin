@@ -33,8 +33,12 @@ def node_payload(spec: NodeSpec, node_id: str):
                 "server=on,wait=off -device virtio-serial-pci "
                 "-device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0"
             )
+        # "vnc": GNS3 2.2.61 picks a free port from 5900 up (display = port - 5900) and starts
+        # QEMU with "-vnc <console_host>:<display>"; console_host is the "[Server] host" of
+        # gns3_server.conf (127.0.0.1 here). The node gets no serial port ("-serial" is added
+        # for telnet only), so there is nothing for serial-getty to talk to.
         common.update(
-            console_type="telnet",
+            console_type=spec.console,
             properties={
                 "qemu_path": "/usr/bin/qemu-system-x86_64",
                 "ram": spec.ram_mb,

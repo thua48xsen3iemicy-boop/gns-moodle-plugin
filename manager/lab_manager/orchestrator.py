@@ -21,16 +21,23 @@ stored in the database. Nothing is deleted or recreated "just in case".
     stopping       lab_stop         slot stop with Idempotency-Key
     stopping       lab_stop_wait    operation polling: STOPPING -> STOPPED
     stopping       ct_stop          agent: pct shutdown (pct stop only as last resort)
+    stopping       ct_reset         agent: the stopped CT is rolled back to its clean snapshot, so the
+                                    next session gets the guest as this one did; a failed rollback sends
+                                    the slot to maintenance. Skipped when the slot stays failed or in
+                                    maintenance for the operator: the rollback would wipe what he needs
+                                    (the slot's journal, GNS3 logs, the guest's journald); slot-enable
+                                    rolls it back after he has looked
     stopping       ct_park          agent: placeholder mounted read-only instead of the student dir;
                                     verified, otherwise the slot goes to maintenance (never free)
-    stopped/failed                  terminal; failed keeps the slot 'failed' for the operator
+    stopped/failed                  terminal; the slot is free again, except after a failure of the slot
+                                    itself (see Failure): then it stays 'failed' for the operator
 
 A failure while the CT may hold the student's directory (ct_start .. lab_stop_wait) does not
 end the session at once: the lab is stopped if it may exist, the CT is stopped and parked,
-and only then the session is failed (the slot stays 'failed' for the operator, but with the
-placeholder mounted). Until the CT is confirmed stopped, slots.student_key names the student,
-and a new session of that student fails with STUDENT_DIR_BUSY instead of mounting the same
-directory read-write in a second slot.
+and only then the session is failed (the slot is free again if the lab was to blame, 'failed' for the
+operator if the slot was, in both cases rolled back and with the placeholder mounted). Until the CT is
+confirmed stopped, slots.student_key names the student, and a new session of that student fails with
+STUDENT_DIR_BUSY instead of mounting the same directory read-write in a second slot.
 """
 
 import asyncio
@@ -44,10 +51,12 @@ import psycopg
 from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentRejected,
                            AgentSourceMissing, AgentUncertain, AgentWrongNode)
 from . import labdef
+from .facts import parse_slot_facts
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
-from .slot_client import SlotError, SlotUnavailable
+from .slot_client import SlotError, SlotOwnerLost, SlotUnavailable
 from .store import Fenced
+from .ownership import command_scope, current
 
 log = logging.getLogger("lab_manager.orchestrator")
 MIB = 1024 * 1024
@@ -62,6 +71,22 @@ NODE_STATUSES = {"started", "stopped", "suspended"}
 MOUNTED_STAGES = ("ct_start", "slot_ready", "lab_submit", "lab_wait", "ready", "lab_stop", "lab_stop_wait")
 # The lab may exist in the slot: stop it before the CT.
 LAB_STAGES = ("lab_submit", "lab_wait", "ready")
+# A slot is rolled back to its clean snapshot whenever a session releases it, so what a student's lab
+# did in the guest cannot reach the next session. These failures are about the lab and its project, not
+# about the slot: the slot is freed once it is stopped, rolled back and parked. Any other failure (the CT
+# does not start, the agent or Proxmox refuse, a mount is wrong) would repeat on a clean guest: the
+# operator looks at the slot first.
+LAB_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_PROJECT_UNKNOWN",
+                          "SLOT_STOP_FAILED", "LAB_UNAVAILABLE"})
+# A stage that runs only when the slot is already known to work: a timeout there is the lab's.
+LAB_STAGE_TIMEOUTS = ("lab_submit", "lab_wait", "lab_stop", "lab_stop_wait")
+LAB_TIMEOUT_STAGES = ("student_dir",) + LAB_STAGE_TIMEOUTS
+# The lab failures that say something about the slot when different students meet them one after
+# another (settings.slot_lab_failure_limit). Not the ones about the lab definition or one project:
+# LAB_UNAVAILABLE and SLOT_PROJECT_UNKNOWN would hold every slot for a single broken lab.
+SLOT_SUSPECT_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_STOP_FAILED"})
+# Stages of the release chain: their commands carry the odd (cleanup) generation.
+RELEASE_STAGES = ("lab_stop", "lab_stop_wait", "ct_stop", "ct_reset", "ct_park")
 
 SLOT_STAGE_MESSAGES = {
     "DEPLOYING": "Создание или открытие проекта…",
@@ -74,14 +99,16 @@ SLOT_STAGE_MESSAGES = {
 
 
 class Failure(Exception):
-    """Unrecoverable for this session: it goes to failed, the slot to failed (after the CT is
-    stopped and parked when the failure happens in a MOUNTED_STAGES stage)."""
+    """Unrecoverable for this session: it goes to failed. The slot goes to failed too (after the CT is
+    stopped, rolled back and parked when the failure happens in a MOUNTED_STAGES stage), unless
+    slot_state says otherwise or the code is one of LAB_FAILURES: then the slot is freed."""
 
-    def __init__(self, message, code="FAILED", slot_state="failed"):
+    def __init__(self, message, code="FAILED", slot_state=None, source=None):
         super().__init__(message)
         self.message = message
         self.code = code
-        self.slot_state = slot_state
+        self.slot_state = slot_state or ("free" if code in LAB_FAILURES else "failed")
+        self.source = source
 
 
 class Wait(Exception):
@@ -128,6 +155,17 @@ def node_states(topology: dict) -> dict:
     return result
 
 
+def consoleless_names(ticket: dict, images: dict) -> set:
+    """Names of the nodes whose image the catalog declares without a console (`console_type: none`).
+
+    The slot keeps a console on every node for its own readiness checks; this only decides for whom the
+    manager may issue a ticket. The image is matched by its file, so reference labs (ticket.json) and labs
+    defined in Moodle are treated alike.
+    """
+    files = {image.file for image in images.values() if image.console_type == "none" and image.file}
+    return {n["name"] for n in ticket.get("nodes") or [] if n.get("image") in files}
+
+
 class Orchestrator:
     def __init__(self, settings, store, pve, agent, slot_clients, catalog, *, sleep=asyncio.sleep):
         self.settings = settings
@@ -140,8 +178,13 @@ class Orchestrator:
         self._wake = asyncio.Event()
         self._tasks: dict[str, asyncio.Task] = {}
         self._health_checked: dict[str, float] = {}
+        self._facts_next: dict[str, float] = {}  # session id -> monotonic time of the next read
+        self._facts_refreshed: dict[str, object] = {}  # session id -> facts_refresh_at already served
         self._live_cache: dict[str, tuple[float, dict]] = {}
+        self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
         self.leader = False
+        self.epoch = None
+        self._claims = set()
         self.last_tick = None
 
     # ------------------------------------------------------------------ loop
@@ -161,9 +204,11 @@ class Orchestrator:
                         if not self.leader:
                             await self.sleep(5)
                     log.info("Orchestrator leader lock acquired")
+                    self.epoch = await self.store.next_epoch()
+                    self._claims.clear()
                     while True:
-                        await self.tick()
                         await conn.execute("SELECT 1")  # Lock lives as long as this connection
+                        await self.tick()
                         try:
                             await asyncio.wait_for(self._wake.wait(), self.settings.worker_interval)
                         except asyncio.TimeoutError:
@@ -175,10 +220,24 @@ class Orchestrator:
                 log.error("Database unavailable for the orchestrator: %s", type(exc).__name__)
             finally:
                 self.leader = False
+                self.epoch = None
+                tasks = list(self._tasks.values())
+                for task in tasks:
+                    task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                self._tasks.clear()
+                self._claims.clear()
             await self.sleep(5)
 
     async def tick(self):
+        if not self.leader or self.epoch is None:
+            return
         self.last_tick = time.monotonic()
+        for task in self._tasks.values():
+            if task.done() and not task.cancelled() and task.exception() is not None:
+                exc = task.exception()
+                log.error("Session task failed", exc_info=(type(exc), exc, exc.__traceback__))
         for session in await self.store.live_sessions():
             task = self._tasks.get(session["id"])
             if task is None or task.done():
@@ -191,17 +250,69 @@ class Orchestrator:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
     async def drive(self, sid, max_steps=50):
+        leader_epoch = self.epoch
         for _ in range(max_steps):
+            if not self.leader or self.epoch != leader_epoch or leader_epoch is None:
+                return
             session = await self.store.session(sid)
             if session is None or session["status"] in ("stopped", "failed"):
                 return
-            try:
-                progressed = await self.step(session)
-            except Fenced as exc:
-                log.warning("Session %s: stale worker stopped (%s)", sid, exc)
-                return
+            epoch = leader_epoch
+            # Odd tokens revoke all starting/running commands before cleanup.
+            generation = 2 * (session["slot_generation"] or 0)
+            if session["stage"] in RELEASE_STAGES:
+                generation += 1
+            with command_scope(epoch, max(1, generation),
+                               lambda: self.leader and self.epoch == leader_epoch):
+                try:
+                    if session["slot_vmid"] is not None:
+                        await self._claim(session, epoch, generation)
+                    progressed = await self.step(session)
+                except SlotOwnerLost as exc:
+                    # A restarted Slot rejects the previously accepted token even while
+                    # this manager is still leader. Revoke the work token by entering
+                    # cleanup; keep the slot in maintenance after it is parked.
+                    if not self.leader or self.epoch != leader_epoch:
+                        return
+                    await self._fail(session, Failure(
+                        "Слот отверг текущего владельца; работа остановлена, слот требует проверки оператором",
+                        "SLOT_OWNER_LOST", slot_state="maintenance",
+                        source={"receiver": "slot", "code": exc.code},
+                    ))
+                    return
+                except Fenced as exc:
+                    log.warning("Session %s: stale worker stopped (%s)", sid, exc)
+                    return
+                except AgentWrongNode:
+                    self.pve.forget_ct_node(session["slot_vmid"])
+                    return
+                except AgentRejected as exc:
+                    await self._fail(session, Failure(f"Агент узла отклонил запрос: {exc.message}", "AGENT_REJECTED"))
+                    return
+                except (AgentError, SlotError) as exc:
+                    message = f"Нет подтверждения владения слотом; слот удерживается: {exc}"[:500]
+                    if session["status_message"] != message:
+                        await self.store.update_session(session, status_message=message,
+                                                        event=("ownership_wait", {"message": message}))
+                    await self._check_stage_timeout(session)
+                    return
+                except Failure as exc:
+                    await self._fail(session, exc)
+                    return
             if not progressed:
                 return
+
+    async def _claim(self, s, epoch, generation):
+        node = await self._node(s)
+        key = (s["slot_vmid"], node, epoch, generation)
+        if ("agent", key) not in self._claims:
+            await self.agent.claim(node, s["slot_vmid"])
+            self._claims.add(("agent", key))
+        if ("slot", key) not in self._claims and await self.agent.status(node, s["slot_vmid"]) == "running":
+            client = self._slot(s)
+            if await client.healthz():
+                await client.claim()
+                self._claims.add(("slot", key))
 
     # ------------------------------------------------------------------ one step
     async def step(self, s) -> bool:
@@ -211,7 +322,7 @@ class Orchestrator:
             return False
         try:
             return await handler(s)
-        except Fenced:
+        except (Fenced, SlotOwnerLost):
             raise
         except Failure as exc:
             await self._fail(s, exc)
@@ -272,8 +383,9 @@ class Orchestrator:
     async def _check_stage_timeout(self, s) -> bool:
         limit = self._stage_limit(s["stage"])
         if limit is not None and (now() - s["stage_started_at"]).total_seconds() > limit:
-            # Before ct_start the CT was not touched for this session: the slot stays usable.
-            slot_state = "free" if s["stage"] == "student_dir" else "failed"
+            # Before ct_start the CT was not touched for this session; after slot_ready the slot is known
+            # to work and the lab is what did not finish: the slot stays usable in both cases.
+            slot_state = "free" if s["stage"] in LAB_TIMEOUT_STAGES else "failed"
             await self._fail(s, Failure(f"Этап {s['stage']} не завершился за {int(limit)} с", "TIMEOUT",
                                         slot_state=slot_state))
             return True
@@ -286,6 +398,8 @@ class Orchestrator:
             # then the CT, then park. The first error is kept and reported at the end.
             error = s["error"] or {"code": failure.code, "stage": s["stage"], "message": failure.message[:500],
                                    "slot_state": failure.slot_state}
+            if not s["error"] and failure.source:
+                error["source"] = failure.source
             lab = s["stage"] in LAB_STAGES and await self.store.current_call(s, ("deploy",)) is not None
             stage, message = ("lab_stop", "Сбой, остановка лабы…") if lab else ("ct_stop", "Сбой, остановка слота…")
             await self.store.update_session(
@@ -295,6 +409,11 @@ class Orchestrator:
             return
         # A failure of the cleanup itself: the student still sees the first error.
         error = s["error"] or {"code": failure.code, "stage": s["stage"], "message": failure.message[:500]}
+        if not s["error"] and failure.source:
+            error["source"] = failure.source
+        if s["error"]:
+            await self.store.event(s["id"], s["slot_vmid"], "cleanup_failed",
+                                   {"code": failure.code, "stage": s["stage"], "message": failure.message[:500]})
         codes = failure.code if error["code"] == failure.code else f"{error['code']}, then {failure.code}"
         await self.store.finish_session(
             s, status="failed", message=error["message"], error=error,
@@ -325,7 +444,12 @@ class Orchestrator:
 
     async def _node(self, s) -> str:
         """Current Proxmox node of the slot CT (it may have migrated since allocation)."""
-        return await self.pve.find_ct_node(s["slot_vmid"])
+        node = await self.pve.find_ct_node(s["slot_vmid"])
+        if (s.get("slot_node") and node != s["slot_node"]
+                and s["stage"] not in RELEASE_STAGES):
+            raise Failure("Слот перемещён на другой узел без переноса резерва", "SLOT_NODE_CHANGED",
+                          slot_state="maintenance")
+        return node
 
     async def _reference(self, s):
         """Reference topology of the session's lab: lab.gns3, or symbols from the image catalog."""
@@ -440,6 +564,10 @@ class Orchestrator:
         return False
 
     async def _try_allocate(self, s):
+        async with self.store.allocation_guard():
+            return await self._allocate_guarded(s)
+
+    async def _allocate_guarded(self, s):
         """Allocate a slot. Returns None on success, otherwise the message to show while waiting."""
         if not await self.store.free_slots():
             return "Ожидание свободного слота…"
@@ -464,8 +592,17 @@ class Orchestrator:
             # A free slot should be stopped; mounts change only on a stopped CT.
             await self.agent.stop(node, vmid, force=False)
             raise Wait("Остановка слота перед запуском…")
+        # Establish the free-slot invariant even for an older installation or a
+        # failed pre-start attempt; no early failure may leave a student's mp1.
+        key = self.settings.placeholder_student_key
+        if not self.mounts_ok(await self.pve.ct_config(vmid), key, read_only=True):
+            await self.agent.set_mounts(node, vmid, student_key=key, data_mode="ro",
+                                        code_revision=self.settings.slot_code_revision)
+            if not self.mounts_ok(await self.pve.ct_config(vmid), key, read_only=True):
+                raise Failure("Парковка перед подготовкой не подтверждена", "PARK_FAILED",
+                              slot_state="maintenance")
         # A definition was sized when it was checked; a catalog lab follows its current meta.json.
-        resources = self.catalog.get(s["lab_ref"]).resources if s["lab_ref"] else s["resources"]
+        resources = s["resources"]
         if resources:
             await self._size_ct(s, resources)
         return await self._goto(s, "student_dir", "Подготовка каталога студента…")
@@ -495,9 +632,8 @@ class Orchestrator:
         config = await self.pve.ct_config(vmid)
         if all(str(config.get(k)) == v for k, v in wanted.items()):
             return
-        upid = await self.pve.ct_set_config(vmid, wanted)
-        if upid:
-            await self.pve.wait_task(upid, timeout=60)
+        await self.agent.size(await self._node(s), vmid,
+                              {"cores": int(wanted["cores"]), "memory_mb": int(wanted["memory"])})
         config = await self.pve.ct_config(vmid)
         if not all(str(config.get(k)) == v for k, v in wanted.items()):
             raise Failure("Proxmox не применил ресурсы слота", "CT_SIZE_NOT_APPLIED")
@@ -564,6 +700,11 @@ class Orchestrator:
         client = self._slot(s)
         if not await client.healthz():
             raise Wait("Ожидание запуска службы слота…")
+        authority = current.get()
+        key = (s["slot_vmid"], await self._node(s), authority.epoch, authority.generation)
+        if ("slot", key) not in self._claims:
+            await client.claim()
+            self._claims.add(("slot", key))
         ready, body = await client.readyz()
         if not ready:
             failed = sorted(k for k, v in (body.get("checks") or {}).items() if not v.get("ok"))
@@ -583,6 +724,8 @@ class Orchestrator:
                 resp = await client.deploy(call["body"], call["idempotency_key"])
             else:
                 resp = await client.stop(str(s["project_id"]), call["idempotency_key"])
+        except SlotOwnerLost:
+            raise
         except SlotUnavailable:
             raise Wait("Слот недоступен, повтор…") from None
         except SlotError as exc:
@@ -667,7 +810,8 @@ class Orchestrator:
                                   "продолжить его нельзя", "SLOT_COLD_RESUME_UNSUPPORTED", slot_state="free")
                 if err.get("code") == "PROJECT_MISSING":
                     raise Failure("Проекта лабы нет в каталоге студента", "PROJECT_MISSING", slot_state="free")
-                raise Failure(f"Слот: {err.get('code', op['status'])}: {text}"[:500], "SLOT_OPERATION_FAILED")
+                raise Failure(f"Слот: {err.get('code', op['status'])}: {text}"[:500], "SLOT_OPERATION_FAILED",
+                              source={"error": err, "operation_id": str(call["operation_id"])})
             await self.store.update_call(call["id"], status="succeeded")
         await self.store.mark_deployed(s["workspace_id"], call["body"])
         raw = await self._slot(s).topology(str(s["project_id"]))
@@ -696,8 +840,10 @@ class Orchestrator:
         if s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]):
             reason = "maxduration" if not s["stop_requested"] else (s["stop_reason"] or "user")
             msg = "Время лабы истекло, остановка…" if reason == "maxduration" else "Остановка лабы…"
+            await self._poll_facts(s, final=True)  # How the lab looked at the end stays in the history
             return await self._goto(s, "lab_stop", msg, status="stopping", slot_state="releasing",
                                     stop_requested=True, stop_reason=reason)
+        await self._poll_facts(s)
         last = self._health_checked.get(s["id"], 0)
         if time.monotonic() - last < 30:
             return False
@@ -708,8 +854,41 @@ class Orchestrator:
             return False  # Transient; the plugin still sees the last topology
         if status is None or status.get("state") == "FAILED":
             err = (status or {}).get("error") or {}
-            raise Failure(f"Лаба в слоте перешла в FAILED: {err.get('code', 'UNKNOWN')}", "SLOT_LAB_FAILED")
+            raise Failure(f"Лаба в слоте перешла в FAILED: {err.get('code', 'UNKNOWN')}: "
+                          f"{err.get('message', '')}"[:500], "SLOT_LAB_FAILED", source={"error": err})
         return False
+
+    async def _poll_facts(self, s, *, final=False):
+        """Read the lab's facts from its slot and store the changes (DESIGN 6.7). Never fails the session.
+
+        Paced by settings.facts_poll_interval; a plugin request for a collection now (facts_refresh_at)
+        is passed to the slot first and read a few seconds later. A slot without the route (older than
+        0.6.0) is asked again only every five minutes.
+        """
+        sid, mono = s["id"], time.monotonic()
+        client = self._slot(s)
+        project_id = str(s["project_id"])
+        try:
+            asked = s.get("facts_refresh_at")
+            if asked is not None and self._facts_refreshed.get(sid) != asked and not final:
+                self._facts_refreshed[sid] = asked
+                await client.refresh_facts(project_id)
+                self._facts_next[sid] = mono + 3  # Time for the slot to collect
+                return
+            if not final and mono < self._facts_next.get(sid, 0):
+                return
+            self._facts_next[sid] = mono + self.settings.facts_poll_interval
+            records = parse_slot_facts(await client.facts(project_id))
+            await self.store.record_facts(sid, records)
+        except SlotOwnerLost:
+            raise  # The slot no longer accepts our token: the same handling as for any other command
+        except SlotError as exc:
+            if exc.status == 404:
+                self._facts_next[sid] = mono + 300
+            elif exc.status is not None or final:
+                log.warning("Facts of session %s: %s", sid, exc)
+        except psycopg.Error as exc:
+            log.warning("Facts of session %s were not stored: %s", sid, type(exc).__name__)
 
     # ------------------------------------------------------------------ stopping
     async def _stage_lab_stop(self, s):
@@ -759,14 +938,51 @@ class Orchestrator:
             raise Wait("Остановка контейнера слота…") from None
         if await self.agent.status(node, vmid) != "stopped":
             raise Wait("Остановка контейнера слота…")
-        await self.store.set_slot_student(s, None)
+        if self._slot_kept(s):
+            return await self._goto(s, "ct_park", "Освобождение слота…")
+        return await self._goto(s, "ct_reset", "Очистка слота…")
+
+    @staticmethod
+    def _counts_against_slot(error) -> bool:
+        return error["code"] in SLOT_SUSPECT_FAILURES or (
+            error["code"] == "TIMEOUT" and error.get("stage") in LAB_STAGE_TIMEOUTS)
+
+    @staticmethod
+    def _slot_kept(s) -> bool:
+        """The first error of the session leaves the slot failed or in maintenance, not free."""
+        return bool(s["error"]) and s["error"].get("slot_state", "free") != "free"
+
+    async def _stage_ct_reset(self, s):
+        """Roll the stopped CT back to its clean snapshot. Whatever the student did in the guest ends
+        here; the next session starts from the same guest as this one did. The rollback also restores the
+        CT config of the snapshot, so ct_park mounts the placeholder afterwards."""
+        vmid, node = s["slot_vmid"], await self._node(s)
+        try:
+            await self.agent.reset(node, vmid)
+        except (AgentBusy, AgentUncertain, AgentNotStopped):
+            raise Wait("Очистка слота…") from None
+        except (AgentRejected, AgentCommandFailed) as exc:
+            # The guest may still hold the last session and the CT config is not what we expect. Park it
+            # all the same (the student's directory must not stay mounted), but never hand the slot out.
+            code = exc.code or "PCT_FAILED"
+            log.error("Session %s: slot %s not reset: %s %s", s["id"], vmid, code, exc.message)
+            await self.store.event(s["id"], vmid, "reset_failed", {"code": code, "error": exc.message[:200]})
+            return await self._goto(s, "ct_park", "Освобождение слота…", slot_state="maintenance",
+                                    slot_message=f"session {s['id']}: reset failed: {code}")
+        await self.store.event(s["id"], vmid, "slot_reset", {})
         return await self._goto(s, "ct_park", "Освобождение слота…")
 
     async def _stage_ct_park(self, s):
         """Replace the student mount, then release. The slot becomes free only when the
         placeholder is confirmed in the Proxmox config; otherwise it goes to maintenance."""
         key = self.settings.placeholder_student_key
+        if not key:
+            raise Failure("Не настроен обязательный каталог-заглушка", "PARK_REQUIRED",
+                          slot_state="maintenance")
         slot_state, slot_message = "free", ""
+        held = await self.store.slot(s["slot_vmid"])
+        if held and held["state"] == "maintenance":  # ct_reset failed: parked, but not handed out again
+            slot_state, slot_message = "maintenance", held["state_message"]
         if key:
             vmid, node = s["slot_vmid"], await self._node(s)
             try:
@@ -780,20 +996,41 @@ class Orchestrator:
                 # Last student's directory may still be configured: no automatic reuse.
                 slot_state, slot_message = "maintenance", f"session {s['id']}: placeholder not confirmed"
                 log.error("Session %s: slot %s not parked; maintenance", s["id"], vmid)
+            else:
+                await self.store.set_slot_student(s, None)
         if s["error"]:
             if slot_state == "free" and s["error"].get("slot_state", "free") != "free":
                 # A slot-level failure: parked, but kept for the operator.
                 slot_state = s["error"]["slot_state"]
                 slot_message = f"session {s['id']}: {s['error']['code']}"
+            lab_failures = None
+            if slot_state == "free" and self._counts_against_slot(s["error"]):
+                lab_failures = list((held or {}).get("lab_failures") or [])
+                if s["student_key"] not in lab_failures:
+                    lab_failures.append(s["student_key"])
+                limit = self.settings.slot_lab_failure_limit
+                if limit and len(lab_failures) >= limit:
+                    # Different students, one failed lab after another: the slot is the likelier culprit.
+                    slot_state = "maintenance"
+                    slot_message = (f"{len(lab_failures)} labs of different students failed in a row "
+                                    f"(last: session {s['id']}, {s['error']['code']}); look at the slot")
+                    log.error("Slot %s held: %s", s["slot_vmid"], slot_message)
             await self.store.finish_session(s, status="failed", message=s["error"]["message"], error=s["error"],
-                                            slot_state=slot_state, slot_message=slot_message)
+                                            slot_state=slot_state, slot_message=slot_message,
+                                            lab_failures=lab_failures)
         else:
             reason = s["stop_reason"] or "user"
             message = {"maxduration": "Время лабы истекло",
                        "teacher": "Лаба остановлена преподавателем"}.get(reason, "Лаба остановлена")
+            # A lab that ran and stopped cleanly shows the slot works: the record of failures starts again.
+            clean = [] if slot_state == "free" and s.get("started_at") else None
             await self.store.finish_session(s, status="stopped", message=message,
-                                            slot_state=slot_state, slot_message=slot_message)
+                                            slot_state=slot_state, slot_message=slot_message,
+                                            lab_failures=clean)
         self._health_checked.pop(s["id"], None)
+        self._facts_next.pop(s["id"], None)
+        self._facts_refreshed.pop(s["id"], None)
+        self._consoleless.pop(s["id"], None)
         return False
 
     # ------------------------------------------------------------------ reads for the API
@@ -813,5 +1050,22 @@ class Orchestrator:
             nodes, stale = {k: live.get(k, v) for k, v in nodes.items()}, False
         except (SlotError, Failure):
             pass
+        try:
+            hidden = await self.consoleless(s)
+        except (LabError, KeyError):
+            hidden = set()  # Only what the plugin draws: console_ticket asks again and refuses
+        nodes = {k: ({**v, "console_type": "none"} if k in hidden else v) for k, v in nodes.items()}
         self._live_cache[s["id"]] = (time.monotonic(), nodes, stale)
         return nodes, stale
+
+    async def consoleless(self, s) -> set:
+        """node_ids of a running session that get no console for anybody, observers included (an image of
+        the catalog with `console_type: none`, e.g. the Linux switch). Raises LabError or KeyError if
+        the lab of the session can no longer be resolved: the caller must not issue a ticket then."""
+        known = self._consoleless.get(s["id"])
+        if known is None:
+            ticket, _ = await self._ticket(s)
+            names = consoleless_names(ticket, self.settings.images or {})
+            known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
+            self._consoleless[s["id"]] = known
+        return known

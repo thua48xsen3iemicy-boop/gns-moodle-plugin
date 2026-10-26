@@ -125,7 +125,7 @@ class FakePve:
 
 
 class FakeAgent:
-    """Lab Node Agent semantics (status/mounts/start/stop) on top of FakePve's CTs."""
+    """Lab Node Agent semantics (status/mounts/start/stop/reset) on top of FakePve's CTs."""
 
     def __init__(self, pve: FakePve, ceph_root="/mnt/pve/cfs", code_dir="gns3-ro/slot",
                  students_dir="gns3-rw/students"):
@@ -135,7 +135,7 @@ class FakeAgent:
         self.missing_students = set()  # Directories that vanish after provisioning (race)
         self.wrong_owner = set()  # Existing directories with an unexpected owner
         self.student_ids_configured = True
-        self.error_codes = False  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
+        self.error_codes = True  # True: {"detail": {"code", "message"}} as in docs/AGENT_REQUESTS.md
         self.ceph_root = ceph_root
         self.code_dir = code_dir
         self.students_dir = students_dir
@@ -146,7 +146,11 @@ class FakeAgent:
         self.lose_start_response = False  # Start happens, then the response is lost
         self.shutdown_hangs = False  # Graceful shutdown leaves the CT running
         self.shutdown_fails_but_stops = False  # 409 from pct shutdown although the CT stopped
+        self.fences = {}
         self.park_fails = False  # PUT mounts fails with a pct error
+        self.no_snapshot = set()  # Slots without the clean snapshot: reset answers SNAPSHOT_MISSING
+        self.reset_fails = False  # pct rollback fails
+        self.reset_unsupported = False  # An agent older than 1.2: the route does not exist
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -179,12 +183,12 @@ class FakeAgent:
             if not self.student_ids_configured:
                 return self._err(503, "Configure mapped gns3 host UID/GID first")
             if key in self.wrong_owner:
-                return self._err(409, "Existing student directory has a different owner")
+                return self._err(409, {"code": "STUDENT_DIR_OWNER", "message": "Existing student directory has a different owner"})
             self.students.add(key)
             self.timeline.append(("agent:student", key))
             return httpx.Response(200, json={"student_key": key, "ready": True})
-        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop)", path)
-        if not m:
+        m = re.fullmatch(r"/slots/(\d+)/(status|mounts|start|stop|claim|size|reset)", path)
+        if not m or (m.group(2) == "reset" and self.reset_unsupported):
             return self._err(404, "Not Found")
         vmid, action = int(m.group(1)), m.group(2)
         ct = self.pve.cts.get(vmid)
@@ -194,10 +198,38 @@ class FakeAgent:
             return self._err(403, "Container is not marked as a lab slot")
         if self.busy:
             return self._err(409, "Another operation on this slot is in progress")
+        if action == "claim":
+            token = (body["epoch"], body["generation"])
+            if token < self.fences.get(vmid, (0, 0)):
+                return self._err(409, {"code": "STALE_OWNER", "message": "superseded"})
+            self.fences[vmid] = token
+            return httpx.Response(200, json={"vmid": vmid, **body})
+        if action != "status":
+            token = (int(request.headers.get("X-Lab-Epoch", 0)), int(request.headers.get("X-Lab-Generation", 0)))
+            if token != self.fences.get(vmid):
+                return self._err(409, {"code": "STALE_OWNER", "message": "claim first"})
+        if action == "size":
+            assert ct["status"] == "stopped"
+            ct["config"].update(cores=str(body["cores"]), memory=str(body["memory_mb"]))
+            self.timeline.append(("agent:size", vmid))
+            return httpx.Response(200, json={"vmid": vmid, **body})
         if action == "status":
             return httpx.Response(200, json={"vmid": vmid, "state": ct["status"]})
         if action in ("mounts", "start") and ct["status"] != "stopped":
             return self._err(409, "Slot must be stopped to change mount points")
+        if action == "reset":
+            if ct["status"] != "stopped":
+                return self._err(409, {"code": "NOT_STOPPED", "message": "Slot must be stopped to roll back"})
+            if vmid in self.no_snapshot:
+                return self._err(422, {"code": "SNAPSHOT_MISSING", "message": "Slot has no 'lab-clean' snapshot"})
+            if self.reset_fails:
+                return self._err(409, {"code": "PCT_FAILED", "message": "Proxmox command failed: rollback"})
+            # The snapshot is taken without the agent's mounts: the rollback takes them away.
+            ct["config"].pop("mp0", None)
+            ct["config"].pop("mp1", None)
+            self.timeline.append(("agent:reset", vmid))
+            return httpx.Response(200, json={"vmid": vmid, "state": "stopped", "reset": True,
+                                             "snapshot": "lab-clean"})
         if action == "mounts":
             if self.park_fails:
                 return self._err(409, "Proxmox command failed: unable to apply mount points")
@@ -257,6 +289,11 @@ class FakeSlot:
         self.projects = projects if projects is not None else {}
         self.stopped_nodes = set()  # Node names reported as stopped in the topology
         self.student_state = student_state
+        self.fence = (0, 0)
+        self.facts_enabled = False  # Slot 0.6.0 serves /facts; older slots answer 404
+        self.deploy_bodies = []  # Bodies of POST /v1/labs/deploy as the slot received them
+        self.facts = {}  # project_id -> {node_id: {"name", "collectors": {...}}} served by GET /facts
+        self.refreshes = []  # project ids the manager asked to collect now
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -346,9 +383,28 @@ class FakeSlot:
             return self._json(200 if self.ready else 503,
                               {"status": "ready" if self.ready else "not_ready",
                                "checks": {"gns3": {"ok": self.ready}}})
+        if path == "/v1/fence":
+            body = json.loads(request.content)
+            token = (body["epoch"], body["generation"])
+            if token < self.fence:
+                return self._json(409, {"detail": {"code": "STALE_OWNER"}})
+            self.fence = token
+            return self._json(200, body)
+        if request.method == "POST":
+            token = (int(request.headers.get("X-Lab-Epoch", 0)), int(request.headers.get("X-Lab-Generation", 0)))
+            if token != self.fence:
+                return self._json(409, {"detail": {"code": "STALE_OWNER"}})
+        facts = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/facts(/refresh)?", path)
+        if facts and self.facts_enabled:
+            if facts.group(2):
+                self.refreshes.append(facts.group(1))
+                return self._json(202, {"accepted": True})
+            return self._json(200, {"schema": "gns3lab.slot-facts/1", "project_id": facts.group(1),
+                                    "nodes": self.facts.get(facts.group(1), {})})
         key = request.headers.get("Idempotency-Key")
         if path == "/v1/labs/deploy" and request.method == "POST":
             ticket = json.loads(request.content)
+            self.deploy_bodies.append(ticket)
             return self._submit("deploy", ticket["project_id"], ticket, key)
         m = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/(resume|stop|status|topology)", path)
         if m and request.method == "POST":
@@ -363,7 +419,8 @@ class FakeSlot:
             ids = self.node_ids[m.group(1)]
             status = "started" if lab["state"] == "READY" else "stopped"
             nodes = [{"node_id": ids[n["name"]], "name": n["name"], "node_type": n["kind"], "x": 0, "y": 0,
-                      "console_type": "telnet", "console": 5000,
+                      "console_type": n.get("console", "telnet"),
+                      "console": 5900 if n.get("console") == "vnc" else 5000,
                       "status": "stopped" if n["name"] in self.stopped_nodes else status,
                       "ports": [{"name": "Ethernet0", "short_name": "e0", "adapter_number": 0, "port_number": 0}],
                       "properties": {"options": "-chardev socket,path=/opt/gns3/qga/x.sock"}}

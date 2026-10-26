@@ -17,24 +17,22 @@
 {{!
     @template mod_gns3lab/viewer
 
-    Topology viewer of a GNS3 lab: inline on the activity page or full screen.
+    The lab page of a student, full screen: a session bar, the topology with levels of detail, the consoles
+    as a panel, a grid or windows (a sheet on a phone), the action wheel and the details card.
+    Everything inside is drawn by the AMD modules (mod_gns3lab/lab and its parts); the template is the frame.
 
     Context variables required for this template:
-    * fullscreen - render the full screen variant
     * labname - activity name
-    * fullscreenurl - URL of the full screen page
     * backurl - URL of the activity page
     * isdemo - demo data is shown
     * previewerror - the reference lab could not be loaded from the lab manager
-    * cancontrol - the user can start the lab: show the session bar and the consoles
+    * cancontrol - the user can start the lab: show the session bar
     * cmid - course module id
     * datajson - JSON with topology, live (node states, guests) and facts (ok, broken)
 
     Example context (json):
     {
-        "fullscreen": false,
         "labname": "Lab 4",
-        "fullscreenurl": "https://example.org/mod/gns3lab/lab.php?id=1",
         "backurl": "https://example.org/mod/gns3lab/view.php?id=1",
         "isdemo": true,
         "previewerror": false,
@@ -43,120 +41,152 @@
         "datajson": "{}"
     }
 }}
-{{^fullscreen}}
-<div class="d-flex flex-wrap align-items-center gap-3 mb-3">
-    <a class="btn btn-primary" href="{{fullscreenurl}}">{{#str}}openfullscreen, mod_gns3lab{{/str}}</a>
-    {{#isdemo}}
-    <p class="text-muted small mb-0 flex-grow-1">{{#str}}demonotice, mod_gns3lab{{/str}}</p>
-    {{/isdemo}}
-    {{#previewerror}}
-    <p class="text-danger small mb-0 flex-grow-1">{{#str}}previewerror, mod_gns3lab{{/str}}</p>
-    {{/previewerror}}
-</div>
-{{/fullscreen}}
-<div class="gns3lab-app {{#fullscreen}}is-fullscreen{{/fullscreen}}{{^fullscreen}}is-inline{{/fullscreen}}" id="{{uniqid}}-app" data-json="{{datajson}}">
+<div class="gns3lab-student is-fullscreen" id="{{uniqid}}-app" data-json="{{datajson}}">
     <header class="bar">
         <div class="ttl">
-            {{#fullscreen}}
-            <a class="gbtn back" href="{{backurl}}" title="{{#str}}backtoactivity, mod_gns3lab{{/str}}" aria-label="{{#str}}backtoactivity, mod_gns3lab{{/str}}">&larr;</a>
-            {{/fullscreen}}
-            <div>
-                <h2 class="ttl-h" id="{{uniqid}}-projName">{{labname}}</h2>
-                <p class="meta" id="{{uniqid}}-meta"></p>
+            <a class="back" href="{{backurl}}" title="{{#str}}backtoactivity, mod_gns3lab{{/str}}" aria-label="{{#str}}backtoactivity, mod_gns3lab{{/str}}">&larr;</a>
+            <div class="ttlbox">
+                <h1 class="ttl-h">{{labname}}</h1>
+                <p class="meta">
+                    {{#cancontrol}}
+                    <span class="pill" data-region="status" role="status"></span>
+                    <span data-region="timeleft" hidden></span>
+                    {{/cancontrol}}
+                    {{#isdemo}}
+                    <span class="demo" title="{{#str}}demonotice, mod_gns3lab{{/str}}">{{#str}}ui_demo_tag, mod_gns3lab{{/str}}</span>
+                    {{/isdemo}}
+                    {{#previewerror}}
+                    <span class="demo bad" title="{{#str}}previewerror, mod_gns3lab{{/str}}">{{#str}}ui_preview_error_tag, mod_gns3lab{{/str}}</span>
+                    {{/previewerror}}
+                    {{#cancontrol}}
+                    <span class="cmsg" data-region="message" role="alert" hidden></span>
+                    {{/cancontrol}}
+                </p>
             </div>
         </div>
         <div class="tools">
-            <span class="ro" {{^isdemo}}hidden{{/isdemo}} title="{{#str}}readonly_help, mod_gns3lab{{/str}}">{{#str}}readonly, mod_gns3lab{{/str}}</span>
-            <div class="seg" id="{{uniqid}}-layerSeg" role="group" aria-label="{{#str}}layers, mod_gns3lab{{/str}}">
-                <button type="button" data-layer="l1" aria-pressed="true" title="{{#str}}layer_l1, mod_gns3lab{{/str}}">L1</button>
-                <button type="button" data-layer="l2" aria-pressed="false" title="{{#str}}layer_l2, mod_gns3lab{{/str}}">L2</button>
-                <button type="button" data-layer="l3" aria-pressed="false" title="{{#str}}layer_l3, mod_gns3lab{{/str}}">L3</button>
-                <button type="button" data-layer="rt" aria-pressed="false" title="{{#str}}layer_rt, mod_gns3lab{{/str}}">OSPF</button>
+            <div class="seg" data-region="modes" role="group" aria-label="{{#str}}ui_modes, mod_gns3lab{{/str}}">
+                <button type="button" data-mode="panel" aria-pressed="false" title="{{#str}}ui_mode_panel_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M9.5 2.5v11"/></svg><span class="wide">{{#str}}ui_mode_panel, mod_gns3lab{{/str}}</span></button>
+                <button type="button" data-mode="grid" aria-pressed="false" title="{{#str}}ui_mode_grid_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1"/><rect x="9" y="9" width="5.5" height="5.5" rx="1"/></svg><span class="wide">{{#str}}ui_mode_grid, mod_gns3lab{{/str}}</span></button>
+                <button type="button" data-mode="windows" aria-pressed="false" title="{{#str}}ui_mode_windows_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="9" height="7" rx="1"/><rect x="5.5" y="7.5" width="9" height="7" rx="1"/></svg><span class="wide">{{#str}}ui_mode_windows, mod_gns3lab{{/str}}</span></button>
             </div>
-            <select class="sel" id="{{uniqid}}-factsSel" {{^isdemo}}hidden{{/isdemo}} aria-label="{{#str}}facts, mod_gns3lab{{/str}}" title="{{#str}}facts_help, mod_gns3lab{{/str}}">
-                <option value="ok">{{#str}}factsok, mod_gns3lab{{/str}}</option>
-                <option value="broken">{{#str}}factsbroken, mod_gns3lab{{/str}}</option>
-            </select>
-            <button class="gbtn" id="{{uniqid}}-btnFit" type="button" title="{{#str}}fit_help, mod_gns3lab{{/str}}">{{#str}}fit, mod_gns3lab{{/str}}</button>
-            <div class="zoomgrp" role="group" aria-label="{{#str}}zoom, mod_gns3lab{{/str}}">
-                <button class="gbtn" id="{{uniqid}}-btnOut" type="button" aria-label="{{#str}}zoomout, mod_gns3lab{{/str}}">&minus;</button>
-                <output id="{{uniqid}}-zoomPct" aria-live="off">100%</output>
-                <button class="gbtn" id="{{uniqid}}-btnIn" type="button" aria-label="{{#str}}zoomin, mod_gns3lab{{/str}}">+</button>
-            </div>
-            <button class="gbtn" id="{{uniqid}}-btnStatus" type="button" {{^isdemo}}hidden{{/isdemo}} aria-pressed="false" title="{{#str}}livedata_help, mod_gns3lab{{/str}}">{{#str}}livedata, mod_gns3lab{{/str}}</button>
-            <label class="gbtn" for="{{uniqid}}-fileInput" {{^isdemo}}hidden{{/isdemo}}>{{#str}}openfile, mod_gns3lab{{/str}}</label>
-            <input class="vh" type="file" id="{{uniqid}}-fileInput" accept=".gns3,.json,application/json">
+            <button class="btn" type="button" data-region="helpBtn" title="{{#str}}ui_help_help, mod_gns3lab{{/str}}">?<span class="wide">{{#str}}ui_help, mod_gns3lab{{/str}}</span></button>
+            {{#cancontrol}}
+            <button class="btn primary" type="button" data-region="start" hidden>{{#str}}startlab, mod_gns3lab{{/str}}</button>
+            <button class="btn danger" type="button" data-region="stop" hidden><span class="wide">{{#str}}stoplab, mod_gns3lab{{/str}}</span><span class="narrow">{{#str}}ui_stop_short, mod_gns3lab{{/str}}</span></button>
+            {{/cancontrol}}
         </div>
     </header>
-    {{#cancontrol}}
-    <div class="ctl" data-region="control">
-        <span class="cstatus" data-region="status" role="status"></span>
-        <span class="ctime" data-region="timeleft" hidden></span>
-        <span class="cmsg" data-region="message" role="alert" hidden></span>
-        <span class="cbtns">
-            <button class="gbtn primary" type="button" data-region="start" hidden>{{#str}}startlab, mod_gns3lab{{/str}}</button>
-            <button class="gbtn" type="button" data-region="stop" hidden>{{#str}}stoplab, mod_gns3lab{{/str}}</button>
-        </span>
-    </div>
-    {{/cancontrol}}
 
-    <div class="stage">
-        <div class="wrap" id="{{uniqid}}-wrap">
-            <svg class="gns3lab-svg" id="{{uniqid}}-svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
-            <defs>
-                <pattern id="{{uniqid}}-dots" width="24" height="24" patternUnits="userSpaceOnUse">
-                <circle style="fill:var(--grid)" cx="1.2" cy="1.2" r="1.2"/>
-                </pattern>
-                {{> mod_gns3lab/icons }}
-            </defs>
+    <main class="stage" data-region="stagebox" data-mode="panel">
+        <div class="wrap" data-region="wrap">
+            <svg class="scene" data-region="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
+                <defs>
+                    <pattern data-region="dots" id="{{uniqid}}-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle class="dots" cx="1.2" cy="1.2" r="1.2"/></pattern>
+                    {{> mod_gns3lab/icons }}
+                    <symbol id="{{uniqid}}-act-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15.5H17"/></symbol>
+                    <symbol id="{{uniqid}}-act-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></symbol>
+                    <symbol id="{{uniqid}}-act-zoom" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20M10.5 8v5M8 10.5h5"/></symbol>
+                    <symbol id="{{uniqid}}-act-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+                    <symbol id="{{uniqid}}-act-free" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" stroke-dasharray="2.6 3"/><path d="M12 9v6M9 12h6"/></symbol>
+                </defs>
                 <rect width="100%" height="100%" fill="url(#{{uniqid}}-dots)"/>
-                <g id="{{uniqid}}-vp">
-                    <g class="drawings" id="{{uniqid}}-lyrDraw"></g>
-                    <g id="{{uniqid}}-lyrLinks"></g>
-                    <g id="{{uniqid}}-lyrNodes"></g>
-                    <g id="{{uniqid}}-lyrLabels"></g>
-                    <g id="{{uniqid}}-lyrNames"></g>
+                <g data-region="vp">
+                    <g data-region="lyrDraw"></g>
+                    <g data-region="lyrLinks"></g>
+                    <g data-region="lyrLabels"></g>
+                    <g data-region="lyrNodes"></g>
+                    <g data-region="lyrCards"></g>
                 </g>
             </svg>
-            <p class="hint">{{#str}}hint, mod_gns3lab{{/str}}</p>
-            <div class="gtoast" id="{{uniqid}}-toast" role="status" hidden></div>
-            <div class="drop" id="{{uniqid}}-drop" hidden>{{#str}}drop, mod_gns3lab{{/str}}</div>
+            <svg class="ov" data-region="ov" aria-hidden="true"></svg>
+            <div class="wins" data-region="wins"></div>
+            <div class="radial" data-region="radial" hidden></div>
+            <p class="hint" data-region="hint"></p>
+            <div class="chip" data-region="chip" role="status" hidden></div>
+            <div class="dhint" data-region="dhint" hidden></div>
+            <aside class="details" data-region="details" aria-label="{{#str}}details, mod_gns3lab{{/str}}" hidden></aside>
+            <div class="layerbox">
+                <button class="btn" type="button" data-region="overview" title="{{#str}}ui_overview_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span class="wide">{{#str}}ui_overview, mod_gns3lab{{/str}}</span></button>
+                <div class="seg" data-region="layerSeg" role="group" aria-label="{{#str}}layers, mod_gns3lab{{/str}}" hidden>
+                    <button type="button" data-layer="l1" aria-pressed="true" title="{{#str}}layer_l1, mod_gns3lab{{/str}}">L1</button>
+                    <button type="button" data-layer="l2" aria-pressed="false" title="{{#str}}layer_l2, mod_gns3lab{{/str}}">L2</button>
+                    <button type="button" data-layer="l3" aria-pressed="false" title="{{#str}}layer_l3, mod_gns3lab{{/str}}">L3</button>
+                    <button type="button" data-layer="rt" aria-pressed="false" title="{{#str}}layer_rt, mod_gns3lab{{/str}}">OSPF</button>
+                </div>
+                <select class="fsel" data-region="factsSel" hidden aria-label="{{#str}}facts, mod_gns3lab{{/str}}" title="{{#str}}facts_help, mod_gns3lab{{/str}}">
+                    <option value="ok">{{#str}}factsok, mod_gns3lab{{/str}}</option>
+                    <option value="broken">{{#str}}factsbroken, mod_gns3lab{{/str}}</option>
+                </select>
+            </div>
+            <div class="zoom" role="group" aria-label="{{#str}}zoom, mod_gns3lab{{/str}}">
+                <button type="button" data-region="zoomOut" aria-label="{{#str}}zoomout, mod_gns3lab{{/str}}">&minus;</button>
+                <output><span data-region="lodName">{{#str}}ui_lod0, mod_gns3lab{{/str}}</span><span class="lodbar" data-region="lodBar"><i></i><i></i><i></i><i></i></span></output>
+                <button type="button" data-region="zoomIn" aria-label="{{#str}}zoomin, mod_gns3lab{{/str}}">+</button>
+                <button type="button" data-region="zoomFit" aria-label="{{#str}}fit_help, mod_gns3lab{{/str}}" title="{{#str}}fit_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button>
+            </div>
         </div>
+        <div class="splitter" data-region="splitter" role="separator" aria-orientation="vertical" aria-label="{{#str}}ui_splitter, mod_gns3lab{{/str}}"></div>
+        <section class="dock" data-region="dock" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}">
+            <div class="tabs" data-region="tabs" role="tablist" aria-label="{{#str}}consoletabs, mod_gns3lab{{/str}}"></div>
+            <div class="dockbody" data-region="dockBody"></div>
+        </section>
+        <section class="grid" data-region="grid" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}"></section>
+    </main>
 
-        <aside class="panel" id="{{uniqid}}-panel" aria-label="{{#str}}details, mod_gns3lab{{/str}}">
-            <button class="handle" id="{{uniqid}}-handle" type="button" aria-expanded="false" aria-controls="{{uniqid}}-panelBody"><span id="{{uniqid}}-handleText"></span></button>
-            <div class="panelbody" id="{{uniqid}}-panelBody"></div>
-        </aside>
-    </div>
-    {{#cancontrol}}
-    <section class="gns3lab-consoles" data-region="consoles" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}" hidden>
-        <div class="ctabs" data-region="tabs" role="tablist"></div>
-        <p class="obsbar" data-region="obsbar" hidden>{{#str}}consolereadonly, mod_gns3lab{{/str}}</p>
-        <div class="ctermhost" data-region="termhost">
-            <div class="ctoast" data-region="toast" role="status" hidden></div>
+    <section class="dive" data-region="dive" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}" hidden>
+        <div class="dhead">
+            <button class="dback" type="button" data-region="diveBack"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M10 3L5 8l5 5"/></svg>{{#str}}ui_dive_back, mod_gns3lab{{/str}}</button>
+            <div class="dchips" data-region="diveChips"></div>
+            <button class="ib" type="button" data-region="diveClose" aria-label="{{#str}}ui_close_console, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         </div>
-        <div class="strip" data-region="keys"></div>
-        <div class="strip csuggest" data-region="suggest" hidden></div>
-        <form class="cinput" data-region="inputbar" autocomplete="off">
-            <button type="button" class="k ctoggle" data-region="cmdtoggle" aria-expanded="false" aria-controls="{{uniqid}}-cmdpad" hidden>&#9776;</button>
-            <span class="cmode" data-region="mode" hidden></span>
-            <input type="text" class="cline" data-region="line" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" aria-label="{{#str}}kb_line, mod_gns3lab{{/str}}">
-            <button type="submit" class="k csend">&#9166;</button>
-        </form>
-        <div class="cmdpad" id="{{uniqid}}-cmdpad" data-region="cmdpad" hidden>
-            <div class="cgroups" data-region="groups" role="tablist"></div>
-            <div class="cgrid" data-region="grid"></div>
-        </div>
+        <div class="dbody" data-region="diveBody"></div>
+        <div class="keys" data-region="keys"></div>
     </section>
-    {{/cancontrol}}
+
+    <div class="toast" data-region="toast" role="status" hidden></div>
+
+    <div class="help" data-region="help" hidden>
+        <div class="helpcard" role="dialog" aria-modal="true" aria-labelledby="{{uniqid}}-helpT">
+            <div class="dh">
+                <div><h2 id="{{uniqid}}-helpT">{{#str}}ui_help_title, mod_gns3lab{{/str}}</h2><p>{{#str}}ui_help_lead, mod_gns3lab{{/str}}</p></div>
+                <button class="ib" type="button" data-region="helpClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+            </div>
+            <div class="lvls">
+                <div><b>{{#str}}ui_lod0, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod0, mod_gns3lab{{/str}}</div>
+                <div><b>{{#str}}ui_lod1, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod1, mod_gns3lab{{/str}}</div>
+                <div><b>{{#str}}ui_lod2, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod2, mod_gns3lab{{/str}}</div>
+                <div><b>{{#str}}ui_lod3, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod3, mod_gns3lab{{/str}}</div>
+            </div>
+            <div class="cols">
+                <div>
+                    <h3>{{#str}}ui_help_phone, mod_gns3lab{{/str}}</h3>
+                    <dl>
+                        <dt>{{#str}}ui_help_p1t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p1, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_p2t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p2, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_p3t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p3, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_p4t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p4, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_p5t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p5, mod_gns3lab{{/str}}</dd>
+                    </dl>
+                </div>
+                <div>
+                    <h3>{{#str}}ui_help_desktop, mod_gns3lab{{/str}}</h3>
+                    <dl>
+                        <dt>{{#str}}ui_help_d1t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d1, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_d2t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d2, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_d3t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d3, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_d4t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d4, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_d5t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d5, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_d6t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d6, mod_gns3lab{{/str}}</dd>
+                        <dt>{{#str}}ui_help_d7t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d7, mod_gns3lab{{/str}}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {{#js}}
-require(['mod_gns3lab/viewer'], function(viewer) {
-    viewer.init('{{uniqid}}');
-});
-{{#cancontrol}}
 require(['mod_gns3lab/lab'], function(lab) {
     lab.init('{{uniqid}}', {{cmid}});
 });
-{{/cancontrol}}
 {{/js}}

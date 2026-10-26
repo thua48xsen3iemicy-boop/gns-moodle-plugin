@@ -2,12 +2,14 @@
 
 import asyncio
 import os
+import re
 import sqlite3
 from contextlib import asynccontextmanager
 
 import httpx
 from api.auth import require_token
 from api.console import router as console_router
+from api.facts import router as facts_router
 from api.health import router as health_router
 from api.labs import router as labs_router
 from api.lifecycle import Lifecycle
@@ -16,6 +18,7 @@ from api.nodes import router as nodes_router
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from release import VERSION, verify
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @asynccontextmanager
@@ -44,6 +47,9 @@ async def lifespan(app: FastAPI):
             await app.state.lifecycle.close()
 
 
+# Guest commands can run for minutes. They are admitted under command_lock but do not hold it.
+LONG_COMMAND = re.compile(r"/v1/labs/[^/]+/nodes/[^/]+/(?:qga/exec|serial/enable)")
+
 app = FastAPI(
     title="Lab Slot API",
     version=VERSION,
@@ -53,6 +59,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(labs_router, dependencies=[Depends(require_token)])
 app.include_router(nodes_router, dependencies=[Depends(require_token)])
+app.include_router(facts_router, dependencies=[Depends(require_token)])
 app.include_router(console_router)  # WebSockets authenticate in their handler.
 
 app.include_router(operations_router, dependencies=[Depends(require_token)])
@@ -92,7 +99,33 @@ async def initialization_guard(request: Request, call_next):
                     }
                 },
             )
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        lifecycle = app.state.lifecycle
+        async with lifecycle.command_lock:
+            if request.url.path != "/v1/fence" and not lifecycle.owns(request.headers):
+                return JSONResponse(status_code=409, content={"detail": {
+                    "code": "STALE_OWNER", "message": "Claim current command ownership first"}})
+            if not (request.method == "POST" and LONG_COMMAND.fullmatch(request.url.path)):
+                return await call_next(request)
+            # Registered before the lock is released, so no claim can slip in between.
+            admission = request.state.admission = lifecycle.admit()
+        try:
+            return await call_next(request)
+        finally:
+            if not admission.attached:  # rejected before any guest command was started
+                admission.release()
     return await call_next(request)
+
+
+class Fence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    epoch: int = Field(ge=1, le=2**63 - 1)
+    generation: int = Field(ge=1, le=2**63 - 1)
+
+
+@app.post("/v1/fence", dependencies=[Depends(require_token)])
+async def claim_slot(spec: Fence):
+    return await app.state.lifecycle.claim(spec.epoch, spec.generation)
 
 
 @app.exception_handler(sqlite3.Error)

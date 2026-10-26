@@ -1,6 +1,8 @@
 """Lab Slot REST client (slot/README.md). The manager is its only API client."""
 
 import httpx
+import ssl
+from .ownership import command_headers, current
 
 
 class SlotError(RuntimeError):
@@ -15,6 +17,10 @@ class SlotError(RuntimeError):
 class SlotUnavailable(SlotError):
     def __init__(self, message: str):
         super().__init__(None, "UNREACHABLE", message)
+
+
+class SlotOwnerLost(SlotError):
+    """The receiver rejected our token; the manager may still own its leader lock."""
 
 
 def _error(resp: httpx.Response) -> SlotError:
@@ -32,10 +38,12 @@ def _error(resp: httpx.Response) -> SlotError:
 
 class SlotClient:
     def __init__(self, address: str, port: int, api_token: str, *, timeout: float = 10.0,
+                 scheme="https", ca_file=None,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.address = address
         self._http = httpx.AsyncClient(
-            base_url=f"http://{address}:{port}",
+            base_url=f"{scheme}://{address}:{port}",
+            verify=ssl.create_default_context(cafile=str(ca_file) if ca_file else None) if transport is None else True,
             headers={"Authorization": f"Bearer {api_token}"},
             timeout=httpx.Timeout(timeout),
             transport=transport,
@@ -46,13 +54,18 @@ class SlotClient:
         await self._http.aclose()
 
     async def _call(self, method, path, *, json=None, key=None, ok=(200, 202)):
-        headers = {"Idempotency-Key": key} if key else None
+        headers = {"Idempotency-Key": key} if key else {}
+        if method in ("POST", "PUT", "DELETE", "PATCH"):
+            headers.update(command_headers())
         try:
             resp = await self._http.request(method, path, json=json, headers=headers)
         except httpx.HTTPError as exc:
             raise SlotUnavailable(f"{method} {path}: {type(exc).__name__}") from exc
         if resp.status_code not in ok:
-            raise _error(resp)
+            error = _error(resp)
+            if error.code == "STALE_OWNER":
+                raise SlotOwnerLost(error.status, error.code, error.message, error.detail)
+            raise error
         try:
             return resp.json()
         except ValueError as exc:
@@ -64,6 +77,14 @@ class SlotClient:
             return True
         except SlotError:
             return False
+
+    async def claim(self):
+        command_headers()
+        body = current.get().body()
+        result = await self._call("POST", "/v1/fence", json=body)
+        if any(result.get(k) != v for k, v in body.items()):
+            raise SlotUnavailable("Slot did not confirm ownership protocol")
+        return result
 
     async def readyz(self) -> tuple[bool, dict]:
         try:
@@ -95,6 +116,13 @@ class SlotClient:
     async def topology(self, project_id: str) -> dict:
         return await self._call("GET", f"/v1/labs/{project_id}/topology")
 
+    async def facts(self, project_id: str) -> dict:
+        """Latest collector results of the lab (CONTRACTS 4.6); a slot older than 0.6.0 answers 404."""
+        return await self._call("GET", f"/v1/labs/{project_id}/facts")
+
+    async def refresh_facts(self, project_id: str) -> dict:
+        return await self._call("POST", f"/v1/labs/{project_id}/facts/refresh")
+
 
 class GatewayClient:
     """POST /internal/tickets of plugin/gateway/console_gateway.py."""
@@ -113,13 +141,13 @@ class GatewayClient:
     async def close(self):
         await self._http.aclose()
 
-    async def issue(self, *, slot: str, project_id: str, node_id: str, readonly: bool, who: str) -> dict:
+    async def issue(self, *, slot: str, project_id: str, node_id: str, readonly: bool, who: str,
+                    console: str = "telnet") -> dict:
+        body = {"slot": slot, "project_id": project_id, "nodes": [node_id], "readonly": readonly, "who": who}
+        if console != "telnet":
+            body["console"] = console  # The gateway's default is telnet: the field is sent only when it differs
         try:
-            resp = await self._http.post(
-                "/internal/tickets",
-                json={"slot": slot, "project_id": project_id, "nodes": [node_id],
-                      "readonly": readonly, "who": who},
-            )
+            resp = await self._http.post("/internal/tickets", json=body)
         except httpx.HTTPError as exc:
             raise SlotUnavailable(f"Gateway: {type(exc).__name__}") from exc
         if resp.status_code != 200:

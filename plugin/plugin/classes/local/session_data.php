@@ -59,6 +59,10 @@ class session_data {
                 'consoletype' => new external_value(PARAM_ALPHA, 'telnet, vnc or none'),
             ]), 'Node states, empty unless running'),
             'nodesstale' => new external_value(PARAM_BOOL, 'Node states are an old snapshot: the slot did not answer'),
+            'features' => new external_multiple_structure(
+                new external_value(PARAM_ALPHANUMEXT, 'Feature name, such as consoles or facts'),
+                'What this session offers (CONTRACTS §7), empty if the manager did not say'
+            ),
         ], 'Lab session', $required);
     }
 
@@ -101,7 +105,30 @@ class session_data {
             'topology' => $topology,
             'nodes' => $nodes,
             'nodesstale' => $running && ($session->nodes_stale ?? false) === true,
+            'features' => self::features($session),
         ];
+    }
+
+    /**
+     * Features of a session (CONTRACTS §7): what the manager offers for it, such as consoles or facts.
+     *
+     * @param \stdClass $session session from manager_client
+     * @return string[] feature names; empty if the manager did not say
+     */
+    public static function features(\stdClass $session): array {
+        $features = is_array($session->features ?? null) ? $session->features : [];
+        return array_values(array_filter($features, fn($f) => is_string($f) && preg_match('/^[a-z0-9_-]+$/i', $f)));
+    }
+
+    /**
+     * Whether a session offers a feature.
+     *
+     * @param \stdClass $session session from manager_client
+     * @param string $feature feature name
+     * @return bool
+     */
+    public static function has_feature(\stdClass $session, string $feature): bool {
+        return in_array($feature, self::features($session), true);
     }
 
     /**

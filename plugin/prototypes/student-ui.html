@@ -1,0 +1,1789 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Лаба студента</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* xterm.js 5.5.0 base styles */
+.xterm{cursor:text;position:relative;user-select:none;-ms-user-select:none;-webkit-user-select:none;}.xterm.focus,.xterm:focus{outline:none;}.xterm .xterm-helpers{position:absolute;top:0;z-index:5;}.xterm .xterm-helper-textarea{padding:0;border:0;margin:0;position:absolute;opacity:0;left:-9999em;top:0;width:0;height:0;z-index:-5;white-space:nowrap;overflow:hidden;resize:none;}.xterm .composition-view{background:#000;color:#FFF;display:none;position:absolute;white-space:nowrap;z-index:1;}.xterm .composition-view.active{display:block;}.xterm .xterm-viewport{background-color:#000;overflow-y:scroll;cursor:default;position:absolute;right:0;left:0;top:0;bottom:0;}.xterm .xterm-screen{position:relative;}.xterm .xterm-screen canvas{position:absolute;left:0;top:0;}.xterm .xterm-scroll-area{visibility:hidden;}.xterm-char-measure-element{display:inline-block;visibility:hidden;position:absolute;top:0;left:-9999em;line-height:normal;}.xterm.enable-mouse-events{cursor:default;}.xterm.xterm-cursor-pointer,.xterm .xterm-cursor-pointer{cursor:pointer;}.xterm.column-select.focus{cursor:crosshair;}.xterm .xterm-accessibility:not(.debug),.xterm .xterm-message{position:absolute;left:0;top:0;bottom:0;right:0;z-index:10;color:transparent;pointer-events:none;}.xterm .xterm-accessibility-tree:not(.debug) *::selection{color:transparent;}.xterm .xterm-accessibility-tree{user-select:text;white-space:pre;}.xterm .live-region{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;}.xterm-dim{opacity:1 !important;}.xterm-underline-1{text-decoration:underline;}.xterm-underline-2{text-decoration:double underline;}.xterm-underline-3{text-decoration:wavy underline;}.xterm-underline-4{text-decoration:dotted underline;}.xterm-underline-5{text-decoration:dashed underline;}.xterm-overline{text-decoration:overline;}.xterm-overline.xterm-underline-1{text-decoration:overline underline;}.xterm-overline.xterm-underline-2{text-decoration:overline double underline;}.xterm-overline.xterm-underline-3{text-decoration:overline wavy underline;}.xterm-overline.xterm-underline-4{text-decoration:overline dotted underline;}.xterm-overline.xterm-underline-5{text-decoration:overline dashed underline;}.xterm-strikethrough{text-decoration:line-through;}.xterm-screen .xterm-decoration-container .xterm-decoration{z-index:6;position:absolute;}.xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer{z-index:7;}.xterm-decoration-overview-ruler{z-index:8;position:absolute;top:0;right:0;pointer-events:none;}.xterm-decoration-top{z-index:2;position:relative;}
+/* Layout: one-screen lab — session bar on top, the topology as the main surface; consoles dock beside it,
+   tile into a grid with it or float over it on a computer, and slide up from the bottom on a phone. */
+:root{
+  --bg:#E8ECEF; --canvas:#F4F6F8; --panel:#FFFFFF; --fg:#16212B; --muted:#57656F;
+  --line:#CAD2D9; --grid:#C9D2DA; --wire:#566878; --accent:#1F6FC5; --accent-ink:#FFFFFF;
+  --ico:#2C4A63; --ico-glyph:#F4F6F8; --chip:#E4EAEF;
+  --ok:#1E8E4F; --warn:#AD7F08; --bad:#C8423A; --off:#8A97A1;
+  --term-bg:#0F171D; --term-fg:#D6DEE5; --term-dim:#7F909C; --term-line:#24323C;
+  --shadow:0 10px 30px rgb(16 33 43 / .16);
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1418; --canvas:#121A20; --panel:#172129; --fg:#E2E8ED; --muted:#94A3AF;
+    --line:#2A3742; --grid:#24313B; --wire:#8094A4; --accent:#5AA8F2; --accent-ink:#0E1418;
+    --ico:#8AAFCC; --ico-glyph:#121A20; --chip:#21303A;
+    --ok:#3CC47A; --warn:#E0B13A; --bad:#EE6B62; --off:#5E6E7A;
+    --term-bg:#0A1014; --term-fg:#D6DEE5; --term-dim:#7F909C; --term-line:#22303A;
+    --shadow:0 10px 30px rgb(0 0 0 / .45); color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1418; --canvas:#121A20; --panel:#172129; --fg:#E2E8ED; --muted:#94A3AF;
+  --line:#2A3742; --grid:#24313B; --wire:#8094A4; --accent:#5AA8F2; --accent-ink:#0E1418;
+  --ico:#8AAFCC; --ico-glyph:#121A20; --chip:#21303A;
+  --ok:#3CC47A; --warn:#E0B13A; --bad:#EE6B62; --off:#5E6E7A;
+  --term-bg:#0A1014; --term-fg:#D6DEE5; --term-dim:#7F909C; --term-line:#22303A;
+  --shadow:0 10px 30px rgb(0 0 0 / .45); color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none !important}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden;margin:0}
+button{font-family:inherit}
+.app{height:100%;display:flex;flex-direction:column}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* session bar */
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;
+  padding-block:9px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.ttl{min-width:0}
+.ttl h1{margin:0;font:600 18px/1.2 var(--display);text-wrap:balance}
+.meta{margin:2px 0 0;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-variant-numeric:tabular-nums}
+.pill{display:inline-flex;align-items:center;gap:6px;font:600 11.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ok)}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.demo{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border:1px dashed var(--line);padding:2px 6px;border-radius:4px}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:500 13px/1 var(--body);height:32px;padding:0 12px;border:1px solid var(--line);background:var(--canvas);color:var(--fg);border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--wire)}
+.btn.danger{color:var(--bad)}
+.btn:focus-visible,.seg button:focus-visible,.tab:focus-visible,.ib:focus-visible,.key:focus-visible,.dchip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;background:var(--canvas);overflow:hidden}
+.seg button{font:500 13px/1 var(--body);height:30px;padding:0 11px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.seg svg,.btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.mob .seg,.mob .wide,.mob .demo{display:none}
+.narrow{display:none}
+.mob .narrow{display:inline}
+.mob .bar{flex-wrap:nowrap;padding-block:7px}
+.mob .ttl{flex:1}
+.mob .ttl h1{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mob .tools{flex-wrap:nowrap}
+.stage[data-mode="grid"] .hint{display:none}
+
+/* stage and its three desktop arrangements */
+.stage{flex:1;min-height:0;display:flex;position:relative}
+.wrap{position:relative;flex:1;min-width:0;min-height:0;background:var(--canvas);overflow:hidden}
+.grid,.dock,.splitter{display:none}
+.stage[data-mode="panel"] .splitter{display:block;flex:none;width:9px;margin:0 -4px;z-index:5;cursor:col-resize;position:relative;touch-action:none}
+.stage[data-mode="panel"] .splitter::after{content:"";position:absolute;left:4px;top:0;bottom:0;width:1px;background:var(--line)}
+.stage[data-mode="panel"] .splitter:hover::after,.splitter.drag::after{background:var(--accent);width:2px}
+.stage[data-mode="panel"] .dock{display:flex;flex-direction:column;flex:none;width:var(--dockw,44%);min-width:320px;max-width:72%;background:var(--term-bg)}
+.stage[data-mode="grid"]{display:grid;gap:8px;padding:8px;grid-auto-rows:minmax(0,1fr)}
+.stage[data-mode="grid"] .grid{display:contents}
+.stage[data-mode="grid"] .wrap{order:-1;border:1px solid var(--line);border-radius:8px}
+
+/* topology */
+#svg{display:block;width:100%;height:100%;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#svg.dragging{cursor:grabbing}
+#svg:focus{outline:none}
+.dots{fill:var(--grid)}
+.dtext{font-family:var(--display)}
+.wire{stroke:var(--wire);stroke-width:2;fill:none;stroke-linecap:round}
+.link{cursor:pointer}
+.link:focus{outline:none}
+.hit{stroke:transparent;stroke-width:calc(18px * var(--inv,1));fill:none;pointer-events:stroke}
+.link.down .wire{stroke:var(--bad);stroke-dasharray:5 5}
+.link.sel .wire,.link:focus-visible .wire{stroke:var(--accent);stroke-width:calc(3.5px * min(1, var(--inv,1) * 1.6))}
+.link.sel.down .wire{stroke:var(--bad)}
+.link.sel .l1,.link.sel .l2{opacity:1;visibility:visible}
+.link.sel .plabel,.link.sel .pip{fill:var(--fg);font-weight:600}
+.link.suspended .wire{stroke-dasharray:2 6;opacity:.6}
+.filt{fill:var(--canvas);stroke:var(--warn);stroke-width:1.6}
+.filt-t{font:600 8px var(--mono);fill:var(--warn);text-anchor:middle}
+.pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5}
+.pdot.down{fill:var(--bad)}
+.plabel{font:500 9px var(--mono);font-size:clamp(calc(9.5px * var(--inv,1)),9px,calc(12px * var(--inv,1)));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.pip{font:500 7.5px var(--mono);font-size:clamp(calc(9px * var(--inv,1)),7.5px,calc(11.5px * var(--inv,1)));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.node{cursor:pointer;-webkit-touch-callout:none}
+.node:focus{outline:none}
+.halo{fill:transparent;stroke:transparent;stroke-width:2}
+.node.sel .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 12%,transparent)}
+.node:focus-visible .halo{stroke:var(--accent);stroke-dasharray:3 3}
+.if{fill:var(--ico)}
+.ig{fill:none;stroke:var(--ico-glyph);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.igf{fill:var(--ico-glyph)}
+.st-stopped .ico{opacity:.38}
+.st-suspended .ico{opacity:.6}
+.sdot{fill:var(--ok);stroke:var(--canvas);stroke-width:2}
+.st-suspended .sdot{fill:var(--warn)}
+.st-stopped .sdot{fill:var(--off)}
+.nname{font-family:var(--display);font-weight:600;font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)));fill:var(--fg);text-anchor:middle;dominant-baseline:hanging;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.nsub{font:500 8px var(--mono);font-size:min(8px,calc(12px * var(--inv,1)));fill:var(--muted);text-anchor:middle;dominant-baseline:hanging}
+.nadj{font:600 7px var(--mono);font-size:min(7px,calc(11px * var(--inv,1)));text-anchor:middle;dominant-baseline:hanging;fill:var(--ok)}
+.nadj.warn{fill:var(--warn)}
+.cbadge{display:none}
+.has-con .cbadge{display:inline}
+.cbadge rect{fill:var(--term-bg);stroke:var(--canvas);stroke-width:1.5}
+.cbadge text{font:600 8px var(--mono);fill:var(--term-fg);text-anchor:middle}
+.unread .cbadge rect{fill:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+.unread .cbadge text{fill:var(--accent-ink)}
+.minimized .cbadge rect{stroke:var(--accent);stroke-width:2}
+@keyframes pulse{50%{opacity:.45}}
+.card{cursor:pointer}
+.card .cbg{fill:var(--term-bg);stroke:var(--term-line)}
+.card .chd{fill:var(--term-dim);font-family:var(--mono);font-weight:600}
+.card .cln{fill:var(--term-fg);font-family:var(--mono);white-space:pre}
+.card .cpt{fill:var(--wire)}
+.l1,.l2,.l3,.l2x{opacity:0;visibility:hidden;transition:opacity .22s ease,visibility .22s}
+[data-lod="1"] .l1,[data-lod="2"] .l1,[data-lod="3"] .l1,
+[data-lod="2"] .l2,[data-lod="3"] .l2,[data-lod="3"] .l3,[data-lod="2"] .l2x{opacity:1;visibility:visible}
+@media (prefers-reduced-motion: reduce){.l1,.l2,.l3,.l2x{transition:none}.unread .cbadge rect{animation:none}}
+
+/* overlays on the topology */
+.ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+.ov .fl-base{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4;opacity:.35;transition:opacity .25s}
+.ov .hover .fl-base{opacity:.9}
+.ov .fl-in,.ov .fl-out{stroke-width:2.6;stroke-linecap:round;stroke-dasharray:1.5 10;opacity:0;transition:opacity .3s}
+.ov .fl-in{stroke:var(--accent);animation:flowIn .45s linear infinite}
+.ov .fl-out{stroke:var(--ok);animation:flowOut .45s linear infinite}
+.ov .on{opacity:1}
+.ov .fl-node{fill:var(--accent)}
+.ov .ping{fill:none;stroke-width:2;transform-box:fill-box;transform-origin:center;animation:ping .6s ease-out forwards}
+.ov .ping.in{stroke:var(--accent)} .ov .ping.out{stroke:var(--ok)}
+@keyframes flowIn{from{stroke-dashoffset:11.5}to{stroke-dashoffset:0}}
+@keyframes flowOut{from{stroke-dashoffset:0}to{stroke-dashoffset:11.5}}
+@keyframes ping{from{transform:scale(.2);opacity:.95}to{transform:scale(1);opacity:0}}
+@media (prefers-reduced-motion: reduce){.ov .fl-in,.ov .fl-out,.ov .ping{animation:none}.ov .fl-in,.ov .fl-out{stroke-dasharray:none}}
+.hint{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:12px;margin:0;max-width:calc(100% - 210px);
+  font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--canvas) 88%,transparent);padding:5px 9px;border-radius:6px;pointer-events:none;z-index:2}
+.mob .hint{bottom:auto;top:10px;max-width:calc(100% - 24px)}
+.zoom{position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:12px;z-index:4;display:flex;align-items:center;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:var(--shadow)}
+.zoom button{width:36px;height:36px;border:0;background:transparent;color:var(--fg);font:500 18px/1 var(--body);cursor:pointer;display:grid;place-items:center}
+.zoom button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.zoom output{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--muted);min-width:76px;text-align:center;display:flex;flex-direction:column;gap:3px;align-items:center}
+.lodbar{display:flex;gap:3px}
+.lodbar i{width:12px;height:3px;border-radius:2px;background:var(--line)}
+.lodbar i.on{background:var(--accent)}
+.toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:40;max-width:min(460px,calc(100% - 32px));
+  background:var(--fg);color:var(--bg);padding:9px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow)}
+.chip{position:absolute;left:50%;bottom:calc(60px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:4;max-width:calc(100% - 24px);
+  background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;box-shadow:var(--shadow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip b{font-family:var(--display);font-weight:600}
+.chip span{color:var(--muted)}
+.dhint{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:9;background:var(--accent);color:var(--accent-ink);
+  font:600 13px var(--body);padding:8px 14px;border-radius:999px;box-shadow:var(--shadow);white-space:nowrap}
+
+/* action wheel */
+.radial{position:absolute;width:236px;height:236px;margin:-118px 0 0 -118px;z-index:8;pointer-events:none;transform-origin:50% 50%}
+.radial.in{animation:wheelIn .16s ease-out}
+@keyframes wheelIn{from{transform:scale(.55);opacity:0}}
+@media (prefers-reduced-motion: reduce){.radial.in{animation:none}}
+.radial svg{width:100%;height:100%;overflow:visible}
+.radial .wedge path{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.radial.pinned .wedge{pointer-events:auto;cursor:pointer}
+.radial .wedge .wi{stroke:var(--fg);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.radial .wedge text{font:600 10.5px var(--body);fill:var(--fg);text-anchor:middle}
+.radial .wedge.hi path{fill:var(--accent);stroke:var(--accent)}
+.radial .wedge.hi .wi{stroke:var(--accent-ink)}
+.radial .wedge.hi text{fill:var(--accent-ink)}
+.radial .wedge.danger .wi{stroke:var(--bad)}
+.radial .wedge.danger text{fill:var(--bad)}
+.radial .wedge.danger.hi path{fill:var(--bad);stroke:var(--bad)}
+.radial .wedge.danger.hi .wi,.radial .wedge.danger.hi text{stroke:var(--accent-ink);fill:var(--accent-ink)}
+.radial .wedge.danger.hi .wi{fill:none}
+.radial .wedge.off{opacity:.42}
+.radial .hub{fill:var(--panel);stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 4px 10px rgb(0 0 0 / .2))}
+.radial .ring{fill:none;stroke:var(--line);stroke-width:1}
+.radial .hubt{font:600 12px var(--display);fill:var(--fg);text-anchor:middle;dominant-baseline:middle}
+.rcap{position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%);background:var(--fg);color:var(--bg);
+  font:600 13px var(--body);padding:6px 11px;border-radius:7px;white-space:nowrap;box-shadow:var(--shadow)}
+.rcap small{font-weight:400;opacity:.75;margin-left:6px}
+
+/* details */
+.details{position:absolute;top:12px;right:max(12px,env(safe-area-inset-right,0px));width:min(350px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;z-index:7;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:14px 16px 16px}
+.mob .details{top:auto;left:0;right:0;bottom:0;width:auto;max-height:62%;border-radius:14px 14px 0 0;
+  padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.dh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.dh h2{margin:0;font:600 19px/1.2 var(--display)}
+.dsub{margin:3px 0 0;font-size:12.5px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.st{display:inline-flex;align-items:center;gap:5px;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.05em}
+.st::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.st.started{color:var(--ok)} .st.suspended{color:var(--warn)} .st.stopped{color:var(--off)}
+.ib{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);cursor:pointer;display:grid;place-items:center;flex:none}
+.ib svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.eyebrow{margin:16px 0 6px;font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.tbl th{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:4px 6px 4px 0;border-bottom:1px solid var(--line)}
+.tbl td{padding:5px 6px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl td.m{font-family:var(--mono);font-size:12px}
+.tbl .dn{color:var(--bad)}
+.tblwrap{overflow-x:auto}
+.dnote{font-size:12.5px;color:var(--muted);margin:10px 0 0}
+.dacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+
+/* consoles */
+.termhost{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0}
+.termview{flex:1;min-height:0;min-width:0;overflow:hidden;padding:6px 4px 4px 10px}
+.termhost .xterm{height:100%}
+.snips{display:flex;align-items:center;gap:6px;flex:none;overflow-x:auto;padding:7px 10px;background:var(--term-bg);border-top:1px solid var(--term-line);scrollbar-width:thin;scrollbar-color:var(--term-line) transparent}
+.snips .lbl{flex:none;color:var(--term-dim);font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.snip{flex:none;min-height:32px;padding:0 10px;border:1px dashed var(--term-line);border-radius:6px;background:transparent;color:var(--term-fg);font:500 11.5px var(--mono);cursor:pointer;touch-action:manipulation}
+.snip:hover{background:var(--term-line)}
+.snip:active{color:var(--accent)}
+.snip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tfail{color:var(--term-fg);font:13px/1.5 var(--body);padding:12px}
+.tabs{display:flex;gap:2px;padding:6px 6px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:thin}
+.tab{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 6px 0 11px;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;
+  background:transparent;color:var(--muted);font:600 13px var(--display);cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--term-bg);color:var(--term-fg);border-color:var(--term-line)}
+.tab .x{width:20px;height:20px;border-radius:4px;display:grid;place-items:center;opacity:.6}
+.tab .x:hover{opacity:1;background:color-mix(in srgb,var(--muted) 25%,transparent)}
+.tab .x svg,.thead svg,.dhead svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dotst{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.dotst.suspended{background:var(--warn)} .dotst.stopped{background:var(--off)}
+.unr{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1.2s infinite}
+.dockbody{flex:1;min-height:0;position:relative}
+.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--term-dim);font-size:13.5px;line-height:1.55}
+.empty b{color:var(--term-fg);font-weight:600}
+.tile,.win{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--term-bg);border:1px solid var(--term-line);border-radius:8px;overflow:hidden}
+.tile.focus,.win.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tile.max{position:absolute;inset:8px;z-index:6}
+.thead{display:flex;align-items:center;gap:8px;height:32px;padding:0 4px 0 11px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;
+  font:600 13px var(--display);color:var(--fg);user-select:none;-webkit-user-select:none}
+.thead .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thead .nm small{font:500 11px var(--mono);color:var(--muted);margin-left:6px}
+.thead button{width:26px;height:26px;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center}
+.thead button:hover{background:var(--chip);color:var(--fg)}
+.tbody{flex:1;min-height:0;position:relative}
+.wins{position:absolute;inset:0;pointer-events:none;z-index:5}
+.win{position:absolute;pointer-events:auto;resize:both;min-width:300px;min-height:170px;box-shadow:var(--shadow)}
+.win .thead{cursor:move;touch-action:none}
+.win.anim{transition:transform .26s ease,opacity .26s ease}
+@media (prefers-reduced-motion: reduce){.win.anim{transition:none}}
+
+/* phone: diving into a console */
+.dive{position:fixed;left:0;right:0;bottom:0;height:72%;z-index:20;display:flex;flex-direction:column;background:var(--term-bg);
+  border-radius:14px 14px 0 0;box-shadow:0 -10px 30px rgb(0 0 0 / .3);overflow:hidden}
+.dive.in{animation:diveIn .24s ease-out}
+@keyframes diveIn{from{transform:translateY(40%);opacity:.3}}
+@media (prefers-reduced-motion: reduce){.dive.in{animation:none}}
+.dhead{display:flex;align-items:center;gap:8px;padding-block:7px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.dhead .grab{position:absolute;left:50%;top:4px;width:36px;height:4px;border-radius:2px;background:var(--line);transform:translateX(-50%)}
+.dback{display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);font:500 13px var(--body);cursor:pointer}
+.dchips{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+.dchip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--canvas);color:var(--fg);font:600 13px var(--display);white-space:nowrap;cursor:pointer}
+.dchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.dchip[aria-pressed="true"] .dotst{box-shadow:0 0 0 1.5px var(--accent-ink)}
+.dbody{flex:1;min-height:0;position:relative}
+.keys{display:flex;gap:6px;overflow-x:auto;padding-block:7px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-top:1px solid var(--line);flex:none;scrollbar-width:none;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))}
+.key{flex:none;min-width:44px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);font:600 13px var(--mono);cursor:pointer;touch-action:manipulation}
+.key:active{background:var(--accent);color:var(--accent-ink)}
+
+/* gesture sheet */
+.help{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:color-mix(in srgb,#000 45%,transparent);padding:16px}
+.helpcard{background:var(--panel);color:var(--fg);border-radius:12px;max-width:720px;width:100%;max-height:100%;overflow:auto;padding:20px 22px;box-shadow:var(--shadow)}
+.helpcard h2{margin:0 0 4px;font:600 21px var(--display)}
+.helpcard>p{margin:0;color:var(--muted);font-size:13.5px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+.cols h3{margin:0 0 8px;font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.cols dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 12px;font-size:13.5px}
+.cols dt{font-weight:600}
+.cols dd{margin:0;color:var(--muted)}
+.lvls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.lvls div{border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:12.5px;color:var(--muted)}
+.lvls b{display:block;color:var(--fg);font:600 14px var(--display);margin-bottom:2px}
+@media (max-width:620px){.cols{grid-template-columns:1fr}.lvls{grid-template-columns:1fr 1fr}}
+</style>
+
+<div class="app" id="app">
+  <header class="bar">
+    <div class="ttl">
+      <h1 id="labTitle">Лаба</h1>
+      <p class="meta"><span class="pill">Запущена</span><span id="left">осталось 2:47:12</span><span class="demo">прототип · демо-данные</span></p>
+    </div>
+    <div class="tools">
+      <div class="seg" id="modes" role="group" aria-label="Как показывать консоли">
+        <button type="button" data-mode="panel" aria-pressed="false" title="Схема и консоли рядом"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M9.5 2.5v11"/></svg><span class="wide">Панель</span></button>
+        <button type="button" data-mode="grid" aria-pressed="false" title="Все консоли сеткой"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1"/><rect x="9" y="9" width="5.5" height="5.5" rx="1"/></svg><span class="wide">Сетка</span></button>
+        <button type="button" data-mode="windows" aria-pressed="false" title="Консоли окнами поверх схемы"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="9" height="7" rx="1"/><rect x="5.5" y="7.5" width="9" height="7" rx="1"/></svg><span class="wide">Окна</span></button>
+      </div>
+      <button class="btn" type="button" id="helpBtn" title="Жесты и уровни">?<span class="wide">Жесты</span></button>
+      <button class="btn danger" type="button" id="stopBtn"><span class="wide">Остановить</span><span class="narrow">Стоп</span></button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage" data-mode="panel">
+    <div class="wrap" id="wrap">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="Схема лабы">
+        <defs>
+          <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle class="dots" cx="1.2" cy="1.2" r="1.2"/></pattern>
+          <symbol id="ico-router" viewBox="0 0 48 48"><circle class="if" cx="24" cy="24" r="20"/><path class="ig" d="M14 14l7 7M21 15.5V21h-5.5M34 34l-7-7M27 32.5V27h5.5M27 21l7-7M28.5 14H34v5.5M21 27l-7 7M14 28.5V34h5.5"/></symbol>
+          <symbol id="ico-switch" viewBox="0 0 48 48"><rect class="if" x="3" y="12" width="42" height="24" rx="5"/><path class="ig" d="M10 20h22M28 16.5l4 3.5-4 3.5M38 28H16M20 24.5L16 28l4 3.5"/></symbol>
+          <symbol id="ico-pc" viewBox="0 0 48 48"><rect class="if" x="6" y="6" width="36" height="26" rx="3"/><rect class="igf" x="10" y="10" width="28" height="18" rx="1.5" opacity=".35"/><path class="if" d="M20 32h8v6h-8z"/><rect class="if" x="13" y="38" width="22" height="4" rx="2"/></symbol>
+          <symbol id="ico-server" viewBox="0 0 48 48"><rect class="if" x="11" y="4" width="26" height="40" rx="3.5"/><path class="ig" d="M16 13h16M16 19h16M16 25h16"/><circle class="igf" cx="31" cy="36" r="2.2"/></symbol>
+          <symbol id="ico-cloud" viewBox="0 0 48 48"><path class="if" d="M13 37h22a8.5 8.5 0 0 0 1.2-16.9A11.5 11.5 0 0 0 14 17.6 9.7 9.7 0 0 0 13 37z"/></symbol>
+          <symbol id="ico-hypervisor" viewBox="0 0 48 48"><rect class="if" x="4" y="7" width="40" height="34" rx="4"/><rect class="igf" x="9" y="12" width="13" height="10" rx="1.5"/><rect class="igf" x="26" y="12" width="13" height="10" rx="1.5"/><rect class="igf" x="9" y="26" width="13" height="10" rx="1.5"/><rect x="26" y="26" width="13" height="10" rx="1.5" class="ig"/></symbol>
+          <symbol id="act-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15.5H17"/></symbol>
+          <symbol id="act-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></symbol>
+          <symbol id="act-zoom" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20M10.5 8v5M8 10.5h5"/></symbol>
+          <symbol id="act-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M7 6.5a7.5 7.5 0 1 0 10 0"/></symbol>
+          <symbol id="act-play" viewBox="0 0 24 24"><path d="M8 5.5l11 6.5-11 6.5z"/></symbol>
+          <symbol id="act-reload" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4v4.5H15"/></symbol>
+          <symbol id="act-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+          <symbol id="act-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#dots)" id="bg"/>
+        <g id="vp">
+          <g id="lyrDraw"></g>
+          <g id="lyrLinks"></g>
+          <g id="lyrNodes"></g>
+          <g id="lyrCards"></g>
+        </g>
+      </svg>
+      <svg class="ov" id="ov" aria-hidden="true"></svg>
+      <div class="wins" id="wins"></div>
+      <div class="radial" id="radial" hidden></div>
+      <p class="hint" id="hint"></p>
+      <div class="chip" id="chip" role="status" hidden></div>
+      <div class="dhint" id="dhint" hidden></div>
+      <aside class="details" id="details" aria-label="Сведения об узле" hidden></aside>
+      <div class="zoom" role="group" aria-label="Масштаб">
+        <button type="button" id="zoomOut" aria-label="Отдалить">−</button>
+        <output id="lodOut"><span id="lodName">Схема</span><span class="lodbar" id="lodBar"><i></i><i></i><i></i><i></i></span></output>
+        <button type="button" id="zoomIn" aria-label="Приблизить">+</button>
+        <button type="button" id="zoomFit" aria-label="Показать всю схему"><svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button>
+      </div>
+    </div>
+    <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="Ширина панели консолей"></div>
+    <section class="dock" id="dock" aria-label="Консоли">
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div class="dockbody" id="dockBody"></div>
+    </section>
+    <section class="grid" id="grid" aria-label="Консоли сеткой"></section>
+  </main>
+
+  <section class="dive" id="dive" aria-label="Консоль" hidden>
+    <div class="dhead">
+      <button class="dback" type="button" id="diveBack"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M10 3L5 8l5 5"/></svg>Схема</button>
+      <div class="dchips" id="diveChips"></div>
+      <button class="ib" type="button" id="diveClose" aria-label="Закрыть консоль"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    </div>
+    <div class="dbody" id="diveBody"></div>
+    <div class="keys" id="keys"></div>
+  </section>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <div class="help" id="help" hidden>
+    <div class="helpcard" role="dialog" aria-modal="true" aria-labelledby="helpT">
+      <div class="dh"><div><h2 id="helpT">Как здесь всё устроено</h2><p>Схема — главный экран. Чем ближе вы к узлу, тем больше о нём видно.</p></div>
+        <button class="ib" type="button" id="helpClose" aria-label="Закрыть"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+      <div class="lvls">
+        <div><b>Схема</b>Узлы, линки, статусы. Значок <code>&gt;_</code> — консоль открыта.</div>
+        <div><b>Подписи</b>Порты на линках, точки состояния портов.</div>
+        <div><b>Адреса</b>IP на портах, router-id, соседи OSPF, превью консоли.</div>
+        <div><b>Консоли</b>Подробное превью. На телефоне — вход в консоль.</div>
+      </div>
+      <div class="cols">
+        <div><h3>Телефон</h3><dl>
+          <dt>Удержать узел</dt><dd>Колесо действий. Не отпуская, ведите к действию и отпустите. Отпустили сразу — колесо остаётся, выберите действие тапом.</dd>
+          <dt>Щипок</dt><dd>Масштаб и уровни. Приблизьте узел до конца и отпустите — откроется его консоль.</dd>
+          <dt>Двойной тап</dt><dd>Приблизить узел.</dd>
+          <dt>Тап по соединению</dt><dd>Сведения о нём: порты, адреса, подсеть, фильтры. Удержание — колесо.</dd>
+          <dt>В консоли</dt><dd>Щипок или «Схема» — назад. Чипы сверху — другие консоли. Сниппеты под терминалом выполняют готовые команды; полосу можно прокручивать вбок.</dd>
+        </dl></div>
+        <div><h3>Компьютер</h3><dl>
+          <dt>Правый клик</dt><dd>Колесо действий. Можно зажать правую кнопку, повести к действию и отпустить.</dd>
+          <dt>Колесо мыши</dt><dd>Масштаб и уровни.</dd>
+          <dt>Двойной клик</dt><dd>Открыть консоль узла.</dd>
+          <dt>Клик по соединению</dt><dd>Сведения о нём. Правый клик — колесо.</dd>
+          <dt>Панель / Сетка / Окна</dt><dd>Как показывать консоли. Окно можно свернуть в его узел.</dd>
+          <dt>Сниппеты</dt><dd>Под каждой консолью — команды для этого устройства. Нажатие сразу выполняет команду; полный текст — в подсказке кнопки.</dd>
+          <dt>Клавиши</dt><dd>Tab — по узлам, Enter — консоль, Shift+F10 — колесо, 0 — вся схема.</dd>
+        </dl></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+"use strict";
+/* Demo data: fixtures/ospf-multi-area.gns3, .facts.json and .live.json */
+const GNS3 = {"name":"Лаба 4 · OSPF multi-area","project_id":"5d1c0b3e-8f2a-4c71-9a55-2f6b8e0d4a11","revision":9,"type":"topology","version":"3.0.6","scene_width":2000,"scene_height":1000,"topology":{"computes":[],"nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000001","name":"NAT1","node_type":"nat","symbol":":/symbols/classic/nat.svg","x":-93,"y":-380,"z":1,"width":66,"height":45,"console_type":"none","console":null,"compute_id":"local","label":{"text":"NAT1","x":null,"y":null,"rotation":0},"properties":{}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000002","name":"R1","node_type":"qemu","symbol":":/symbols/classic/router.svg","x":-93,"y":-250,"z":1,"width":66,"height":45,"console_type":"telnet","console":5000,"compute_id":"local","label":{"text":"R1","x":null,"y":null,"rotation":0},"properties":{"hda_disk_image":"vios-adventerprisek9-m.spa.159-3.m8.qcow2","ram":512,"cpus":1,"adapters":4,"adapter_type":"e1000"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000003","name":"R2","node_type":"qemu","symbol":":/symbols/classic/router.svg","x":-303,"y":-110,"z":1,"width":66,"height":45,"console_type":"telnet","console":5002,"compute_id":"local","label":{"text":"R2","x":null,"y":null,"rotation":0},"properties":{"hda_disk_image":"vios-adventerprisek9-m.spa.159-3.m8.qcow2","ram":512,"cpus":1,"adapters":4,"adapter_type":"e1000"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000004","name":"R3","node_type":"qemu","symbol":":/symbols/classic/router.svg","x":117,"y":-110,"z":1,"width":66,"height":45,"console_type":"telnet","console":5004,"compute_id":"local","label":{"text":"R3","x":null,"y":null,"rotation":0},"properties":{"hda_disk_image":"vios-adventerprisek9-m.spa.159-3.m8.qcow2","ram":512,"cpus":1,"adapters":4,"adapter_type":"e1000"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000005","name":"SW1","node_type":"iou","symbol":":/symbols/classic/multilayer_switch.svg","x":-303,"y":60,"z":1,"width":66,"height":45,"console_type":"telnet","console":5006,"compute_id":"local","label":{"text":"SW1","x":null,"y":null,"rotation":0},"properties":{"path":"i86bi_LinuxL2-AdvEnterpriseK9-M_152_May_2018.bin","ram":256,"ethernet_adapters":1,"serial_adapters":0}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000006","name":"SW2","node_type":"ethernet_switch","symbol":":/symbols/classic/ethernet_switch.svg","x":117,"y":60,"z":1,"width":66,"height":45,"console_type":"none","console":null,"compute_id":"local","label":{"text":"SW2","x":null,"y":null,"rotation":0},"properties":{"ports_mapping":[{"name":"Ethernet0","port_number":0,"type":"dot1q","vlan":1},{"name":"Ethernet1","port_number":1,"type":"access","vlan":20},{"name":"Ethernet2","port_number":2,"type":"access","vlan":20},{"name":"Ethernet3","port_number":3,"type":"dot1q","vlan":1}]}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000007","name":"PC1","node_type":"vpcs","symbol":":/symbols/classic/vpcs_guest.svg","x":-413,"y":210,"z":1,"width":66,"height":45,"console_type":"telnet","console":5008,"compute_id":"local","label":{"text":"PC1","x":null,"y":null,"rotation":0},"properties":{}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000008","name":"PC2","node_type":"vpcs","symbol":":/symbols/classic/vpcs_guest.svg","x":-193,"y":210,"z":1,"width":66,"height":45,"console_type":"telnet","console":5009,"compute_id":"local","label":{"text":"PC2","x":null,"y":null,"rotation":0},"properties":{}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000009","name":"SRV1","node_type":"qemu","symbol":":/symbols/classic/qemu_guest.svg","x":37,"y":210,"z":1,"width":66,"height":45,"console_type":"telnet","console":5010,"compute_id":"local","label":{"text":"SRV1","x":null,"y":null,"rotation":0},"properties":{"hda_disk_image":"debian12.qcow2","ram":2048,"cpus":2,"adapters":2,"adapter_type":"virtio-net-pci"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000010","name":"PC3","node_type":"vpcs","symbol":":/symbols/classic/vpcs_guest.svg","x":237,"y":210,"z":1,"width":66,"height":45,"console_type":"telnet","console":5012,"compute_id":"local","label":{"text":"PC3","x":null,"y":null,"rotation":0},"properties":{}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000011","name":"PVE1","node_type":"qemu","symbol":":/symbols/classic/server.svg","x":317,"y":60,"z":1,"width":66,"height":45,"console_type":"vnc","console":5914,"compute_id":"local","label":{"text":"PVE1","x":null,"y":null,"rotation":0},"properties":{"hda_disk_image":"pve-9.1-base.qcow2","ram":8192,"cpus":4,"adapters":2,"adapter_type":"virtio-net-pci","options":"-cpu host"}}],"links":[{"link_id":"l-01","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000002","adapter_number":0,"port_number":0,"label":{"text":"Gi0/0"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000001","adapter_number":0,"port_number":0,"label":{"text":"nat0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-02","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000002","adapter_number":1,"port_number":0,"label":{"text":"Gi0/1"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000003","adapter_number":0,"port_number":0,"label":{"text":"Gi0/0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-03","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000002","adapter_number":2,"port_number":0,"label":{"text":"Gi0/2"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000004","adapter_number":0,"port_number":0,"label":{"text":"Gi0/0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-04","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000003","adapter_number":1,"port_number":0,"label":{"text":"Gi0/1"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000004","adapter_number":1,"port_number":0,"label":{"text":"Gi0/1"}}],"filters":{"delay":[30,5]},"suspend":false,"link_type":"ethernet"},{"link_id":"l-05","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000003","adapter_number":2,"port_number":0,"label":{"text":"Gi0/2"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000005","adapter_number":0,"port_number":0,"label":{"text":"e0/0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-06","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000005","adapter_number":0,"port_number":1,"label":{"text":"e0/1"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000007","adapter_number":0,"port_number":0,"label":{"text":"e0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-07","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000005","adapter_number":0,"port_number":2,"label":{"text":"e0/2"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000008","adapter_number":0,"port_number":0,"label":{"text":"e0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-08","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000004","adapter_number":2,"port_number":0,"label":{"text":"Gi0/2"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000006","adapter_number":0,"port_number":0,"label":{"text":"Ethernet0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-09","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000006","adapter_number":0,"port_number":1,"label":{"text":"Ethernet1"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000009","adapter_number":0,"port_number":0,"label":{"text":"Ethernet0"}}],"filters":{},"suspend":false,"link_type":"ethernet"},{"link_id":"l-10","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000006","adapter_number":0,"port_number":2,"label":{"text":"Ethernet2"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000010","adapter_number":0,"port_number":0,"label":{"text":"e0"}}],"filters":{},"suspend":true,"link_type":"ethernet"},{"link_id":"l-11","nodes":[{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000006","adapter_number":0,"port_number":3,"label":{"text":"Ethernet3"}},{"node_id":"6b1f3c2e-4a7d-4e5b-9c10-000000000011","adapter_number":0,"port_number":0,"label":{"text":"Ethernet0"}}],"filters":{},"suspend":false,"link_type":"ethernet"}],"drawings":[{"drawing_id":"d-1","x":-380,"y":-300,"z":0,"rotation":0,"svg":"<svg height=\"285\" width=\"640\"><rect fill=\"#3B7DD8\" fill-opacity=\"0.07\" height=\"285\" width=\"640\" rx=\"14\" stroke=\"#3B7DD8\" stroke-opacity=\"0.55\" stroke-width=\"1.5\" stroke-dasharray=\"6,4\"/></svg>"},{"drawing_id":"d-2","x":-366,"y":-292,"z":2,"rotation":0,"svg":"<svg height=\"20\" width=\"260\"><text fill=\"#3B7DD8\" font-family=\"IBM Plex Sans Condensed\" font-size=\"13\" font-weight=\"bold\">Area 0 · backbone</text></svg>"},{"drawing_id":"d-3","x":-460,"y":30,"z":0,"rotation":0,"svg":"<svg height=\"270\" width=\"400\"><rect fill=\"#2E9A62\" fill-opacity=\"0.07\" height=\"270\" width=\"400\" rx=\"14\" stroke=\"#2E9A62\" stroke-opacity=\"0.55\" stroke-width=\"1.5\" stroke-dasharray=\"6,4\"/></svg>"},{"drawing_id":"d-4","x":-446,"y":38,"z":2,"rotation":0,"svg":"<svg height=\"20\" width=\"260\"><text fill=\"#2E9A62\" font-family=\"IBM Plex Sans Condensed\" font-size=\"13\" font-weight=\"bold\">Area 1 · VLAN 10</text></svg>"},{"drawing_id":"d-5","x":-20,"y":30,"z":0,"rotation":0,"svg":"<svg height=\"270\" width=\"480\"><rect fill=\"#C08A1E\" fill-opacity=\"0.07\" height=\"270\" width=\"480\" rx=\"14\" stroke=\"#C08A1E\" stroke-opacity=\"0.55\" stroke-width=\"1.5\" stroke-dasharray=\"6,4\"/></svg>"},{"drawing_id":"d-6","x":-6,"y":38,"z":2,"rotation":0,"svg":"<svg height=\"20\" width=\"260\"><text fill=\"#C08A1E\" font-family=\"IBM Plex Sans Condensed\" font-size=\"13\" font-weight=\"bold\">Area 2 · DMZ, VLAN 20</text></svg>"}]}};
+const FACTS = {"schema":"gns3lab.facts/1","generated_at":"2026-10-16T10:00:30Z","ttl":60,"nodes":{"6b1f3c2e-4a7d-4e5b-9c10-000000000001":{"status":"started","interfaces":[{"name":"nat0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","ipv4":["192.168.122.1/24"]}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000002":{"status":"started","router_id":"1.1.1.1","interfaces":[{"name":"Gi0/0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","ipv4":["192.168.122.10/24"]},{"name":"Gi0/1","kind":"physical","port":{"adapter":1,"port":0},"admin":"up","oper":"up","ipv4":["10.0.12.1/30"],"ospf":{"area":"0"}},{"name":"Gi0/2","kind":"physical","port":{"adapter":2,"port":0},"admin":"up","oper":"up","ipv4":["10.0.13.1/30"],"ospf":{"area":"0"}},{"name":"Gi0/3","kind":"physical","port":{"adapter":3,"port":0},"admin":"down","oper":"down"},{"name":"Lo0","kind":"loopback","admin":"up","oper":"up","ipv4":["1.1.1.1/32"],"ospf":{"area":"0"}}],"adjacencies":[{"proto":"ospf","peer_router_id":"2.2.2.2","iface":"Gi0/1","area":"0","state":"full"},{"proto":"ospf","peer_router_id":"3.3.3.3","iface":"Gi0/2","area":"0","state":"full"}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000003":{"status":"started","router_id":"2.2.2.2","interfaces":[{"name":"Gi0/0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","ipv4":["10.0.12.2/30"],"ospf":{"area":"0"}},{"name":"Gi0/1","kind":"physical","port":{"adapter":1,"port":0},"admin":"up","oper":"up","ipv4":["10.0.23.1/30"],"ospf":{"area":"0"}},{"name":"Gi0/2","kind":"physical","port":{"adapter":2,"port":0},"admin":"up","oper":"up"},{"name":"Gi0/2.10","kind":"subif","parent":"Gi0/2","dot1q":10,"admin":"up","oper":"up","ipv4":["10.1.10.1/24"],"ospf":{"area":"1","passive":true}},{"name":"Gi0/2.99","kind":"subif","parent":"Gi0/2","dot1q":99,"admin":"up","oper":"up","ipv4":["10.1.99.1/24"],"ospf":{"area":"1","passive":true}},{"name":"Gi0/3","kind":"physical","port":{"adapter":3,"port":0},"admin":"down","oper":"down"},{"name":"Lo0","kind":"loopback","admin":"up","oper":"up","ipv4":["2.2.2.2/32"],"ospf":{"area":"0"}}],"adjacencies":[{"proto":"ospf","peer_router_id":"1.1.1.1","iface":"Gi0/0","area":"0","state":"full"},{"proto":"ospf","peer_router_id":"3.3.3.3","iface":"Gi0/1","area":"0","state":"full"}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000004":{"status":"started","router_id":"3.3.3.3","interfaces":[{"name":"Gi0/0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","ipv4":["10.0.13.2/30"],"ospf":{"area":"0"}},{"name":"Gi0/1","kind":"physical","port":{"adapter":1,"port":0},"admin":"up","oper":"up","ipv4":["10.0.23.2/30"],"ospf":{"area":"0"}},{"name":"Gi0/2","kind":"physical","port":{"adapter":2,"port":0},"admin":"up","oper":"up"},{"name":"Gi0/2.20","kind":"subif","parent":"Gi0/2","dot1q":20,"admin":"up","oper":"up","ipv4":["10.2.20.1/24"],"ospf":{"area":"2","passive":true}},{"name":"Gi0/2.30","kind":"subif","parent":"Gi0/2","dot1q":30,"admin":"up","oper":"up","ipv4":["10.2.30.1/24"],"ospf":{"area":"2","passive":true}},{"name":"Gi0/3","kind":"physical","port":{"adapter":3,"port":0},"admin":"down","oper":"down"},{"name":"Lo0","kind":"loopback","admin":"up","oper":"up","ipv4":["3.3.3.3/32"],"ospf":{"area":"0"}}],"adjacencies":[{"proto":"ospf","peer_router_id":"1.1.1.1","iface":"Gi0/0","area":"0","state":"full"},{"proto":"ospf","peer_router_id":"2.2.2.2","iface":"Gi0/1","area":"0","state":"full"}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000005":{"status":"started","vlans":[{"id":1,"name":"default"},{"id":10,"name":"USERS"},{"id":99,"name":"MGMT"}],"interfaces":[{"name":"e0/0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","switchport":{"mode":"trunk","allowed":[10,99],"native":1},"stp":{"state":"forwarding","role":"designated"}},{"name":"e0/1","kind":"physical","port":{"adapter":0,"port":1},"admin":"up","oper":"up","switchport":{"mode":"access","vlan":10},"stp":{"state":"forwarding","role":"designated"}},{"name":"e0/2","kind":"physical","port":{"adapter":0,"port":2},"admin":"up","oper":"up","switchport":{"mode":"access","vlan":10},"stp":{"state":"forwarding","role":"designated"}},{"name":"e0/3","kind":"physical","port":{"adapter":0,"port":3},"admin":"down","oper":"down","switchport":{"mode":"access","vlan":1}},{"name":"Vlan99","kind":"svi","vlan":99,"admin":"up","oper":"up","ipv4":["10.1.99.2/24"]}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000006":{"status":"started","interfaces":[{"name":"Ethernet0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","switchport":{"mode":"trunk","allowed":"all","native":1}},{"name":"Ethernet1","kind":"physical","port":{"adapter":0,"port":1},"admin":"up","oper":"up","switchport":{"mode":"access","vlan":20}},{"name":"Ethernet2","kind":"physical","port":{"adapter":0,"port":2},"admin":"up","oper":"up","switchport":{"mode":"access","vlan":20}},{"name":"Ethernet3","kind":"physical","port":{"adapter":0,"port":3},"admin":"up","oper":"up","switchport":{"mode":"trunk","allowed":"all","native":1}}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000007":{"status":"started","interfaces":[{"name":"e0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","ipv4":["10.1.10.11/24"],"gateway":"10.1.10.1"}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000008":{"status":"started","interfaces":[{"name":"e0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up","ipv4":["10.1.10.12/24"],"gateway":"10.1.10.1"}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000009":{"status":"suspended"},"6b1f3c2e-4a7d-4e5b-9c10-000000000010":{"status":"stopped","interfaces":[{"name":"e0","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"down"}]},"6b1f3c2e-4a7d-4e5b-9c10-000000000011":{"status":"started","interfaces":[{"name":"ens18","kind":"physical","port":{"adapter":0,"port":0},"admin":"up","oper":"up"},{"name":"vmbr0.20","kind":"subif","parent":"ens18","dot1q":20,"admin":"up","oper":"up","ipv4":["10.2.20.5/24"],"gateway":"10.2.20.1"},{"name":"vmbr0.30","kind":"subif","parent":"ens18","dot1q":30,"admin":"up","oper":"up"}]}}};
+const LIVE = {"node_status":{"6b1f3c2e-4a7d-4e5b-9c10-000000000001":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000002":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000003":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000004":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000005":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000006":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000007":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000008":"started","6b1f3c2e-4a7d-4e5b-9c10-000000000009":"suspended","6b1f3c2e-4a7d-4e5b-9c10-000000000010":"stopped","6b1f3c2e-4a7d-4e5b-9c10-000000000011":"started"},"guests":{"6b1f3c2e-4a7d-4e5b-9c10-000000000011":{"source":"pvesh get /cluster/resources --type vm","note":"Шлюз опрашивает его через guest-exec, сеть до лабы не нужна.","items":[{"vmid":100,"name":"web01","type":"qemu","status":"running","mem":1181116006.4,"maxmem":2147483648},{"vmid":101,"name":"db01","type":"qemu","status":"running","mem":3650722201.6,"maxmem":4294967296},{"vmid":102,"name":"win-client","type":"qemu","status":"stopped","mem":0,"maxmem":4294967296},{"vmid":200,"name":"dns","type":"lxc","status":"running","mem":125829120,"maxmem":536870912},{"vmid":201,"name":"proxy","type":"lxc","status":"paused","mem":220200960,"maxmem":1073741824}]}}};
+
+/* ---------------- helpers ---------------- */
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent){ const e = document.createElementNS(NS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function hel(tag, cls, parent){ const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; }
+const esc = v => String(v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const mq = matchMedia("(max-width: 760px)");
+let mobile = mq.matches;
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("gns3lab.proto." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v){ try { localStorage.setItem("gns3lab.proto." + k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
+};
+const ICON_X = '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+const STATUS = { started: "запущен", suspended: "приостановлен", stopped: "остановлен" };
+const CAT = { router: "Маршрутизатор", switch: "Коммутатор", pc: "Хост", server: "Сервер", cloud: "NAT / облако", hypervisor: "Гипервизор" };
+const LOD_NAMES = ["Схема", "Подписи", "Адреса", "Консоли"];
+let toastT = null;
+function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 2600); }
+function buzz(){ try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) { /* not supported */ } }
+
+/* ---------------- model ---------------- */
+const T = GNS3.topology;
+function cat(n){
+  const s = n.symbol.toLowerCase();
+  if (LIVE.guests && LIVE.guests[n.id]) return "hypervisor";
+  if (n.type === "cloud" || n.type === "nat") return "cloud";
+  if (n.type === "ethernet_switch" || n.type === "ethernet_hub" || /switch|hub/.test(s)) return "switch";
+  if (/router/.test(s)) return "router";
+  if (n.type === "vpcs" || /vpcs|computer|\bpc/.test(s)) return "pc";
+  return "server";
+}
+const nodes = T.nodes.map(n => ({
+  id: n.node_id, name: n.name, type: n.node_type, symbol: n.symbol || "",
+  cx: n.x + (n.width || 66) / 2, cy: n.y + (n.height || 45) / 2,
+  console: n.console_type || "none", status: LIVE.node_status[n.node_id] || "stopped",
+  facts: FACTS.nodes[n.node_id] || null
+}));
+nodes.forEach(n => { n.cat = cat(n); });
+const byId = new Map(nodes.map(n => [n.id, n]));
+const links = T.links.map(l => ({
+  id: l.link_id, suspend: !!l.suspend, filters: l.filters || {},
+  ends: l.nodes.map(e => ({ node: byId.get(e.node_id), adapter: e.adapter_number, port: e.port_number,
+    label: (e.label && e.label.text) || (e.adapter_number + "/" + e.port_number) }))
+}));
+const linkById = new Map(links.map(l => [l.id, l]));
+links.forEach(l => {
+  const [a, b] = l.ends;
+  l.isLink = true; l.cx = (a.node.cx + b.node.cx) / 2; l.cy = (a.node.cy + b.node.cy) / 2;
+  l.name = `${a.node.name} ${a.label} — ${b.node.name} ${b.label}`;
+});
+function ifaceAt(n, adapter, port){
+  const f = n.facts; if (!f || !f.interfaces) return null;
+  return f.interfaces.find(i => i.port && i.port.adapter === adapter && i.port.port === port) || null;
+}
+const ipOnly = a => String(a).split("/")[0];
+function subtitle(n){
+  const f = n.facts; if (!f) return "";
+  if (f.router_id) return "RID " + f.router_id;
+  const i = (f.interfaces || []).find(x => x.ipv4 && x.ipv4.length);
+  if (i) return i.ipv4[0];
+  if (f.vlans) return "VLAN " + f.vlans.map(v => v.id).join(", ");
+  return "";
+}
+
+/* ---------------- drawings: whitelist sanitizer, never innerHTML ---------------- */
+const OK_EL = new Set(["rect", "ellipse", "circle", "line", "text"]);
+const OK_AT = new Set(["x", "y", "width", "height", "rx", "ry", "cx", "cy", "r", "x1", "y1", "x2", "y2", "fill", "fill-opacity",
+  "stroke", "stroke-opacity", "stroke-width", "stroke-dasharray", "font-size", "font-weight", "opacity"]);
+function sanitizeDrawing(src){
+  let doc; try { doc = new DOMParser().parseFromString(src, "image/svg+xml"); } catch (e) { return null; }
+  const root = doc.documentElement;
+  if (!root || root.nodeName !== "svg") return null;
+  const g = el("g", { class: "drawing" });
+  for (const c of Array.from(root.children)) {
+    if (!OK_EL.has(c.nodeName)) continue;
+    const e = el(c.nodeName, {}, g);
+    for (const a of Array.from(c.attributes)) {
+      if (!OK_AT.has(a.name)) continue;
+      if ((a.name === "fill" || a.name === "stroke") && !/^(#[0-9a-fA-F]{3,8}|none|[a-z]+)$/.test(a.value)) continue;
+      e.setAttribute(a.name, a.value);
+    }
+    if (c.nodeName === "text") {
+      e.textContent = c.textContent;
+      e.setAttribute("class", "dtext");
+      if (!e.hasAttribute("y")) e.setAttribute("y", c.getAttribute("font-size") || 12);
+    }
+  }
+  return g;
+}
+
+/* ---------------- rendering ---------------- */
+const svg = $("svg"), vp = $("vp"), wrap = $("wrap"), stage = $("stage");
+const L = { draw: $("lyrDraw"), links: $("lyrLinks"), nodes: $("lyrNodes"), cards: $("lyrCards") };
+function renderDrawings(){
+  for (const d of T.drawings || []) {
+    const g = sanitizeDrawing(d.svg); if (!g) continue;
+    g.setAttribute("transform", `translate(${+d.x} ${+d.y})` + (d.rotation ? ` rotate(${+d.rotation})` : ""));
+    L.draw.appendChild(g);
+  }
+}
+function renderLinks(){
+  L.links.textContent = "";
+  for (const l of links) {
+    const [a, b] = l.ends;
+    const ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
+    const down = l.down = !!((ia && ia.oper === "down") || (ib && ib.oper === "down"));
+    const g = el("g", { class: "link" + (l.suspend ? " suspended" : "") + (down ? " down" : "") + (selectedLink === l ? " sel" : ""),
+      "data-id": l.id, tabindex: "0", role: "button", "aria-label": "Соединение " + l.name }, L.links);
+    l.g = g;
+    el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "hit" }, g);
+    el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "wire" }, g);
+    if (l.filters && Object.keys(l.filters).length) {
+      const mx = (a.node.cx + b.node.cx) / 2, my = (a.node.cy + b.node.cy) / 2;
+      const f = el("g", { class: "l1" }, g);
+      el("circle", { cx: mx, cy: my, r: 8, class: "filt" }, f);
+      el("text", { x: mx, y: my + 2.8, class: "filt-t" }, f).textContent = "ms";
+      el("title", {}, f).textContent = "Фильтр на линке: " + Object.keys(l.filters).join(", ");
+    }
+    for (const [e, o, ifc] of [[a, b, ia], [b, a, ib]]) {
+      const dx = o.node.cx - e.node.cx, dy = o.node.cy - e.node.cy, len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      el("circle", { cx: e.node.cx + ux * 31, cy: e.node.cy + uy * 31, r: 3.2, class: "pdot l1" + (ifc && ifc.oper === "down" ? " down" : "") }, g);
+      const d = Math.min(58, len * 0.36), px = e.node.cx + ux * d, py = e.node.cy + uy * d;
+      el("text", { x: px, y: py + 3, class: "plabel l1" }, g).textContent = e.label;
+      if (ifc && ifc.ipv4 && ifc.ipv4.length) el("text", { x: px, y: py + 3, dy: "1.35em", class: "pip l2" }, g).textContent = ifc.ipv4[0];
+    }
+  }
+  if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
+}
+function renderNodes(){
+  L.nodes.textContent = "";
+  for (const n of nodes) {
+    const g = el("g", { class: "node st-" + n.status, transform: `translate(${n.cx} ${n.cy})`, "data-id": n.id, tabindex: "0", role: "button",
+      "aria-label": `${n.name}, ${CAT[n.cat].toLowerCase()}, ${STATUS[n.status]}` }, L.nodes);
+    n.g = g;
+    el("circle", { r: 31, class: "halo" }, g);
+    el("use", { href: "#ico-" + n.cat, x: -22, y: -22, width: 44, height: 44, class: "ico" }, g);
+    el("circle", { cx: 19, cy: -17, r: 5.5, class: "sdot" }, g);
+    el("text", { y: 25, class: "nname" }, g).textContent = n.name;
+    const sub = subtitle(n);
+    if (sub) el("text", { y: 25, dy: "1.9em", class: "nsub l2" }, g).textContent = sub;
+    const adj = n.facts && n.facts.adjacencies;
+    if (adj && adj.length) {
+      const full = adj.filter(x => x.state === "full").length;
+      el("text", { y: 25, dy: "3.6em", class: "nadj l2" + (full < adj.length ? " warn" : "") }, g).textContent = `OSPF ${full}/${adj.length} FULL`;
+    }
+    const bd = el("g", { class: "cbadge", transform: "translate(-22 -21)" }, g);
+    el("rect", { x: -10, y: -7.5, width: 20, height: 15, rx: 3.5 }, bd);
+    el("text", { y: 3 }, bd).textContent = ">_";
+    updateBadge(n);
+  }
+}
+function setNodeStatus(n, st){
+  n.status = st;
+  n.g.setAttribute("class", n.g.getAttribute("class").replace(/st-\w+/, "st-" + st));
+  n.g.setAttribute("aria-label", `${n.name}, ${CAT[n.cat].toLowerCase()}, ${STATUS[st]}`);
+}
+
+/* ---------------- view and levels of detail ---------------- */
+const view = { k: 1, tx: 0, ty: 0 };
+const KMIN = 0.22, KMAX = 6;
+let lod = -1, anim = null;
+function lodOf(k){ const s = 44 * k; return s < 34 ? 0 : s < 70 ? 1 : s < 120 ? 2 : 3; }
+function applyView(){
+  vp.setAttribute("transform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
+  $("dots").setAttribute("patternTransform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
+  svg.style.setProperty("--inv", (1 / view.k).toFixed(4));
+  const nl = lodOf(view.k);
+  if (nl !== lod) {
+    lod = nl; svg.dataset.lod = nl;
+    $("lodName").textContent = LOD_NAMES[nl];
+    Array.from($("lodBar").children).forEach((i, j) => i.classList.toggle("on", j <= nl));
+    if (nl >= 2) cons.forEach(c => c.renderCard());
+  }
+  positionOverlays();
+}
+const toScreen = (x, y) => ({ x: view.tx + view.k * x, y: view.ty + view.k * y });
+function bounds(){
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of nodes) { x0 = Math.min(x0, n.cx - 40); y0 = Math.min(y0, n.cy - 36); x1 = Math.max(x1, n.cx + 40); y1 = Math.max(y1, n.cy + 52); }
+  for (const d of T.drawings || []) {
+    const w = +((d.svg.match(/width="(\d+)/) || [])[1] || 0), hh = +((d.svg.match(/height="(\d+)/) || [])[1] || 0);
+    x0 = Math.min(x0, d.x); y0 = Math.min(y0, d.y); x1 = Math.max(x1, d.x + w); y1 = Math.max(y1, d.y + hh);
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+function fitTarget(){
+  const r = wrap.getBoundingClientRect(), b = bounds(), pad = mobile ? 14 : 36;
+  const k = clamp(Math.min((r.width - 2 * pad) / b.w, (r.height - 2 * pad) / b.h), KMIN, 2.2);
+  return { k, tx: r.width / 2 - k * (b.x + b.w / 2), ty: r.height / 2 - k * (b.y + b.h / 2) };
+}
+function stopAnim(){ if (anim) { cancelAnimationFrame(anim); anim = null; } }
+function animateTo(t, ms){
+  stopAnim();
+  if (reduced || ms === 0) { Object.assign(view, t); applyView(); return; }
+  const s = { ...view }, t0 = performance.now(), dur = ms || 320;
+  const step = now => {
+    const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    view.k = s.k + (t.k - s.k) * e; view.tx = s.tx + (t.tx - s.tx) * e; view.ty = s.ty + (t.ty - s.ty) * e;
+    applyView();
+    anim = p < 1 ? requestAnimationFrame(step) : null;
+  };
+  anim = requestAnimationFrame(step);
+}
+function zoomAt(sx, sy, f){
+  const k = clamp(view.k * f, KMIN, KMAX), r = k / view.k;
+  view.tx = sx - (sx - view.tx) * r; view.ty = sy - (sy - view.ty) * r; view.k = k;
+}
+function zoomBy(f){
+  const r = wrap.getBoundingClientRect(), k = clamp(view.k * f, KMIN, KMAX), q = k / view.k;
+  animateTo({ k, tx: r.width / 2 - (r.width / 2 - view.tx) * q, ty: r.height / 2 - (r.height / 2 - view.ty) * q }, 260);
+}
+function zoomToNode(n, k, anchorY){
+  const r = wrap.getBoundingClientRect(); k = k || 2.3;
+  animateTo({ k, tx: r.width / 2 - k * n.cx, ty: (anchorY != null ? anchorY : r.height / 2) - k * n.cy }, 360);
+}
+function nodeNear(sx, sy, maxPx){
+  let best = null, bd = maxPx;
+  for (const n of nodes) { const p = toScreen(n.cx, n.cy), d = Math.hypot(p.x - sx, p.y - sy); if (d < bd) { bd = d; best = n; } }
+  return best;
+}
+
+/* ---------------- gestures on the topology ---------------- */
+const ptrs = new Map();
+let gest = null, pinch = null, lpTimer = null, lastTap = null, diveCand = null;
+function targetOf(t){
+  const n = t.closest && t.closest(".node"); if (n) return byId.get(n.dataset.id);
+  const l = t.closest && t.closest(".link"); return l ? linkById.get(l.dataset.id) : null;
+}
+const relPt = e => { const r = svg.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+function clearLp(){ if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
+svg.addEventListener("contextmenu", e => e.preventDefault());
+svg.addEventListener("pointerdown", e => {
+  if (radial.tracking) return;
+  stopAnim(); hideHint();
+  const tgt = targetOf(e.target);
+  if (e.pointerType === "mouse" && e.button === 2) {
+    if (tgt) openRadial(tgt, relPt(e), e.pointerId, "mouse");
+    return;
+  }
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  try { svg.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  ptrs.set(e.pointerId, relPt(e));
+  if (ptrs.size === 1) {
+    const p = relPt(e), t0 = performance.now();
+    gest = { sx: p.x, sy: p.y, moved: false, pinched: false, target: e.target, samples: [{ t: t0, x: p.x, y: p.y }] };
+    if (tgt && e.pointerType !== "mouse") {
+      const pid = e.pointerId;
+      lpTimer = setTimeout(() => {
+        lpTimer = null;
+        if (!gest || gest.moved || ptrs.size !== 1) return;
+        const at = ptrs.get(pid) || p;
+        gest = null; ptrs.clear();
+        try { svg.releasePointerCapture(pid); } catch (err) { /* ignore */ }
+        openRadial(tgt, at, pid, "touch");
+      }, 430);
+    }
+  } else {
+    clearLp();
+    if (gest) { gest.moved = true; gest.pinched = true; }
+    pinch = null;
+  }
+});
+svg.addEventListener("pointermove", e => {
+  const prev = ptrs.get(e.pointerId); if (!prev) return;
+  const p = relPt(e); ptrs.set(e.pointerId, p);
+  if (ptrs.size === 1 && gest) {
+    if (!gest.moved && Math.hypot(p.x - gest.sx, p.y - gest.sy) > 8) { gest.moved = true; clearLp(); svg.classList.add("dragging"); }
+    if (gest.moved && !gest.pinched) {
+      view.tx += p.x - prev.x; view.ty += p.y - prev.y; applyView();
+      gest.samples.push({ t: performance.now(), x: p.x, y: p.y }); if (gest.samples.length > 6) gest.samples.shift();
+    }
+  } else if (ptrs.size === 2) {
+    const [a, b] = Array.from(ptrs.values());
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch && pinch.dist > 0) {
+      zoomAt(mid.x, mid.y, dist / pinch.dist);
+      view.tx += mid.x - pinch.mid.x; view.ty += mid.y - pinch.mid.y; applyView();
+      updateDiveCandidate(mid);
+    }
+    pinch = { mid, dist };
+  }
+});
+function endPtr(e){
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId); clearLp();
+  if (ptrs.size < 2 && pinch) { pinch = null; finishPinch(); }
+  if (ptrs.size === 0) {
+    svg.classList.remove("dragging");
+    if (gest) {
+      if (e.type === "pointerup" && !gest.moved) onTap(e, gest);
+      else if (gest.moved && !gest.pinched) fling(gest.samples);
+    }
+    gest = null;
+  }
+}
+svg.addEventListener("pointerup", endPtr);
+svg.addEventListener("pointercancel", endPtr);
+function fling(s){
+  if (reduced || s.length < 2) return;
+  const a = s[0], b = s[s.length - 1], dt = b.t - a.t;
+  if (dt <= 0 || performance.now() - b.t > 80) return;
+  let vx = (b.x - a.x) / dt * 16, vy = (b.y - a.y) / dt * 16;
+  if (Math.hypot(vx, vy) < 2) return;
+  const step = () => { vx *= 0.92; vy *= 0.92; view.tx += vx; view.ty += vy; applyView(); anim = Math.hypot(vx, vy) > 0.4 ? requestAnimationFrame(step) : null; };
+  anim = requestAnimationFrame(step);
+}
+svg.addEventListener("wheel", e => {
+  e.preventDefault(); stopAnim(); hideHint();
+  const p = relPt(e), unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  zoomAt(p.x, p.y, Math.exp(-e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.0018)));
+  applyView();
+}, { passive: false });
+function onTap(e, g){
+  if (radial.node) { closeRadial(); return; }
+  const now = performance.now(), p = relPt(e);
+  const dbl = lastTap && now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30;
+  lastTap = dbl ? null : { t: now, x: p.x, y: p.y };
+  const badge = g.target.closest && g.target.closest(".cbadge");
+  const nodeEl = g.target.closest && g.target.closest(".node");
+  const cardEl = g.target.closest && g.target.closest(".card");
+  if (cardEl) { openConsole(byId.get(cardEl.dataset.id)); return; }
+  if (badge && nodeEl) { openConsole(byId.get(nodeEl.dataset.id)); return; }
+  if (nodeEl) {
+    const n = byId.get(nodeEl.dataset.id);
+    if (dbl) { if (mobile) zoomToNode(n, Math.max(view.k * 1.8, 2.3)); else openConsole(n); return; }
+    if (diving && cons.has(n.id)) { switchDive(cons.get(n.id)); return; }
+    select(n); return;
+  }
+  const linkEl = g.target.closest && g.target.closest(".link");
+  if (linkEl) {
+    const l = linkById.get(linkEl.dataset.id);
+    if (dbl) { zoomToLink(l); return; }
+    select(null); showLinkDetails(l); return;
+  }
+  select(null); hideDetails();
+  if (dbl) { const r = 2, k = clamp(view.k * r, KMIN, KMAX), q = k / view.k; animateTo({ k, tx: p.x - (p.x - view.tx) * q, ty: p.y - (p.y - view.ty) * q }, 260); }
+}
+let selected = null, chipT = null;
+function select(n){
+  if (n) selectLink(null);
+  if (selected && selected.g) selected.g.classList.remove("sel");
+  selected = n;
+  const chip = $("chip");
+  if (!n) { chip.hidden = true; return; }
+  n.g.classList.add("sel");
+  chip.innerHTML = `<b>${esc(n.name)}</b> <span>· ${esc(CAT[n.cat].toLowerCase())} · ${esc(STATUS[n.status])} · ${mobile ? "удерживайте для действий" : "правый клик — действия"}</span>`;
+  chip.hidden = false; clearTimeout(chipT); chipT = setTimeout(() => { chip.hidden = true; }, 3800);
+}
+svg.addEventListener("keydown", e => {
+  const nodeEl = document.activeElement && document.activeElement.closest && document.activeElement.closest(".node");
+  const linkEl = !nodeEl && document.activeElement && document.activeElement.closest && document.activeElement.closest(".link");
+  const n = nodeEl ? byId.get(nodeEl.dataset.id) : linkEl ? linkById.get(linkEl.dataset.id) : selected;
+  if (e.key === "Enter" && n && n.isLink) { e.preventDefault(); showLinkDetails(n); }
+  else if (e.key === "Enter" && n) { e.preventDefault(); openConsole(n); }
+  else if ((e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) && n) { e.preventDefault(); const p = toScreen(n.cx, n.cy); openRadial(n, p, null, "key"); }
+  else if (e.key === "+" || e.key === "=") zoomBy(1.6);
+  else if (e.key === "-") zoomBy(1 / 1.6);
+  else if (e.key === "0") animateTo(fitTarget());
+  else if (e.key === "Escape") { closeRadial(); hideDetails(); select(null); }
+});
+svg.addEventListener("focusin", e => { const nodeEl = e.target.closest && e.target.closest(".node"); if (nodeEl) select(byId.get(nodeEl.dataset.id)); });
+let selectedLink = null;
+function selectLink(l){
+  if (selectedLink && selectedLink.g) selectedLink.g.classList.remove("sel");
+  selectedLink = l || null;
+  if (l && l.g) { l.g.classList.add("sel"); L.links.appendChild(l.g); }
+}
+function zoomToLink(l){
+  const r = wrap.getBoundingClientRect(), [a, b] = l.ends;
+  const k = clamp(Math.min(r.width / (Math.abs(a.node.cx - b.node.cx) + 160), r.height / (Math.abs(a.node.cy - b.node.cy) + 160)), KMIN, 3);
+  animateTo({ k, tx: r.width / 2 - k * l.cx, ty: r.height / 2 - k * l.cy }, 360);
+}
+$("zoomIn").onclick = () => zoomBy(1.6);
+$("zoomOut").onclick = () => zoomBy(1 / 1.6);
+$("zoomFit").onclick = () => animateTo(fitTarget());
+
+/* zooming deep into a node on a phone opens its console */
+const DIVE_PX = 140;
+function canConsole(n){ return n.console === "telnet" && n.status === "started"; }
+function updateDiveCandidate(mid){
+  if (!mobile) return;
+  const n = 44 * view.k >= DIVE_PX ? nodeNear(mid.x, mid.y, 44 * view.k) : null;
+  diveCand = n && canConsole(n) ? n : null;
+  const h = $("dhint");
+  if (diveCand && !(diving && active === diveCand.id)) { h.textContent = `Отпустите — консоль ${diveCand.name}`; h.hidden = false; }
+  else h.hidden = true;
+}
+function finishPinch(){
+  $("dhint").hidden = true;
+  if (!mobile) return;
+  if (diveCand && !(diving && active === diveCand.id)) { const n = diveCand; diveCand = null; openConsole(n); return; }
+  diveCand = null;
+  if (diving && view.k < 1.1) exitDive(true);
+}
+
+/* ---------------- action wheel ---------------- */
+const radial = { el: $("radial"), node: null, tracking: false, pid: null, kind: null, items: [], hi: -1, at: null, moved: false };
+const R0 = 34, R1 = 108;
+function linkActions(l){
+  const a = [{ id: "linfo", label: "Сведения", full: "Сведения о соединении", icon: "info" },
+    { id: "lzoom", label: "Ближе", full: "Приблизить соединение", icon: "zoom" },
+    l.suspend ? { id: "resume", label: "Включить", full: "Возобновить соединение", icon: "play" }
+              : { id: "suspend", label: "Пауза", full: "Приостановить соединение", icon: "pause" }];
+  l.ends.forEach((e, i) => {
+    if (e.node.console === "none") return;
+    const why = !canConsole(e.node) ? (e.node.console !== "telnet" ? "VNC-консоль прототип не показывает" : `${e.node.name} ${STATUS[e.node.status]}`) : "";
+    a.push({ id: i ? "conb" : "cona", label: e.node.name, full: `Консоль ${e.node.name}`, icon: "term", off: !!why, why });
+  });
+  return a;
+}
+function actionsFor(n){
+  if (n.isLink) return linkActions(n);
+  const a = [], con = cons.get(n.id);
+  if (n.console !== "none") {
+    const why = n.console !== "telnet" ? "VNC-консоль прототип не показывает" : n.status !== "started" ? `${n.name} ${STATUS[n.status]}` : "";
+    a.push({ id: "console", label: "Консоль", full: con ? "Перейти к консоли" : "Открыть консоль", icon: "term", off: !!why, why });
+  }
+  a.push({ id: "info", label: "Сведения", full: "Сведения об узле", icon: "info" });
+  a.push({ id: "zoom", label: "Ближе", full: "Приблизить узел", icon: "zoom" });
+  if (!["nat", "cloud", "ethernet_switch", "ethernet_hub"].includes(n.type)) {
+    if (n.status === "started") {
+      a.push({ id: "reload", label: "Рестарт", full: "Перезагрузить узел", icon: "reload" });
+      a.push({ id: "stop", label: "Стоп", full: "Остановить узел", icon: "power", danger: true });
+    } else a.push({ id: "start", label: "Пуск", full: "Запустить узел", icon: "play" });
+  }
+  if (con) a.push({ id: "close", label: "Закрыть", full: "Закрыть консоль", icon: "close" });
+  return a;
+}
+function wedgePath(a0, a1){
+  const p = (r, a) => `${(118 + r * Math.cos(a)).toFixed(2)} ${(118 + r * Math.sin(a)).toFixed(2)}`;
+  const big = a1 - a0 > Math.PI ? 1 : 0;
+  return `M${p(R1, a0)} A${R1} ${R1} 0 ${big} 1 ${p(R1, a1)} L${p(R0, a1)} A${R0} ${R0} 0 ${big} 0 ${p(R0, a0)} Z`;
+}
+function openRadial(n, at, pid, kind){
+  closeRadial(); select(null); buzz();
+  radial.node = n; radial.items = actionsFor(n); radial.pid = pid; radial.kind = kind; radial.hi = -1; radial.moved = false;
+  radial.tracking = kind === "touch" || kind === "mouse";
+  radial.pos = n.isLink && kind !== "key" ? { x: (at.x - view.tx) / view.k, y: (at.y - view.ty) / view.k } : { x: n.cx, y: n.cy };
+  if (n.isLink) selectLink(n);
+  radial.anchor = at;
+  const box = radial.el; box.textContent = ""; box.hidden = false;
+  box.classList.toggle("pinned", !radial.tracking);
+  box.classList.remove("in"); void box.offsetWidth; box.classList.add("in");
+  const s = el("svg", { viewBox: "0 0 236 236" }, box);
+  el("circle", { cx: 118, cy: 118, r: R1 + 0.5, class: "ring" }, s);
+  const N = radial.items.length, step = 2 * Math.PI / N, gap = 0.035;
+  radial.items.forEach((it, i) => {
+    const mid = -Math.PI / 2 + i * step, a0 = mid - step / 2 + gap, a1 = mid + step / 2 - gap;
+    const g = el("g", { class: "wedge" + (it.off ? " off" : "") + (it.danger ? " danger" : ""), "data-i": i }, s);
+    el("path", { d: wedgePath(a0, a1) }, g);
+    const rm = (R0 + R1) / 2 + 2, ix = 118 + rm * Math.cos(mid), iy = 118 + rm * Math.sin(mid);
+    el("use", { href: "#act-" + it.icon, x: ix - 11, y: iy - 18, width: 22, height: 22, class: "wi" }, g);
+    el("text", { x: ix, y: iy + 15 }, g).textContent = it.label;
+    g.addEventListener("click", ev => { ev.stopPropagation(); runAction(i); });
+    g.addEventListener("pointerenter", () => { if (!radial.tracking) setHi(i); });
+    g.addEventListener("pointerleave", () => { if (!radial.tracking) setHi(-1); });
+  });
+  el("circle", { cx: 118, cy: 118, r: R0 - 5, class: "hub" }, s);
+  el("text", { x: 118, y: 119, class: "hubt" }, s).textContent = n.isLink ? "линк" : n.name;
+  radial.cap = hel("div", "rcap", box); radial.cap.hidden = true;
+  positionRadial();
+  if (!radial.tracking) setTimeout(() => { const w = box.querySelector(".wedge:not(.off)"); if (w && kind === "key") { w.setAttribute("tabindex", "0"); } }, 0);
+}
+function setHi(i){
+  radial.hi = i;
+  radial.el.querySelectorAll(".wedge").forEach((w, j) => w.classList.toggle("hi", j === i));
+  const cap = radial.cap; if (!cap) return;
+  if (i < 0) { cap.hidden = true; return; }
+  const it = radial.items[i];
+  cap.innerHTML = esc(it.full) + (it.off ? `<small>${esc(it.why)}</small>` : "");
+  cap.hidden = false;
+}
+function positionRadial(){
+  if (!radial.node) return;
+  const r = wrap.getBoundingClientRect();
+  const p = toScreen(radial.pos.x, radial.pos.y);
+  const m = 118 + 8;
+  const x = clamp(p.x, m, Math.max(m, r.width - m)), y = clamp(p.y, m + 34, Math.max(m + 34, r.height - m));
+  radial.cx = x; radial.cy = y;
+  radial.el.style.left = x + "px"; radial.el.style.top = y + "px";
+}
+function closeRadial(){ radial.node = null; radial.tracking = false; radial.el.hidden = true; radial.el.textContent = ""; radial.cap = null; }
+function runAction(i){
+  const it = radial.items[i], t = radial.node;
+  if (!it || !t) return;
+  if (it.off) { toast(it.why); return; }
+  closeRadial();
+  ({
+    console: () => openConsole(t),
+    info: () => showDetails(t),
+    zoom: () => zoomToNode(t, Math.max(2.4, view.k)),
+    stop: () => setPower(t, "stopped"),
+    start: () => setPower(t, "started"),
+    reload: () => { const c = cons.get(t.id); if (c) { c.sim.reload(); openConsole(t); } else toast(`${t.name} перезагружается (демо)`); },
+    close: () => closeConsole(t),
+    linfo: () => showLinkDetails(t),
+    lzoom: () => zoomToLink(t),
+    suspend: () => setSuspend(t, true),
+    resume: () => setSuspend(t, false),
+    cona: () => openConsole(t.ends[0].node),
+    conb: () => openConsole(t.ends[1].node)
+  })[it.id]();
+}
+function setSuspend(l, on){
+  l.suspend = on; renderLinks();
+  toast(on ? "Соединение приостановлено (демо): трафик по нему не идёт" : "Соединение возобновлено (демо)");
+  if (!$("details").hidden && $("details").dataset.link === l.id) showLinkDetails(l);
+}
+window.addEventListener("pointermove", e => {
+  if (!radial.tracking || (radial.pid != null && e.pointerId !== radial.pid)) return;
+  const r = wrap.getBoundingClientRect(), x = e.clientX - r.left - radial.cx, y = e.clientY - r.top - radial.cy, d = Math.hypot(x, y);
+  if (d > 14) radial.moved = true;
+  if (d < R0 - 4) { setHi(-1); return; }
+  const N = radial.items.length, step = 2 * Math.PI / N;
+  let a = Math.atan2(y, x) + Math.PI / 2 + step / 2; a = ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  setHi(Math.floor(a / step) % N);
+});
+function endTracking(e){
+  if (!radial.tracking || (radial.pid != null && e.pointerId !== radial.pid)) return;
+  e.preventDefault();
+  radial.tracking = false;
+  if (radial.hi >= 0 && radial.moved) { runAction(radial.hi); return; }
+  radial.anchor = null; setHi(-1);
+  radial.el.classList.add("pinned"); positionRadial();
+}
+window.addEventListener("pointerup", endTracking, true);
+window.addEventListener("pointercancel", e => { if (radial.tracking && e.pointerId === radial.pid) { radial.tracking = false; radial.el.classList.add("pinned"); } }, true);
+window.addEventListener("contextmenu", e => { if (radial.node) e.preventDefault(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { if (!$("help").hidden) { $("help").hidden = true; return; } if (radial.node) { closeRadial(); return; } }
+  if (radial.node && !radial.tracking && /^[1-9]$/.test(e.key)) { const i = +e.key - 1; if (i < radial.items.length) runAction(i); }
+});
+function setPower(n, st){
+  setNodeStatus(n, st);
+  const c = cons.get(n.id);
+  if (st === "stopped") { if (c) c.sim.halt("узел остановлен"); toast(`${n.name} остановлен (демо: API плагина пока не управляет узлами)`, 3400); }
+  else { if (c) c.sim.boot(true); toast(`${n.name} запущен (демо)`); }
+  renderTabsAndChips();
+}
+
+/* ---------------- details ---------------- */
+function showDetails(n){
+  selectLink(null); revealAbove(n.cx, n.cy);
+  const d = $("details"), f = n.facts || {};
+  const ifs = (f.interfaces || []).map(i => `<tr><td class="m">${esc(i.name)}</td><td class="m">${esc((i.ipv4 || []).join(" ") || (i.switchport ? (i.switchport.mode === "access" ? "VLAN " + i.switchport.vlan : "trunk") : "—"))}</td>`
+    + `<td class="${i.oper === "down" ? "dn" : ""}">${i.admin === "down" ? "выкл." : esc(i.oper || "—")}</td><td class="m">${i.ospf ? "area " + esc(i.ospf.area) : ""}</td></tr>`).join("");
+  const adj = (f.adjacencies || []).map(a => `<tr><td class="m">${esc(a.peer_router_id)}</td><td class="m">${esc(a.iface)}</td><td class="m">${esc(a.area)}</td><td>${esc(a.state)}</td></tr>`).join("");
+  const g = LIVE.guests && LIVE.guests[n.id];
+  const guests = g ? g.items.map(v => `<tr><td class="m">${esc(v.vmid)}</td><td>${esc(v.name)}</td><td class="m">${esc(v.type)}</td><td>${esc(v.status)}</td></tr>`).join("") : "";
+  d.innerHTML = `<div class="dh"><div><h2>${esc(n.name)}</h2><p class="dsub"><span>${esc(CAT[n.cat])}</span><span class="st ${esc(n.status)}">${esc(STATUS[n.status])}</span>`
+    + `${f.router_id ? `<span>RID ${esc(f.router_id)}</span>` : ""}</p></div><button class="ib" type="button" data-close aria-label="Закрыть">${ICON_X}</button></div>`
+    + (ifs ? `<p class="eyebrow">Интерфейсы</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Порт</th><th>Адрес</th><th>Сост.</th><th>OSPF</th></tr></thead><tbody>${ifs}</tbody></table></div>` : "")
+    + (adj ? `<p class="eyebrow">Соседи OSPF</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Router ID</th><th>Порт</th><th>Area</th><th>Сост.</th></tr></thead><tbody>${adj}</tbody></table></div>` : "")
+    + (guests ? `<p class="eyebrow">Гости Proxmox</p><div class="tblwrap"><table class="tbl"><thead><tr><th>ID</th><th>Имя</th><th>Тип</th><th>Сост.</th></tr></thead><tbody>${guests}</tbody></table></div>` : "")
+    + (!ifs && !adj && !guests ? `<p class="dnote">Нет данных об устройстве: узел ${esc(STATUS[n.status])}.</p>` : "")
+    + (canConsole(n) ? `<div class="dacts"><button class="btn" type="button" data-con>${cons.has(n.id) ? "Перейти к консоли" : "Открыть консоль"}</button></div>` : "");
+  delete d.dataset.link;
+  d.hidden = false;
+  d.querySelector("[data-close]").onclick = hideDetails;
+  const b = d.querySelector("[data-con]"); if (b) b.onclick = () => { hideDetails(); openConsole(n); };
+}
+const FILTERS = {
+  delay: v => `задержка ${v[0]} мс` + (v[1] ? ` ± ${v[1]} мс` : ""),
+  packet_loss: v => `потеря ${v[0]} % пакетов`,
+  corrupt: v => `искажение ${v[0]} % пакетов`,
+  frequency_drop: v => `отбрасывается каждый ${v[0]}-й пакет`,
+  bpf: () => "BPF-фильтр"
+};
+function endAddr(i){
+  if (!i) return "—";
+  if (i.ipv4 && i.ipv4.length) return i.ipv4.join(" ");
+  if (i.switchport) return i.switchport.mode === "access" ? "access, VLAN " + i.switchport.vlan : "trunk" + (Array.isArray(i.switchport.allowed) ? ", VLAN " + i.switchport.allowed.join(", ") : "");
+  return "—";
+}
+function revealAbove(x, y){
+  if (!mobile) return;
+  const r = wrap.getBoundingClientRect(), p = toScreen(x, y), want = r.height * 0.24;
+  if (Math.abs(p.y - want) > 30 || p.x < 20 || p.x > r.width - 20) animateTo({ k: view.k, tx: view.tx + (r.width / 2 - p.x), ty: view.ty + (want - p.y) }, 300);
+}
+function showLinkDetails(l){
+  selectLink(l); revealAbove(l.cx, l.cy);
+  const d = $("details"), [a, b] = l.ends, ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
+  const state = l.suspend ? ["suspended", "приостановлено"] : l.down ? ["stopped", "нет связи"] : ["started", "работает"];
+  let net = "", area = "";
+  if (ia && ib && ia.ipv4 && ib.ipv4) {
+    const [ipa, len] = ia.ipv4[0].split("/"), ipb = ipOnly(ib.ipv4[0]), m = maskOf(+len);
+    if (((ip2n(ipa) & m) >>> 0) === ((ip2n(ipb) & m) >>> 0)) net = `${n2ip((ip2n(ipa) & m) >>> 0)}/${len}`;
+  }
+  if (ia && ib && ia.ospf && ib.ospf) area = ia.ospf.area === ib.ospf.area ? ia.ospf.area : `${ia.ospf.area} / ${ib.ospf.area}`;
+  const why = l.suspend ? "Соединение приостановлено: кадры по нему не проходят." : l.down
+    ? `Порт выключен: ${[[a, ia], [b, ib]].filter(([, i]) => i && i.oper === "down").map(([e, i]) => `${e.node.name} ${e.label}${i.admin === "down" ? " (shutdown)" : ""}`).join(", ")}.` : "";
+  const row = (e, i) => `<tr><td><span class="st ${esc(e.node.status)}" title="${esc(STATUS[e.node.status])}"></span> ${esc(e.node.name)}</td><td class="m">${esc(e.label)}</td>`
+    + `<td class="m">${esc(endAddr(i))}</td><td class="${i && i.oper === "down" ? "dn" : ""}">${!i ? "—" : i.admin === "down" ? "выкл." : esc(i.oper || "—")}</td></tr>`;
+  const filters = Object.entries(l.filters || {}).map(([k, v]) => FILTERS[k] ? FILTERS[k](v) : k);
+  const btns = l.ends.filter(e => canConsole(e.node)).map(e => `<button class="btn" type="button" data-con="${esc(e.node.id)}">Консоль ${esc(e.node.name)}</button>`).join("");
+  d.innerHTML = `<div class="dh"><div><h2>${esc(a.node.name)} — ${esc(b.node.name)}</h2><p class="dsub"><span>Соединение · Ethernet</span><span class="st ${state[0]}">${state[1]}</span></p></div>`
+    + `<button class="ib" type="button" data-close aria-label="Закрыть">${ICON_X}</button></div>`
+    + (why ? `<p class="dnote">${esc(why)}</p>` : "")
+    + `<p class="eyebrow">Концы</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Узел</th><th>Порт</th><th>Адрес</th><th>Сост.</th></tr></thead><tbody>${row(a, ia)}${row(b, ib)}</tbody></table></div>`
+    + (net || area ? `<p class="eyebrow">Сеть</p><div class="tblwrap"><table class="tbl"><tbody>${net ? `<tr><td>Подсеть</td><td class="m">${esc(net)}</td></tr>` : ""}${area ? `<tr><td>OSPF area</td><td class="m">${esc(area)}</td></tr>` : ""}</tbody></table></div>` : "")
+    + (filters.length ? `<p class="eyebrow">Фильтры на линке</p><p class="dnote" style="margin-top:0">${filters.map(esc).join("<br>")}</p>` : "")
+    + `<div class="dacts">${btns}<button class="btn" type="button" data-susp>${l.suspend ? "Возобновить" : "Приостановить"}</button></div>`;
+  d.dataset.link = l.id;
+  d.hidden = false;
+  d.querySelector("[data-close]").onclick = hideDetails;
+  d.querySelector("[data-susp]").onclick = () => setSuspend(l, !l.suspend);
+  d.querySelectorAll("[data-con]").forEach(btn => btn.onclick = () => { hideDetails(); openConsole(byId.get(btn.dataset.con)); });
+}
+function hideDetails(){ $("details").hidden = true; delete $("details").dataset.link; selectLink(null); }
+
+/* ---------------- device simulators (demo only: the plugin talks to the console gateway) ---------------- */
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const p2 = n => String(n).padStart(2, "0");
+function ts(){ const d = new Date(); return `*${MON[d.getMonth()]} ${String(d.getDate()).padStart(2, " ")} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}: `; }
+const longIf = s => s.replace(/^Gi(?=\d)/, "GigabitEthernet").replace(/^Lo(?=\d)/, "Loopback").replace(/^e(?=\d)/, "Ethernet");
+function normIf(s){
+  return s.replace(/\s+/g, "").replace(/^g(i(g(abit(ethernet)?)?)?)?(?=\d)/i, "Gi").replace(/^lo(op(back)?)?(?=\d)/i, "Lo").replace(/^e(th(ernet)?)?(?=\d)/i, "e");
+}
+const ip2n = s => s.split(".").reduce((a, o) => a * 256 + (+o), 0) >>> 0;
+const n2ip = n => [24, 16, 8, 0].map(b => (n >>> b) & 255).join(".");
+const maskOf = len => len === 0 ? 0 : (0xFFFFFFFF << (32 - len)) >>> 0;
+const isIp = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split(".").every(o => +o <= 255);
+function allAddrs(){
+  const out = [];
+  for (const n of nodes) for (const i of (n.facts && n.facts.interfaces) || []) for (const a of i.ipv4 || []) {
+    const [ip, len] = a.split("/"); out.push({ n, i, ip, len: +len });
+  }
+  return out;
+}
+function reachable(from, ip){
+  const hit = allAddrs().find(a => a.ip === ip);
+  if (!hit) return false;
+  if (hit.n.status !== "started" || hit.i.oper === "down") return false;
+  return from.status === "started";
+}
+const IOS_CMDS = [
+  { m: ["user", "priv"], p: "enable", f(){ this.mode = "priv"; } },
+  { m: ["priv"], p: "disable", f(){ this.mode = "user"; } },
+  { m: ["user", "priv"], p: "show ip interface brief", f(){ return this.ipIntBrief(); } },
+  { m: ["user", "priv"], p: "show ip ospf neighbor", f(){ return this.ospfNbr(); } },
+  { m: ["user", "priv"], p: "show ip route", f(){ return this.route(); } },
+  { m: ["user", "priv"], p: "show vlan brief", f(){ return this.vlans(); } },
+  { m: ["user", "priv"], p: "show version", f(){ return `Cisco IOS Software, ${this.n.type === "iou" ? "Linux Software (I86BI_LINUXL2-ADVENTERPRISEK9-M)" : "IOSv Software (VIOS-ADVENTERPRISEK9-M)"}, Version 15.6(2)T\n${this.host} uptime is 2 hours, 14 minutes\nSystem image file is "flash0:/vios-adventerprisek9-m"`; } },
+  { m: ["priv"], p: "show running-config", f(){ return this.runCfg(); } },
+  { m: ["user", "priv"], p: "ping *", f(a){ this.ping(a[0]); return Sim.PENDING; } },
+  { m: ["priv"], p: "configure terminal", f(){ this.mode = "conf"; return "Enter configuration commands, one per line.  End with CNTL/Z."; } },
+  { m: ["priv"], p: "write memory", f(){ return "Building configuration...\n[OK]"; } },
+  { m: ["priv"], p: "reload", f(){ this.reload(); return Sim.PENDING; } },
+  { m: ["conf", "if", "router"], p: "end", f(){ this.mode = "priv"; this.log("%SYS-5-CONFIG_I: Configured from console by console", true); } },
+  { m: ["conf"], p: "hostname *", f(a){ this.host = a[0]; } },
+  { m: ["conf", "if", "router"], p: "interface *", f(a){ const i = this.findIf(a.join("")); if (!i) return "% Invalid input detected at '^' marker."; this.iface = i; this.mode = "if"; } },
+  { m: ["if"], p: "shutdown", f(){ return this.setIf(false); } },
+  { m: ["if"], p: "no shutdown", f(){ return this.setIf(true); } },
+  { m: ["if"], p: "ip address * *", f(){} },
+  { m: ["conf", "if"], p: "router ospf *", f(){ this.mode = "router"; } },
+  { m: ["router"], p: "network * * area *", f(){} },
+  { m: ["router"], p: "router-id *", f(){} },
+  { m: ["user", "priv", "conf", "if", "router"], p: "exit", f(){ this.mode = { if: "conf", router: "conf", conf: "priv", priv: "user", user: "user" }[this.mode]; } }
+];
+class Sim {
+  constructor(n, write){
+    this.n = n; this.w = write; this.host = n.name;
+    this.kind = n.type === "vpcs" ? "vpcs" : (/router|switch/.test(n.symbol) || n.type === "iou") ? "ios" : "linux";
+    this.mode = "user"; this.line = ""; this.hist = []; this.hpos = 0; this.busy = false; this.on = false; this.iface = null; this.timers = [];
+  }
+  prompt(){
+    if (this.kind === "vpcs") return this.host + "> ";
+    if (this.kind === "linux") return `student@${this.host.toLowerCase()}:~$ `;
+    return this.host + { user: ">", priv: "#", conf: "(config)#", if: "(config-if)#", router: "(config-router)#" }[this.mode];
+  }
+  later(fn, ms){ const t = setTimeout(() => { this.timers = this.timers.filter(x => x !== t); fn(); }, ms); this.timers.push(t); }
+  clearTimers(){ this.timers.forEach(clearTimeout); this.timers = []; }
+  boot(again){
+    this.clearTimers(); this.on = true; this.busy = false; this.mode = "user"; this.line = "";
+    this.w(`${again ? "\r\n" : ""}\x1b[2m-- консоль ${this.n.name} · демо-устройство в браузере --\x1b[0m\r\n\r\n${this.prompt()}`);
+    if (this.kind === "ios") this.later(() => this.syslog(), 7000 + Math.random() * 9000);
+  }
+  halt(msg){ this.clearTimers(); this.on = false; this.busy = false; this.w(`\r\n\x1b[33m-- ${msg} --\x1b[0m\r\n`); }
+  reload(){
+    if (!this.on) return;
+    this.clearTimers(); this.busy = true;
+    const lines = ["Proceed with reload? [confirm]", "", "*** System restarted ***", "System Bootstrap, Version 15.6(3)M, RELEASE SOFTWARE", "", "Initializing memory...  done",
+      "Cisco IOS Software, Version 15.6(2)T", "", "Press RETURN to get started!"];
+    this.w("\r\n");
+    lines.forEach((l, i) => this.later(() => this.w(l + "\r\n"), 250 + i * 380));
+    this.later(() => { this.busy = false; this.mode = "user"; this.w("\r\n" + this.prompt()); this.later(() => this.syslog(), 9000); }, 250 + lines.length * 380 + 300);
+  }
+  log(msg, quietPrompt){
+    const head = this.kind === "ios" ? ts() : "";
+    if (quietPrompt) { this.w(head + msg + "\r\n"); return; }
+    this.w("\r\n" + head + msg + "\r\n" + this.prompt() + this.line);
+  }
+  syslog(){
+    if (!this.on) return;
+    if (!this.busy) {
+      const adj = (this.n.facts && this.n.facts.adjacencies) || [];
+      const pick = [
+        ...adj.map(a => `%OSPF-5-ADJCHG: Process 1, Nbr ${a.peer_router_id} on ${longIf(a.iface)} from LOADING to FULL, Loading Done`),
+        "%SYS-5-CONFIG_I: Configured from console by vty0",
+        "%LINEPROTO-5-UPDOWN: Line protocol on Interface Loopback0, changed state to up",
+        "%SEC_LOGIN-5-LOGIN_SUCCESS: Login Success [user: admin] [Source: 10.0.0.2]"
+      ];
+      this.log(pick[Math.floor(Math.random() * pick.length)]);
+    }
+    this.later(() => this.syslog(), 26000 + Math.random() * 30000);
+  }
+  input(d){
+    if (!this.on) return;
+    if (this.busy) { if (d.includes("\x03") || d.includes("\x1e")) this.abort(); return; }
+    if (d === "\x1b[A" || d === "\x1b[B") {
+      if (!this.hist.length) return;
+      this.hpos = clamp(this.hpos + (d === "\x1b[A" ? -1 : 1), 0, this.hist.length);
+      this.setLine(this.hist[this.hpos] || ""); return;
+    }
+    if (d.startsWith("\x1b")) return;
+    for (const ch of d) {
+      if (ch === "\r") this.enter();
+      else if (ch === "\x7f" || ch === "\b") { if (this.line) { this.line = this.line.slice(0, -1); this.w("\b \b"); } }
+      else if (ch === "\x03") { this.line = ""; this.w("^C\r\n" + this.prompt()); }
+      else if (ch === "\x15") this.setLine("");
+      else if (ch === "\x1a" && this.kind === "ios") { this.line = ""; if (["conf", "if", "router"].includes(this.mode)) this.mode = "priv"; this.w("^Z\r\n" + this.prompt()); }
+      else if (ch === "\t") this.complete();
+      else if (ch === "?" && this.kind === "ios") this.help();
+      else if (ch >= " ") { this.line += ch; this.w(ch); }
+    }
+  }
+  setLine(s){ this.line = s; this.w("\r\x1b[K" + this.prompt() + s); }
+  enter(){
+    const cmd = this.line.trim(); this.line = ""; this.w("\r\n");
+    if (cmd) { this.hist.push(cmd); if (this.hist.length > 50) this.hist.shift(); }
+    this.hpos = this.hist.length;
+    const out = cmd ? this.exec(cmd) : "";
+    if (out === Sim.PENDING) return;
+    if (out) this.w(out.replace(/\n/g, "\r\n") + "\r\n");
+    this.w(this.prompt());
+  }
+  iosMatch(cmd){
+    const toks = cmd.split(/\s+/), list = IOS_CMDS.filter(c => c.m.includes(this.mode));
+    const hits = [];
+    let best = 0;
+    for (const c of list) {
+      const pw = c.p.split(" "), args = [];
+      let ok = true, j = 0;
+      for (; j < pw.length; j++) {
+        if (j >= toks.length) { ok = "incomplete"; break; }
+        if (pw[j] === "*") { args.push(toks[j]); continue; }
+        if (!pw[j].startsWith(toks[j].toLowerCase())) { ok = false; break; }
+      }
+      best = Math.max(best, j);
+      if (ok === true) { if (toks.length > pw.length && pw[pw.length - 1] === "*") args[args.length - 1] = toks.slice(pw.length - 1).join(" "); else if (toks.length > pw.length) continue; hits.push({ c, args }); }
+      else if (ok === "incomplete") hits.push({ c, incomplete: true });
+    }
+    return { hits, best, toks };
+  }
+  exec(cmd){
+    if (this.kind === "vpcs") return this.vpcs(cmd);
+    if (this.kind === "linux") return this.linux(cmd);
+    const { hits, best, toks } = this.iosMatch(cmd);
+    const full = hits.filter(h => !h.incomplete);
+    if (full.length === 1 || (full.length > 1 && full.every(h => h.c === full[0].c))) return full[0].c.f.call(this, full[0].args) || "";
+    if (full.length > 1) return `% Ambiguous command:  "${cmd}"`;
+    if (hits.length) return "% Incomplete command.";
+    const pos = this.prompt().length + toks.slice(0, best).reduce((s, t) => s + t.length + 1, 0);
+    return " ".repeat(pos) + "^\n% Invalid input detected at '^' marker.";
+  }
+  candidates(){
+    const parts = this.line.split(/\s+/), last = this.line.endsWith(" ") ? "" : parts.pop(), prev = parts.filter(Boolean);
+    const words = new Set();
+    for (const c of IOS_CMDS.filter(x => x.m.includes(this.mode))) {
+      const pw = c.p.split(" ");
+      if (prev.length >= pw.length) continue;
+      if (!prev.every((t, i) => pw[i] === "*" || pw[i].startsWith(t.toLowerCase()))) continue;
+      const w = pw[prev.length];
+      if (w === "*") words.add("WORD"); else if (w.startsWith(last.toLowerCase())) words.add(w);
+    }
+    return { words: Array.from(words), last };
+  }
+  help(){
+    const { words } = this.candidates();
+    this.w("?\r\n" + (words.length ? words.map(w => "  " + w).join("\r\n") : "% Unrecognized command") + "\r\n\r\n" + this.prompt() + this.line);
+  }
+  complete(){
+    if (this.kind !== "ios") return;
+    const { words, last } = this.candidates();
+    const real = words.filter(w => w !== "WORD");
+    if (real.length === 1 && last) { const add = real[0].slice(last.length) + " "; this.line += add; this.w(add); }
+  }
+  abort(){ this.clearTimers(); this.busy = false; this.w("\r\n" + this.prompt()); if (this.kind === "ios") this.later(() => this.syslog(), 20000); }
+  ifs(){ return (this.n.facts && this.n.facts.interfaces) || []; }
+  findIf(s){ const k = normIf(s).toLowerCase(); return this.ifs().find(i => i.name.toLowerCase() === k) || null; }
+  setIf(up){
+    const i = this.iface; if (!i) return "";
+    i.admin = up ? "up" : "down"; i.oper = up ? "up" : "down";
+    const l = links.find(x => x.ends.some(e => e.node === this.n && i.port && e.adapter === i.port.adapter && e.port === i.port.port));
+    if (l) { const o = l.ends.find(e => e.node !== this.n); const oi = ifaceAt(o.node, o.adapter, o.port); if (oi && oi.admin !== "down") oi.oper = up ? "up" : "down"; }
+    renderLinks();
+    const nm = longIf(i.name);
+    this.later(() => this.log(up ? `%LINK-3-UPDOWN: Interface ${nm}, changed state to up` : `%LINK-5-CHANGED: Interface ${nm}, changed state to administratively down`), 400);
+    this.later(() => this.log(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${nm}, changed state to ${up ? "up" : "down"}`), 1300);
+    return "";
+  }
+  ipIntBrief(){
+    const rows = this.ifs().map(i => longIf(i.name).padEnd(27) + ((i.ipv4 && ipOnly(i.ipv4[0])) || "unassigned").padEnd(16) + "YES " + (i.ipv4 ? "NVRAM  " : "unset  ")
+      + (i.admin === "down" ? "administratively down" : (i.oper || "up")).padEnd(22) + (i.oper || "up"));
+    return ["Interface".padEnd(27) + "IP-Address".padEnd(16) + "OK? Method Status".padEnd(29) + "Protocol", ...rows].join("\n");
+  }
+  ospfNbr(){
+    const adj = (this.n.facts && this.n.facts.adjacencies) || [];
+    if (!adj.length) return "";
+    const rows = adj.map((a, k) => {
+      const me = this.ifs().find(i => i.name === a.iface), peer = nodes.find(n => n.facts && n.facts.router_id === a.peer_router_id);
+      let addr = "—";
+      if (me && me.ipv4 && peer) {
+        const [ip, len] = me.ipv4[0].split("/"), net = (ip2n(ip) & maskOf(+len)) >>> 0;
+        const pi = (peer.facts.interfaces || []).find(i => (i.ipv4 || []).some(x => ((ip2n(ipOnly(x)) & maskOf(+len)) >>> 0) === net));
+        if (pi) addr = ipOnly(pi.ipv4[0]);
+      }
+      return a.peer_router_id.padEnd(16) + "1".padEnd(6) + (a.state.toUpperCase() + (k % 2 ? "/BDR" : "/DR")).padEnd(16) + ("00:00:3" + (k + 2)).padEnd(12) + addr.padEnd(16) + longIf(a.iface);
+    });
+    return ["", "Neighbor ID".padEnd(16) + "Pri".padEnd(6) + "State".padEnd(16) + "Dead Time".padEnd(12) + "Address".padEnd(16) + "Interface", ...rows].join("\n");
+  }
+  route(){
+    const mine = this.ifs().filter(i => i.ipv4 && i.oper !== "down");
+    if (!mine.length) return "% IP routing table is empty";
+    const areas = new Set(mine.filter(i => i.ospf).map(i => i.ospf.area));
+    const out = ["Codes: L - local, C - connected, O - OSPF, IA - OSPF inter area", "", "Gateway of last resort is not set", ""];
+    const seen = new Set();
+    for (const i of mine) {
+      const [ip, len] = i.ipv4[0].split("/"), net = n2ip((ip2n(ip) & maskOf(+len)) >>> 0);
+      seen.add(net + "/" + len);
+      if (+len < 32) out.push(`C        ${net}/${len} is directly connected, ${longIf(i.name)}`);
+      out.push(`L        ${ip}/32 is directly connected, ${longIf(i.name)}`);
+    }
+    const adj = (this.n.facts && this.n.facts.adjacencies) || [];
+    if (adj.length) {
+      const nh = adj[0];
+      for (const n of nodes) {
+        if (n === this.n || !n.facts || !n.facts.router_id) continue;
+        for (const i of n.facts.interfaces || []) {
+          if (!i.ipv4 || !i.ospf || i.oper === "down") continue;
+          const [ip, len] = i.ipv4[0].split("/"), key = n2ip((ip2n(ip) & maskOf(+len)) >>> 0) + "/" + len;
+          if (seen.has(key)) continue; seen.add(key);
+          out.push(`${areas.has(i.ospf.area) ? "O   " : "O IA"}     ${key} [110/2] via ${nh.peer_router_id}, 00:41:12, ${longIf(nh.iface)}`);
+        }
+      }
+    }
+    return out.join("\n");
+  }
+  vlans(){
+    const v = this.n.facts && this.n.facts.vlans;
+    if (!v) return "% Invalid input detected at '^' marker.";
+    const rows = v.map(x => {
+      const ports = this.ifs().filter(i => i.switchport && i.switchport.mode === "access" && i.switchport.vlan === x.id).map(i => longIf(i.name).replace("Ethernet", "Et"));
+      return String(x.id).padEnd(5) + x.name.padEnd(33) + "active    " + ports.join(", ");
+    });
+    return ["", "VLAN Name                             Status    Ports", "---- -------------------------------- --------- -------------------------------", ...rows].join("\n");
+  }
+  runCfg(){
+    const out = ["Building configuration...", "", "Current configuration : 1482 bytes", "!", `hostname ${this.host}`, "!"];
+    for (const i of this.ifs()) {
+      out.push(`interface ${longIf(i.name)}`);
+      if (i.ipv4) { const [ip, len] = i.ipv4[0].split("/"); out.push(` ip address ${ip} ${n2ip(maskOf(+len))}`); } else if (!i.switchport) out.push(" no ip address");
+      if (i.switchport) out.push(i.switchport.mode === "access" ? ` switchport access vlan ${i.switchport.vlan}\n switchport mode access` : " switchport trunk encapsulation dot1q\n switchport mode trunk");
+      if (i.admin === "down") out.push(" shutdown");
+      out.push("!");
+    }
+    const f = this.n.facts || {};
+    if (f.router_id) {
+      out.push("router ospf 1", ` router-id ${f.router_id}`);
+      for (const i of this.ifs()) if (i.ospf && i.ipv4) { const [ip] = i.ipv4[0].split("/"); out.push(` network ${ip} 0.0.0.0 area ${i.ospf.area}`); }
+      out.push("!");
+    }
+    out.push("end");
+    return out.join("\n");
+  }
+  ping(ip){
+    if (!isIp(ip)) { this.w("% Unrecognized host or address, or protocol not running.\r\n\r\n" + this.prompt()); return; }
+    const ok = reachable(this.n, ip);
+    this.busy = true;
+    this.w(`Type escape sequence to abort.\r\nSending 5, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:\r\n`);
+    for (let k = 0; k < 5; k++) this.later(() => this.w(ok ? "!" : "."), ok ? 260 * (k + 1) : 900 * (k + 1));
+    this.later(() => { this.busy = false; this.w(`\r\nSuccess rate is ${ok ? "100 percent (5/5), round-trip min/avg/max = 1/2/4 ms" : "0 percent (0/5)"}\r\n${this.prompt()}`); }, ok ? 1500 : 4800);
+  }
+  vpcs(cmd){
+    const [c, ...a] = cmd.split(/\s+/), i = this.ifs()[0] || {};
+    if (c === "?" || c === "help") return "ping       Ping the network host\nshow       Print the information of VPCs\nip         Configure the current VPC's IP settings\nclear      Clear the screen";
+    if (c === "show" || c === "sh") return `\nNAME        : ${this.host}[1]\nIP/MASK     : ${(i.ipv4 && i.ipv4[0]) || "0.0.0.0/0"}\nGATEWAY     : ${i.gateway || "0.0.0.0"}\nDNS         : \nMAC         : 00:50:79:66:68:0${this.host.slice(-1)}\nLPORT       : 20000\nRHOST:PORT  : 127.0.0.1:30000\nMTU         : 1500`;
+    if (c === "ip" && a[0]) { if (i.ipv4) i.ipv4 = [a[0].includes("/") ? a[0] : a[0] + "/24"]; if (a[1]) i.gateway = a[1]; renderLinks(); return `Checking for duplicate address...\n${this.host} : ${a[0]} ${a[1] ? "gateway " + a[1] : ""}`; }
+    if (c === "clear") { this.w("\x1b[2J\x1b[H"); return ""; }
+    if (c === "ping" && a[0]) {
+      const ip = a[0], ok = isIp(ip) && reachable(this.n, ip);
+      this.busy = true;
+      for (let k = 1; k <= 5; k++) this.later(() => this.w(ok ? `84 bytes from ${ip} icmp_seq=${k} ttl=${62 + (k % 2)} time=${(1.2 + Math.random() * 3).toFixed(3)} ms\r\n` : `${ip} icmp_seq=${k} timeout\r\n`), (ok ? 320 : 1000) * k);
+      this.later(() => { this.busy = false; this.w(this.prompt()); }, (ok ? 320 : 1000) * 5 + 150);
+      return Sim.PENDING;
+    }
+    return `Bad command: "${cmd}". Use ? for help.`;
+  }
+  linux(cmd){
+    const [c, ...a] = cmd.split(/\s+/);
+    const addrs = this.ifs().filter(i => i.ipv4);
+    if (c === "help") return "Доступно в демо: ip a, ping, hostname, whoami, uname -a, ls, clear";
+    if (c === "hostname") return this.host.toLowerCase();
+    if (c === "whoami") return "student";
+    if (c === "uname") return `Linux ${this.host.toLowerCase()} 6.1.0-18-amd64 #1 SMP Debian 6.1.76-1 x86_64 GNU/Linux`;
+    if (c === "ls") return "notes.txt  www";
+    if (c === "clear") { this.w("\x1b[2J\x1b[H"); return ""; }
+    if (c === "ip" && /^a(ddr)?$/.test(a[0] || "")) return ["1: lo: <LOOPBACK,UP> mtu 65536\n    inet 127.0.0.1/8 scope host lo", ...addrs.map((i, k) => `${k + 2}: ens${k + 3}: <BROADCAST,UP> mtu 1500\n    inet ${i.ipv4[0]} scope global ens${k + 3}`)].join("\n");
+    if (c === "ping" && a.length) {
+      const ip = a[a.length - 1], ok = isIp(ip) && reachable(this.n, ip);
+      this.busy = true; this.w(`PING ${ip} (${ip}) 56(84) bytes of data.\r\n`);
+      for (let k = 1; k <= 4; k++) this.later(() => { if (ok) this.w(`64 bytes from ${ip}: icmp_seq=${k} ttl=63 time=${(0.8 + Math.random() * 2).toFixed(2)} ms\r\n`); }, 700 * k);
+      this.later(() => { this.busy = false; this.w(`\r\n--- ${ip} ping statistics ---\r\n4 packets transmitted, ${ok ? 4 : 0} received, ${ok ? 0 : 100}% packet loss\r\n${this.prompt()}`); }, 3000);
+      return Sim.PENDING;
+    }
+    return `bash: ${c}: command not found`;
+  }
+}
+Sim.PENDING = {};
+
+/* ---------------- consoles ---------------- */
+const PRE = "\x15\r\x1aenable\r";
+const SNIPS = [
+  { l: "show ip int brief", s: PRE + "show ip interface brief\r", kind: "ios" },
+  { l: "Поднять Gi0/1", s: PRE + "configure terminal\rinterface GigabitEthernet0/1\rip address 10.0.12.1 255.255.255.252\rno shutdown\rend\r", kind: "ios", only: "R1" },
+  { l: "OSPF area 0", s: PRE + "configure terminal\rrouter ospf 1\rrouter-id 1.1.1.1\rnetwork 10.0.12.0 0.0.0.3 area 0\rnetwork 1.1.1.1 0.0.0.0 area 0\rend\r", kind: "ios", only: "R1" },
+  { l: "show ip ospf neighbor", s: PRE + "show ip ospf neighbor\r", kind: "ios" },
+  { l: "ping 2.2.2.2", s: PRE + "ping 2.2.2.2\r", kind: "ios", only: "R1" },
+  { l: "ping 1.1.1.1", s: PRE + "ping 1.1.1.1\r", kind: "ios", only: "R2" },
+  { l: "show run", s: PRE + "show running-config\r", kind: "ios" },
+  { l: "ip addr", s: "\x15ip addr\r", kind: "linux" },
+  { l: "hostname", s: "\x15hostname\r", kind: "linux" },
+  { l: "uname -a", s: "\x15uname -a\r", kind: "linux" },
+  { l: "show", s: "\x15show\r", kind: "vpcs" },
+  { l: "help", s: "\x15help\r", kind: "vpcs" }
+];
+const cons = new Map();
+let active = null, mode = store.get("mode", "panel"), diving = false, preDive = null, zTop = 10, fontsReady = null;
+function termTheme(){
+  const v = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  return { background: v("--term-bg"), foreground: v("--term-fg"), cursor: v("--accent"), selectionBackground: "#3A5A78" };
+}
+class Con {
+  constructor(n){
+    this.n = n; this.raw = ""; this.lines = [""]; this.unread = false; this.term = null; this.fit = null; this.min = false;
+    this.host = hel("div", "termhost"); this.win = null; this.wpos = null; this.cardDue = false;
+    this.viewport = hel("div", "termview", this.host);
+    this.sim = new Sim(n, s => this.out(s));
+    this.buildSnippets();
+    this.ro = new ResizeObserver(() => this.refit()); this.ro.observe(this.host);
+  }
+  buildSnippets(){
+    const strip = hel("div", "snips", this.host);
+    strip.setAttribute("role", "group"); strip.setAttribute("aria-label", `Сниппеты для ${this.n.name}`);
+    hel("span", "lbl", strip).textContent = "Сниппеты";
+    SNIPS.filter(sn => sn.kind === this.sim.kind && (!sn.only || sn.only === this.n.name)).forEach(sn => {
+      const b = hel("button", "snip", strip); b.type = "button"; b.textContent = sn.l;
+      b.title = sn.s.replace(PRE, "").replace(/\x15/g, "").replace(/\r/g, " ⏎ ").trim();
+      b.setAttribute("aria-label", `Выполнить: ${sn.l}`);
+      b.addEventListener("pointerdown", e => e.preventDefault());
+      b.addEventListener("click", () => {
+        if (!this.sim.on || this.n.status !== "started") { toast(`${this.n.name}: устройство не запущено`); return; }
+        if (this.sim.busy) { toast("Дождитесь завершения команды или прервите её через Ctrl+C"); return; }
+        active = this.n.id; this.unread = false; updateBadge(this.n); markFocus();
+        this.send(sn.s); this.focus();
+      });
+    });
+  }
+  send(d){ this.sim.input(d); this.activity("in"); }
+  out(s){
+    this.raw += s; if (this.raw.length > 200000) this.raw = this.raw.slice(-150000);
+    if (this.term) this.term.write(s);
+    const clean = s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+    for (const tok of clean.split(/(\r\n|\n|\r|\x08)/)) {
+      if (tok === "\r\n" || tok === "\n") this.lines.push("");
+      else if (tok === "\r") this.lines[this.lines.length - 1] = "";
+      else if (tok === "\x08") this.lines[this.lines.length - 1] = this.lines[this.lines.length - 1].slice(0, -1);
+      else if (tok) this.lines[this.lines.length - 1] += tok;
+    }
+    if (this.lines.length > 400) this.lines.splice(0, this.lines.length - 300);
+    if (s.length > 3 || /\n/.test(s)) this.activity("out");
+    if (!this.isVisible() && /\S/.test(clean)) { this.unread = true; updateBadge(this.n); renderTabsAndChips(); }
+    this.renderCard();
+  }
+  activity(dir){
+    if (mobile || mode !== "windows" || !this.win || this.min) return;
+    const now = performance.now();
+    if (dir === "in") { this.flowIn = now + 1400; if (now - (this.lastPing || 0) > 150) { this.lastPing = now; pingNode(this.n, "in"); } }
+    else { this.flowOut = now + 1100; if (now - (this.lastPong || 0) > 400) { this.lastPong = now; pingNode(this.n, "out"); } }
+    drawLinks();
+    clearTimeout(this.flowT); this.flowT = setTimeout(drawLinks, 1500);
+  }
+  isVisible(){
+    if (mobile) return diving && active === this.n.id;
+    if (mode === "grid") return true;
+    if (mode === "windows") return !this.min;
+    return active === this.n.id;
+  }
+  ensureTerm(){
+    if (this.term) return;
+    if (!window.Terminal || !window.FitAddon) { this.viewport.innerHTML = '<p class="tfail">Не загрузилась xterm.js с cdn.jsdelivr.net. Превью консоли на схеме работает, ввод — нет.</p>'; return; }
+    this.term = new Terminal({ fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: mobile ? 13 : 13.5, lineHeight: 1.15,
+      cursorBlink: true, scrollback: mobile ? 1000 : 3000, theme: termTheme() });
+    this.fit = new FitAddon.FitAddon(); this.term.loadAddon(this.fit);
+    this.term.open(this.viewport);
+    this.term.write(this.raw);
+    this.term.onData(d => this.send(d));
+    this.term.textarea && this.term.textarea.addEventListener("focus", () => { if (active !== this.n.id) { active = this.n.id; markFocus(); } });
+  }
+  attach(container){ if (this.host.parentNode !== container) container.appendChild(this.host); this.ensureTerm(); this.refit(); }
+  refit(){
+    if (!this.term || !this.host.isConnected) return;
+    cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(() => { if (this.viewport.offsetWidth > 40 && this.viewport.offsetHeight > 30) { try { this.fit.fit(); } catch (e) { /* hidden */ } } });
+  }
+  focus(){ this.unread = false; updateBadge(this.n); if (this.term && !(mobile && matchMedia("(pointer: coarse)").matches)) this.term.focus(); }
+  renderCard(){
+    if (this.isVisible()) { if (this.card) { this.card.remove(); this.card = null; } this.cardDue = false; return; }
+    if (lod < 2) { this.cardDue = true; return; }
+    if (this.cardT) return;
+    this.cardT = setTimeout(() => { this.cardT = null; this.drawCard(); }, 120);
+  }
+  drawCard(){
+    if (this.card) this.card.remove();
+    this.card = null;
+    if (this.isVisible() || !cons.has(this.n.id)) return;
+    this.cardDue = false;
+    const n = this.n, g = el("g", { class: "card", "data-id": n.id }, L.cards);
+    this.card = g;
+    const tail = this.lines.slice(-14);
+    while (tail.length && !tail[0].trim()) tail.shift();
+    const variants = [{ cls: "l2x", n: 5, fs: 6.4, w: 158 }, { cls: "l3", n: 12, fs: 4.3, w: 150 }];
+    for (const v of variants) {
+      const sub = el("g", { class: v.cls, transform: `translate(${n.cx + 36} ${n.cy - 30})` }, g);
+      const rows = tail.slice(-v.n), lh = v.fs * 1.32, max = Math.floor(v.w / (v.fs * 0.6)) - 1, hh = v.fs * 1.9;
+      el("path", { d: `M-4 ${hh / 2} L0 ${hh / 2 - 3} L0 ${hh / 2 + 3} Z`, class: "cpt" }, sub);
+      el("rect", { x: 0, y: 0, width: v.w, height: hh + rows.length * lh + v.fs * 0.9, rx: 3.5, class: "cbg" }, sub);
+      el("text", { x: v.fs * 0.8, y: v.fs * 1.35, class: "chd", "font-size": v.fs * 0.86 }, sub).textContent = `${n.name} · консоль` + (this.unread ? " · новое" : "");
+      rows.forEach((r, i) => {
+        const t = el("text", { x: v.fs * 0.8, y: hh + (i + 0.85) * lh, class: "cln", "font-size": v.fs }, sub);
+        t.textContent = r.length > max ? r.slice(0, max - 1) + "…" : r;
+      });
+    }
+  }
+  dispose(){ this.ro.disconnect(); this.sim.clearTimers(); this.sim.on = false; if (this.term) this.term.dispose(); this.host.remove(); if (this.card) this.card.remove(); if (this.win) this.win.remove(); }
+}
+function updateBadge(n){
+  if (!n.g) return;
+  const c = cons.get(n.id);
+  n.g.classList.toggle("has-con", !!c);
+  n.g.classList.toggle("unread", !!(c && c.unread));
+  n.g.classList.toggle("minimized", !!(c && c.min));
+}
+async function openConsole(n){
+  if (!n) return;
+  if (n.console !== "telnet") { toast(n.console === "none" ? `У ${n.name} нет консоли` : "VNC-консоль прототип не показывает"); return; }
+  if (n.status !== "started") { toast(`${n.name} ${STATUS[n.status]}. Запустите его из колеса действий`); return; }
+  if (fontsReady) await fontsReady;
+  let c = cons.get(n.id);
+  if (!c) { c = new Con(n); cons.set(n.id, c); c.sim.boot(); }
+  active = n.id; c.unread = false; updateBadge(n); hideDetails(); select(null);
+  if (mobile) { enterDive(c); return; }
+  if (mode === "windows" && c.min) { layout(); restoreWin(c); return; }
+  layout();
+  c.focus();
+}
+function closeConsole(n){
+  const c = cons.get(n.id); if (!c) return;
+  c.dispose(); cons.delete(n.id); updateBadge(n);
+  if (active === n.id) active = cons.size ? Array.from(cons.keys()).pop() : null;
+  if (diving) { if (active) switchDive(cons.get(active)); else exitDive(true); return; }
+  layout();
+}
+function markFocus(){
+  document.querySelectorAll(".tile,.win").forEach(t => t.classList.toggle("focus", t.dataset.id === active));
+  const c = cons.get(active); if (c && c.unread) { c.unread = false; updateBadge(c.n); }
+}
+
+/* ---------------- desktop arrangements ---------------- */
+function layout(){
+  document.body.classList.toggle("mob", mobile);
+  stage.dataset.mode = mobile ? "mobile" : mode;
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  $("grid").textContent = ""; stage.style.gridTemplateColumns = ""; stage.style.gridTemplateRows = "";
+  if (mobile) { $("wins").textContent = ""; cons.forEach(c => { c.win = null; }); if (diving && cons.get(active)) cons.get(active).attach($("diveBody")); }
+  else if (mode === "panel") renderPanel();
+  else if (mode === "grid") renderGrid();
+  if (!mobile && mode === "windows") renderWindows(); else if (!mobile) { $("wins").textContent = ""; cons.forEach(c => { c.win = null; }); }
+  setHint();
+  requestAnimationFrame(() => { cons.forEach(c => c.refit()); positionOverlays(); refreshCards(); });
+}
+function headHtml(c, buttons){
+  return `<span class="dotst ${esc(c.n.status)}"></span><span class="nm">${esc(c.n.name)}<small>${esc(CAT[c.n.cat].toLowerCase())}</small></span>${c.unread ? '<span class="unr" title="Новый вывод"></span>' : ""}${buttons}`;
+}
+function renderPanel(){
+  const tabs = $("tabs"), body = $("dockBody");
+  tabs.textContent = "";
+  if (!cons.size) {
+    body.innerHTML = '<div class="empty"><p><b>Консолей пока нет.</b><br>Двойной клик по узлу или правый клик → «Консоль».<br>Приближайте схему — на уровне «Адреса» появится превью вывода.</p></div>';
+    return;
+  }
+  const em = body.querySelector(".empty"); if (em) em.remove();
+  if (!cons.has(active)) active = Array.from(cons.keys())[0];
+  cons.forEach(c => {
+    const t = hel("button", "tab", tabs); t.type = "button"; t.setAttribute("role", "tab"); t.setAttribute("aria-selected", String(c.n.id === active));
+    t.innerHTML = `<span class="dotst ${esc(c.n.status)}"></span>${esc(c.n.name)}${c.unread ? '<span class="unr"></span>' : ""}<span class="x" data-x title="Закрыть">${ICON_X}</span>`;
+    t.onclick = ev => { if (ev.target.closest("[data-x]")) { closeConsole(c.n); return; } active = c.n.id; c.unread = false; updateBadge(c.n); renderPanel(); c.focus(); };
+  });
+  Array.from(body.children).forEach(ch => { if (ch !== cons.get(active).host) ch.remove(); });
+  cons.get(active).attach(body);
+  refreshCards();
+}
+function renderGrid(){
+  const n = cons.size + 1, cols = n <= 2 ? 2 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 9 ? 3 : 4;
+  if (cons.size === 0) { stage.style.gridTemplateColumns = "1fr"; toast("Откройте консоли — они разложатся сеткой рядом со схемой"); return; }
+  stage.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  stage.style.gridTemplateRows = `repeat(${Math.ceil(n / cols)}, minmax(0, 1fr))`;
+  cons.forEach(c => {
+    const t = hel("div", "tile", $("grid")); t.dataset.id = c.n.id;
+    const hd = hel("div", "thead", t);
+    hd.innerHTML = headHtml(c, `<button type="button" data-max title="Развернуть (двойной клик по заголовку)"><svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button><button type="button" data-x title="Закрыть">${ICON_X}</button>`);
+    const b = hel("div", "tbody", t);
+    hd.addEventListener("dblclick", () => t.classList.toggle("max"));
+    hd.querySelector("[data-max]").onclick = () => { t.classList.toggle("max"); c.refit(); };
+    hd.querySelector("[data-x]").onclick = () => closeConsole(c.n);
+    t.addEventListener("pointerdown", () => { active = c.n.id; markFocus(); });
+    c.attach(b);
+  });
+  markFocus();
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !mobile && mode === "grid") { const m = document.querySelector(".tile.max"); if (m) { m.classList.remove("max"); cons.forEach(c => c.refit()); } }
+});
+function renderWindows(){
+  const layer = $("wins"), r = wrap.getBoundingClientRect();
+  let i = 0;
+  cons.forEach(c => {
+    if (!c.win) {
+      const w = hel("div", "win", layer); w.dataset.id = c.n.id; c.win = w;
+      if (!c.wpos) {
+        const W = Math.min(480, r.width * 0.4), H = Math.min(290, r.height * 0.42);
+        c.wpos = { x: Math.max(8, r.width - W - 16 - i * 26), y: clamp(16 + i * 30, 8, Math.max(8, r.height - H - 60)), w: W, h: H };
+      }
+      Object.assign(w.style, { left: c.wpos.x + "px", top: c.wpos.y + "px", width: c.wpos.w + "px", height: c.wpos.h + "px", zIndex: ++zTop });
+      const hd = hel("div", "thead", w);
+      const b = hel("div", "tbody", w);
+      w.addEventListener("pointerdown", () => { w.style.zIndex = ++zTop; active = c.n.id; markFocus(); });
+      dragWin(c, hd);
+      new ResizeObserver(() => { if (c.win === w && w.offsetWidth) { c.wpos.w = w.offsetWidth; c.wpos.h = w.offsetHeight; drawLinks(); } }).observe(w);
+      w.addEventListener("pointerenter", () => showLink(c));
+      w.addEventListener("pointerleave", () => showLink(null));
+      c.attach(b);
+    }
+    c.win.querySelector(".thead").innerHTML = headHtml(c, `<button type="button" data-min title="Свернуть в узел"><svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg></button><button type="button" data-x title="Закрыть">${ICON_X}</button>`);
+    c.win.querySelector("[data-min]").onclick = ev => { ev.stopPropagation(); minimizeWin(c); };
+    c.win.querySelector("[data-x]").onclick = ev => { ev.stopPropagation(); closeConsole(c.n); };
+    c.win.hidden = c.min;
+    i++;
+  });
+  layer.querySelectorAll(".win").forEach(w => { if (!cons.has(w.dataset.id)) w.remove(); });
+  markFocus();
+}
+function dragWin(c, hd){
+  let s = null;
+  hd.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    s = { x: e.clientX, y: e.clientY, ox: c.wpos.x, oy: c.wpos.y }; hd.setPointerCapture(e.pointerId); showLink(c);
+  });
+  hd.addEventListener("pointermove", e => {
+    if (!s) return;
+    const r = wrap.getBoundingClientRect();
+    c.wpos.x = clamp(s.ox + e.clientX - s.x, -c.wpos.w + 80, r.width - 80);
+    c.wpos.y = clamp(s.oy + e.clientY - s.y, 0, r.height - 36);
+    c.win.style.left = c.wpos.x + "px"; c.win.style.top = c.wpos.y + "px"; showLink(c);
+  });
+  const end = () => { if (s) { s = null; showLink(null); } };
+  hd.addEventListener("pointerup", end); hd.addEventListener("pointercancel", end);
+}
+let linked = null;
+const flows = new Map();
+function showLink(c){ linked = c; drawLinks(); }
+function winAnchor(c, p){
+  const { x, y, w, h } = c.wpos;
+  const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
+  return inside ? { x: x + w / 2, y: y + 16 } : { x: clamp(p.x, x, x + w), y: clamp(p.y, y, y + h) };
+}
+/* dashed line from a console window to its node; while the student types, dots run to the node, the answer runs back */
+function drawLinks(){
+  const ov = $("ov"), now = performance.now(), want = new Set();
+  cons.forEach(c => {
+    if (mobile || mode !== "windows" || !c.win || c.min || c.win.hidden) return;
+    const fin = (c.flowIn || 0) > now, fout = (c.flowOut || 0) > now;
+    if (linked !== c && !fin && !fout) return;
+    want.add(c);
+    let f = flows.get(c);
+    if (!f) {
+      const g = el("g", { class: "flow" }, ov);
+      f = { g, base: el("line", { class: "fl-base" }, g), fin: el("line", { class: "fl-in" }, g), fout: el("line", { class: "fl-out" }, g), dot: el("circle", { r: 4, class: "fl-node" }, g) };
+      flows.set(c, f);
+    }
+    const p = toScreen(c.n.cx, c.n.cy), w = winAnchor(c, p);
+    for (const ln of [f.base, f.fin, f.fout]) { ln.setAttribute("x1", w.x); ln.setAttribute("y1", w.y); ln.setAttribute("x2", p.x); ln.setAttribute("y2", p.y); }
+    f.dot.setAttribute("cx", p.x); f.dot.setAttribute("cy", p.y);
+    f.fin.classList.toggle("on", fin); f.fout.classList.toggle("on", fout);
+    f.g.classList.toggle("hover", linked === c);
+  });
+  flows.forEach((f, c) => { if (!want.has(c)) { f.g.remove(); flows.delete(c); } });
+}
+function pingNode(n, dir){
+  const p = toScreen(n.cx, n.cy), c = el("circle", { cx: p.x, cy: p.y, r: 24, class: "ping " + dir }, $("ov"));
+  setTimeout(() => c.remove(), 650);
+}
+function refreshCards(){ cons.forEach(c => c.renderCard()); }
+function minimizeWin(c){
+  const w = c.win; if (!w) return;
+  const p = toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
+  w.classList.add("anim");
+  w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`; w.style.opacity = "0";
+  showLink(null);
+  setTimeout(() => { w.hidden = true; w.classList.remove("anim"); c.min = true; updateBadge(c.n); c.renderCard(); drawLinks(); }, reduced ? 0 : 270);
+}
+function restoreWin(c){
+  const w = c.win; if (!w) return;
+  c.min = false; updateBadge(c.n); c.renderCard();
+  const p = toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
+  w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`; w.style.opacity = "0"; w.hidden = false;
+  void w.offsetWidth;
+  w.classList.add("anim"); w.style.transform = ""; w.style.opacity = ""; w.style.zIndex = ++zTop;
+  setTimeout(() => { w.classList.remove("anim"); c.refit(); c.focus(); }, reduced ? 0 : 270);
+  active = c.n.id; markFocus();
+}
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode; store.set("mode", mode);
+  if (mode === "windows") cons.forEach(c => { c.min = false; updateBadge(c.n); });
+  layout();
+});
+(function splitter(){
+  const sp = $("splitter"); let s = null;
+  sp.addEventListener("pointerdown", e => { s = { x: e.clientX, w: $("dock").offsetWidth }; sp.setPointerCapture(e.pointerId); sp.classList.add("drag"); });
+  sp.addEventListener("pointermove", e => { if (!s) return; const w = clamp(s.w - (e.clientX - s.x), 320, stage.offsetWidth * 0.72); stage.style.setProperty("--dockw", w + "px"); });
+  const end = () => { if (!s) return; s = null; sp.classList.remove("drag"); store.set("dockw", stage.style.getPropertyValue("--dockw")); cons.forEach(c => c.refit()); };
+  sp.addEventListener("pointerup", end); sp.addEventListener("pointercancel", end);
+  const saved = store.get("dockw", ""); if (saved) stage.style.setProperty("--dockw", saved);
+})();
+
+/* ---------------- phone: diving into a console ---------------- */
+const KEYS = [["Tab", "\t"], ["?", "?"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Ctrl+C", "\x03"], ["Ctrl+Z", "\x1a"], ["Ctrl+Shift+6", "\x1e"], ["Space", " "]];
+KEYS.forEach(([label, seq]) => {
+  const b = hel("button", "key", $("keys")); b.type = "button"; b.textContent = label;
+  b.addEventListener("pointerdown", e => e.preventDefault());
+  b.addEventListener("click", () => { const c = cons.get(active); if (c) c.send(seq); });
+});
+function enterDive(c){
+  if (!diving) preDive = { ...view };
+  diving = true; active = c.n.id; c.unread = false; updateBadge(c.n);
+  $("hint").hidden = true; $("chip").hidden = true; store.set("hinted", true);
+  const d = $("dive"); const was = !d.hidden; d.hidden = false;
+  if (!was) { d.classList.remove("in"); void d.offsetWidth; d.classList.add("in"); }
+  closeRadial();
+  fitDive();
+  c.attach($("diveBody"));
+  Array.from($("diveBody").children).forEach(ch => { if (ch !== c.host) ch.remove(); });
+  renderTabsAndChips(); refreshCards();
+  const top = wrap.getBoundingClientRect().height - d.offsetHeight + 0;
+  zoomToNode(c.n, 1.7, Math.max(60, top / 2 + 10));
+  setTimeout(() => c.refit(), 280);
+}
+function switchDive(c){ if (c) enterDive(c); }
+function exitDive(restore){
+  diving = false; $("dive").hidden = true; $("dhint").hidden = true;
+  if (restore && preDive) animateTo(preDive, 320);
+  preDive = null;
+  renderTabsAndChips(); refreshCards();
+}
+function fitDive(){
+  const d = $("dive"); if (d.hidden) return;
+  const vv = window.visualViewport, H = vv ? vv.height : innerHeight, off = vv ? vv.offsetTop : 0;
+  const kb = Math.max(0, innerHeight - H - off);
+  d.style.bottom = kb + "px";
+  d.style.height = Math.round(H * (kb > 80 ? 0.9 : 0.68)) + "px";
+  const c = cons.get(active); if (c) c.refit();
+}
+if (window.visualViewport) { visualViewport.addEventListener("resize", fitDive); visualViewport.addEventListener("scroll", fitDive); }
+$("diveBack").onclick = () => exitDive(true);
+$("diveClose").onclick = () => { const c = cons.get(active); if (c) closeConsole(c.n); };
+(function pinchOutOfDive(){
+  let d0 = 0;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  $("dive").addEventListener("touchstart", e => { d0 = e.touches.length === 2 ? dist(e.touches) : 0; }, { passive: true });
+  $("dive").addEventListener("touchmove", e => { if (d0 && e.touches.length === 2 && dist(e.touches) < d0 * 0.6) { d0 = 0; exitDive(true); } }, { passive: true });
+})();
+function renderTabsAndChips(){
+  if (mobile) {
+    const box = $("diveChips"); box.textContent = "";
+    cons.forEach(c => {
+      const b = hel("button", "dchip", box); b.type = "button"; b.setAttribute("aria-pressed", String(c.n.id === active));
+      b.innerHTML = `<span class="dotst ${esc(c.n.status)}"></span>${esc(c.n.name)}${c.unread ? '<span class="unr"></span>' : ""}`;
+      b.onclick = () => switchDive(c);
+    });
+    return;
+  }
+  if (mode === "panel") { const tabs = $("tabs"); if (tabs.children.length || cons.size) renderPanelTabsOnly(); }
+  else if (mode === "grid") document.querySelectorAll(".tile").forEach(t => { const c = cons.get(t.dataset.id); if (!c) return; const u = t.querySelector(".unr"); if (c.unread && !u) t.querySelector(".nm").insertAdjacentHTML("afterend", '<span class="unr"></span>'); if (!c.unread && u) u.remove(); const d = t.querySelector(".dotst"); d.className = "dotst " + c.n.status; });
+  else if (mode === "windows") cons.forEach(c => { if (c.win) { const d = c.win.querySelector(".dotst"); if (d) d.className = "dotst " + c.n.status; } });
+}
+function renderPanelTabsOnly(){
+  $("tabs").querySelectorAll(".tab").forEach((t, i) => {
+    const c = Array.from(cons.values())[i]; if (!c) return;
+    const u = t.querySelector(".unr"); if (c.unread && !u) t.querySelector(".x").insertAdjacentHTML("beforebegin", '<span class="unr"></span>'); if (!c.unread && u) u.remove();
+    t.querySelector(".dotst").className = "dotst " + c.n.status;
+  });
+}
+
+/* ---------------- overlays, hints, misc ---------------- */
+function positionOverlays(){ if (radial.node && !radial.tracking) positionRadial(); drawLinks(); }
+function setHint(){
+  const h = $("hint");
+  if (store.get("hinted", false)) { h.hidden = true; return; }
+  h.textContent = mobile ? "Удерживайте узел — колесо действий · приближайте щипком, чтобы видеть больше" : "Правый клик по узлу — колесо действий · колесо мыши — глубже в детали · двойной клик — консоль";
+  h.hidden = false;
+}
+let hintT = null;
+function hideHint(){ if ($("hint").hidden || hintT) return; hintT = setTimeout(() => { $("hint").hidden = true; store.set("hinted", true); }, 6000); }
+$("helpBtn").onclick = () => { $("help").hidden = false; $("helpClose").focus(); };
+$("helpClose").onclick = () => { $("help").hidden = true; };
+$("help").addEventListener("click", e => { if (e.target === $("help")) $("help").hidden = true; });
+$("stopBtn").onclick = () => toast("В прототипе лаба не останавливается. В плагине здесь будет подтверждение.");
+(function countdown(){
+  let left = 2 * 3600 + 47 * 60 + 12;
+  setInterval(() => { left = Math.max(0, left - 1); $("left").textContent = `осталось ${Math.floor(left / 3600)}:${p2(Math.floor(left / 60) % 60)}:${p2(left % 60)}`; }, 1000);
+})();
+let lastSize = null;
+new ResizeObserver(() => {
+  const r = wrap.getBoundingClientRect();
+  if (lastSize && r.width && r.height) { view.tx += (r.width - lastSize.w) / 2; view.ty += (r.height - lastSize.h) / 2; applyView(); }
+  if (r.width && r.height) lastSize = { w: r.width, h: r.height };
+}).observe(wrap);
+mq.addEventListener("change", () => {
+  mobile = mq.matches;
+  if (!mobile && diving) exitDive(false);
+  layout(); renderTabsAndChips();
+});
+
+/* ---------------- start ---------------- */
+$("labTitle").textContent = GNS3.name;
+renderDrawings(); renderLinks(); renderNodes();
+fontsReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
+layout();
+requestAnimationFrame(() => { Object.assign(view, fitTarget()); applyView(); lastSize = { w: wrap.clientWidth, h: wrap.clientHeight }; });
+/* demo: one console is already open, so the first view shows a badge and, closer in, a live preview */
+fontsReady.then(() => {
+  const r1 = nodes.find(n => n.name === "R1");
+  if (r1 && !cons.size) {
+    const c = new Con(r1); cons.set(r1.id, c); c.sim.boot();
+    c.sim.input("show ip ospf neighbor\r");
+    if (!mobile) { active = r1.id; layout(); } else { c.unread = true; updateBadge(r1); }
+  }
+});
+</script>

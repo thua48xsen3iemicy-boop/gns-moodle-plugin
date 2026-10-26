@@ -22,6 +22,8 @@ def run(env=None) -> dict:
     checks["labs"] = {"ok": settings.labs_dir.is_dir() and os.access(settings.labs_dir, os.R_OK | os.X_OK)}
     checks["agent_tls"] = {"ok": all(os.access(p, os.R_OK) for p in (
         settings.agent_ca_file, settings.agent_cert_file, settings.agent_key_file))}
+    checks["slot_tls"] = {"ok": settings.slot_ca_file is None or os.access(settings.slot_ca_file, os.R_OK),
+                          "scheme": settings.slot_scheme}
     try:
         with psycopg.connect(settings.database_url, connect_timeout=5) as conn:
             exists = conn.execute("SELECT to_regclass('schema_migrations') IS NOT NULL").fetchone()[0]

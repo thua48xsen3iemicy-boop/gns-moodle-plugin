@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GNS Portal · интерактивный вход</title>
+    <link rel="stylesheet" href="preview.css">
+    <link rel="stylesheet" href="../theme/gnsportal/style/loginlab.css">
+    <script src="../theme/gnsportal/javascript/loginlab.js" defer></script>
+    <script src="preview.js" defer></script>
+</head>
+<body class="gnsportal-login">
+<main id="page" class="gnsportal-lab" data-demo="true">
+    <header class="gnsportal-labbar">
+        <div class="gnsportal-labbrand"><span class="gnsportal-brand-mark" aria-hidden="true">&gt;_</span><span>GNS Portal<small>СЕТЕВЫЕ ЛАБОРАТОРНЫЕ</small></span></div>
+        <div class="gnsportal-labbar-meta"><span class="gnsportal-live">ДЕМО РАБОТАЕТ</span><span>Исследуйте лабораторную до входа</span></div>
+        <div class="gnsportal-labbar-actions" role="group" aria-label="Масштаб схемы"><button type="button" data-zoom="out" aria-label="Отдалить">−</button><button type="button" data-zoom="fit" aria-label="Показать всю схему">ВСЯ СХЕМА</button><button type="button" data-zoom="in" aria-label="Приблизить">+</button></div>
+    </header>
+    <div class="gnsportal-labscene">
+        <div class="gnsportal-lab-canvas" aria-label="Интерактивная схема учебной сети">
+            <svg class="gnsportal-topology" viewBox="0 0 1100 650" role="group" aria-label="Интерактивная схема учебной сети"><g class="gnsportal-topology-view"></g></svg>
+            <div class="gnsportal-scene-heading"><span class="gnsportal-kicker">LAB 04 / OSPF MULTI-AREA</span><h1>Сеть начинается здесь.</h1><p>Двигайте схему, приближайте узлы и попробуйте команду в консоли.</p></div>
+            <div class="gnsportal-map-label">ТОПОЛОГИЯ / ПЕРЕМЕЩАЙТЕ СХЕМУ <span class="gnsportal-scale">100%</span></div>
+        </div>
+        <section class="gnsportal-console" aria-label="Симуляция консоли устройства">
+            <div class="gnsportal-console-head"><span><i></i> <b class="gnsportal-console-title">R1</b> / console</span><span class="gnsportal-demo-tag">ДЕМО РАБОТАЕТ</span></div>
+            <div class="gnsportal-console-output" role="log" aria-live="polite"></div>
+            <form class="gnsportal-console-form"><label class="visually-hidden" for="gnsportal-command">Команда консоли</label><span class="gnsportal-prompt">R1#</span><input id="gnsportal-command" class="gnsportal-command" autocomplete="off" spellcheck="false" placeholder="попробуйте show ip route"><button type="submit" aria-label="Выполнить команду">↵</button></form>
+        </section>
+        <section id="region-main" class="gnsportal-login-floating" aria-label="Вход">
+            <div class="gnsportal-login-card">
+                <span class="gnsportal-card-top"><span class="gnsportal-card-icon" aria-hidden="true">⌁</span><span>УЗЕЛ ДОСТУПА</span><span class="gnsportal-card-dots" aria-hidden="true">•••</span></span>
+                <div class="gnsportal-card-content">
+                    <p class="gnsportal-kicker">ACCESS / LEARNING PORTAL</p>
+                    <div id="demo-login">
+                        <h2 class="login-heading">Вход в портал</h2>
+                        <p class="demo-note">Локальная симуляция · данные никуда не отправляются.</p>
+                        <form id="demoform" novalidate>
+                            <label for="username">Логин</label><input id="username" name="username" value="demo" autocomplete="off" required>
+                            <label for="password">Пароль</label><input id="password" name="password" type="password" placeholder="demo123" autocomplete="off" required>
+                            <label for="clientip">Тестовый IP</label><select id="clientip" name="clientip"><option value="192.0.2.10">192.0.2.10 · разрешён</option><option value="198.51.100.20">198.51.100.20 · разрешён</option><option value="203.0.113.7">203.0.113.7 · заблокирован</option></select>
+                            <label for="captcha" id="captchalabel">Проверка</label><input id="captcha" name="captcha" inputmode="numeric" autocomplete="off" required>
+                            <p class="demo-help">Данные: <code>demo</code> / <code>demo123</code>. Ответьте на пример выше.</p>
+                            <p class="demo-feedback" id="feedback" role="status" aria-live="polite"></p>
+                            <button class="demo-submit" type="submit">Войти в портал <span aria-hidden="true">→</span></button>
+                        </form>
+                    </div>
+                    <div id="demo-success" hidden><h2 class="login-heading">Доступ открыт</h2><p>Вы вошли в локальное превью. Изучайте сеть и консоль — они остаются доступными.</p><button type="button" id="logout" class="demo-submit">Вернуться ко входу ↩</button></div>
+                </div>
+            </div>
+        </section>
+    </div>
+</main>
+</body>
+</html>

@@ -200,7 +200,7 @@ async def test_info(tmp_path, dsn):
         r = await env.client.get("/api/v1/info")
         assert r.json() == {"schema": "gns3lab.info/1", "version": r.json()["version"],
                             "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
-                            "features": ["consoles", "observer", "resume"]}
+                            "features": ["consoles", "observer", "resume", "facts"]}
         async with anon(env) as c:
             assert (await c.get("/api/v1/info")).status_code == 401
 

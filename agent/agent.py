@@ -6,6 +6,9 @@ This service must be accessible ONLY from the Lab Manager management network.
 from __future__ import annotations
 
 import errno
+import json
+import tempfile
+from contextvars import ContextVar
 import logging
 import fcntl
 import os
@@ -16,7 +19,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Path as ApiPath
+from fastapi import FastAPI, HTTPException, Request, Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 log = logging.getLogger("uvicorn.error")
@@ -27,6 +30,8 @@ FINDMNT = "/usr/bin/findmnt"
 CEPH_ROOT = Path(os.environ.get("LAB_CEPH_ROOT", "/mnt/pve/cfs"))
 CONF_DIR = Path("/etc/pve/lxc")
 LOCK_DIR = Path("/run/lab-node-agent")
+FENCE_DIR = Path(os.environ.get("LAB_FENCE_DIR", "/var/lib/lab-node-agent"))
+ACTIVE_SLOT = ContextVar("agent_active_slot", default=None)
 VMID_MIN = int(os.environ.get("LAB_VMID_MIN", "2000"))
 VMID_MAX = int(os.environ.get("LAB_VMID_MAX", "2999"))
 REQUIRED_TAG = "labslot"
@@ -45,12 +50,24 @@ def ceph_subdir(name: str, default: str) -> Path:
     return Path(*parts)
 
 
+def snapshot_name(name: str, default: str) -> str:
+    """Administrator-defined Proxmox snapshot name."""
+    value = os.environ.get(name, default)
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,39}", value) is None:
+        raise SystemExit(f"{name} must be a Proxmox snapshot name")
+    return value
+
+
 # Slot code (git checkout, RO) and student data (RW) are separate trees on one CephFS.
 CODE_DIR = ceph_subdir("LAB_CODE_DIR", "gns3-ro/slot")
 STUDENTS_DIR = ceph_subdir("LAB_STUDENTS_DIR", "gns3-rw/students")
 # Optional shared GNS3 images (QEMU/, IOU/, firmware), mounted read-only at /opt/gns3/images as mp2.
 # Unset: mp2 is left alone (images in the slot's rootfs or on a mount point of the administrator).
 IMAGES_DIR = ceph_subdir("LAB_IMAGES_DIR", "") if os.environ.get("LAB_IMAGES_DIR", "").strip() else None
+
+# The clean state of a slot: the template plus the slot's own identity, snapshotted once by
+# install/lab-provision. Never a client value: `reset` rolls back to this name and no other.
+CLEAN_SNAPSHOT = snapshot_name("LAB_CLEAN_SNAPSHOT", "lab-clean")
 
 # Each action runs as root INSIDE the container, not in the host namespace.
 # Do not expose client-provided executable names, shell strings or argument lists.
@@ -91,9 +108,66 @@ class Stop(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     force: bool = False
 
+
+class Fence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    epoch: int = Field(ge=1, le=2**63 - 1)
+    generation: int = Field(ge=1, le=2**63 - 1)
+
+
+class Reset(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class Size(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    cores: int = Field(ge=1, le=4096)
+    memory_mb: int = Field(ge=128, le=2**31 - 1)
+
+
+def fence_state(vmid):
+    try:
+        data = json.loads((FENCE_DIR / f"{vmid}.json").read_text())
+        if (type(data["epoch"]) is not int or type(data["generation"]) is not int
+                or data["epoch"] < 1 or data["generation"] < 1):
+            raise ValueError()
+        return data
+    except FileNotFoundError:
+        return {"epoch": 0, "generation": 0}
+    except (OSError, ValueError, KeyError, TypeError):
+        raise api_error(503, "FENCE_STORAGE_ERROR", "Cannot verify command ownership")
+
+
+def save_fence(vmid, data):
+    FENCE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=FENCE_DIR, prefix=f".{vmid}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(name, FENCE_DIR / f"{vmid}.json")
+        directory = os.open(FENCE_DIR, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def require_fence(vmid, request):
+    state = fence_state(vmid)
+    if state.get("uncertain") or state.get("inflight"):
+        raise api_error(409, "COMMAND_UNCERTAIN", "Previous host command needs operator reconciliation")
+    if (request.headers.get("X-Lab-Epoch"), request.headers.get("X-Lab-Generation")) != (
+            str(state["epoch"]), str(state["generation"])) or state["epoch"] == 0:
+        raise api_error(409, "STALE_OWNER", "Claim current command ownership first")
+
 app = FastAPI(
     title="Lab Node Agent",
-    version="1.0.0",
+    version="1.2.0",
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -102,30 +176,56 @@ def api_error(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status, {"code": code, "message": message})
 
 
-def vmid_allowed(vmid: int) -> None:
-    if not VMID_MIN <= vmid <= VMID_MAX:
-        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
-    conf = CONF_DIR / f"{vmid}.conf"
+def conf_sections(vmid: int) -> dict[str | None, dict[str, str]]:
+    """The CT's Proxmox config as {section: {key: value}}.
+
+    None is the current config; the others are snapshots ([name]) and [pve:pending]. A snapshot
+    repeats `unprivileged:` and `tags:` in its own section, so only the current one may decide
+    what the agent is allowed to touch."""
     try:
-        content = conf.read_text(encoding="utf-8")
+        content = (CONF_DIR / f"{vmid}.conf").read_text(encoding="utf-8")
     except FileNotFoundError:
         raise api_error(404, "CT_NOT_ON_NODE", "LXC not found on this node")
     except OSError:
         raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot read Proxmox configuration")
-    # Do not attach writable host paths to privileged containers.
-    if not re.search(r"(?m)^unprivileged:\s*1\s*$", content):
-        raise api_error(403, "PRIVILEGED_CT", "Only unprivileged lab containers are accepted")
-    tags = set()
+    sections: dict[str | None, dict[str, str]] = {None: {}}
+    current = sections[None]
     for line in content.splitlines():
-        if line.startswith("tags:"):
-            tags.update(t for t in re.split(r"[;,\s]+", line.partition(":")[2].strip()) if t)
-    if REQUIRED_TAG not in tags:
+        header = re.fullmatch(r"\[([^\]]+)\]\s*", line)
+        if header:
+            current = sections.setdefault(header.group(1), {})
+        elif ":" in line and not line.startswith("#"):
+            key, _, value = line.partition(":")
+            current[key.strip()] = value.strip()
+    return sections
+
+
+def section_tags(section: dict[str, str]) -> set[str]:
+    return {t for t in re.split(r"[;,\s]+", section.get("tags", "")) if t}
+
+
+def vmid_allowed(vmid: int) -> None:
+    if not VMID_MIN <= vmid <= VMID_MAX:
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
+    current = conf_sections(vmid)[None]
+    # Do not attach writable host paths to privileged containers.
+    if current.get("unprivileged") != "1":
+        raise api_error(403, "PRIVILEGED_CT", "Only unprivileged lab containers are accepted")
+    if REQUIRED_TAG not in section_tags(current):
         raise api_error(403, "NOT_LAB_SLOT", "Container is not marked as a lab slot")
 
 
 def run_cmd(args: list[str], timeout: int = 45) -> str:
     """Never invoke a shell, even for trusted action names."""
     log.info("operation argv=%r timeout=%s", args, timeout)
+    vmid = ACTIVE_SLOT.get()
+    mutating = vmid is not None and args[:2] in (
+        [PCT, "start"], [PCT, "set"], [PCT, "stop"], [PCT, "shutdown"], [PCT, "exec"], [PCT, "rollback"])
+    if mutating:
+        state = fence_state(vmid)
+        # Write ahead of starting pct. A killed/restarted agent cannot forget an
+        # in-flight host command just because its process-local lock disappeared.
+        save_fence(vmid, dict(state, inflight=True, command=args[1]))
     try:
         p = subprocess.run(
             args, stdin=subprocess.DEVNULL, capture_output=True, text=True,
@@ -134,9 +234,16 @@ def run_cmd(args: list[str], timeout: int = 45) -> str:
         )
     except subprocess.TimeoutExpired:
         log.warning("operation timed out argv=%r", args)
+        if mutating:
+            state = fence_state(vmid)
+            save_fence(vmid, dict(state, uncertain=True, command=args[1]))
         raise api_error(504, "PCT_TIMEOUT", "Proxmox command timed out; check actual container state")
     except OSError:
+        if mutating:
+            save_fence(vmid, state)  # No process could be started.
         raise api_error(503, "PCT_UNAVAILABLE", "Proxmox command could not be executed")
+    if mutating:
+        save_fence(vmid, state)  # The synchronous command returned; re-read its actual effect.
     if p.returncode != 0:
         log.warning("operation failed argv=%r returncode=%s", args, p.returncode)
         detail = (p.stderr or p.stdout or "Command failed").strip()[:800]
@@ -241,14 +348,18 @@ def slot_lock(vmid: int):
         except BlockingIOError:
             raise api_error(409, "SLOT_BUSY", "Another operation on this slot is in progress")
         try:
-            yield
+            token = ACTIVE_SLOT.set(vmid)
+            try:
+                yield
+            finally:
+                ACTIVE_SLOT.reset(token)
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
 
 
-def require_stopped(vmid: int) -> None:
+def require_stopped(vmid: int, action: str = "change mount points") -> None:
     if lxc_state(vmid) != "stopped":
-        raise api_error(409, "NOT_STOPPED", "Slot must be stopped to change mount points")
+        raise api_error(409, "NOT_STOPPED", f"Slot must be stopped to {action}")
 
 
 @app.get("/health")
@@ -263,26 +374,28 @@ def status(vmid: VMID):
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
-        return {"vmid": vmid, "state": lxc_state(vmid)}
+        return {"vmid": vmid, "state": lxc_state(vmid), "ownership": fence_state(vmid)}
 
 
 @app.put("/slots/{vmid}/mounts")
-def mounts(vmid: VMID, spec: Mounts):
+def mounts(vmid: VMID, spec: Mounts, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
+        require_fence(vmid, request)
         require_stopped(vmid)
         apply_mounts(vmid, spec)
         return {"vmid": vmid, "mounts_configured": True}
 
 
 @app.post("/slots/{vmid}/start")
-def start(vmid: VMID, spec: Start):
+def start(vmid: VMID, spec: Start, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
+        require_fence(vmid, request)
         require_stopped(vmid)
         apply_mounts(vmid, spec)
         vmid_allowed(vmid)
@@ -298,11 +411,12 @@ def start(vmid: VMID, spec: Start):
 
 
 @app.post("/slots/{vmid}/stop")
-def stop(vmid: VMID, options: Stop):
+def stop(vmid: VMID, options: Stop, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
     with slot_lock(vmid):
         vmid_allowed(vmid)
+        require_fence(vmid, request)
         if lxc_state(vmid) == "stopped":
             return {"vmid": vmid, "state": "stopped"}
         if options.force:
@@ -372,3 +486,48 @@ def ensure_student(student_key: Key):
         log.warning("student directory operation failed key=%s errno=%s", student_key, exc.errno)
         raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot provision student directory; inspect ownership before retry")
     return {"student_key": student_key, "ready": True}
+
+
+@app.post("/slots/{vmid}/claim")
+def claim(vmid: VMID, spec: Fence):
+    with slot_lock(vmid):
+        vmid_allowed(vmid)
+        state = fence_state(vmid)
+        if state.get("uncertain") or state.get("inflight"):
+            raise api_error(409, "COMMAND_UNCERTAIN", "Previous host command needs operator reconciliation")
+        if (spec.epoch, spec.generation) < (state["epoch"], state["generation"]):
+            raise api_error(409, "STALE_OWNER", "Command owner superseded")
+        if (spec.epoch, spec.generation) != (state["epoch"], state["generation"]):
+            save_fence(vmid, spec.model_dump())
+        return {"vmid": vmid, **spec.model_dump()}
+
+
+@app.post("/slots/{vmid}/reset")
+def reset(vmid: VMID, spec: Reset, request: Request):
+    """Roll the stopped slot back to its clean snapshot: guest disk and CT config together."""
+    if not VMID_MIN <= vmid <= VMID_MAX:
+        raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
+    with slot_lock(vmid):
+        vmid_allowed(vmid)
+        require_fence(vmid, request)
+        require_stopped(vmid, "roll back to the clean snapshot")
+        snapshot = conf_sections(vmid).get(CLEAN_SNAPSHOT)
+        if snapshot is None:
+            raise api_error(422, "SNAPSHOT_MISSING", f"Slot has no '{CLEAN_SNAPSHOT}' snapshot")
+        # The rollback replaces the whole config. A snapshot without the lab markers would
+        # leave a slot that this agent refuses to manage.
+        if snapshot.get("unprivileged") != "1" or REQUIRED_TAG not in section_tags(snapshot):
+            raise api_error(422, "SNAPSHOT_UNSAFE",
+                            f"Snapshot '{CLEAN_SNAPSHOT}' is not an unprivileged '{REQUIRED_TAG}' slot")
+        run_cmd([PCT, "rollback", str(vmid), CLEAN_SNAPSHOT], timeout=180)
+        return {"vmid": vmid, "state": lxc_state(vmid), "reset": True, "snapshot": CLEAN_SNAPSHOT}
+
+
+@app.put("/slots/{vmid}/size")
+def size(vmid: VMID, spec: Size, request: Request):
+    with slot_lock(vmid):
+        vmid_allowed(vmid)
+        require_fence(vmid, request)
+        require_stopped(vmid)
+        run_cmd([PCT, "set", str(vmid), "--cores", str(spec.cores), "--memory", str(spec.memory_mb)], timeout=40)
+        return {"vmid": vmid, **spec.model_dump()}

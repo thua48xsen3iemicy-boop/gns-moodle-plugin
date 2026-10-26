@@ -2,9 +2,92 @@
 
 | Что | Зачем |
 |---|---|
-| `build_zip.sh` | ZIP плагина для установки через интерфейс Moodle |
-| `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` в демо-лабу плагина |
-| `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot |
+| `prepare_zip.sh` | полная подготовка ZIP: Node 22, Moodle 5.1, зависимости, ESLint, `grunt amd`, перенос `amd/build` и архив |
+| `build_zip.sh` | только упаковка уже собранного плагина; обычно запускается из `prepare_zip.sh` |
+| `sync_demo_data.sh` | копирует `fixtures/ospf-multi-area.*` и `fixtures/linux-switch-vlan.*` в `plugin/demo` |
+| `build_novnc.mjs` | собирает `plugin/amd/src/novnc.js` из пакета `@novnc/novnc` (esbuild, один ES-модуль); нужен только при смене версии noVNC, порядок команд — в шапке скрипта |
+| `check_facts.mjs` | проверка чистых функций `facts.js` на Node, без Moodle и браузера (раздел «Проверка слоёв без браузера») |
+| `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot; у `vnc`-ноды (PVE1 эталонной лабы, образ `debian12-desktop`) — экран по RFB 3.8, билет только владельцу |
+| `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
+
+## Подготовка ZIP одной командой (Calculate Linux)
+
+Из корня клона репозитория, после переключения на нужную ветку и получения изменений:
+
+```bash
+bash plugin/devtools/prepare_zip.sh
+```
+
+Скрипт собирает текущие файлы рабочей копии, включая незакоммиченные изменения. Ветки сам не переключает,
+`git pull`, коммиты и push не выполняет. Для запуска нужны Bash, Git, curl, Python 3, `zip` и `flock` (util-linux).
+На Calculate они устанавливаются обычным способом через Portage; системный Node менять не требуется.
+Запускать от своего пользователя, без `sudo`. Нужен доступ к GitHub, nodejs.org и реестру npm.
+
+При первом запуске скрипт:
+
+1. Проверяет Node: нужен `>=22.11.0 <23`. Если подходящего нет, скачивает nvm 0.40.3 и Node 22 в свой кеш.
+   Профили оболочки, системный Node и пользовательские настройки npm не меняет. Уже установленный подходящий Node
+   использует напрямую.
+2. Загружает исходники Moodle 5.1, закреплённые полным хешем коммита в `prepare_zip.sh`. Это только дерево сборки:
+   не нужны PHP, веб-сервер, база данных и запущенный Moodle. Рабочую установку Moodle и прежний `~/moodle-build`
+   скрипт не использует.
+3. Выполняет `npm ci` с исходным lock-файлом Moodle. При последующих запусках использует готовые зависимости,
+   пока не меняются Node, npm, версия Moodle или lock-файл.
+4. Копирует плагин в отдельное дерево, удаляет из копии прежний `amd/build` и запускает штатный `grunt amd`
+   с ESLint. Проверяет наличие JS и карт для каждого модуля, включая noVNC. При ошибке останавливается;
+   проверки не обходятся, исходники автоматически не исправляются.
+5. После успешной сборки заменяет `plugin/plugin/amd/build` результатом и создаёт
+   `plugin/dist/mod_gns3lab-<release>.zip` с единственным корневым каталогом `gns3lab`.
+   В конце печатает полный путь к архиву и сообщение `ZIP ready`.
+
+Кеш находится в `plugin/devtools/.cache/`, не попадает в Git и ZIP. Повторный запуск выполняет сборку заново,
+но повторно скачивать Moodle и устанавливать npm-зависимости обычно не нужно. Можно выбрать другой кеш:
+
+```bash
+GNS3LAB_BUILD_CACHE=/путь/к/кешу bash plugin/devtools/prepare_zip.sh
+```
+
+Не указывайте каталог рабочей установки Moodle. Для обновления закреплённой версии инструментов сопровождающий
+меняет хеш в скрипте и проверяет сборку; для нового хеша используется свежий каталог кеша.
+
+`Browserslist: caniuse-lite is outdated` само по себе сборку не останавливает. При ошибках ESLint нужно исправить
+указанные исходники и повторить запуск. При ошибке `npm ci` сначала проверьте версию Node и текст ошибки;
+не запускайте `npm audit fix --force` и не переписывайте lock-файл Moodle для обхода ошибки.
+Неудачный запуск не считается готовой сборкой: в `dist` может оставаться ZIP от предыдущего успешного запуска.
+
+После успешного запуска проверьте и сохраните полученные сборки:
+
+```bash
+git diff --check
+git status --short
+git add plugin/plugin/amd/build/
+git commit -m "plugin: rebuild AMD modules"
+```
+
+Если в той же задаче исправлялись исходники, включите их в коммит тоже. ZIP и кеш в Git не добавляются.
+Скрипт не повышает версию плагина: перед выпуском обновления разработчик должен повысить `$plugin->version`
+и при необходимости `$plugin->release` в `plugin/plugin/version.php`, чтобы Moodle распознал обновление.
+
+### Установка архива на Moodle
+
+Загрузите ZIP через «Администрирование сайта → Плагины → Установка плагинов» и завершите обновление.
+На узле Moodle больше не нужны Node, npm или Grunt. Если обновление завершено через веб, повторять `upgrade.php`
+не нужно. При обновлении через CLI из корня установленного Moodle 5.1:
+
+```bash
+sudo -u www-data php public/admin/cli/upgrade.php --non-interactive
+sudo -u www-data php public/admin/cli/purge_caches.php
+```
+
+`www-data` замените на пользователя PHP вашей установки. Для контейнерного Moodle команды выполняются внутри
+контейнера с PHP. После установки — Ctrl+F5 и проверка обычной консоли, VNC и режима преподавателя.
+Сборка ZIP не заменяет PHPUnit и проверку поведения плагина в настоящем Moodle.
+
+Проверки самого скрипта без сети и Moodle:
+
+```bash
+python3 -m unittest discover -s plugin/devtools/tests -q
+```
 
 ## Плагин с консолями без Proxmox
 
@@ -28,7 +111,10 @@ python3 devtools/mock-manager/mock_manager.py
    - секрет — `dev-secret`;
    - адрес шлюза можно не задавать: mock отдаёт `ws://127.0.0.1:8080` вместе с билетом.
 
-   У активности эталонная лаба — `ospf-multi-area`: лабы mock-менеджера — это `fixtures/*.gns3`.
+   У активности эталонная лаба — `ospf-multi-area`: лабы mock-менеджера — это `fixtures/*.gns3`. Лаба `linux-switch-vlan`
+   (два хоста и сервер с VLAN-подинтерфейсами вокруг Linux-коммутатора: access, транк без native, порт без VLAN) —
+   то же с `labref` `linux-switch-vlan`: «Обновить сейчас» переключает верный снимок и снимок, где порт PC1 выключен
+   (порт коммутатора на схеме тоже становится down).
 
 `GW_ALLOWED_ORIGINS` — origin сайта Moodle, с которого браузер открывает консоли. Настройка обязательна: без неё
 шлюз не запускается.
@@ -45,6 +131,11 @@ curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/stop
 curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/start
 ```
 
+Нода с `console_type: vnc` (PVE1) открывается экраном noVNC: цветные полосы и буквы VNC; клавиша рисует цветной квадрат
+внизу, мышь — жёлтый маркер, щелчок — красный квадрат. Что дошло до экрана — `curl localhost:8090/mock/vnc/<node_id>`.
+Шлюзу менеджера для этого нужна поддержка `vnc` (`console: "vnc"` в `/internal/tickets`, CONTRACTS §6); без неё —
+`ui-harness` (`ui-harness/README.md`, раздел про noVNC).
+
 Команда `reload` в консоли закрывает её на стороне слота: так проверяется переподключение. Поддельная консоль
 понимает режимы IOS (`enable`, `configure terminal`, `interface …`, `router …`, `exit`, `end`, Ctrl+Z, Ctrl+U) и меняет
 приглашение, как устройство: на этом проверяется клавиатура консоли.
@@ -56,6 +147,40 @@ curl -X POST localhost:8090/mock/fail-next -d '{"code": "AGENT_REJECTED", "retry
 curl -X POST localhost:8090/mock/stale/on
 curl -X POST localhost:8090/mock/stale/off
 ```
+
+## Живые факты лабы
+
+Mock-менеджер ведёт себя как менеджер 0.8 (CONTRACTS §2.7): у запущенной сессии `features: ["consoles", "facts"]`,
+`GET /api/v1/sessions/{id}/state` отдаёт `fixtures/ospf-multi-area.facts.json` с `node_id` живого проекта, `rev`,
+`generated_at` и `ttl: 90`; с `since_rev`, равным `rev`, — `304`. Сбор «идёт» каждые 30 с: `generated_at` сдвигается,
+`rev` — нет. `POST …/state/refresh` — `202` (у неживой сессии `409 session_not_running`), не чаще раза в 10 с: `rev`
+растёт, снимок переключается между `facts.json` и `facts-broken.json`.
+
+На странице лабы после запуска появляются слои L2 / L3 / OSPF, в «Обзоре» — «Факты собраны в …» и «Обновить сейчас»:
+через ~5 с схема показывает конфиг с ошибками, следующее нажатие возвращает верный.
+
+```bash
+# сбор с R1 не удался: R1 бледнеет, в его карточке — «Устройство не ответило вовремя…»
+curl -X POST localhost:8090/mock/facts/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/fail -d '{"code": "timeout"}'
+curl -X POST localhost:8090/mock/facts/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/ok
+# сбор встал: через ttl (90 с) факты помечаются «данные устарели», но показываются
+curl -X POST localhost:8090/mock/facts/stall/on
+curl -X POST localhost:8090/mock/facts/stall/off
+```
+
+Без Moodle то же видно в `ui-harness` (`?factsempty` — «нет данных», `?nofacts` — сессия без фактов,
+`window.__stub.facts` — сбой ноды и устаревание).
+
+## Проверка слоёв без браузера
+
+```bash
+node plugin/devtools/check_facts.mjs     # из корня репозитория; Node 22, зависимостей нет
+```
+
+Скрипт подключает настоящие `plugin/amd/src/model.js` и `facts.js` (префикс `mod_gns3lab/` ведёт в `amd/src`) и прогоняет
+сценарии над маленькими лабами: девять сценариев задачи Б из `docs/linux-switch-integration/PLAN.md` (состояние обоих
+концов линка и самого линка: порт коммутатора повторяет линк и не читает свои `admin` / `oper`) и режимы L2 `none` и
+`native: null` (`docs/live-state.md` §3.1). Печатает `ok` / `FAIL` по каждому, при сбое выходит с кодом 1.
 
 ## Библиотека и редактор лаб
 
