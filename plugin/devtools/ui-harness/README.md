@@ -6,8 +6,11 @@
 Что настоящее: модули `plugin/amd/src` (собираются Babel в AMD), шаблон `plugin/templates/viewer.mustache`
 (рисуется настоящим Mustache со строками из `plugin/lang`), `plugin/styles.css`, демо-лаба `plugin/demo`.
 Что подделано: `core/ajax` (сессия в памяти: старт → запуск → работает, остановка), `core/str`, `core/notification`
-(`stubs/`) и шлюз консолей (`server.js`, WebSocket `/gw/console/<node_id>`): приглашение `R1#`, эхо ввода,
-`show ip interface brief`, `write memory`, `reload` закрывает консоль кодом 4000.
+(`stubs/`) и шлюз консолей (`server.js`, WebSocket `/gw/console/<node_id>`): эхо ввода и приглашение по виду устройства — Cisco IOS
+(IOU, маршрутизаторы) `R1#`, VPCS `PC1> `, остальные узлы — Linux `user@pc1:~$ `; `reload` закрывает консоль кодом 4000.
+Ответы подобраны так, чтобы слой «увидено в консоли» (`docs/live-state.md` §8) было что показать сразу: `show ip interface
+brief`, `show interfaces status` (порт Et0/2 коммутатора выключен), `show vlan brief` (есть VLAN 20, которого нет в фактах),
+`write memory` / `wr` с `[OK]`, у Linux `ip a`, `ip -br a`, `ip r` и у VPCS `show ip` с другим адресом, чем в фактах.
 
 ```bash
 cd plugin/devtools/ui-harness
@@ -22,6 +25,7 @@ node server.js         # → http://127.0.0.1:8123/index.ru.html
 `?fast` — лаба запускается за секунду, `?theme=dark`, `?min` — модули из `plugin/amd/build`, `?conflict` — старт отвечает
 «уже есть другая лаба», `?observer` — чужая работающая лаба, только просмотр, `?nofacts` — сессия без фактов,
 `?factsempty` — факты ещё не собраны (rev 0). В консоли браузера `window.__stub.setNode(<node_id>, 'stopped'|'started')` меняет состояние ноды. Живые факты — демо-фикстуры: «Обновить сейчас» переключает верный конфиг и конфиг с ошибками;
+`window.__stub.calls` считает вызовы external functions (по имени), по нему видно, спрашивала ли страница факты;
 `__stub.facts.fail(<node_id>, 'timeout')` — сбор с ноды не удался, `__stub.facts.stale(true)` — сбор встал давно,
 `__stub.facts.fill()` / `empty()` — есть данные / нет данных. Опрос идёт раз в 30 с; событие `visibilitychange` на
 `document` запрашивает факты сразу.
@@ -49,6 +53,18 @@ PYTHON=python3 node check_vnc.js --shots /tmp/vnc-shots   # нужен Playwrigh
 
 Каждая проверка печатается как `PASS` / `FAIL`, код выхода — число провалов; скриншоты (панель после ввода, сетка, окна,
 пауза переподключения, шторка телефона) — в каталоге `--shots` (по умолчанию `dist/shots`).
+
+Проверка слоя «увидено в консоли» — `check_seen.js`: поднимает только шлюз харнесса (порт 18124), в Chromium запускает
+лабу, набирает в консолях SW1 и PC1 `sh int status`, `sh vl br`, `show ip`, `wr` и проверяет, что схема меняется сразу, без
+опроса фактов (кабель к PC2 гаснет, адрес PC1 на L3 меняется), что карточка узла подписана и поля отмечены, что `write` с `[OK]`
+просит свежие факты не чаще раза в 10 с и что новый снимок сбрасывает увиденное на SW1, но не на PC1. `--min` — те же
+проверки на минифицированных модулях `amd/build`.
+
+```bash
+cd plugin/devtools/ui-harness
+npm install
+node check_seen.js [--min] [--shots /tmp/seen-shots]    # нужен Playwright с Chromium; mock-менеджер не нужен
+```
 
 Не проверяет: PHP, права, настоящих менеджер и шлюз, тему Boost (в `index.template.html` — лишь несколько переменных
 Bootstrap), поведение клавиатуры телефона.

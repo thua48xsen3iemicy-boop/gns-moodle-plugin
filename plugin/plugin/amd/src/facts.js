@@ -61,7 +61,9 @@ function indexFacts(m, facts){
       // The last collection failed: the facts beside it are the last known ones, not the current ones.
       err: f.error && typeof f.error === "object" ? f.error : null, at: f.collected_at || null,
       // No `mac_table` (or one without a list) means "not collected", which is not the same as an empty table.
-      macs: f.mac_table && typeof f.mac_table === "object" && Array.isArray(f.mac_table.entries) ? f.mac_table : null };
+      macs: f.mac_table && typeof f.mac_table === "object" && Array.isArray(f.mac_table.entries) ? f.mac_table : null,
+      // Set by consolefacts.mergeSeen(): when and by which command the student saw some of these facts in a console.
+      seen: f.seen && typeof f.seen === "object" ? f.seen : null };
     (ifs || []).forEach(i => {
       rec.byName.set(i.name, i);
       if (i.port) fx.byPort.set(n.id + "|" + i.port.adapter + "/" + i.port.port, i);

@@ -2016,6 +2016,26 @@ body.gns3lab-fullscreen {
 .gns3lab-student .idline.fnodata {
     font-style: italic;
 }
+.gns3lab-student .idline.seenline {
+    color: var(--accent);
+}
+.gns3lab-student .seennote {
+    margin-top: -6px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.gns3lab-student .seencmd {
+    color: var(--muted);
+}
+.gns3lab-student .seenmark {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: middle;
+}
 .gns3lab-student .fref {
     align-self: flex-start;
 }

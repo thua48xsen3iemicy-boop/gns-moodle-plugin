@@ -96,6 +96,16 @@ function ago(ms){
   const min = Math.floor((Date.now() - ms) / 60000);
   return min < 1 ? strings.ui_facts_ago_now : fill(strings.ui_facts_ago, min);
 }
+/* seen in the console (docs/live-state.md §8): when and by which command, and a mark on the fields that came from it */
+function seenHTML(n){
+  const f = st.fx && st.fx.nodes.get(n.id), seen = f && f.seen;
+  if (!seen || !seen.at) return "";
+  const time = new Date(seen.at).toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" });
+  return `<p class="idline seenline">${esc(fill(strings.ui_seen_at, time))} <span class="seencmd">(${esc(seen.command)})</span></p>
+    <p class="glead seennote">${esc(strings.ui_seen_note)}</p>`;
+}
+const seenMark = (i, ...fields) => i && Array.isArray(i.seen) && fields.some(x => i.seen.includes(x))
+  ? ` <i class="seenmark" title="${esc(strings.ui_seen_mark)}"></i>` : "";
 /* live facts: when they were collected, whether they are out of date, and the button to collect them now */
 function liveFactsLine(){
   const doc = stage.liveDoc, meta = stage.factsMeta, btn = host.refreshFacts
@@ -215,6 +225,7 @@ function nodeHTML(n){
   return `
     <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div></div>
     ${statusLine(n)}
+    ${seenHTML(n)}
     ${ferr}
     ${layered ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
     ${macs ? (ferr ? `<div class="fstale">${macs}</div>` : macs) : ""}
@@ -262,7 +273,7 @@ function modeText(f, i){
 }
 function linkL2HTML(l){
   const r = st.der.l2.links.get(l.id), fx = st.fx, m = st.model;
-  const row = (e, i) => `<tr><td>${esc(m.nodes.get(e.nodeId).name)} <span class="mono peer">${esc(i ? i.name : e.text)}</span></td><td class="mono">${esc(modeText(fx.nodes.get(e.nodeId), i))}</td></tr>`;
+  const row = (e, i) => `<tr><td>${esc(m.nodes.get(e.nodeId).name)} <span class="mono peer">${esc(i ? i.name : e.text)}</span></td><td class="mono">${esc(modeText(fx.nodes.get(e.nodeId), i))}${seenMark(i, "switchport", "admin", "oper")}</td></tr>`;
   const pass = !r.known ? "нет фактов об одном из портов" : st.der.l1.links.get(l.id).down ? "ничего — линк не работает"
     : r.tags.length ? (r.vlans.length ? r.vlans.map(v => `<span class="tag" style="border-left:3px solid ${vc(v)}">VLAN ${v}</span>`).join(" ") : "кадры без тега (точка-точка)") : `<span class="tag bad">ничего</span>`;
   return `<h3>L2 на концах</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Настройка</th></tr></thead><tbody>${row(l.a, r.ia)}${row(l.b, r.ib)}</tbody></table></div>
@@ -289,7 +300,7 @@ function nodeLayerHTML(n){
     const rows = f.ifs.filter(i => i.kind !== "loopback").map(i => {
       const d = i.switchport ? null : D.l2.domFor(n.id, i);
       const dom = d ? `<button class="tag" type="button" data-goto-vlan="${d.id}" style="cursor:pointer;border:0;border-left:3px solid ${d.vlans.length ? vc(d.vlans[0]) : "var(--wire)"}">${esc(d.label)}</button>` : "";
-      return `<tr><td class="mono">${esc(i.name)}</td><td class="mono">${esc(modeText(f, i))}</td><td>${dom}${i.stp ? ` <span class="peer">STP ${esc(i.stp.state)}</span>` : ""}</td></tr>`;
+      return `<tr><td class="mono">${esc(i.name)}</td><td class="mono">${esc(modeText(f, i))}${seenMark(i, "switchport", "admin", "oper")}</td><td>${dom}${i.stp ? ` <span class="peer">STP ${esc(i.stp.state)}</span>` : ""}</td></tr>`;
     }).join("");
     return `<h3>L2: порты и VLAN</h3>${iss}<div class="tblwrap"><table class="ifs"><thead><tr><th>Интерфейс</th><th>Настройка</th><th>Домен</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
@@ -299,7 +310,7 @@ function nodeLayerHTML(n){
       const end = i.switchport && portEnd(D, f, i);   // a switch port repeats its link end, its own admin/oper are not read
       const state = end ? (end.down ? `<span class="tag bad">down</span>` : "up")
         : i.admin === "down" ? `<span class="tag bad">shutdown</span>` : i.oper === "down" ? `<span class="tag bad">down</span>` : "up";
-      return `<tr><td class="mono">${esc(i.name)}</td><td>${ips}</td><td>${state}</td></tr>`;
+      return `<tr><td class="mono">${esc(i.name)}</td><td>${ips}${seenMark(i, "ipv4")}</td><td>${state}${seenMark(i, "admin", "oper")}</td></tr>`;
     }).join("");
     const gw = f.ifs.map(i => i.gateway).filter(Boolean);
     return `<h3>L3: адреса</h3>${iss}<div class="tblwrap"><table class="ifs"><thead><tr><th>Интерфейс</th><th>Адрес</th><th>Состояние</th></tr></thead><tbody>${rows}</tbody></table></div>

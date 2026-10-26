@@ -153,6 +153,8 @@ define([], function() {
     };
 
     window.__stub = {
+        // How many times each external function was called: a test tells a page that read the facts from one that did not.
+        calls: {},
         setNode: (id, status) => {
             nodeStatus[id] = status;
         },
@@ -180,6 +182,7 @@ define([], function() {
 
     return {
         call: requests => requests.map(r => {
+            window.__stub.calls[r.methodname] = (window.__stub.calls[r.methodname] || 0) + 1;
             if (!handlers[r.methodname]) {
                 return Promise.reject(new Error('Unknown external function ' + r.methodname));
             }
