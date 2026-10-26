@@ -52,6 +52,10 @@ Claude Code читает этот файл через `CLAUDE.md`. Во всех
   в `docs/` компонентов. Если в документах противоречие — спроси.
 - Изменение компонента — отдельный коммит. Если нужно, подними его версию: `plugin/plugin/version.php`,
   `manager/lab_manager/__init__.py`, `slot/release.json`, `version=` в `agent/agent.py` и заголовок `README.md`.
+- Добавил, удалил или переименовал файл в `manager/`, `slot/` или `agent/` (любой, включая документацию и тесты) —
+  обнови явный перечень `SOURCE_FILES` в `install/lab-release.py`: сборщик выпусков отклоняет дерево с файлом не из
+  перечня. Поднял версию компонента — обнови `compatibility.components` в `install/lab-release-build.json.example`.
+  Расхождение ловят тесты `install/tests` (`test_allowlist_matches_delivered_trees`); запускай их в таких изменениях.
 - Не коммить секреты, `.env`, ключи, сертификаты, дампы БД.
 - Зависимости Python проверены на 3.12; версии закреплены в `constraints-tested.txt`.
   Новую зависимость добавляй только при необходимости и тоже закрепляй там.

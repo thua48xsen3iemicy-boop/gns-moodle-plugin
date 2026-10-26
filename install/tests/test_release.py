@@ -122,12 +122,22 @@ def edit_manifest(root, mutate):
     path.chmod(0o444)
 
 
+def test_allowlist_matches_delivered_trees():
+    # A file added to or removed from a delivered tree must be reviewed into SOURCE_FILES in the same change.
+    listed = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z", "--", *r.COMPONENTS, "constraints-tested.txt"],
+                            check=True, capture_output=True).stdout.decode().split("\0")
+    tracked = {name for name in listed if name and Path(name).name not in (".gitignore", ".gitkeep")}
+    allowed = set(r.SOURCE_FILES)
+    assert (sorted(tracked - allowed), sorted(allowed - tracked)) == ([], []), "(unreviewed, listed but absent)"
+
+
 def test_valid_package_separate_source_builder_identity(package):
     result = r.verify_package(package, "r1")
     assert result["ok"]
     assert result["source_git_sha"] != result["builder_git_sha"]
     assert result["manifest_sha256"] == r.digest((package / "manifest.json").read_bytes())
-    assert r.read_json(package / "manifest.json")["facts"]["postgresql"]["minimum"] == 6
+    migrations = len(list((REPO / "manager/lab_manager/migrations").glob("*.sql")))
+    assert r.read_json(package / "manifest.json")["facts"]["postgresql"]["minimum"] == migrations
 
 
 @pytest.mark.parametrize("name,action", [
