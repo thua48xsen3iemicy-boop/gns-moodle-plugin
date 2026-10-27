@@ -103,4 +103,35 @@ final class provider_test extends \core_privacy\tests\provider_testcase {
         provider::delete_data_for_all_users_in_context($context);
         $this->assertSame(0, $DB->count_records('gns3lab_reveal'));
     }
+
+    public function test_the_seat_of_a_student_in_an_activity(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $gen = $this->getDataGenerator();
+        $course = $gen->create_course();
+        $lab = $gen->create_module('gns3lab', ['course' => $course->id]);
+        $student = $gen->create_and_enrol($course, 'student');
+        $other = $gen->create_and_enrol($course, 'student');
+        $context = \context_module::instance($lab->cmid);
+        $row = fn($user) => (object) [
+            'gns3labid' => $lab->id, 'userid' => $user->id, 'sessionkey' => hash('sha256', 'sid' . $user->id), 'tabid' => 'p',
+            'timeclaimed' => 1790000000, 'timemodified' => 1790000000,
+        ];
+        $DB->insert_records('gns3lab_seat', [$row($student), $row($other)]);
+
+        $contextids = array_map('intval', provider::get_contexts_for_userid($student->id)->get_contextids());
+        $this->assertSame([(int) $context->id], $contextids);
+        $userlist = new userlist($context, 'mod_gns3lab');
+        provider::get_users_in_context($userlist);
+        $this->assertEqualsCanonicalizing([(int) $student->id, (int) $other->id], array_map('intval', $userlist->get_userids()));
+
+        provider::delete_data_for_user(new approved_contextlist($student, 'mod_gns3lab', [$context->id]));
+        $this->assertSame(0, $DB->count_records('gns3lab_seat', ['userid' => $student->id]));
+        $this->assertSame(1, $DB->count_records('gns3lab_seat', ['userid' => $other->id]));
+        provider::delete_data_for_users(new approved_userlist($context, 'mod_gns3lab', [$other->id]));
+        $this->assertSame(0, $DB->count_records('gns3lab_seat'));
+        $DB->insert_record('gns3lab_seat', $row($student));
+        provider::delete_data_for_all_users_in_context($context);
+        $this->assertSame(0, $DB->count_records('gns3lab_seat'));
+    }
 }

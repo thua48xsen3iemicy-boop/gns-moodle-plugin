@@ -46,6 +46,7 @@ import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
+import {Seat, STRING_KEYS as SEAT_KEYS, reportRefusal, tabId} from 'mod_gns3lab/seat';
 import {Session, STRING_KEYS as SESSION_KEYS} from 'mod_gns3lab/session';
 import {Stage} from 'mod_gns3lab/stage';
 import {STRING_KEYS as VNC_KEYS} from 'mod_gns3lab/vnc';
@@ -199,9 +200,29 @@ class LabPage {
             this.session.render();
             this.session.refresh();
         }
+        // The seat (docs/seat.md): in the modes `tab` and `login` only one page drives the lab of the student. A teacher
+        // who looks at a student's lab has no seat to claim and may be many. The server enforces it either way.
+        this.seat = null;
+        const wall = region('seatwall');
+        if (controllable && userid === 0 && wall && (this.data.seatmode === 'tab' || this.data.seatmode === 'login')) {
+            this.seat = new Seat(root, {cmid, strings, onChange: held => this.seatChanged(held)});
+            this.seat.start();
+        }
         this.bindAsStudent(region('asStudent'));
         if (this.uncovering && controllable) {
             this.loadMask();
+        }
+    }
+
+    /**
+     * The page gained or lost the seat of the lab (docs/seat.md). A page that lost it closes its consoles at once: the
+     * wall covers the rest, and a console that stayed open would be a way around it.
+     *
+     * @param {boolean} held the page holds the seat now
+     */
+    seatChanged(held) {
+        if (!held) {
+            this.consoles.closeAll();
         }
     }
 
@@ -613,10 +634,11 @@ class LabPage {
         try {
             await Promise.all(Ajax.call([{
                 methodname: 'mod_gns3lab_reveal',
-                args: {cmid: this.cmid, items: batch},
+                args: {cmid: this.cmid, items: batch, tabid: tabId()},
             }]));
             this.flushFails = 0;
         } catch (error) {
+            reportRefusal(error);
             // The lab may have stopped or the server be busy: the items wait, and after the last try they are dropped
             // (the page still has them; a reload would show less).
             if (++this.flushFails < REVEAL_TRIES) {
@@ -866,7 +888,7 @@ export const init = async(prefix, cmid, userid = 0) => {
         return;
     }
     root.dataset.labReady = '1';
-    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...CONSOLE_KEYS, ...VNC_KEYS, ...SNIPPET_KEYS])];
+    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...SEAT_KEYS, ...CONSOLE_KEYS, ...VNC_KEYS, ...SNIPPET_KEYS])];
     const values = await getStrings(keys.map(key => ({key, component: 'mod_gns3lab'})));
     const strings = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
     new LabPage(root, {prefix, cmid, userid, strings});

@@ -24,6 +24,7 @@ use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
+use mod_gns3lab\local\seat;
 use mod_gns3lab\local\session_data;
 
 /**
@@ -42,6 +43,7 @@ class start_session extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'cmid' => new external_value(PARAM_INT, 'Course module id'),
+            'tabid' => new external_value(PARAM_ALPHANUMEXT, 'Id of this page load (one-seat rule)', VALUE_DEFAULT, ''),
         ]);
     }
 
@@ -49,13 +51,19 @@ class start_session extends external_api {
      * Starts the lab.
      *
      * @param int $cmid course module id
+     * @param string $tabid page id for the one-seat rule
      * @return array session
      */
-    public static function execute(int $cmid): array {
-        ['cmid' => $cmid] = self::validate_parameters(self::execute_parameters(), ['cmid' => $cmid]);
+    public static function execute(int $cmid, string $tabid = ''): array {
+        ['cmid' => $cmid, 'tabid' => $tabid] = self::validate_parameters(
+            self::execute_parameters(),
+            ['cmid' => $cmid, 'tabid' => $tabid]
+        );
         $access = lab_access::from_cmid($cmid);
         self::validate_context($access->context);
         [$userid] = $access->resolve_user(0);
+        // Only the page that holds the seat of the student starts the lab (docs/seat.md).
+        seat::require_seat($access, $userid, $tabid);
 
         $lab = lab_library::activity_lab($access->instance);
         if ($lab === null) {

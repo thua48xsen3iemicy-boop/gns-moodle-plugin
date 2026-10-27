@@ -171,6 +171,7 @@ $string['ed_warning_hostname_not_set'] = 'the name is not a Cisco hostname (a le
 $string['ed_warning_switch_not_configured'] = 'only Cisco IOL switches are set up by the lab: the student sets the VLAN on the other switches on the way';
 $string['ed_warnings'] = 'Notes';
 $string['eventlabrejected'] = 'Lab refused by the lab manager';
+$string['eventseatdenied'] = 'Lab refused: the account is in use in another login session';
 $string['facts'] = 'Demo device facts';
 $string['facts_help'] = 'What the backend would send about the running lab: interfaces, VLANs, addresses, adjacencies (two demo data sets here)';
 $string['factsbroken'] = 'Configuration with mistakes';
@@ -300,12 +301,38 @@ $string['privacy:metadata:gns3lab_reveal:kind'] = 'What was uncovered: a device,
 $string['privacy:metadata:gns3lab_reveal:nodeid'] = 'The device in the lab of the student.';
 $string['privacy:metadata:gns3lab_reveal:timecreated'] = 'When it was uncovered.';
 $string['privacy:metadata:gns3lab_reveal:userid'] = 'The student.';
+$string['privacy:metadata:gns3lab_seat'] = 'Which login and which browser page of a student drives the lab of an activity right now. Kept for a minute and a half after the last sign of life.';
+$string['privacy:metadata:gns3lab_seat:gns3labid'] = 'The activity.';
+$string['privacy:metadata:gns3lab_seat:sessionkey'] = 'A one-way hash of the Moodle session id: tells one login from another.';
+$string['privacy:metadata:gns3lab_seat:tabid'] = 'A random id of the browser page.';
+$string['privacy:metadata:gns3lab_seat:timeclaimed'] = 'When the seat last changed hands.';
+$string['privacy:metadata:gns3lab_seat:timemodified'] = 'When the holder was last seen.';
+$string['privacy:metadata:gns3lab_seat:userid'] = 'The student.';
 $string['privacy:metadata:gns3labmanager'] = 'The lab manager runs the student\'s lab and keeps the student\'s saved project.';
 $string['privacy:metadata:gns3labmanager:courseid'] = 'The course id of the activity.';
 $string['privacy:metadata:gns3labmanager:instanceid'] = 'The activity id, to find the student\'s project.';
 $string['privacy:metadata:gns3labmanager:userid'] = 'The user id, to run and keep the lab of this user.';
 $string['privacy:reveal'] = 'Uncovered on the scheme';
 $string['revealfull'] = 'Too much is recorded as uncovered in this activity.';
+$string['seat_take'] = 'Use the lab here';
+$string['seat_text_otherlogin'] = 'Your account is working in this lab in another login session (another browser or device). Only one place at a time can drive the lab. If that is you, close the lab there: this page takes the lab over by itself within a minute and a half. If it is not you, change your password and tell your teacher.';
+$string['seat_text_othertab'] = 'The lab is open on another page of this browser. Only one page at a time can open the consoles and start or stop the lab. Use it here, or go back to the other page.';
+$string['seat_title_otherlogin'] = 'The lab is open under another login';
+$string['seat_title_othertab'] = 'The lab is open in another tab';
+$string['seatbusy'] = 'The lab is busy with another request. Try again.';
+$string['seatmode'] = 'Parallel work under one account';
+$string['seatmode_help'] = 'Who may work in the lab of a student at the same time.
+
+* **One browser page** (default) - the consoles and the start and stop buttons work on one page. A newer page of the same login takes the lab over, the older one is told and closes its consoles. Another login on the same account is refused.
+* **One login, any number of pages** - several tabs of one login share the lab. Another login on the same account is refused.
+* **No limit** - for labs that are meant to be shared.
+
+A refusal of another login is written to the course log. This does not stop a student from giving away a password; it stops two people from working in one lab at the same moment.';
+$string['seatmode_login'] = 'One login, any number of pages';
+$string['seatmode_off'] = 'No limit';
+$string['seatmode_tab'] = 'One browser page (default)';
+$string['seatotherlogin'] = 'This account is working in this lab in another login session. Close the lab there and try again in a minute and a half.';
+$string['seatothertab'] = 'The lab is open on another page. Use the lab here, or go back to that page.';
 $string['sessionconflictat'] = 'You already have a lab running in "{$a}". Stop it first.';
 $string['sessionnotrunning'] = 'The lab is not running.';
 $string['snip_ios_arp'] = 'ARP table: IP address to MAC address';

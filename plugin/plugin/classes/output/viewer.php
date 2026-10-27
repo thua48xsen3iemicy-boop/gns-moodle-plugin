@@ -26,6 +26,7 @@ use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
 use mod_gns3lab\local\reveal;
+use mod_gns3lab\local\seat;
 
 /**
  * The lab page of a student: the data for the full screen interface (topology, node states, facts).
@@ -88,6 +89,8 @@ class viewer implements renderable, templatable {
         // What the scheme shows a student (live, seen or fog) and, for a fog, the names of the nodes it starts from.
         $data->factsview = reveal::mode($this->instance);
         $data->fogstart = reveal::start_names($this->instance);
+        // Who may drive the lab at the same time (docs/seat.md): the page claims the seat unless the mode is `off`.
+        $data->seatmode = seat::mode($this->instance);
         $mode = $data->factsview;
 
         return [

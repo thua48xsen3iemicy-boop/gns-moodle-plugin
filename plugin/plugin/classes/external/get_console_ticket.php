@@ -23,6 +23,7 @@ use core_external\external_value;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\reveal;
+use mod_gns3lab\local\seat;
 use mod_gns3lab\local\session_data;
 
 /**
@@ -30,6 +31,9 @@ use mod_gns3lab\local\session_data;
  *
  * The browser connects to the gateway directly with the ticket; Moodle never sees the WebSocket.
  * A ticket for another user's lab is always read only, whatever the browser asks.
+ *
+ * The owner gets a ticket only from the page that holds the seat of the student (mode `tab` or `login` of the activity,
+ * docs/seat.md): a second person on the same account cannot open a console next to the student.
  *
  * A node with a graphical console (console_type vnc) has no read-only mode: its screen belongs to the owner of the
  * lab. An observer gets no ticket for it, and Moodle does not even ask the manager (which would refuse too:
@@ -53,6 +57,7 @@ class get_console_ticket extends external_api {
             'cmid' => new external_value(PARAM_INT, 'Course module id'),
             'nodeid' => new external_value(PARAM_ALPHANUMEXT, 'Node id in the live project'),
             'userid' => new external_value(PARAM_INT, 'Whose lab, 0 for the current user', VALUE_DEFAULT, 0),
+            'tabid' => new external_value(PARAM_ALPHANUMEXT, 'Id of this page load (one-seat rule)', VALUE_DEFAULT, ''),
         ]);
     }
 
@@ -62,18 +67,24 @@ class get_console_ticket extends external_api {
      * @param int $cmid course module id
      * @param string $nodeid node id
      * @param int $userid whose lab, 0 for the current user
+     * @param string $tabid page id for the one-seat rule
      * @return array
      */
-    public static function execute(int $cmid, string $nodeid, int $userid = 0): array {
+    public static function execute(int $cmid, string $nodeid, int $userid = 0, string $tabid = ''): array {
         global $USER;
 
-        ['cmid' => $cmid, 'nodeid' => $nodeid, 'userid' => $userid] = self::validate_parameters(
+        ['cmid' => $cmid, 'nodeid' => $nodeid, 'userid' => $userid, 'tabid' => $tabid] = self::validate_parameters(
             self::execute_parameters(),
-            ['cmid' => $cmid, 'nodeid' => $nodeid, 'userid' => $userid]
+            ['cmid' => $cmid, 'nodeid' => $nodeid, 'userid' => $userid, 'tabid' => $tabid]
         );
         $access = lab_access::from_cmid($cmid);
         self::validate_context($access->context);
         [$userid, $readonly] = $access->resolve_user($userid);
+        if (!$readonly) {
+            // The owner's console is the seat's main job: a second login gets no ticket (docs/seat.md). An observer has
+            // no seat, and a teacher looking at a student's lab can be many.
+            seat::require_seat($access, $userid, $tabid);
+        }
 
         $client = \core\di::get(manager_client::class);
         $session = $client->find_session($userid, (int) $access->instance->id);

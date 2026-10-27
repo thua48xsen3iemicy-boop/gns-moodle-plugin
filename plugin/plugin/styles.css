@@ -3082,6 +3082,42 @@ body.gns3lab-fullscreen {
 .gns3lab-student .key:disabled {
     opacity: .4;
 }
+/* the wall of the seat: the lab is driven from another page or login (docs/seat.md) */
+.gns3lab-student .seatwall {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb,var(--bg) 88%,transparent);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    padding: 16px;
+}
+.gns3lab-student .seatcard {
+    background: var(--panel);
+    color: var(--fg);
+    border-radius: 12px;
+    max-width: 480px;
+    width: 100%;
+    padding: 20px 22px;
+    box-shadow: var(--shadow);
+}
+.gns3lab-student .seatcard h2 {
+    margin: 0 0 8px;
+    font: 600 20px var(--display);
+}
+.gns3lab-student .seatcard p {
+    margin: 0 0 16px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.5;
+}
+.gns3lab-student .seatact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
 /* gesture sheet */
 .gns3lab-student .help {
     position: fixed;

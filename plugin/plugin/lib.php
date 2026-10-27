@@ -94,12 +94,13 @@ function gns3lab_delete_instance($id): bool {
         return false;
     }
     \mod_gns3lab\local\reveal::delete((int) $id);
+    \mod_gns3lab\local\seat::delete((int) $id);
     $DB->delete_records('gns3lab', ['id' => $id]);
     return true;
 }
 
 /**
- * Normalises what the scheme shows a student before the activity is saved.
+ * Normalises what the scheme shows a student and the seat mode before the activity is saved.
  *
  * The form sends the starting nodes of a fog as a list (a multiple choice) or as text; the table keeps a JSON list.
  * Starting nodes make sense only for a fog.
@@ -112,4 +113,6 @@ function gns3lab_prepare_view_settings(stdClass $data): void {
     $names = $data->fogstart ?? '';
     $names = is_array($names) ? $names : \mod_gns3lab\local\reveal::parse_names((string) $names);
     $data->fogstart = $mode === \mod_gns3lab\local\reveal::FOG ? \mod_gns3lab\local\reveal::encode_names($names) : '';
+    // Who may drive the lab of a student at the same time (docs/seat.md); an unknown value becomes the default.
+    $data->seatmode = \mod_gns3lab\local\seat::mode((object) ['seatmode' => $data->seatmode ?? '']);
 }

@@ -26,7 +26,7 @@
     * backurl - URL of the activity page
     * isdemo - demo data is shown
     * previewerror - the reference lab could not be loaded from the lab manager
-    * cancontrol - the user can start the lab: show the session bar
+    * cancontrol - the user can start the lab: show the session bar and the wall of the seat (docs/seat.md)
     * cmid - course module id
     * datajson - JSON with topology, live (node states, guests) and facts (ok, broken)
 
@@ -149,6 +149,19 @@
     </section>
 
     <div class="toast" data-region="toast" role="status" hidden></div>
+
+    {{#cancontrol}}
+    <div class="seatwall" data-region="seatwall" tabindex="-1" role="alertdialog" aria-modal="true" aria-labelledby="{{uniqid}}-seatT" aria-describedby="{{uniqid}}-seatD" hidden>
+        <div class="seatcard">
+            <h2 id="{{uniqid}}-seatT" data-region="seatTitle"></h2>
+            <p id="{{uniqid}}-seatD" data-region="seatText"></p>
+            <div class="seatact">
+                <button class="btn primary" type="button" data-region="seatTake" hidden></button>
+                <a class="btn" href="{{backurl}}">{{#str}}backtoactivity, mod_gns3lab{{/str}}</a>
+            </div>
+        </div>
+    </div>
+    {{/cancontrol}}
 
     <div class="help" data-region="help" hidden>
         <div class="helpcard" role="dialog" aria-modal="true" aria-labelledby="{{uniqid}}-helpT">
