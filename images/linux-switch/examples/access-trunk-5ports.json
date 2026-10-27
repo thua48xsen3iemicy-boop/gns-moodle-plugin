@@ -1,0 +1,9 @@
+{
+  "ports": {
+    "ens3": {"mode": "trunk", "allowed": [10, 20]},
+    "ens4": {"mode": "access", "vlan": 10},
+    "ens5": {"mode": "access", "vlan": 10},
+    "ens6": {"mode": "access", "vlan": 20},
+    "ens7": {"mode": "access", "vlan": 20}
+  }
+}

@@ -12,7 +12,7 @@ from .server import MAX_REQUEST, MAX_RESPONSE, Service
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", default="/run/switch-api/api.sock")
-    parser.add_argument("method", choices=["status", "ports", "fdb", "vlans", "vlan.apply",
+    parser.add_argument("method", choices=["status", "ports", "fdb", "vlans", "vlan.apply", "port.configure",
                                            "capture.start", "capture.read", "capture.stop"])
     parser.add_argument("--params", default="{}", help="JSON object, or - to read stdin")
     args = parser.parse_args()

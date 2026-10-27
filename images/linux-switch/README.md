@@ -1,4 +1,4 @@
-# Linux switch guest image 0.1.1
+# Linux switch guest image 0.2.0
 
 Base: Debian 13 (trixie) minimal, amd64, Linux bridge, systemd-networkd and
 qemu-guest-agent from the maintained Debian repositories. These files configure
@@ -34,7 +34,9 @@ The initial profile is one learning bridge, with a 300-second FDB ageing time.
 VLAN filtering is enabled with no automatic PVID. switch-api assigns access VLAN 1
 to all ports until a saved policy exists; otherwise it applies the saved access/
 trunk policy. Ports have no VLAN connectivity until the service configures them.
-STP is disabled: the initial topology must be loop-free.
+Classic STP is enabled to block redundant paths. The same spanning tree applies
+to all VLANs; this is not RSTP/PVST/MSTP. Ports can take about 30 seconds to enter
+forwarding at startup, and blocking does not change the administrative UP flag.
 
 ## Prepare a dedicated guest
 
@@ -67,8 +69,12 @@ network, stage the new network files outside /etc/systemd/network until the fina
 step. If SSH uses IPv6, applying the appliance sysctls would disconnect it.
 
 At final activation the installer backs up existing .network/.netdev files in
-/etc/systemd/network, installs the complete profile, disables the previous network
-managers and disables cloud-init if present. systemd-networkd must be the sole
+/etc/systemd/network, installs the complete profile, archives ifupdown's interfaces
+file and includes and replaces them with a loopback-only configuration without
+includes. It masks ifupdown hotplug units, previous network managers and standalone
+DHCP/IPv4LL services, and disables cloud-init if present. Masking networking.service
+alone is insufficient because allow-hotplug can start ifupdown separately.
+systemd-networkd must be the sole
 owner of the switch interfaces. It uses the first matching .network file; check
 /run/systemd/network and /usr/lib/systemd/network for any additional custom
 profiles that could override this dedicated guest's configuration.
@@ -163,6 +169,12 @@ SSH is masked only after the three installed profile files are validated. Do not
 mask sshd.service: it can already be an alias symlink to ssh.service on Debian.
 After reboot the old temporary addresses are absent, networkd applies the bridge
 profile, and guest management uses QGA and the serial console.
+
+Activation also installs the IPv6-disable sysctl profile, independently of the
+optional logging settings. Recheck `ip -br address` after reboot: no IPv4 link-local,
+DHCP or IPv6 addresses should remain on the switch ports or br0. For an earlier
+prototype, rerun prepare then activate to replace the old ifupdown configuration;
+a service restart alone does not remove old clients or their address state.
 
 The reboot also applies the sysctl, mount and manager settings. IPv6 is disabled on
 current and future interfaces. Check /etc/fstab has no other /var/log mount.

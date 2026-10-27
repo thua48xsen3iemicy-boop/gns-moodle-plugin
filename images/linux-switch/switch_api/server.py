@@ -50,6 +50,8 @@ class Service:
             return await self.vlans.read()
         if method == "vlan.apply":
             return await self.vlans.configure(params)
+        if method == "port.configure":
+            return await self.vlans.configure_port(params)
         if method == "capture.start":
             return await self.captures.start(params)
         if method in {"capture.read", "capture.stop"}:
