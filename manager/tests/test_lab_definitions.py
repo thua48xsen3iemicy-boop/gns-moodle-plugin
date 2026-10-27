@@ -36,7 +36,7 @@ async def test_info_images_and_site_limits(tmp_path, dsn):
     async with make_env(tmp_path, dsn, images=IMAGES, sites=sites) as env:
         info = (await env.client.get("/api/v1/info")).json()
         assert {"images", "lab_definitions"} <= set(info["features"])
-        assert info["lab_formats"] == ["gns3lab.lab/1"]
+        assert info["lab_formats"] == ["gns3lab.lab/1", "gns3lab.lab/2"] and "lab_constructor" in info["features"]
         assert info["limits"] == {"max_nodes": 30, "max_memory_mb": 16384, "max_cpus": 8,
                                   "images": ["cisco-iou-l2", "debian12"]}
         images = (await env.client.get("/api/v1/images")).json()["images"]
@@ -204,3 +204,31 @@ async def test_a_reference_lab_follows_the_image_of_its_nodes_too(tmp_path, dsn)
         router = next(n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"].startswith("SW"))
         r = await ticket_of(env, sid, router)
         assert r.status_code == 403 and r.json()["error"] == "console_disabled"
+
+
+async def test_segments_validate_images_and_session(tmp_path, dsn):
+    from test_segments import IMAGES as CONSTRUCTOR_IMAGES
+    from test_segments import LAB2
+
+    async with make_env(tmp_path, dsn, images=CONSTRUCTOR_IMAGES) as env:
+        r = await env.client.get("/api/v1/images")
+        flags = {i["id"]: i["preconfig"] for i in r.json()["images"]}
+        assert flags["vpcs"] and flags["debian12"] and not flags["linux-switch"] and not flags["cisco-iou-l3"]
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": LAB2})
+        assert r.status_code == 200, r.text
+        assert r.json()["warnings"] == [{"path": "segments[0].gateway", "code": "gateway_not_configured",
+                                         "message": "the router is set by the student"}]
+        bad = copy.deepcopy(LAB2)
+        bad["segments"][0]["subnet"] = {"fixed": "192.168.10.1/24"}
+        bad["segments"][0]["members"][0]["host"] = 0
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": bad})
+        assert r.status_code == 422
+        assert [(p["path"], p["code"]) for p in r.json()["problems"]] == [("segments[0].subnet.fixed", "bad_subnet")]
+
+        r = await start_def(env, LAB2)
+        assert r.status_code == 201, r.text
+        await env.run()
+        ticket = next(iter(env.slots[201].labs.values()))["ticket"]
+        nodes = {n["name"]: n for n in ticket["nodes"]}
+        assert nodes["PC1"]["provisioning"][0]["timeout_seconds"] == 120
+        assert nodes["PC3"]["startup_script"] == "ip 192.168.10.3/24 192.168.10.254\n"

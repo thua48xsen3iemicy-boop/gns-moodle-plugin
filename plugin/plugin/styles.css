@@ -3461,6 +3461,65 @@ body.gns3lab-fullscreen {
     height: 32px;
 }
 
+/* lab constructor: segments of the lab, members on the canvas, the preview of addresses */
+.gns3lab-editor .node.member .halo {
+    stroke: var(--accent);
+    fill: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.gns3lab-editor .node.gw .halo {
+    stroke: var(--c2);
+    fill: color-mix(in srgb, var(--c2) 14%, transparent);
+}
+.gns3lab-editor .node.pickable {
+    cursor: copy;
+}
+.gns3lab-editor .node.nopick use {
+    opacity: .35;
+}
+.gns3lab-editor .ed-members td {
+    vertical-align: middle;
+}
+.gns3lab-editor .ed-members tr.bad td:first-child {
+    box-shadow: inset 3px 0 0 var(--bad);
+}
+.gns3lab-editor .ed-members .rowbtn {
+    display: inline-block;
+    width: auto;
+    padding: 2px 6px;
+}
+.gns3lab-editor .ed-members .ed-host {
+    width: 5em;
+}
+.gns3lab-editor .ed-pick {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+}
+.gns3lab-editor .ed-problems.warn .rowbtn {
+    border-left-color: var(--warn);
+}
+.gns3lab-editor .ed-problems.seglist .rowbtn {
+    border-left-color: var(--accent);
+}
+.gns3lab-editor .pv-issue.bad {
+    color: var(--bad);
+}
+.gns3lab-editor .pv-tie {
+    stroke-width: 1.5;
+    stroke-dasharray: 4 4;
+    opacity: .7;
+    pointer-events: none;
+}
+.gns3lab-editor .pv-subnet rect {
+    stroke: var(--pv, var(--line));
+}
+.gns3lab-editor .pv-ip {
+    font: 500 10.5px var(--mono);
+    fill: var(--fg);
+    pointer-events: none;
+}
+
 @media (max-width: 760px) {
     .gns3lab-editor .stage {
         flex-direction: column;

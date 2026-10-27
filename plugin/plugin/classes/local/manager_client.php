@@ -138,10 +138,21 @@ class manager_client {
     }
 
     /**
+     * Whether the manager has the lab constructor: lab definitions with segments (gns3lab.lab/2, CONTRACTS §2.6).
+     *
+     * @return bool
+     */
+    public function supports_lab_constructor(): bool {
+        return $this->supports_lab_definitions()
+            && $this->has_feature('lab_constructor')
+            && in_array(lab_definition::FORMAT_2, $this->get_info()->lab_formats ?? [], true);
+    }
+
+    /**
      * Image catalog for the lab editor (MANAGER_REQUESTS П10), cached like the info.
      *
      * @return \stdClass[] images with id, title, kind, category, symbol, console_type, ram_mb, cpus, adapters,
-     *     port_name, ports_per_adapter; empty if the manager has no catalog
+     *     port_name, ports_per_adapter and, with the lab constructor, preconfig; empty if the manager has no catalog
      */
     public function get_images(): array {
         if (!$this->has_feature('images')) {
@@ -169,8 +180,8 @@ class manager_client {
      *
      * A definition with problems comes back as manager_exception lab_invalid, with problems in details.
      *
-     * @param array $lab lab definition gns3lab.lab/1
-     * @return \stdClass lab_def (hash), resources {cores, memory_mb}, warnings
+     * @param array $lab lab definition gns3lab.lab/1 or gns3lab.lab/2
+     * @return \stdClass lab_def (hash), resources {cores, memory_mb}, warnings [{path, code, message}]
      */
     public function validate_lab(array $lab): \stdClass {
         $result = $this->expect_object($this->request('POST', '/api/v1/labs/validate', ['lab' => $lab]));

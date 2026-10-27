@@ -52,7 +52,7 @@ class SessionCreate(Strict):
     user_id: int = Field(gt=0)
     instance_id: int = Field(gt=0)
     lab_ref: str | None = Field(default=None, min_length=1, max_length=64)
-    lab: dict | None = None  # gns3lab.lab/1 from Moodle, checked by labdef.check (exactly one of the two)
+    lab: dict | None = None  # gns3lab.lab/1 or /2 from Moodle, checked by labdef.check (exactly one of the two)
     course_id: int | None = Field(default=None, ge=0)
     options: SessionOptions | None = None
     client: ClientInfo | None = None
@@ -272,8 +272,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": OPTIONS, "features": features}
         if settings.images is not None:
-            features += ["images", "lab_definitions"]
-            body["lab_formats"] = [labdef.FORMAT]
+            features += ["images", "lab_definitions", "lab_constructor"]
+            body["lab_formats"] = list(labdef.FORMATS)
             body["limits"] = site.limits.public()
         return body
 
@@ -286,7 +286,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     @app.post("/api/v1/labs/validate")
     async def validate_lab(body: LabValidate, site=Depends(site_of)):
         checked = check_lab(body.lab, site)
-        return {"lab_def": checked.lab_def, "resources": checked.resources, "warnings": []}
+        return {"lab_def": checked.lab_def, "resources": checked.resources, "warnings": list(checked.warnings)}
 
     @app.get("/api/v1/labs")
     async def list_labs(site=Depends(site_of)):

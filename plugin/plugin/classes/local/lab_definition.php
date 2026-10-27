@@ -17,7 +17,11 @@
 namespace mod_gns3lab\local;
 
 /**
- * Lab definition gns3lab.lab/1: what the lab library stores and sends to the lab manager (MANAGER_REQUESTS П11).
+ * Lab definition gns3lab.lab/1 or gns3lab.lab/2: what the lab library stores and sends to the lab manager
+ * (MANAGER_REQUESTS П11, lab constructor stage 2).
+ *
+ * lab/2 is lab/1 plus segments (docs/lab-constructor/README.md §3). A definition with segments is lab/2, one
+ * without them is lab/1, whatever format the editor named.
  *
  * The plugin only checks the shape and the size: the lab manager knows the images and their limits and
  * checks the rest (POST /api/v1/labs/validate). Drawings and texts of a lab are not part of the definition.
@@ -29,6 +33,18 @@ namespace mod_gns3lab\local;
 class lab_definition {
     /** Format name. */
     public const FORMAT = 'gns3lab.lab/1';
+
+    /** Format with segments (lab constructor). */
+    public const FORMAT_2 = 'gns3lab.lab/2';
+
+    /** Most segments in a lab, as in the lab manager. */
+    public const MAX_SEGMENTS = 100;
+
+    /** Most devices in a segment, as in the lab manager. */
+    public const MAX_MEMBERS = 100;
+
+    /** Segment name pattern of the lab manager. */
+    public const SEGMENT_PATTERN = '/^[A-Za-z][A-Za-z0-9_]{0,31}$/';
 
     /** Most nodes a Lab Slot takes. */
     public const MAX_NODES = 100;
@@ -115,7 +131,85 @@ class lab_definition {
             }
             $def['links'][] = $ends;
         }
+        $segments = self::segments($raw['segments'] ?? [], $names);
+        if ($segments) {
+            $def['format'] = self::FORMAT_2;
+            $def['segments'] = $segments;
+        }
         return $def;
+    }
+
+    /**
+     * Keeps the known fields of the segments and refuses a wrong shape; values are the lab manager's to check.
+     *
+     * @param mixed $raw segments as sent by the editor
+     * @param array $names node names of the lab as keys
+     * @return array clean segments
+     * @throws \moodle_exception labdefinvalid when the shape is wrong
+     */
+    protected static function segments(mixed $raw, array $names): array {
+        if (!is_array($raw) || !array_is_list($raw) || count($raw) > self::MAX_SEGMENTS) {
+            throw self::invalid('segments');
+        }
+        $out = [];
+        foreach ($raw as $i => $segment) {
+            $name = is_array($segment) ? ($segment['name'] ?? null) : null;
+            if (!is_string($name) || !preg_match(self::SEGMENT_PATTERN, $name)) {
+                throw self::invalid("segments[{$i}].name");
+            }
+            $subnet = $segment['subnet']['fixed'] ?? null;
+            if (!is_string($subnet) || strlen($subnet) > 32) {
+                throw self::invalid("segments[{$i}].subnet");
+            }
+            $clean = ['name' => $name];
+            if (isset($segment['vlan'])) {
+                $vlan = is_array($segment['vlan']) ? ($segment['vlan']['fixed'] ?? null) : null;
+                if (!is_int($vlan)) {
+                    throw self::invalid("segments[{$i}].vlan");
+                }
+                $clean['vlan'] = ['fixed' => $vlan];
+            }
+            $clean['subnet'] = ['fixed' => $subnet];
+            if (isset($segment['gateway'])) {
+                $clean['gateway'] = self::port($segment['gateway'], $names, "segments[{$i}].gateway");
+            }
+            $members = $segment['members'] ?? [];
+            if (!is_array($members) || !array_is_list($members) || count($members) > self::MAX_MEMBERS) {
+                throw self::invalid("segments[{$i}].members");
+            }
+            $clean['members'] = [];
+            foreach ($members as $j => $member) {
+                $clean['members'][] = self::port($member, $names, "segments[{$i}].members[{$j}]");
+            }
+            $out[] = $clean;
+        }
+        return $out;
+    }
+
+    /**
+     * A port of a segment: node, adapter, port and an optional address number.
+     *
+     * @param mixed $raw port as sent by the editor
+     * @param array $names node names of the lab as keys
+     * @param string $where path, for the error
+     * @return array
+     */
+    protected static function port(mixed $raw, array $names, string $where): array {
+        if (
+            !is_array($raw) || !is_string($raw['node'] ?? null) || !isset($names[$raw['node']])
+            || !is_int($raw['adapter'] ?? null) || !is_int($raw['port'] ?? null)
+            || $raw['adapter'] < 0 || $raw['port'] < 0 || $raw['adapter'] > 255 || $raw['port'] > 255
+        ) {
+            throw self::invalid($where);
+        }
+        $port = ['node' => $raw['node'], 'adapter' => $raw['adapter'], 'port' => $raw['port']];
+        if (isset($raw['host'])) {
+            if (!is_int($raw['host']) || $raw['host'] < 1 || $raw['host'] > 65535) {
+                throw self::invalid($where . '.host');
+            }
+            $port['host'] = $raw['host'];
+        }
+        return $port;
     }
 
     /**

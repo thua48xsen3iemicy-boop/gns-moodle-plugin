@@ -22,13 +22,16 @@
     * labname - lab name
     * libraryurl - URL of the lab library
     * canpublish - the lab manager takes lab definitions
-    * datajson - JSON with labid, definition, version, status, images, limits, canpublish, catalogerror, strings
+    * labconstructor - the lab manager has the lab constructor (segments, lab/2)
+    * datajson - JSON with labid, definition, version, status, images, limits, canpublish, labconstructor, catalogerror,
+      strings
 
     Example context (json):
     {
         "labname": "OSPF, three areas",
         "libraryurl": "https://example.org/mod/gns3lab/library.php",
         "canpublish": true,
+        "labconstructor": true,
         "datajson": "{}"
     }
 }}
@@ -44,6 +47,9 @@
         <div class="tools">
             <button class="gbtn" type="button" data-act="undo" disabled>{{#str}}ed_undo, mod_gns3lab{{/str}}</button>
             <button class="gbtn" type="button" data-act="link" aria-pressed="false" title="{{#str}}ed_link_help, mod_gns3lab{{/str}}">{{#str}}ed_link, mod_gns3lab{{/str}}</button>
+            {{#labconstructor}}
+            <button class="gbtn" type="button" data-act="preview" aria-pressed="false" disabled title="{{#str}}ed_preview_help, mod_gns3lab{{/str}}">{{#str}}ed_preview, mod_gns3lab{{/str}}</button>
+            {{/labconstructor}}
             <button class="gbtn" type="button" data-act="fit">{{#str}}fit, mod_gns3lab{{/str}}</button>
             <button class="gbtn" type="button" data-act="check" {{^canpublish}}disabled{{/canpublish}}>{{#str}}ed_check, mod_gns3lab{{/str}}</button>
             <button class="gbtn" type="button" data-act="save">{{#str}}ed_save, mod_gns3lab{{/str}}</button>

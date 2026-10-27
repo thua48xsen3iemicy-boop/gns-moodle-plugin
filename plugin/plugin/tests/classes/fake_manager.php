@@ -204,6 +204,75 @@ class fake_manager {
     }
 
     /**
+     * Answers like manager 0.10 with the lab constructor (CONTRACTS §2.6): lab/2, preconfig of the images, warnings.
+     *
+     * @param string $labdef hash that validate returns
+     */
+    public function with_lab_constructor(string $labdef = 'sha256:bbbb'): void {
+        $this->with_info(['consoles', 'observer', 'images', 'lab_definitions', 'lab_constructor'], [
+            'lab_formats' => ['gns3lab.lab/1', 'gns3lab.lab/2'],
+            'limits' => ['max_nodes' => 30, 'max_memory_mb' => 16384, 'max_cpus' => 8, 'images' => '*'],
+        ]);
+        $this->on('GET', '/api/v1/images', 200, ['images' => [self::image(), self::host_image()]]);
+        $this->on('POST', '/api/v1/labs/validate', 200, [
+            'lab_def' => $labdef,
+            'resources' => ['cores' => 2, 'memory_mb' => 3072],
+            'warnings' => [['path' => 'segments[0].gateway', 'code' => 'gateway_not_configured', 'message' => 'by the student']],
+        ]);
+    }
+
+    /**
+     * A Linux host image whose network the lab constructor can set up.
+     *
+     * @return array
+     */
+    public static function host_image(): array {
+        return [
+            'id' => 'debian12',
+            'title' => 'Debian 12',
+            'kind' => 'qemu',
+            'category' => 'host',
+            'symbol' => ':/symbols/computer.svg',
+            'console_type' => 'telnet',
+            'ram_mb' => ['default' => 768, 'min' => 512, 'max' => 4096],
+            'cpus' => ['default' => 1, 'min' => 1, 'max' => 2],
+            'adapters' => ['default' => 1, 'min' => 1, 'max' => 4],
+            'port_name' => 'Ethernet{adapter}',
+            'ports_per_adapter' => 1,
+            'preconfig' => true,
+        ];
+    }
+
+    /**
+     * A lab definition of a router and two hosts with one segment, as the editor sends it (gns3lab.lab/2).
+     *
+     * @return array
+     */
+    public static function lab_with_segments(): array {
+        return [
+            'format' => 'gns3lab.lab/2',
+            'nodes' => [
+                ['name' => 'R1', 'image' => 'cisco-iou-l3', 'x' => 0, 'y' => 0, 'adapters' => 1],
+                ['name' => 'PC1', 'image' => 'debian12', 'x' => -100, 'y' => 100, 'adapters' => 1],
+                ['name' => 'PC2', 'image' => 'debian12', 'x' => 100, 'y' => 100, 'adapters' => 1],
+            ],
+            'links' => [
+                ['a' => ['node' => 'R1', 'adapter' => 0, 'port' => 0], 'b' => ['node' => 'PC1', 'adapter' => 0, 'port' => 0]],
+            ],
+            'segments' => [[
+                'name' => 'LAN1',
+                'vlan' => ['fixed' => 10],
+                'subnet' => ['fixed' => '192.168.10.0/24'],
+                'gateway' => ['node' => 'R1', 'adapter' => 0, 'port' => 0],
+                'members' => [
+                    ['node' => 'PC1', 'adapter' => 0, 'port' => 0],
+                    ['node' => 'PC2', 'adapter' => 0, 'port' => 0, 'host' => 20],
+                ],
+            ]],
+        ];
+    }
+
+    /**
      * An image of the catalog: Cisco IOU L3.
      *
      * @return array

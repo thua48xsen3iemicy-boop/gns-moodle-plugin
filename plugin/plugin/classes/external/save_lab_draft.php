@@ -39,7 +39,7 @@ class save_lab_draft extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'labid' => new external_value(PARAM_INT, 'Lab id'),
-            'definition' => new external_value(PARAM_RAW, 'Lab definition gns3lab.lab/1 as JSON'),
+            'definition' => new external_value(PARAM_RAW, 'Lab definition gns3lab.lab/1 or /2 as JSON'),
         ]);
     }
 

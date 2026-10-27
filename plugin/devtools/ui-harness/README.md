@@ -68,6 +68,18 @@ npm install
 node check_seen.js [--min] [--shots /tmp/seen-shots]    # нужен Playwright с Chromium; mock-менеджер не нужен
 ```
 
+Редактор лаб в харнессе: `editor.<язык>.html` (менеджер с конструктором: панель «Сегменты», предпросмотр), `editor.<язык>.plain.html`
+(менеджер без него) и `editor.<язык>.segments.html` (лаба, в которой уже есть сегмент). Заглушки `validate`, `save` и `publish` в
+`stubs/ajax.js` отказывают на повторе номера адреса, плохой подсети и пустом сегменте и предупреждают о каждом шлюзе и VLAN;
+последнее сохранённое определение — `window.__stub.editor.saved`. Сквозная проверка — `check_editor.js` (порт 18126, Playwright
+с Chromium; `--min` — минифицированные модули):
+
+```bash
+cd plugin/devtools/ui-harness
+npm install
+node check_editor.js [--min] [--shots /tmp/editor-shots]
+```
+
 Проверка режимов `seen` и `fog` — `check_reveal.js`: поднимает шлюз харнесса (порт 18125), в Chromium ведёт страницы `fog`, `fog-start`,
 `seen` и преподавателя: силуэты и открытие устройства первым выводом, интерфейс и кабель, сосед, узел без консоли, выключенный и затем
 поднятый интерфейс (`__stub.facts.patch`), перезагрузка страницы (маска живёт в `sessionStorage` вкладки: заглушки `get_reveal` и

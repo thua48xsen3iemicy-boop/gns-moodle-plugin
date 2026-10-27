@@ -8,6 +8,7 @@
 | `build_novnc.mjs` | собирает `plugin/amd/src/novnc.js` из пакета `@novnc/novnc` (esbuild, один ES-модуль); нужен только при смене версии noVNC, порядок команд — в шапке скрипта |
 | `check_facts.mjs` | проверка чистых функций `facts.js` на Node, без Moodle и браузера (раздел «Проверка слоёв без браузера») |
 | `check_consolefacts.mjs` | проверка слоя «увидено в консоли» на Node: разбор выводов, слияние с фактами, сброс по отпечатку и снятие команд с настоящего xterm.js (`docs/live-state.md` §8) |
+| `check_segments.mjs` | проверка `segments.js` на Node: адреса сегментов, ожидаемые факты и предпросмотр через `facts.js`, привязка находок менеджера к сегментам (`docs/lab-constructor/README.md` §13.2) |
 | `check_reveal.mjs` | проверка режимов `seen` и `fog` на Node: маска, что открывает команда и что открывают факты, стартовые узлы, отфильтрованные факты и находки (`docs/lab-constructor/README.md` §2) |
 | `mock-manager/mock_manager.py` | менеджер лаб в памяти (SPEC §3) и поддельная консоль Lab Slot; у `vnc`-ноды (PVE1 эталонной лабы, образ `debian12-desktop`) — экран по RFB 3.8, билет только владельцу |
 | `ui-harness/` | интерфейс студента (`lab.php`) в браузере без Moodle: настоящие модули и шаблон, заглушки API Moodle, поддельный шлюз (`ui-harness/README.md`) |
@@ -209,6 +210,10 @@ node plugin/devtools/check_reveal.mjs     # из корня репозитори
 `ui-harness/check_reveal.js`.
 
 ## Библиотека и редактор лаб
+
+Конструктор (сегменты, `gns3lab.lab/2`, менеджер 0.10.0) mock-менеджер не знает: он не объявляет `lab_constructor`, в редакторе
+при нём панели «Сегменты» нет. Редактор с сегментами — `ui-harness/editor.<язык>.html` (заглушки), настоящую проверку делает
+менеджер 0.10.0.
 
 Mock-менеджер ведёт себя как менеджер 0.5 (CONTRACTS §2.6, ветка `claude/determined-brown-lfgnxy`): объявляет
 `images`, `lab_definitions` и `lab_formats`, отдаёт каталог образов (`GET /api/v1/images`, пять образов: IOU L3/L2,

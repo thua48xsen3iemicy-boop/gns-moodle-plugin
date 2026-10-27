@@ -97,7 +97,48 @@ final class lab_editor_test extends \advanced_testcase {
     public function test_validate_gives_the_resources(): void {
         $result = validate_lab::execute($this->labid, json_encode(fake_manager::lab()));
 
-        $this->assertSame(['valid' => true, 'memorymb' => 3072, 'cores' => 2, 'problems' => []], $result);
+        $this->assertSame(
+            ['valid' => true, 'memorymb' => 3072, 'cores' => 2, 'problems' => [], 'warnings' => []],
+            $result
+        );
+    }
+
+    public function test_a_lab_with_segments_is_saved_as_lab_2_and_validate_gives_the_warnings(): void {
+        $this->manager->with_lab_constructor();
+        $json = json_encode(fake_manager::lab_with_segments());
+
+        $result = external_api::clean_returnvalue(
+            validate_lab::execute_returns(),
+            validate_lab::execute($this->labid, $json)
+        );
+        save_lab_draft::execute($this->labid, $json);
+
+        $this->assertTrue($result['valid']);
+        $this->assertSame(
+            [['path' => 'segments[0].gateway', 'code' => 'gateway_not_configured', 'message' => 'by the student']],
+            $result['warnings']
+        );
+        [$request] = $this->manager->requests_to('POST', '/api/v1/labs/validate');
+        $this->assertSame('gns3lab.lab/2', $request['body']['lab']['format']);
+        $this->assertSame('LAN1', $request['body']['lab']['segments'][0]['name']);
+        $stored = json_decode(lab_library::latest_version($this->labid)->definition, true);
+        $this->assertSame('gns3lab.lab/2', $stored['format']);
+        $this->assertSame(20, $stored['segments'][0]['members'][1]['host']);
+    }
+
+    public function test_the_problems_of_segments_reach_the_editor(): void {
+        $this->manager->with_lab_constructor();
+        $this->manager->on('POST', '/api/v1/labs/validate', 422, [
+            'error' => 'lab_invalid',
+            'message' => '1 problem',
+            'problems' => [['path' => 'segments[0].members[1]', 'code' => 'host_in_use', 'message' => 'host 20']],
+        ]);
+
+        $result = validate_lab::execute($this->labid, json_encode(fake_manager::lab_with_segments()));
+
+        $this->assertFalse($result['valid']);
+        $this->assertSame('host_in_use', $result['problems'][0]['code']);
+        $this->assertSame([], $result['warnings']);
     }
 
     public function test_unreachable_manager_is_an_error_not_a_problem(): void {

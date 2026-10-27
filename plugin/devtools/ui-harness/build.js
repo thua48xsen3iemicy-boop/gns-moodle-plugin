@@ -121,9 +121,11 @@ function page(lang, extra = {}) {
     };
     return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons});
 }
-const shell = (lang, lab, body, mode = 'live', start = '') => fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
+const LAB_INIT = "require(['mod_gns3lab/lab'], function(lab) { lab.init('u1', 1, q.has('observer') ? 7 : 0); });";
+const EDITOR_INIT = "require(['mod_gns3lab/editor'], function(editor) { editor.init('u1'); });";
+const shell = (lang, lab, body, mode = 'live', start = '', init = LAB_INIT) => fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
     .replaceAll('{{lang}}', lang).replaceAll('{{lab}}', lab).replaceAll('{{mode}}', mode).replaceAll('{{start}}', start)
-    .replace('{{body}}', () => body);
+    .replace('{{init}}', () => init).replace('{{body}}', () => body);
 // The modes of the scheme (docs/lab-constructor/README.md §2): index.<lang>.seen.html, .fog.html, and .fog-start.html
 // where the fog starts from PC1 (the activity setting `fogstart`).
 const MODES = {seen: {mode: 'seen', start: []}, fog: {mode: 'fog', start: []}, 'fog-start': {mode: 'fog', start: ['PC1']}};
@@ -144,6 +146,86 @@ for (const lang of ['en', 'ru']) {
         fs.writeFileSync(path.join(dist, `index.${lang}.${name}.html`), shell(lang, '', body, m.mode, m.start.join(',')));
     }
 }
+
+// The lab editor of the library (classes/local/lab_definition.php, editor.php): a catalog of the lab manager with the
+// lab constructor, a lab of a switch, two Debian, a VPCS and a router, no segments yet. editor.<lang>.html is a manager
+// with the lab constructor; editor.<lang>.plain.html is one without it (a lab/1 manager); editor.<lang>.segments.html
+// opens a lab that already has a segment.
+const image = (id, title, kind, category, extra = {}) => ({
+    id, title, kind, category, symbol: ':/symbols/x.svg', console_type: 'telnet', ram_mb: null, cpus: null,
+    adapters: {default: 1, min: 1, max: 8}, port_name: kind === 'iou' ? 'Ethernet{adapter}/{port}' : 'Ethernet{adapter}',
+    ports_per_adapter: kind === 'iou' ? 4 : 1, preconfig: false, ...extra,
+});
+const EDITOR_IMAGES = [
+    image('debian12', 'Debian 12', 'qemu', 'host', {preconfig: true}),
+    image('vpcs', 'VPCS', 'vpcs', 'host', {preconfig: true, adapters: null, port_name: 'Ethernet0'}),
+    image('linux-switch', 'Linux Switch', 'qemu', 'switch', {adapters: {default: 8, min: 1, max: 16}, console_type: 'none'}),
+    image('cisco-iou-l3', 'Cisco IOU L3', 'iou', 'router', {adapters: {default: 2, min: 1, max: 4}}),
+];
+const end = (node, adapter, port = 0) => ({node, adapter, port});
+const EDITOR_LAB = {
+    format: 'gns3lab.lab/1',
+    nodes: [
+        {name: 'SW1', image: 'linux-switch', x: 0, y: 0, adapters: 8},
+        {name: 'PC1', image: 'debian12', x: -200, y: 160, adapters: 1},
+        {name: 'PC2', image: 'debian12', x: 0, y: 160, adapters: 2},
+        {name: 'PC3', image: 'vpcs', x: 200, y: 160},
+        {name: 'R1', image: 'cisco-iou-l3', x: 0, y: -160, adapters: 2},
+    ],
+    links: [
+        {a: end('SW1', 0), b: end('PC1', 0)}, {a: end('SW1', 1), b: end('PC2', 0)}, {a: end('SW1', 2), b: end('PC3', 0)},
+        {a: end('SW1', 3), b: end('R1', 0, 0)},
+    ],
+};
+const EDITOR_SEGMENTED = {
+    ...EDITOR_LAB, format: 'gns3lab.lab/2',
+    segments: [{name: 'LAN1', subnet: {fixed: '192.168.10.0/24'}, vlan: {fixed: 10}, gateway: end('R1', 0, 0),
+        members: [end('PC1', 0), {...end('PC3', 0), host: 20}]}],
+};
+/**
+ * Renders the real template of the lab editor with the strings editor.php sends.
+ *
+ * @param {string} lang language
+ * @param {object} def definition the editor opens
+ * @param {boolean} constructor the manager has the lab constructor
+ * @returns {string} HTML
+ */
+function editorPage(lang, def, constructor) {
+    const all = strings(lang);
+    const texts = {};
+    for (const [key, text] of Object.entries(all)) {
+        if (key.startsWith('ed_problem_') && key !== 'ed_problem') {
+            texts['problem_' + key.slice(11)] = text;
+        } else if (key.startsWith('ed_warning_')) {
+            texts['warning_' + key.slice(11)] = text;
+        } else if (key.startsWith('ed_')) {
+            texts[key] = text;
+        }
+    }
+    const data = {labid: 1, definition: def, version: 1, status: 'draft', images: EDITOR_IMAGES,
+        limits: {max_nodes: 30}, canpublish: true, labconstructor: constructor, catalogerror: '', strings: texts};
+    const view = {
+        uniqid: 'u1', labname: 'Lab', libraryurl: '#library', canpublish: true, labconstructor: constructor,
+        datajson: JSON.stringify(data),
+        str: () => (text, render) => {
+            const key = render(text).split(',')[0].trim();
+            if (!(key in all)) {
+                throw new Error('Missing string ' + key);
+            }
+            return all[key];
+        },
+        js: () => () => '',
+    };
+    const icons = fs.readFileSync(path.join(plugin, 'templates/icons.mustache'), 'utf8');
+    return Mustache.render(fs.readFileSync(path.join(plugin, 'templates/editor.mustache'), 'utf8'), view, {'mod_gns3lab/icons': icons});
+}
+for (const lang of ['en', 'ru']) {
+    fs.writeFileSync(path.join(dist, `editor.${lang}.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, true), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `editor.${lang}.plain.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, false), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `editor.${lang}.segments.html`),
+        shell(lang, '', editorPage(lang, EDITOR_SEGMENTED, true), 'live', '', EDITOR_INIT));
+}
+
 // A user who may only look: no session bar.
 fs.writeFileSync(path.join(dist, 'index.viewer.html'), shell('ru', '', page('ru', {cancontrol: false})));
 
