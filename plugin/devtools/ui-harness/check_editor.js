@@ -142,9 +142,9 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await act(page, 'preview').click();
         const ips = await until(async() => {
             const list = await svgTexts(page, '.pv-ip');
-            return list.length === 3 && list;
+            return list.length === 4 && list;
         });
-        check('the preview shows the host part of every address', JSON.stringify(ips && ips.sort()) === JSON.stringify(['.1', '.2', '.3']),
+        check('the preview shows the host part of every address, the gateway\'s too', JSON.stringify(ips && ips.sort()) === JSON.stringify(['.1', '.2', '.254', '.3']),
             JSON.stringify(ips));
         check('...and the subnet with the name of the segment', (await svgTexts(page, '.pv-subnet')).join() === 'LAN1 192.168.10.0/24');
         check('...and the panel says there are no conflicts', /no address conflicts/.test(await page.locator('.ed-props').innerText()));
@@ -172,11 +172,11 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await act(page, 'check').click();
         const notes = await until(async() => {
             const list = await texts(page, '.ed-props .ed-problems.warn li');
-            return list.length === 2 && list;
+            return list.length === 1 && list;
         });
-        check('a valid lab brings the notes of the manager apart from the findings', !!notes
-            && notes.some(t => t.startsWith('LAN1 · Gateway') && t.includes('the student gives it this address'))
-            && notes.some(t => /^LAN1\s*:/.test(t) && t.includes('the student sets the VLAN')), JSON.stringify(notes));
+        // R1 is a Cisco IOL router, which the manager sets up (no note); SW1 is a Linux switch, which stays the student's.
+        check('a valid lab brings the notes of the manager apart from the findings, only for what it does not set up', !!notes
+            && notes.length === 1 && /^LAN1\s*:/.test(notes[0]) && notes[0].includes('the student sets the VLAN'), JSON.stringify(notes));
         check('...and the resources', /needs 3 GB of memory/.test(await page.locator('.ed-props').innerText()));
 
         // ---- save as lab/2
@@ -223,13 +223,40 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         check('the strings are Russian', (await act(page, 'addsegment').innerText()) === 'Добавить сегмент');
         await act(page, 'preview').click();
         await sleep(150);
-        check('the preview works on an opened lab', (await svgTexts(page, '.pv-ip')).length === 2);
+        check('the preview works on an opened lab (two members and the gateway)', (await svgTexts(page, '.pv-ip')).length === 3);
         await page.screenshot({path: path.join(SHOTS, 'editor-3-dark-ru.png')});
         await page.locator('.seglist .rowbtn').first().click();
         await page.locator('[data-act="addmembers"]').click();
         await tap(page, SW1);
         check('the toast about a switch is Russian too', /SW1 — коммутатор: его не нужно добавлять/.test(
             await page.locator('[data-region="toast"]').innerText()));
+
+        // ---- Cisco IOL switches and a router: the manager sets them up
+        await page.goto(`${BASE}/editor.en.iol.html${MIN}`);
+        await until(async() => (await page.locator('.node').count()) === 6);
+        await page.locator('.seglist .rowbtn').first().click();
+        check('the panel of a segment names the IOL devices the lab manager sets up, not the spur',
+            (await page.locator('[data-region="managed"]').innerText()) === 'The lab manager sets up: SW1, SW2, R1.');
+        await act(page, 'check').click();
+        await until(async() => /needs \d/.test(await page.locator('.ed-props').innerText()));
+        check('...and the manager has no notes for a lab it sets up completely', (await page.locator('.ed-props .ed-problems.warn').count()) === 0);
+        await act(page, 'preview').click();
+        const iolIps = await until(async() => {
+            const list = await svgTexts(page, '.pv-ip');
+            return list.length === 3 && list;
+        });
+        check('the preview shows the gateway address of the router as well', JSON.stringify(iolIps && iolIps.sort()) === JSON.stringify(['.1', '.2', '.254']),
+            JSON.stringify(iolIps));
+        await page.screenshot({path: path.join(SHOTS, 'editor-4-iol.png')});
+        await act(page, 'addsegment').click();
+        const gwOptions = await texts(page, '[data-seg="gateway"] option');
+        check('a router port that is a gateway already can be the gateway of another segment (another VLAN)',
+            gwOptions.includes('R1 · Ethernet0/0'), JSON.stringify(gwOptions));
+        check('the second segment lists no IOL devices before it has members', (await page.locator('[data-region="managed"]').count()) === 0);
+        await page.goto(`${BASE}/editor.ru.iol.html${MIN}`);
+        await until(async() => (await page.locator('.node').count()) === 6);
+        await page.locator('.seglist .rowbtn').first().click();
+        check('the line is Russian too', (await page.locator('[data-region="managed"]').innerText()) === 'Настроит менеджер: SW1, SW2, R1.');
 
         // ---- a lab without a router
         await page.goto(`${BASE}/editor.en.norouter.html${MIN}`);

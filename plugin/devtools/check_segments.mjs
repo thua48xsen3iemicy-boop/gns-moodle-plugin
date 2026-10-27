@@ -154,5 +154,71 @@ check('why a node cannot join a segment depends on the category of its image', (
     assert.equal(S.notMemberKey(null), 'ed_nopreconfig');
 });
 
+// Stage 3: IOL switches and routers are set up by the lab manager (lab constructor README §15).
+const iolImages = new Map([...images, ...[image('l2', 'iou', 'switch'), image('l3', 'iou', 'router')].map(i => [i.id, i])]);
+const cable = (a, ap, b, bp) => ({a: {node: a, adapter: Math.floor(ap / 4), port: ap % 4}, b: {node: b, adapter: Math.floor(bp / 4), port: bp % 4}});
+const stick = segments => ({
+    nodes: [node('SW1', 'l2'), node('SW2', 'l2'), node('SW3', 'l2'), node('LSW', 'linux-switch'), node('PC1', 'debian12'),
+        node('PC2', 'vpcs'), node('R1', 'l3', 0, 0, {adapters: 1})],
+    // PC1 - SW1 - SW2 - PC2, the router on SW2, SW3 is a spur behind SW2 (a Linux switch behind that), nobody is on it
+    links: [cable('PC1', 0, 'SW1', 0), cable('SW1', 3, 'SW2', 3), cable('PC2', 0, 'SW2', 0), cable('R1', 0, 'SW2', 2),
+        cable('SW2', 1, 'SW3', 0), cable('SW3', 1, 'LSW', 0)],
+    segments,
+});
+const gw = {node: 'R1', adapter: 0, port: 0};
+const users = seg('USERS', '192.168.10.0/24', ['PC1', {node: 'PC2', adapter: 0, port: 0}], {vlan: {fixed: 10}, gateway: gw});
+
+check('the lab manager sets the IOL switches on the path and the IOL gateway, not a spur', () => {
+    const l = stick([users]);
+    assert.deepEqual(S.managedNodes(l, iolImages, 0), ['SW1', 'SW2', 'R1']);
+    assert.deepEqual([...S.pathSwitches(l, iolImages, users)].sort(), ['SW1', 'SW2']);
+    assert.deepEqual(S.managedNodes(l, iolImages, 1), []);
+});
+
+check('a switch that is not IOL stays the student\'s, and so does a router that is not IOL', () => {
+    const l = stick([users]);
+    l.nodes.find(n => n.name === 'SW1').image = 'linux-switch';
+    l.links[0] = {a: {node: 'PC1', adapter: 0, port: 0}, b: {node: 'SW1', adapter: 0, port: 0}};
+    l.links[1] = {a: {node: 'SW1', adapter: 1, port: 0}, b: {node: 'SW2', adapter: 0, port: 3}};
+    assert.deepEqual(S.managedNodes(l, iolImages, 0), ['SW2', 'R1']);
+    l.nodes.find(n => n.name === 'R1').image = 'debian12';
+    assert.deepEqual(S.managedNodes(l, iolImages, 0), ['SW2']);
+});
+
+check('a ring puts every switch of the ring on the path', () => {
+    const l = {nodes: [node('SW1', 'l2'), node('SW2', 'l2'), node('SW3', 'l2'), node('PC1', 'vpcs'), node('PC2', 'vpcs')],
+        links: [cable('PC1', 0, 'SW1', 0), cable('PC2', 0, 'SW2', 0), cable('SW1', 1, 'SW2', 1), cable('SW2', 2, 'SW3', 2),
+            cable('SW3', 1, 'SW1', 2)],
+        segments: [seg('RING', '10.0.0.0/24', ['PC1', 'PC2'])]};
+    assert.deepEqual(S.managedNodes(l, iolImages, 0), ['SW1', 'SW2', 'SW3']);
+});
+
+check('the preview gives the gateway its address on a subinterface and trunks the switch port towards it', () => {
+    const l = stick([users]);
+    const facts = S.previewFacts(l, iolImages);
+    const router = facts.nodes.R1.interfaces;
+    assert.deepEqual(router.map(i => i.name), ['Ethernet0/0', 'Ethernet0/0.10']);
+    assert.equal(router[0].ipv4, undefined);
+    assert.deepEqual([router[1].kind, router[1].parent, router[1].dot1q, router[1].ipv4], ['subif', 'Ethernet0/0', 10, ['192.168.10.254/24']]);
+    const toward = facts.nodes.SW2.interfaces.find(i => i.name === 'Ethernet0/2');
+    assert.deepEqual(toward.switchport, {mode: 'trunk', allowed: [10], native: 1});
+    assert.deepEqual(facts.nodes.SW2.interfaces.find(i => i.name === 'Ethernet0/0').switchport, {mode: 'access', vlan: 10});
+    const {der} = derive(buildModel(S.previewDocument(l, iolImages)), facts);
+    assert.deepEqual(der.l3.issues, []);
+    assert.deepEqual(der.l3.subnets[0].members.map(m => m.nodeId).sort(), ['PC1', 'PC2', 'R1']);
+});
+
+check('a segment without VLAN puts the gateway address on the port itself, and a shared port gets both', () => {
+    const plain = seg('PLAIN', '192.168.30.0/24', [], {gateway: gw});
+    const facts = S.previewFacts(stick([plain]), iolImages);
+    assert.deepEqual(facts.nodes.R1.interfaces.map(i => [i.name, i.ipv4]), [['Ethernet0/0', ['192.168.30.254/24']]]);
+    assert.deepEqual(facts.nodes.SW2.interfaces.find(i => i.name === 'Ethernet0/2').switchport, {mode: 'access', vlan: 1});
+    const both = S.previewFacts(stick([plain, users]), iolImages);
+    assert.deepEqual(both.nodes.R1.interfaces.map(i => i.name), ['Ethernet0/0', 'Ethernet0/0.10']);
+    assert.deepEqual(both.nodes.SW2.interfaces.find(i => i.name === 'Ethernet0/2').switchport,
+        {mode: 'trunk', allowed: [1, 10], native: 1});
+    assert.deepEqual([...S.gatewayUse(stick([plain, users])).get('R1|0/0')], [{segment: 0, vlan: 0}, {segment: 1, vlan: 10}]);
+});
+
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

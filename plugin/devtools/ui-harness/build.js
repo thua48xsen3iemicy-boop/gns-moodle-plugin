@@ -150,7 +150,8 @@ for (const lang of ['en', 'ru']) {
 // The lab editor of the library (classes/local/lab_definition.php, editor.php): a catalog of the lab manager with the
 // lab constructor, a lab of a switch, two Debian, a VPCS and a router, no segments yet. editor.<lang>.html is a manager
 // with the lab constructor; editor.<lang>.plain.html is one without it (a lab/1 manager); editor.<lang>.segments.html
-// opens a lab that already has a segment; editor.<lang>.norouter.html is one without a router.
+// opens a lab that already has a segment; editor.<lang>.norouter.html is one without a router; editor.<lang>.iol.html is
+// a lab of Cisco IOL switches and a router, which the lab manager sets up itself (lab constructor README §15).
 const image = (id, title, kind, category, extra = {}) => ({
     id, title, kind, category, symbol: ':/symbols/x.svg', console_type: 'telnet', ram_mb: null, cpus: null,
     adapters: {default: 1, min: 1, max: 8}, port_name: kind === 'iou' ? 'Ethernet{adapter}/{port}' : 'Ethernet{adapter}',
@@ -161,6 +162,7 @@ const EDITOR_IMAGES = [
     image('vpcs', 'VPCS', 'vpcs', 'host', {preconfig: true, adapters: null, port_name: 'Ethernet0'}),
     image('linux-switch', 'Linux Switch', 'qemu', 'switch', {adapters: {default: 8, min: 1, max: 16}, console_type: 'none'}),
     image('cisco-iou-l3', 'Cisco IOU L3', 'iou', 'router', {adapters: {default: 2, min: 1, max: 4}}),
+    image('cisco-iou-l2', 'Cisco IOU L2', 'iou', 'switch', {adapters: {default: 1, min: 1, max: 4}}),
 ];
 const end = (node, adapter, port = 0) => ({node, adapter, port});
 const EDITOR_LAB = {
@@ -188,6 +190,23 @@ const EDITOR_NOROUTER = {
     nodes: EDITOR_LAB.nodes.filter(n => n.name !== 'R1'),
     links: EDITOR_LAB.links.filter(l => l.b.node !== 'R1'),
     segments: [{name: 'LAN1', subnet: {fixed: '192.168.10.0/24'}, members: [end('PC1', 0)]}],
+};
+// SW1 - SW2, PC1 on SW1, PC2 and the router on SW2, SW3 is a spur behind SW2 that nobody is cabled to.
+const EDITOR_IOL = {
+    format: 'gns3lab.lab/2',
+    nodes: [
+        {name: 'SW1', image: 'cisco-iou-l2', x: -100, y: 0}, {name: 'SW2', image: 'cisco-iou-l2', x: 100, y: 0},
+        {name: 'SW3', image: 'cisco-iou-l2', x: 100, y: 120},
+        {name: 'PC1', image: 'debian12', x: -200, y: 160, adapters: 1}, {name: 'PC2', image: 'vpcs', x: 0, y: 160},
+        {name: 'R1', image: 'cisco-iou-l3', x: 100, y: -160, adapters: 2},
+    ],
+    links: [
+        {a: end('PC1', 0), b: end('SW1', 0, 0)}, {a: end('SW1', 0, 3), b: end('SW2', 0, 3)},
+        {a: end('PC2', 0), b: end('SW2', 0, 0)}, {a: end('R1', 0, 0), b: end('SW2', 0, 2)},
+        {a: end('SW2', 0, 1), b: end('SW3', 0, 0)},
+    ],
+    segments: [{name: 'USERS', subnet: {fixed: '192.168.10.0/24'}, vlan: {fixed: 10}, gateway: end('R1', 0, 0),
+        members: [end('PC1', 0), end('PC2', 0)]}],
 };
 /**
  * Renders the real template of the lab editor with the strings editor.php sends.
@@ -231,6 +250,8 @@ for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `editor.${lang}.plain.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, false), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.segments.html`),
         shell(lang, '', editorPage(lang, EDITOR_SEGMENTED, true), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `editor.${lang}.iol.html`),
+        shell(lang, '', editorPage(lang, EDITOR_IOL, true), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.norouter.html`),
         shell(lang, '', editorPage(lang, EDITOR_NOROUTER, true), 'live', '', EDITOR_INIT));
 }
