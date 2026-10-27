@@ -486,7 +486,8 @@ export const init = (prefix) => {
     });
     der.l3.subnets.forEach((sub, k) => {
       const color = `var(--c${k % 6 + 1})`;
-      for (let tries = 0; tries < 12 && tags.some(t => Math.abs(sub.x - t.x) < 90 && Math.abs(sub.y - t.y) < t.h / 2 + 12); tries++) {
+      for (let tries = 0; tries < 12 && tags.some(t =>
+        Math.abs(sub.x - t.x) < 90 && Math.abs(sub.y - t.y) < t.h / 2 + 12); tries++) {
         sub.y += 16;
       }
       tags.push({x: sub.x, y: sub.y, h: 0});
@@ -584,7 +585,8 @@ export const init = (prefix) => {
     const rows = st.lab.segments.map((g, i) => `<li><button type="button" class="rowbtn" data-goto="segment:${i}"><span>` +
       `<b>${esc(g.name)}</b> ${esc((g.subnet && g.subnet.fixed) || "")}${g.vlan ? " · VLAN " + +g.vlan.fixed : ""}` +
       ` · ${g.members.length}</span></button></li>`).join("");
-    return `<h3>${esc(str("ed_segments"))}</h3>` + (rows ? `<ul class="ed-problems seglist">${rows}</ul>` : `<p class="muted">${esc(str("ed_nosegments"))}</p>`) +
+    return `<h3>${esc(str("ed_segments"))}</h3>` + (rows ? `<ul class="ed-problems seglist">${rows}</ul>`
+      : `<p class="muted">${esc(str("ed_nosegments"))}</p>`) +
       `<button type="button" class="btn btn-sm btn-outline-primary" data-act="addsegment">${esc(str("ed_addsegment"))}</button>`;
   };
 
@@ -603,20 +605,24 @@ export const init = (prefix) => {
     const gwOptions = routerPorts(g.gateway ? Seg.portKey(g.gateway) : "");
     const gwSel = g.gateway ? Seg.portKey(g.gateway) : "";
     const gwHTML = `<label class="ed-field"><span>${esc(str("ed_seggateway"))}</span>
-      <select class="form-select form-select-sm${flag("gateway")}" data-seg="gateway"><option value="">${esc(str("ed_nogateway"))}</option>` +
+      <select class="form-select form-select-sm${flag("gateway")}" data-seg="gateway"><option value="">${
+        esc(str("ed_nogateway"))}</option>` +
       gwOptions.map(o => `<option value="${esc(o.key)}"${o.key === gwSel ? " selected" : ""}>${esc(o.node)} · ` +
         `${esc(portName(byName(o.node), o.adapter, o.port))}</option>`).join("") + `</select></label>` +
       (g.gateway ? `<label class="ed-field"><span>${esc(str("ed_hostnumber"))}</span>
         <input type="number" class="form-control form-control-sm" data-seg="gwhost" min="1" step="1"
-          value="${Number.isInteger(g.gateway.host) ? g.gateway.host : ""}" placeholder="${pl && pl.gateway ? esc(pl.gateway) : ""}"></label>` : "");
+          value="${Number.isInteger(g.gateway.host) ? g.gateway.host : ""}" placeholder="${
+            pl && pl.gateway ? esc(pl.gateway) : ""}"></label>` : "");
     const rows = g.members.map((m, j) => {
       const node = byName(m.node), ip = pl && pl.members[j] ? `${pl.members[j]}/${net.prefix}` : "";
-      return `<tr class="${bad.members.has(j) ? "bad" : ""}"><td><button type="button" class="rowbtn" data-select-node="${esc(m.node)}">` +
+      return `<tr class="${bad.members.has(j) ? "bad" : ""}"><td><button type="button" class="rowbtn" data-select-node="${
+        esc(m.node)}">` +
         `${esc(m.node)}</button> <span class="mono">${esc(portName(node || {}, m.adapter, m.port))}</span></td>
         <td class="mono">${esc(ip)}</td>
         <td><input type="number" class="form-control form-control-sm ed-host" data-mhost="${j}" min="1" step="1"
           value="${Number.isInteger(m.host) ? m.host : ""}" aria-label="${esc(str("ed_hostnumber"))}"></td>
-        <td><button type="button" class="rowbtn" data-mdel="${j}" aria-label="${esc(str("ed_removemember"))}">&times;</button></td></tr>`;
+        <td><button type="button" class="rowbtn" data-mdel="${j}" aria-label="${
+          esc(str("ed_removemember"))}">&times;</button></td></tr>`;
     }).join("");
     let pick = "";
     if (st.pick && byName(st.pick)) {
@@ -624,7 +630,8 @@ export const init = (prefix) => {
       pick = `<div class="ed-pick"><label class="ed-field"><span>${esc(str("ed_pickport", n.name))}</span>
         <select class="form-select form-select-sm" data-pick>` + segPorts(n).map(p =>
         `<option value="${p.adapter}/${p.port}">${esc(portName(n, p.adapter, p.port))}</option>`).join("") +
-        `</select></label><button type="button" class="btn btn-sm btn-primary" data-act="pickadd">${esc(str("ed_addport"))}</button></div>`;
+        `</select></label><button type="button" class="btn btn-sm btn-primary" data-act="pickadd">${
+          esc(str("ed_addport"))}</button></div>`;
     }
     return `<div class="ph"><div><p class="eyebrow">${esc(str("ed_segment"))}</p><h2>${esc(g.name)}</h2></div></div>
       <label class="ed-field"><span>${esc(str("ed_segname"))}</span>
@@ -634,12 +641,14 @@ export const init = (prefix) => {
         <input type="number" class="form-control form-control-sm${flag("vlan")}" data-seg="vlan" min="2" max="${MAX_VLAN}" step="1"
           value="${g.vlan ? +g.vlan.fixed : ""}" placeholder="—"><small>${esc(str("ed_segvlan_help"))}</small></label>
       <label class="ed-field"><span>${esc(str("ed_segsubnet"))}</span>
-        <input type="text" class="form-control form-control-sm${flag("subnet")}" data-seg="subnet" value="${esc((g.subnet || {}).fixed || "")}"
+        <input type="text" class="form-control form-control-sm${flag("subnet")}" data-seg="subnet" value="${
+          esc((g.subnet || {}).fixed || "")}"
           placeholder="192.168.10.0/24" autocomplete="off" spellcheck="false"></label>
       ${gwHTML}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
       <h3>${esc(str("ed_members"))}</h3>
-      ${rows ? `<table class="ed-ports ed-members"><tbody>${rows}</tbody></table>` : `<p class="muted">${esc(str("ed_nomembers"))}</p>`}
+      ${rows ? `<table class="ed-ports ed-members"><tbody>${rows}</tbody></table>`
+        : `<p class="muted">${esc(str("ed_nomembers"))}</p>`}
       ${pick}
       <button type="button" class="btn btn-sm ${st.adding ? "btn-primary" : "btn-outline-primary"}" data-act="addmembers"
         aria-pressed="${st.adding}">${esc(st.adding ? str("ed_addmembers_done") : str("ed_addmembers"))}</button>
@@ -1093,7 +1102,8 @@ export const init = (prefix) => {
     if (field === "adapters") {
       const count = v === null ? r.default : v;
       const busy = st.lab.links.some(l => ["a", "b"].some(side => l[side].node === n.name && l[side].adapter >= count))
-        || st.lab.segments.some(g => g.members.concat(g.gateway ? [g.gateway] : []).some(m => m.node === n.name && m.adapter >= count));
+        || st.lab.segments.some(g => g.members.concat(g.gateway ? [g.gateway] : [])
+          .some(m => m.node === n.name && m.adapter >= count));
       if (busy) {
         fieldError(str("ed_adaptersinuse"));
         t.value = Number.isInteger(n.adapters) ? n.adapters : "";
