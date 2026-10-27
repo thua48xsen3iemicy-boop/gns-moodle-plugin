@@ -23,7 +23,7 @@ requirejs.config({baseUrl: '.', paths: {mod_gns3lab: q.has('min') ? 'amd-min' : 
 <body class="gns3lab-fullscreen">
 {{body}}
 <script>
-require(['mod_gns3lab/lab'], function(lab) { lab.init('u1', 1, q.has('observer') ? 7 : 0); });
+{{init}}
 </script>
 </body>
 </html>

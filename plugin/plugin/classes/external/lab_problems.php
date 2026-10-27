@@ -43,6 +43,27 @@ class lab_problems {
     }
 
     /**
+     * Notes the lab manager gives with a definition it accepts (validate warnings), in the shape of the problems.
+     *
+     * @param \stdClass $result validate answer of the lab manager
+     * @return array
+     */
+    public static function warnings(\stdClass $result): array {
+        $warnings = [];
+        foreach (is_array($result->warnings ?? null) ? $result->warnings : [] as $w) {
+            if (!$w instanceof \stdClass) {
+                continue;
+            }
+            $warnings[] = [
+                'path' => \core_text::substr((string) ($w->path ?? ''), 0, 255),
+                'code' => preg_replace('/[^a-z0-9_]/', '', strtolower((string) ($w->code ?? ''))) ?: 'note',
+                'message' => \core_text::substr((string) ($w->message ?? ''), 0, 500),
+            ];
+        }
+        return $warnings;
+    }
+
+    /**
      * Problems from a lab_invalid error; other errors are thrown again.
      *
      * @param manager_exception $e error of the lab manager

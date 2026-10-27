@@ -229,6 +229,23 @@ final class manager_client_test extends \advanced_testcase {
         $this->assertSame('cisco-iou-l3', $this->client->get_images()[0]->id);
     }
 
+    public function test_the_lab_constructor_needs_its_feature_and_format(): void {
+        $this->manager->with_lab_definitions();
+        $this->assertFalse($this->client->supports_lab_constructor());
+
+        \cache::make('mod_gns3lab', 'info')->purge();
+        $this->manager->with_info(['consoles', 'images', 'lab_definitions', 'lab_constructor'], [
+            'lab_formats' => ['gns3lab.lab/1'],
+        ]);
+        $this->assertFalse($this->client->supports_lab_constructor());
+
+        \cache::make('mod_gns3lab', 'info')->purge();
+        $this->manager->with_lab_constructor();
+        $this->assertTrue($this->client->supports_lab_constructor());
+        $this->assertTrue($this->client->supports_lab_definitions());
+        $this->assertTrue($this->client->get_images()[1]->preconfig);
+    }
+
     public function test_session_facts_full_and_not_modified(): void {
         $this->manager->with_facts();
 

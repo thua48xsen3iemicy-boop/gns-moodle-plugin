@@ -41,6 +41,7 @@ $def = $version ? lab_definition::decode($version->definition) : lab_definition:
 $images = [];
 $limits = null;
 $canpublish = false;
+$constructor = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
     $catalogerror = get_string('librarynomanager', 'gns3lab');
@@ -50,6 +51,7 @@ if (!manager_client::is_configured()) {
         $images = $client->get_images();
         $limits = $client->get_info()->limits;
         $canpublish = $client->supports_lab_definitions();
+        $constructor = $client->supports_lab_constructor();
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
         }
@@ -66,18 +68,28 @@ $keys = [
     'ed_invalid', 'ed_lab', 'ed_link', 'ed_linkends', 'ed_maxnodes', 'ed_name', 'ed_nameinvalid',
     'ed_nametaken', 'ed_noport', 'ed_ports', 'ed_problem', 'ed_problems', 'ed_published', 'ed_publishing',
     'ed_ram', 'ed_range', 'ed_cpus', 'ed_saved', 'ed_saving', 'ed_summary', 'ed_unknownimage', 'ed_unsaved', 'ed_valid',
-    'ed_version', 'ed_cannotpublish',
+    'ed_version', 'ed_cannotpublish', 'ed_segments', 'ed_segment', 'ed_addsegment', 'ed_nosegments', 'ed_segname',
+    'ed_segvlan', 'ed_segvlan_help', 'ed_segsubnet', 'ed_seggateway', 'ed_nogateway', 'ed_members', 'ed_nomembers',
+    'ed_addmembers', 'ed_addmembers_done', 'ed_removemember', 'ed_hostnumber', 'ed_nopreconfig', 'ed_pickport',
+    'ed_addport', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
+    'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
 ];
 $codes = [
     'required', 'unknown_field', 'bad_type', 'bad_format', 'bad_name', 'duplicate_name', 'unknown_image',
     'image_not_allowed', 'out_of_range', 'unknown_node', 'bad_port', 'port_in_use', 'self_link', 'too_many_nodes',
-    'limit_exceeded', 'too_large',
+    'limit_exceeded', 'too_large', 'segment_not_connected', 'segment_overlap', 'member_in_two_segments',
+    'gateway_not_router', 'unsupported_image', 'subnet_too_small', 'bad_subnet', 'vlan_out_of_range',
+    'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment',
 ];
+$warningcodes = ['gateway_not_configured', 'switch_not_configured'];
 foreach ($keys as $key) {
     $strings[$key] = get_string($key, 'gns3lab');
 }
 foreach ($codes as $code) {
     $strings['problem_' . $code] = get_string('ed_problem_' . $code, 'gns3lab');
+}
+foreach ($warningcodes as $code) {
+    $strings['warning_' . $code] = get_string('ed_warning_' . $code, 'gns3lab');
 }
 
 $data = [
@@ -88,6 +100,7 @@ $data = [
     'images' => $images,
     'limits' => $limits,
     'canpublish' => $canpublish,
+    'labconstructor' => $constructor,
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];
@@ -101,6 +114,7 @@ echo $OUTPUT->render_from_template('mod_gns3lab/editor', [
     'labname' => $name,
     'libraryurl' => (new \core\url('/mod/gns3lab/library.php'))->out(false),
     'canpublish' => $canpublish,
+    'labconstructor' => $constructor,
     'datajson' => json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
 ]);
 echo $OUTPUT->footer();

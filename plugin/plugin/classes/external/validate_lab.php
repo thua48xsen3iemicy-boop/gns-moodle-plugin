@@ -41,7 +41,7 @@ class validate_lab extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'labid' => new external_value(PARAM_INT, 'Lab id'),
-            'definition' => new external_value(PARAM_RAW, 'Lab definition gns3lab.lab/1 as JSON'),
+            'definition' => new external_value(PARAM_RAW, 'Lab definition gns3lab.lab/1 or /2 as JSON'),
         ]);
     }
 
@@ -66,13 +66,17 @@ class validate_lab extends external_api {
         try {
             $result = \core\di::get(manager_client::class)->validate_lab($def);
         } catch (manager_exception $e) {
-            return ['valid' => false, 'memorymb' => 0, 'cores' => 0, 'problems' => lab_problems::from_exception($e)];
+            return [
+                'valid' => false, 'memorymb' => 0, 'cores' => 0, 'problems' => lab_problems::from_exception($e),
+                'warnings' => [],
+            ];
         }
         return [
             'valid' => true,
             'memorymb' => max(0, (int) ($result->resources->memory_mb ?? 0)),
             'cores' => max(0, (int) ($result->resources->cores ?? 0)),
             'problems' => [],
+            'warnings' => lab_problems::warnings($result),
         ];
     }
 
@@ -87,6 +91,7 @@ class validate_lab extends external_api {
             'memorymb' => new external_value(PARAM_INT, 'Memory the lab needs, MB'),
             'cores' => new external_value(PARAM_INT, 'CPU cores the lab needs'),
             'problems' => lab_problems::structure(),
+            'warnings' => lab_problems::structure(),
         ]);
     }
 }

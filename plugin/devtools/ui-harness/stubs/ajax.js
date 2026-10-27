@@ -219,7 +219,60 @@ define([], function() {
         },
     };
 
+    // The lab editor: a pretend lab manager. validate refuses what the manager would refuse in these simple cases and
+    // warns about every gateway, like manager 0.10; save and publish remember the last definition they got.
+    const editor = {saved: null, published: null, validated: 0};
+    const SUBNET = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+    const problemsOf = def => {
+        const problems = [], warnings = [];
+        (def.segments || []).forEach((g, i) => {
+            const m = SUBNET.exec((g.subnet || {}).fixed || '');
+            if (!m || +m[5] < 8 || +m[5] > 30) {
+                problems.push({path: `segments[${i}].subnet.fixed`, code: 'bad_subnet', message: ''});
+            }
+            const seen = new Set();
+            g.members.forEach((x, j) => {
+                if (Number.isInteger(x.host) && seen.has(x.host)) {
+                    problems.push({path: `segments[${i}].members[${j}]`, code: 'host_in_use', message: `host ${x.host}`});
+                }
+                seen.add(x.host);
+            });
+            if (!g.members.length) {
+                problems.push({path: `segments[${i}].members`, code: 'required', message: 'non-empty list'});
+            }
+            if (g.gateway) {
+                warnings.push({path: `segments[${i}].gateway`, code: 'gateway_not_configured', message: ''});
+            }
+            if (g.vlan) {
+                warnings.push({path: `segments[${i}].vlan`, code: 'switch_not_configured', message: ''});
+            }
+        });
+        return {problems, warnings};
+    };
+    Object.assign(handlers, {
+        mod_gns3lab_validate_lab: async args => {
+            editor.validated++;
+            const {problems, warnings} = problemsOf(JSON.parse(args.definition));
+            return {valid: !problems.length, memorymb: problems.length ? 0 : 3072, cores: problems.length ? 0 : 2, problems,
+                warnings: problems.length ? [] : warnings};
+        },
+        mod_gns3lab_save_lab_draft: async args => {
+            editor.saved = JSON.parse(args.definition);
+            return {version: 1, status: 'draft'};
+        },
+        mod_gns3lab_publish_lab: async args => {
+            const def = JSON.parse(args.definition);
+            const {problems} = problemsOf(def);
+            editor.saved = def;
+            if (!problems.length) {
+                editor.published = def;
+            }
+            return {published: !problems.length, version: 1, problems};
+        },
+    });
+
     window.__stub = {
+        editor,
         // How many times each external function was called: a test tells a page that read the facts from one that did not.
         calls: {},
         setNode: (id, status) => {

@@ -48,7 +48,7 @@
         <FIELD NAME="labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="version" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Number of the version; a draft has the number it gets when published"/>
         <FIELD NAME="status" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="draft" SEQUENCE="false" COMMENT="draft or published"/>
-        <FIELD NAME="definition" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Lab definition gns3lab.lab/1 as JSON, sent to the lab manager"/>
+        <FIELD NAME="definition" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Lab definition gns3lab.lab/1 or /2 (with segments) as JSON, sent to the lab manager"/>
         <FIELD NAME="labdef" TYPE="char" LENGTH="80" NOTNULL="false" SEQUENCE="false" COMMENT="Hash of the definition given by the lab manager when the version was published"/>
         <FIELD NAME="memorymb" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Memory the lab needs, from the lab manager"/>
         <FIELD NAME="cores" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="CPU cores the lab needs, from the lab manager"/>

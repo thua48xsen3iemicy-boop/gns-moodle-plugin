@@ -82,6 +82,91 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json($json, 'Lab');
     }
 
+    public function test_segments_make_a_lab_2_and_keep_their_known_fields(): void {
+        $raw = fake_manager::lab_with_segments();
+        $raw['segments'][0]['extra'] = 'dropped';
+        $raw['segments'][0]['vlan']['random'] = [10, 20];
+        $raw['segments'][0]['members'][0]['console'] = 1;
+        $raw['values'] = 'shared';
+
+        $def = lab_definition::from_json(json_encode($raw), 'LAN');
+
+        $this->assertSame(lab_definition::FORMAT_2, $def['format']);
+        $this->assertSame(['format', 'title', 'nodes', 'links', 'segments'], array_keys($def));
+        $this->assertSame(
+            [[
+                'name' => 'LAN1',
+                'vlan' => ['fixed' => 10],
+                'subnet' => ['fixed' => '192.168.10.0/24'],
+                'gateway' => ['node' => 'R1', 'adapter' => 0, 'port' => 0],
+                'members' => [
+                    ['node' => 'PC1', 'adapter' => 0, 'port' => 0],
+                    ['node' => 'PC2', 'adapter' => 0, 'port' => 0, 'host' => 20],
+                ],
+            ]],
+            $def['segments']
+        );
+    }
+
+    public function test_a_lab_without_segments_is_lab_1_whatever_the_editor_says(): void {
+        $raw = fake_manager::lab_with_segments();
+        $raw['segments'] = [];
+
+        $def = lab_definition::from_json(json_encode($raw), 'LAN');
+
+        $this->assertSame(lab_definition::FORMAT, $def['format']);
+        $this->assertArrayNotHasKey('segments', $def);
+        $this->assertSame(lab_definition::FORMAT, lab_definition::empty('x')['format']);
+    }
+
+    /**
+     * Segments the editor never sends.
+     *
+     * @return array
+     */
+    public static function broken_segments_provider(): array {
+        $cases = [
+            'name' => ['name', '1LAN'],
+            'subnet' => ['subnet', ['fixed' => 24]],
+            'vlan' => ['vlan', ['fixed' => '10']],
+            'members' => ['members', 'PC1'],
+            'member node' => ['members', [['node' => 'PC9', 'adapter' => 0, 'port' => 0]]],
+            'member port' => ['members', [['node' => 'PC1', 'adapter' => '0', 'port' => 0]]],
+            'member host' => ['members', [['node' => 'PC1', 'adapter' => 0, 'port' => 0, 'host' => 'x']]],
+            'gateway node' => ['gateway', ['node' => 'R9', 'adapter' => 0, 'port' => 0]],
+        ];
+        $out = [];
+        foreach ($cases as $title => [$key, $value]) {
+            $raw = fake_manager::lab_with_segments();
+            $raw['segments'][0][$key] = $value;
+            $out[$title] = [json_encode($raw)];
+        }
+        $raw = fake_manager::lab_with_segments();
+        $raw['segments'] = ['a' => 1];
+        $out['segments as an object'] = [json_encode($raw)];
+        return $out;
+    }
+
+    /**
+     * Segments of the wrong shape are refused before anything is stored or sent.
+     *
+     * @param string $json broken definition
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('broken_segments_provider')]
+    public function test_refuses_broken_segments(string $json): void {
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json($json, 'Lab');
+    }
+
+    public function test_segments_do_not_change_the_topology_for_the_viewer(): void {
+        $def = lab_definition::from_json(json_encode(fake_manager::lab_with_segments()), 'LAN');
+
+        $doc = lab_definition::to_topology($def, [json_decode(json_encode(fake_manager::image()))]);
+
+        $this->assertCount(3, $doc->topology->nodes);
+        $this->assertCount(1, $doc->topology->links);
+    }
+
     public function test_title_and_names_fit_the_lab_manager(): void {
         $raw = fake_manager::lab();
         $raw['nodes'][0]['name'] = str_repeat('a', 80);

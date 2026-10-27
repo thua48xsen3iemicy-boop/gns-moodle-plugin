@@ -16,9 +16,11 @@
 /**
  * Lab editor of the site lab library.
  *
- * Edits a lab definition gns3lab.lab/1: nodes from the image catalog of the lab manager and links between
- * their ports. The definition is checked by the lab manager (validate), saved as a draft or published
- * through the external functions of the plugin. Node x, y are the top left corner of the node, as in .gns3.
+ * Edits a lab definition gns3lab.lab/1 or /2: nodes from the image catalog of the lab manager, links between
+ * their ports and, when the manager has the lab constructor, segments (a broadcast domain with a subnet, an optional
+ * VLAN and gateway) of the ports of preconfigurable nodes. The definition is checked by the lab manager (validate),
+ * saved as a draft or published through the external functions of the plugin. A lab without segments is sent as
+ * lab/1. Node x, y are the top left corner of the node, as in .gns3.
  *
  * @module     mod_gns3lab/editor
  * @copyright  2026 mod_gns3lab contributors
@@ -27,10 +29,14 @@
 
 import Ajax from 'core/ajax';
 import Notification from 'core/notification';
+import {buildModel} from 'mod_gns3lab/model';
+import {derive, hostPart} from 'mod_gns3lab/facts';
+import * as Seg from 'mod_gns3lab/segments';
 
 const NS = "http://www.w3.org/2000/svg";
 const FORMAT = "gns3lab.lab/1";
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
+const MAX_VLAN = 4094;
 const W = 60, H = 45;
 const KMIN = 0.2, KMAX = 3;
 const GRID = 10;
@@ -63,11 +69,22 @@ export const init = (prefix) => {
   const lyr = {links: $("links"), nodes: $("nodes"), labels: $("labels"), names: $("names")};
   const images = new Map((D.images || []).map(i => [i.id, i]));
   const maxNodes = Math.min(100, (D.limits && D.limits.max_nodes) || 100);
+  /* the manager announces the lab constructor: segments can be edited (otherwise stored ones are only kept) */
+  const withSegments = !!D.labconstructor;
 
   const def = D.definition || {};
   const st = {
-    lab: {nodes: Array.isArray(def.nodes) ? def.nodes : [], links: Array.isArray(def.links) ? def.links : []},
+    lab: {
+      nodes: Array.isArray(def.nodes) ? def.nodes : [],
+      links: Array.isArray(def.links) ? def.links : [],
+      segments: Array.isArray(def.segments) ? def.segments : [],
+    },
     sel: null,
+    adding: false,
+    pick: null,
+    preview: false,
+    pv: null,
+    warnings: [],
     linking: false,
     from: null,
     undo: [],
@@ -138,7 +155,9 @@ export const init = (prefix) => {
       }
     }
   };
-  const definition = () => JSON.stringify({format: FORMAT, nodes: st.lab.nodes, links: st.lab.links});
+  const definition = () => JSON.stringify(st.lab.segments.length
+    ? {format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments}
+    : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links});
 
   /* ---------- изменения и отмена ---------- */
   const snapshot = () => JSON.stringify(st.lab);
@@ -153,6 +172,7 @@ export const init = (prefix) => {
     fn();
     st.dirty = true;
     st.problems = [];
+    st.warnings = [];
     st.resources = null;
     render();
   };
@@ -163,8 +183,11 @@ export const init = (prefix) => {
     st.lab = JSON.parse(st.undo.pop());
     st.sel = null;
     st.from = null;
+    st.adding = false;
+    st.pick = null;
     st.dirty = true;
     st.problems = [];
+    st.warnings = [];
     st.resources = null;
     render();
   };
@@ -194,6 +217,17 @@ export const init = (prefix) => {
         const name = st.lab.nodes[s.i].name;
         st.lab.nodes.splice(s.i, 1);
         st.lab.links = st.lab.links.filter(l => l.a.node !== name && l.b.node !== name);
+        /* a deleted device leaves its segments; a segment keeps existing, the manager reports an empty one */
+        st.lab.segments.forEach(seg => {
+          seg.members = seg.members.filter(m => m.node !== name);
+          if (seg.gateway && seg.gateway.node === name) {
+            delete seg.gateway;
+          }
+        });
+      } else if (s.kind === "segment") {
+        st.lab.segments.splice(s.i, 1);
+        st.adding = false;
+        st.pick = null;
       } else {
         st.lab.links.splice(s.i, 1);
       }
@@ -225,27 +259,98 @@ export const init = (prefix) => {
   const setLinking = on => {
     st.linking = on;
     st.from = null;
+    if (on) {
+      st.adding = false;
+    }
     render();
   };
 
-  /* ---------- замечания менеджера ---------- */
-  const placeOf = path => {
-    const m = /^(nodes|links)\[(\d+)\]/.exec(path || "");
-    return m ? {kind: m[1] === "nodes" ? "node" : "link", i: +m[2]} : null;
+  /* ---------- сегменты ---------- */
+  const taken = () => Seg.takenPorts(st.lab);
+  const canPreconfig = n => Seg.isPreconfig(imageOf(n));
+  /* порты ноды, свободные для сегмента: ни в одном сегменте ещё не заняты */
+  const segPorts = n => {
+    const used = taken();
+    return portsOf(n).filter(p => !used.has(Seg.portKey({node: n.name, adapter: p.adapter, port: p.port})));
   };
+  const nextSegmentName = () => {
+    for (let i = 1; ; i++) {
+      if (!st.lab.segments.some(g => g.name === "LAN" + i)) {
+        return "LAN" + i;
+      }
+    }
+  };
+  const addSegment = () => {
+    change(() => {
+      const name = nextSegmentName(), k = +name.slice(3);
+      st.lab.segments.push({name, subnet: {fixed: `192.168.${Math.min(k * 10, 250)}.0/24`}, members: []});
+      st.sel = {kind: "segment", i: st.lab.segments.length - 1};
+      st.adding = true;
+    });
+  };
+  const addMember = (i, nodeName, adapter, port) => {
+    change(() => {
+      st.lab.segments[i].members.push({node: nodeName, adapter, port});
+      st.pick = null;
+    });
+  };
+  /* клик по ноде в режиме «участники»: один свободный порт — берём сразу, иначе выбор в панели */
+  const tapMember = idx => {
+    const n = st.lab.nodes[idx], i = st.sel.i;
+    if (!canPreconfig(n)) {
+      toast(str("ed_nopreconfig", n.name), true);
+      return;
+    }
+    const free = segPorts(n);
+    if (!free.length) {
+      toast(str("ed_noport", n.name), true);
+      return;
+    }
+    if (free.length === 1) {
+      addMember(i, n.name, free[0].adapter, free[0].port);
+      return;
+    }
+    st.pick = n.name;
+    render();
+  };
+  const routerPorts = current => {
+    const out = [], used = taken();
+    st.lab.nodes.filter(n => category(n) === "router").forEach(n => portsOf(n).forEach(p => {
+      const key = Seg.portKey({node: n.name, adapter: p.adapter, port: p.port});
+      if (!used.has(key) || key === current) {
+        out.push({node: n.name, adapter: p.adapter, port: p.port, key});
+      }
+    }));
+    return out;
+  };
+
+  /* ---------- замечания менеджера ---------- */
   const problemSets = () => {
-    const nodes = new Set(), links = new Set();
+    const nodes = new Set(), links = new Set(), segs = new Map();
     st.problems.forEach(p => {
-      if (p.place && p.place.kind === "node") {
-        nodes.add(p.place.i);
-      } else if (p.place) {
-        links.add(p.place.i);
+      const pl = p.place;
+      if (!pl) {
+        return;
+      }
+      if (pl.kind === "node") {
+        nodes.add(pl.i);
+      } else if (pl.kind === "link") {
+        links.add(pl.i);
+      } else {
+        const e = segs.get(pl.i) || {members: new Set(), parts: new Set()};
+        segs.set(pl.i, e);
+        if (pl.j !== undefined) {
+          e.members.add(pl.j);
+        } else if (pl.part) {
+          e.parts.add(pl.part);
+        }
       }
     });
-    return {nodes, links};
+    return {nodes, links, segs};
   };
+  const withPlace = list => (list || []).map(p => Object.assign({}, p, {place: Seg.placeOf(p.path)}));
   const setProblems = list => {
-    st.problems = (list || []).map(p => Object.assign({}, p, {place: placeOf(p.path)}));
+    st.problems = withPlace(list);
   };
   const placeName = place => {
     if (!place) {
@@ -253,6 +358,14 @@ export const init = (prefix) => {
     }
     if (place.kind === "node") {
       return (st.lab.nodes[place.i] || {}).name || "?";
+    }
+    if (place.kind === "segment") {
+      const seg = st.lab.segments[place.i];
+      if (!seg) {
+        return "?";
+      }
+      const m = place.j !== undefined ? seg.members[place.j] : null;
+      return seg.name + (m ? " · " + m.node : place.part === "gateway" ? " · " + str("ed_seggateway") : "");
     }
     const l = st.lab.links[place.i];
     return l ? `${l.a.node} — ${l.b.node}` : "?";
@@ -288,7 +401,9 @@ export const init = (prefix) => {
     r.setAttribute("y", y - h / 2 - 2);
     r.setAttribute("width", w + 10);
     r.setAttribute("height", h + 4);
+    return g;
   };
+  lyr.preview = el("g", {"data-region": "preview"}, vp);
   const center = n => [n.x + W / 2, n.y + H / 2];
 
   const renderScene = () => {
@@ -325,14 +440,81 @@ export const init = (prefix) => {
     st.lab.nodes.forEach((n, i) => {
       const [cx, cy] = center(n);
       const sel = st.sel && st.sel.kind === "node" && st.sel.i === i;
+      const segSel = st.sel && st.sel.kind === "segment" ? st.lab.segments[st.sel.i] : null;
+      const role = !segSel ? "" : segSel.gateway && segSel.gateway.node === n.name ? " gw"
+        : segSel.members.some(m => m.node === n.name) ? " member" : "";
+      const pickable = st.adding && segSel ? (canPreconfig(n) ? " pickable" : " nopick") : "";
       const cls = "node" + (sel ? " sel" : "") + (st.from === n.name ? " from" : "") + (bad.nodes.has(i) ? " bad" : "")
-        + (imageOf(n) ? "" : " unknown");
+        + (imageOf(n) ? "" : " unknown") + role + pickable;
       const g = el("g", {class: cls, "data-node": i, role: "button", "aria-label": n.name}, lyr.nodes);
       el("rect", {class: "halo", x: cx - 31, y: cy - 31, width: 62, height: 62, rx: 12}, g);
       el("use", {href: `#${prefix}-ico-${ICON[category(n)] || "server"}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
       /* имя — над подписями портов, как во вьюере */
       const t = el("text", {class: "nname", x: cx, y: cy + 42, "text-anchor": "middle", "data-node": i}, lyr.names);
       t.textContent = n.name;
+    });
+    drawPreview();
+  };
+
+  /* ---------- предпросмотр: адреса и подсети из сегментов тем же facts.js, что и у студента ---------- */
+  const previewData = () => {
+    if (!st.preview || !withSegments || !st.lab.segments.length) {
+      return null;
+    }
+    const facts = Seg.previewFacts(st.lab, images);
+    if (!Object.values(facts.nodes).some(n => n.interfaces.some(i => i.ipv4))) {
+      return null;
+    }
+    return derive(buildModel(Seg.previewDocument(st.lab, images)), facts);
+  };
+  const drawPreview = () => {
+    st.pv = previewData();
+    lyr.preview.textContent = "";
+    if (!st.pv) {
+      return;
+    }
+    const {fx, der} = st.pv;
+    /* the address lines under the names of the devices: the pills of the subnets keep off them */
+    const rowsOf = f => (f.ifs || []).reduce((sum, i) => sum + (i.ipv4 || []).length, 0);
+    const tags = [];
+    fx.nodes.forEach(f => {
+      const n = byName(f.id);
+      if (n) {
+        const [cx, cy] = center(n);
+        tags.push({x: cx, y: cy + 56 + (rowsOf(f) - 1) * 6.5, h: rowsOf(f) * 13});
+      }
+    });
+    der.l3.subnets.forEach((sub, k) => {
+      const color = `var(--c${k % 6 + 1})`;
+      for (let tries = 0; tries < 12 && tags.some(t => Math.abs(sub.x - t.x) < 90 && Math.abs(sub.y - t.y) < t.h / 2 + 12); tries++) {
+        sub.y += 16;
+      }
+      tags.push({x: sub.x, y: sub.y, h: 0});
+      sub.members.forEach(mb => {
+        const n = byName(mb.nodeId);
+        if (n) {
+          const [cx, cy] = center(n);
+          el("line", {class: "pv-tie", x1: sub.x, y1: sub.y, x2: cx, y2: cy, style: `stroke:${color}`}, lyr.preview);
+        }
+      });
+      const names = st.lab.segments.filter(g => g.subnet && g.subnet.fixed === sub.key).map(g => g.name).join(", ");
+      const tag = pill(lyr.preview, sub.x, sub.y, (names ? names + " " : "") + sub.key);
+      tag.classList.add("pv-subnet");
+      tag.setAttribute("style", `--pv:${color}`);
+    });
+    fx.nodes.forEach(f => {
+      const n = byName(f.id);
+      if (!n) {
+        return;
+      }
+      const [cx, cy] = center(n);
+      let row = 0;
+      (f.ifs || []).forEach(i => (i.ipv4 || []).forEach(a => {
+        const c = der.l3.subnets.flatMap(sub => sub.members).find(mb => mb.iface === i);
+        const t = el("text", {class: "pv-ip", x: cx, y: cy + 56 + row * 13, "text-anchor": "middle"}, lyr.preview);
+        t.textContent = c ? hostPart(c.c) : a;
+        row++;
+      }));
     });
   };
 
@@ -362,9 +544,108 @@ export const init = (prefix) => {
     st.problems.map(p => {
       const text = S["problem_" + p.code] || str("ed_problem", p.code);
       const attr = p.place ? ` data-goto="${p.place.kind}:${p.place.i}"` : "";
-      return `<li><button type="button" class="rowbtn"${attr} title="${esc(p.message)}">` +
-        `<b>${esc(placeName(p.place))}</b>: ${esc(text)}</button></li>`;
+      return `<li><button type="button" class="rowbtn"${attr} title="${esc(p.message)}"><span>` +
+        `<b>${esc(placeName(p.place))}</b>: ${esc(text)}</span></button></li>`;
     }).join("") + "</ul>";
+
+  const warningsHTML = () => !st.warnings.length ? "" : `<h3>${esc(str("ed_warnings"))}</h3><ul class="ed-problems warn">` +
+    st.warnings.map(w => {
+      const attr = w.place ? ` data-goto="${w.place.kind}:${w.place.i}"` : "";
+      return `<li><button type="button" class="rowbtn"${attr} title="${esc(w.message)}"><span>` +
+        `<b>${esc(placeName(w.place))}</b>: ${esc(S["warning_" + w.code] || str("ed_problem", w.code))}</span></button></li>`;
+    }).join("") + "</ul>";
+  /* what the addresses of a segment already say before the lab manager is asked (the rules of its address plan) */
+  const localFindings = i => {
+    const g = st.lab.segments[i], net = Seg.parseSubnet(g.subnet && g.subnet.fixed);
+    return net ? Seg.plan(net, g.gateway || null, g.members).problems : [];
+  };
+  const previewHTML = () => {
+    if (!st.preview || !withSegments || !st.lab.segments.length) {
+      return "";
+    }
+    const own = [];
+    st.lab.segments.forEach((g, i) => localFindings(i).forEach(p => own.push({
+      sev: "bad",
+      text: `${placeName({kind: "segment", i, part: p.where === "gateway" ? "gateway" : "members",
+        j: typeof p.where === "number" ? p.where : undefined})}: ${S["problem_" + p.code] || p.code}`,
+    })));
+    const issues = own.concat(st.pv ? st.pv.der.l3.issues : []);
+    if (!issues.length) {
+      return `<h3>${esc(str("ed_preview"))}</h3>` + (st.pv ? `<p class="ed-ok">${esc(str("ed_previewok"))}</p>`
+        : `<p class="muted">${esc(str("ed_previewempty"))}</p>`);
+    }
+    return `<h3>${esc(str("ed_preview"))}</h3><ul class="ed-problems ${issues.some(x => x.sev === "bad") ? "" : "warn"}">` +
+      issues.map(x => `<li><span class="pv-issue ${esc(x.sev)}">${esc(x.text)}</span></li>`).join("") + "</ul>";
+  };
+  const segmentsListHTML = () => {
+    if (!withSegments) {
+      return st.lab.segments.length ? `<p class="ed-note">${esc(str("ed_segkept", st.lab.segments.length))}</p>` : "";
+    }
+    const rows = st.lab.segments.map((g, i) => `<li><button type="button" class="rowbtn" data-goto="segment:${i}"><span>` +
+      `<b>${esc(g.name)}</b> ${esc((g.subnet && g.subnet.fixed) || "")}${g.vlan ? " · VLAN " + +g.vlan.fixed : ""}` +
+      ` · ${g.members.length}</span></button></li>`).join("");
+    return `<h3>${esc(str("ed_segments"))}</h3>` + (rows ? `<ul class="ed-problems seglist">${rows}</ul>` : `<p class="muted">${esc(str("ed_nosegments"))}</p>`) +
+      `<button type="button" class="btn btn-sm btn-outline-primary" data-act="addsegment">${esc(str("ed_addsegment"))}</button>`;
+  };
+
+  const segmentHTML = i => {
+    const g = st.lab.segments[i], bad = problemSets().segs.get(i) || {members: new Set(), parts: new Set()};
+    const flag = part => bad.parts.has(part) ? " is-invalid" : "";
+    const net = Seg.parseSubnet(g.subnet && g.subnet.fixed);
+    const pl = net ? Seg.plan(net, g.gateway || null, g.members) : null;
+    localFindings(i).forEach(p => {
+      if (typeof p.where === "number") {
+        bad.members.add(p.where);
+      } else if (p.where === "gateway") {
+        bad.parts.add("gateway");
+      }
+    });
+    const gwOptions = routerPorts(g.gateway ? Seg.portKey(g.gateway) : "");
+    const gwSel = g.gateway ? Seg.portKey(g.gateway) : "";
+    const gwHTML = `<label class="ed-field"><span>${esc(str("ed_seggateway"))}</span>
+      <select class="form-select form-select-sm${flag("gateway")}" data-seg="gateway"><option value="">${esc(str("ed_nogateway"))}</option>` +
+      gwOptions.map(o => `<option value="${esc(o.key)}"${o.key === gwSel ? " selected" : ""}>${esc(o.node)} · ` +
+        `${esc(portName(byName(o.node), o.adapter, o.port))}</option>`).join("") + `</select></label>` +
+      (g.gateway ? `<label class="ed-field"><span>${esc(str("ed_hostnumber"))}</span>
+        <input type="number" class="form-control form-control-sm" data-seg="gwhost" min="1" step="1"
+          value="${Number.isInteger(g.gateway.host) ? g.gateway.host : ""}" placeholder="${pl && pl.gateway ? esc(pl.gateway) : ""}"></label>` : "");
+    const rows = g.members.map((m, j) => {
+      const node = byName(m.node), ip = pl && pl.members[j] ? `${pl.members[j]}/${net.prefix}` : "";
+      return `<tr class="${bad.members.has(j) ? "bad" : ""}"><td><button type="button" class="rowbtn" data-select-node="${esc(m.node)}">` +
+        `${esc(m.node)}</button> <span class="mono">${esc(portName(node || {}, m.adapter, m.port))}</span></td>
+        <td class="mono">${esc(ip)}</td>
+        <td><input type="number" class="form-control form-control-sm ed-host" data-mhost="${j}" min="1" step="1"
+          value="${Number.isInteger(m.host) ? m.host : ""}" aria-label="${esc(str("ed_hostnumber"))}"></td>
+        <td><button type="button" class="rowbtn" data-mdel="${j}" aria-label="${esc(str("ed_removemember"))}">&times;</button></td></tr>`;
+    }).join("");
+    let pick = "";
+    if (st.pick && byName(st.pick)) {
+      const n = byName(st.pick);
+      pick = `<div class="ed-pick"><label class="ed-field"><span>${esc(str("ed_pickport", n.name))}</span>
+        <select class="form-select form-select-sm" data-pick>` + segPorts(n).map(p =>
+        `<option value="${p.adapter}/${p.port}">${esc(portName(n, p.adapter, p.port))}</option>`).join("") +
+        `</select></label><button type="button" class="btn btn-sm btn-primary" data-act="pickadd">${esc(str("ed_addport"))}</button></div>`;
+    }
+    return `<div class="ph"><div><p class="eyebrow">${esc(str("ed_segment"))}</p><h2>${esc(g.name)}</h2></div></div>
+      <label class="ed-field"><span>${esc(str("ed_segname"))}</span>
+        <input type="text" class="form-control form-control-sm${flag("name")}" data-seg="name" value="${esc(g.name)}" maxlength="32"
+          autocomplete="off" spellcheck="false"></label>
+      <label class="ed-field"><span>${esc(str("ed_segvlan"))}</span>
+        <input type="number" class="form-control form-control-sm${flag("vlan")}" data-seg="vlan" min="2" max="${MAX_VLAN}" step="1"
+          value="${g.vlan ? +g.vlan.fixed : ""}" placeholder="—"><small>${esc(str("ed_segvlan_help"))}</small></label>
+      <label class="ed-field"><span>${esc(str("ed_segsubnet"))}</span>
+        <input type="text" class="form-control form-control-sm${flag("subnet")}" data-seg="subnet" value="${esc((g.subnet || {}).fixed || "")}"
+          placeholder="192.168.10.0/24" autocomplete="off" spellcheck="false"></label>
+      ${gwHTML}
+      <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
+      <h3>${esc(str("ed_members"))}</h3>
+      ${rows ? `<table class="ed-ports ed-members"><tbody>${rows}</tbody></table>` : `<p class="muted">${esc(str("ed_nomembers"))}</p>`}
+      ${pick}
+      <button type="button" class="btn btn-sm ${st.adding ? "btn-primary" : "btn-outline-primary"}" data-act="addmembers"
+        aria-pressed="${st.adding}">${esc(st.adding ? str("ed_addmembers_done") : str("ed_addmembers"))}</button>
+      <button type="button" class="btn btn-sm btn-outline-danger" data-act="delete">${esc(str("ed_deletesegment"))}</button>
+      ${problemsHTML()}${warningsHTML()}${previewHTML()}`;
+  };
 
   const numberField = (n, key, label) => {
     const r = range(n, key);
@@ -429,14 +710,15 @@ export const init = (prefix) => {
       memory: fmtMem(st.resources.memorymb), cores: st.resources.cores}))}</p>` : "";
     return `<div class="ph"><div><p class="eyebrow">${esc(str("ed_lab"))}</p>
       <h2>${esc(str("ed_summary", {nodes: st.lab.nodes.length, links: st.lab.links.length}))}</h2></div></div>
-      ${res}${problemsHTML()}
+      ${res}${segmentsListHTML()}${problemsHTML()}${warningsHTML()}${previewHTML()}
       ${D.canpublish ? "" : `<p class="ed-note">${esc(str("ed_cannotpublish"))}</p>`}
       <p class="muted">${esc(str("ed_hint"))}</p>`;
   };
 
   const renderProps = () => {
     const s = st.sel;
-    props.innerHTML = !s ? labHTML() : s.kind === "node" ? nodeHTML(s.i) : linkHTML(s.i);
+    props.innerHTML = !s ? labHTML() : s.kind === "node" ? nodeHTML(s.i)
+      : s.kind === "segment" ? segmentHTML(s.i) : linkHTML(s.i);
   };
 
   const renderChrome = () => {
@@ -448,13 +730,25 @@ export const init = (prefix) => {
     btn("save").disabled = st.busy;
     btn("check").disabled = st.busy || !D.canpublish;
     btn("publish").disabled = st.busy || !D.canpublish;
-    $("hint").textContent = !st.linking ? str("ed_hint") : st.from ? str("ed_hintlinkto", st.from) : str("ed_hintlink");
+    const pv = btn("preview");
+    if (pv) {
+      pv.hidden = !withSegments;
+      pv.disabled = !st.lab.segments.length;
+      pv.setAttribute("aria-pressed", String(st.preview));
+    }
+    $("hint").textContent = st.adding ? str("ed_hintmembers") : !st.linking ? str("ed_hint")
+      : st.from ? str("ed_hintlinkto", st.from) : str("ed_hintlink");
     svg.classList.toggle("linking", st.linking);
   };
 
   const render = () => {
-    if (st.sel && !(st.sel.kind === "node" ? st.lab.nodes : st.lab.links)[st.sel.i]) {
+    const pool = {node: st.lab.nodes, link: st.lab.links, segment: st.lab.segments};
+    if (st.sel && !(pool[st.sel.kind] || [])[st.sel.i]) {
       st.sel = null;
+    }
+    if (!st.sel || st.sel.kind !== "segment") {
+      st.adding = false;
+      st.pick = null;
     }
     renderScene();
     renderProps();
@@ -590,6 +884,10 @@ export const init = (prefix) => {
         tapLinking(g.i);
         return;
       }
+      if (st.adding && st.sel && st.sel.kind === "segment") {
+        tapMember(g.i);
+        return;
+      }
       st.sel = {kind: "node", i: g.i};
     } else if (g.type === "link") {
       st.sel = {kind: "link", i: g.i};
@@ -646,9 +944,105 @@ export const init = (prefix) => {
       p.hidden = !text;
     }
   };
+  const intField = (t, min, max) => {
+    const raw = t.value.trim();
+    if (raw === "") {
+      return null;
+    }
+    const v = Number(raw);
+    return Number.isInteger(v) && v >= min && v <= max ? v : undefined;
+  };
+  const segmentChange = t => {
+    const i = st.sel.i, g = st.lab.segments[i];
+    if (t.dataset.pick !== undefined) {
+      return;
+    }
+    if (t.dataset.mhost !== undefined) {
+      const j = +t.dataset.mhost, v = intField(t, 1, 65535);
+      if (v === undefined) {
+        fieldError(str("ed_hostinvalid"));
+        t.value = Number.isInteger(g.members[j].host) ? g.members[j].host : "";
+        return;
+      }
+      change(() => {
+        if (v === null) {
+          delete g.members[j].host;
+        } else {
+          g.members[j].host = v;
+        }
+      });
+      return;
+    }
+    const field = t.dataset.seg;
+    if (field === "name") {
+      const name = t.value.trim();
+      if (name === g.name) {
+        return;
+      }
+      if (!Seg.NAME_RE.test(name) || st.lab.segments.some(x => x.name === name)) {
+        fieldError(str(Seg.NAME_RE.test(name) ? "ed_segnametaken" : "ed_segnameinvalid", name));
+        t.value = g.name;
+        return;
+      }
+      change(() => {
+        g.name = name;
+      });
+    } else if (field === "vlan") {
+      const v = intField(t, 2, MAX_VLAN);
+      if (v === undefined || (v >= 1002 && v <= 1005)) {
+        fieldError(str("ed_vlaninvalid"));
+        t.value = g.vlan ? g.vlan.fixed : "";
+        return;
+      }
+      change(() => {
+        if (v === null) {
+          delete g.vlan;
+        } else {
+          g.vlan = {fixed: v};
+        }
+      });
+    } else if (field === "subnet") {
+      const text = t.value.trim();
+      if (!Seg.parseSubnet(text)) {
+        fieldError(str("ed_subnetinvalid"));
+        t.value = (g.subnet || {}).fixed || "";
+        return;
+      }
+      change(() => {
+        g.subnet = {fixed: text};
+      });
+    } else if (field === "gateway") {
+      const pick = routerPorts(g.gateway ? Seg.portKey(g.gateway) : "").find(o => o.key === t.value);
+      change(() => {
+        if (pick) {
+          g.gateway = {node: pick.node, adapter: pick.adapter, port: pick.port};
+        } else {
+          delete g.gateway;
+        }
+      });
+    } else if (field === "gwhost" && g.gateway) {
+      const v = intField(t, 1, 65535);
+      if (v === undefined) {
+        fieldError(str("ed_hostinvalid"));
+        t.value = Number.isInteger(g.gateway.host) ? g.gateway.host : "";
+        return;
+      }
+      change(() => {
+        if (v === null) {
+          delete g.gateway.host;
+        } else {
+          g.gateway.host = v;
+        }
+      });
+    }
+  };
   props.addEventListener("change", e => {
     const s = st.sel, t = e.target;
     if (!s) {
+      return;
+    }
+    if (s.kind === "segment") {
+      segmentChange(t);
       return;
     }
     if (s.kind === "link" && t.dataset.end) {
@@ -678,6 +1072,13 @@ export const init = (prefix) => {
             l[side].node = name;
           }
         }));
+        st.lab.segments.forEach(g => {
+          g.members.concat(g.gateway ? [g.gateway] : []).forEach(m => {
+            if (m.node === n.name) {
+              m.node = name;
+            }
+          });
+        });
         n.name = name;
       });
       return;
@@ -691,7 +1092,8 @@ export const init = (prefix) => {
     }
     if (field === "adapters") {
       const count = v === null ? r.default : v;
-      const busy = st.lab.links.some(l => ["a", "b"].some(side => l[side].node === n.name && l[side].adapter >= count));
+      const busy = st.lab.links.some(l => ["a", "b"].some(side => l[side].node === n.name && l[side].adapter >= count))
+        || st.lab.segments.some(g => g.members.concat(g.gateway ? [g.gateway] : []).some(m => m.node === n.name && m.adapter >= count));
       if (busy) {
         fieldError(str("ed_adaptersinuse"));
         t.value = Number.isInteger(n.adapters) ? n.adapters : "";
@@ -714,8 +1116,38 @@ export const init = (prefix) => {
       render();
       return;
     }
-    if (e.target.closest('[data-act="delete"]')) {
+    const mdel = e.target.closest("[data-mdel]");
+    if (mdel && st.sel && st.sel.kind === "segment") {
+      change(() => {
+        st.lab.segments[st.sel.i].members.splice(+mdel.dataset.mdel, 1);
+      });
+      return;
+    }
+    const goNode = e.target.closest("[data-select-node]");
+    if (goNode) {
+      const idx = st.lab.nodes.findIndex(n => n.name === goNode.dataset.selectNode);
+      if (idx >= 0) {
+        st.sel = {kind: "node", i: idx};
+        render();
+      }
+      return;
+    }
+    const act = e.target.closest("[data-act]");
+    const name = act && act.dataset.act;
+    if (name === "delete") {
       deleteSel();
+    } else if (name === "addsegment") {
+      addSegment();
+    } else if (name === "addmembers" && st.sel && st.sel.kind === "segment") {
+      st.adding = !st.adding;
+      st.pick = null;
+      render();
+    } else if (name === "pickadd" && st.sel && st.sel.kind === "segment" && st.pick) {
+      const select = props.querySelector("[data-pick]");
+      const [a, p] = (select ? select.value : "").split("/").map(Number);
+      if (Number.isInteger(a) && Number.isInteger(p)) {
+        addMember(st.sel.i, st.pick, a, p);
+      }
     }
   });
 
@@ -751,6 +1183,7 @@ export const init = (prefix) => {
   const check = () => run(str("ed_checking"), async() => {
     const r = await call("mod_gns3lab_validate_lab", {labid: D.labid, definition: definition()});
     setProblems(r.problems);
+    st.warnings = withPlace(r.warnings);
     st.resources = r.valid ? {memorymb: r.memorymb, cores: r.cores} : null;
     st.sel = null;
     const text = r.valid ? str("ed_valid", {memory: fmtMem(r.memorymb), cores: r.cores}) : str("ed_invalid", r.problems.length);
@@ -765,6 +1198,7 @@ export const init = (prefix) => {
       const r = await call("mod_gns3lab_publish_lab", {labid: D.labid, definition: definition()});
       /* черновик сохранён в обоих случаях */
       st.dirty = false;
+      st.warnings = [];
       setProblems(r.problems);
       st.sel = null;
       if (r.published) {
@@ -785,6 +1219,9 @@ export const init = (prefix) => {
       undo();
     } else if (act === "link") {
       setLinking(!st.linking);
+    } else if (act === "preview") {
+      st.preview = !st.preview;
+      render();
     } else if (act === "fit") {
       fit();
     } else if (act === "save") {
@@ -798,7 +1235,11 @@ export const init = (prefix) => {
   root.addEventListener("keydown", e => {
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
     if (e.key === "Escape") {
-      if (st.linking) {
+      if (st.adding) {
+        st.adding = false;
+        st.pick = null;
+        render();
+      } else if (st.linking) {
         setLinking(false);
       } else if (!typing) {
         st.sel = null;
