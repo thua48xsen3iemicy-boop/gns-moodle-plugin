@@ -672,3 +672,16 @@ PHP — `classes/local/reveal.php`, `classes/external/{get_reveal,reveal}.php`, 
   хост, а не коммутатор, — не больше одного сегмента.
 - Тест `test_the_slot_parser_reads_what_the_compiler_wrote` (`manager/tests/test_ios_config.py`) читает `slot/api/ios_config.py`
   по пути в дереве репозитория и сравнивает его разбор с ожидаемыми фактами; в дереве без слота он пропускается.
+
+### 15.7. Как сделано в слоте 0.10.0
+
+- `api/iol_nvram.py` (новый) и вызов из `create_project` (`api/labs.py`): сразу после `POST …/nodes` для ноды с `nvram_config`, до
+  связей и до запуска. Модуль `iou_import.py` грузится по пути (`SLOT_IOU_IMPORT`, затем venv GNS3 из шаблона слота, затем
+  пакет), как экспорт. Вызывается `nvram_import(None, текст, None, 256)` — сигнатура установленного gns3server 2.2.61.
+- Файл `nvram_<application_id:05d>`: `application_id` берётся из ответа GNS3 на создание ноды (то же имя ищет `ios.config/1` и
+  переименовывает GNS3 при старте, `_rename_nvram_file`). Существующий файл не перезаписывается. Нет `application_id` или модуля —
+  `FAILED` с кодом `NVRAM_PRESET_FAILED`.
+- GNS3 2.2.61 при старте трогает NVRAM только если у ноды есть непустой `startup-config.cfg` (`_push_configs_to_nvram`);
+  слот его не создаёт, поэтому преднастройка не повторяется и сохранённое студентом не затирается. Это ещё проверяется на стенде (§15.5.4).
+- Пара `nvram_import`/`nvram_export` настоящего gns3server 2.2.61 проверена круговым тестом (`test_real_gns3server_roundtrip`):
+  текст, записанный в NVRAM слотом, читается `ios_config.read_nvram` без изменений.

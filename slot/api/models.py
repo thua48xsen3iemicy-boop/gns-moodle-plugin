@@ -34,16 +34,23 @@ class NodeSpec(BaseModel):
     # QEMU only. "telnet" is the serial console; "vnc" is the graphic screen and the node then
     # has no serial console at all (CONTRACTS.md 4.2).
     console: Literal["telnet", "vnc"] = "telnet"
+    # IOL only: the text of startup-config, put into the node's NVRAM once, when the project is
+    # created, before the node first starts (CONTRACTS.md 4.2). Printable ASCII and "\n".
+    nvram_config: str | None = Field(default=None, max_length=65536)
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
         # The dumped ticket is the project passport (compared on every repeated deploy and
         # stored in the lab record) and part of the idempotency fingerprint. The default
         # "telnet" must not appear in it: records written before this field existed, and a
-        # manifest that omits it, keep their exact representation.
+        # manifest that omits it, keep their exact representation. The same holds for an absent
+        # nvram_config: only a node the Manager preconfigured carries it.
         data = handler(self)
-        if isinstance(data, dict) and data.get("console") == "telnet":
-            del data["console"]
+        if isinstance(data, dict):
+            if data.get("console") == "telnet":
+                del data["console"]
+            if data.get("nvram_config") is None:
+                data.pop("nvram_config", None)
         return data
 
     @model_validator(mode="after")
@@ -63,6 +70,11 @@ class NodeSpec(BaseModel):
             raise ValueError(f"image is required for {self.kind}")
         if self.console == "vnc" and self.kind != "qemu":
             raise ValueError("console vnc is only supported for qemu nodes")
+        if self.nvram_config is not None:
+            if self.kind != "iou":
+                raise ValueError("nvram_config is only supported for iou nodes")
+            if any(c != "\n" and not " " <= c <= "~" for c in self.nvram_config):
+                raise ValueError("nvram_config must be printable ASCII and newlines")
         if self.image and (
             self.image in (".", "..") or "/" in self.image or "\\" in self.image
         ):

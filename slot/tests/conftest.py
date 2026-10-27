@@ -24,3 +24,12 @@ def no_iou_export(tmp_path, monkeypatch):
 
     monkeypatch.delenv("SLOT_IOU_EXPORT", raising=False)
     monkeypatch.setattr(ios_config, "DEFAULT_EXPORT", str(tmp_path / "no-gns3" / "iou_export.py"))
+
+
+@pytest.fixture(autouse=True)
+def no_iou_import(tmp_path, monkeypatch):
+    """No iou_import.py of the GNS3 venv (/opt/gns3-server) unless a test names one."""
+    from api import iol_nvram
+
+    monkeypatch.delenv("SLOT_IOU_IMPORT", raising=False)
+    monkeypatch.setattr(iol_nvram, "DEFAULT_IMPORT", str(tmp_path / "no-gns3" / "iou_import.py"))

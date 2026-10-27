@@ -1,4 +1,4 @@
-# Lab Slot — 0.9.0
+# Lab Slot — 0.10.0
 
 **Новый обязательный протокол:** до изменяющих запросов менеджер вызывает
 `POST /v1/fence` с `{epoch,generation}`; команды содержат `X-Lab-Epoch` и
@@ -374,6 +374,27 @@ python3 slot/release.py check
 QGA гостевых VM, реальным Cisco CLI, CephFS flock, systemd/LXC, сохранность реальных
 QCOW2 или runtime-производительность. Проверка этих свойств требует стенда.
 L1-sidecar, автоматическая оценка задания, reset файлов и UI не реализованы.
+
+## Версия 0.10.0: NVRAM IOL из билета (`iol-nvram`)
+
+- `NodeSpec.nvram_config` (только `kind: "iou"`, до 65536 символов, печатный ASCII и `\n`, без `\r`) — текст
+  `startup-config`. Слот кладёт его в NVRAM ноды **один раз, при создании проекта, после создания ноды в GNS3 и до её первого
+  старта** (`api/iol_nvram.py`, вызов из `create_project`). Продолжение проекта (`resume`, повторный `deploy`) NVRAM не
+  трогает; ноды без поля — тоже. В билете без поля нет и ключа `nvram_config`: паспорт проекта и отпечаток идемпотентности
+  прежних лаб не меняются.
+- Текст переводит в NVRAM `nvram_import` установленного gns3server — пара к `nvram_export`, которым `ios.config/1` читает файл.
+  Модуль грузится по пути, как экспорт: `SLOT_IOU_IMPORT`, затем
+  `/opt/gns3-server/lib/python3.12/site-packages/gns3server/compute/iou/utils/iou_import.py`, затем пакет `gns3server`, который
+  видит интерпретатор слота. Размер NVRAM — 256 КиБ, как у ноды (`nvram` в `node_payload`), приватная конфигурация пустая.
+- Файл — `nvram_<application_id:05d>` в каталоге ноды (`project-files/iou/<node_id>`, как читает `ios.config/1`), режим 0644,
+  создаётся без перезаписи существующего (`O_EXCL`); слот работает под тем же пользователем `gns3`, что и GNS3. Свойство GNS3
+  `startup_config_content` не задаётся, поэтому GNS3 не пишет в NVRAM при старте и не создаёт `startup-config.cfg`.
+- Ошибка (нет модуля, импорт или запись не удались, нет `application_id`) — лаба `FAILED`, код `NVRAM_PRESET_FAILED`, в сообщении имя
+  ноды и тип ошибки, но не текст конфигурации. `GET /v1/capabilities` отдаёт `iol-nvram` в `features`. Новая настройка —
+  `SLOT_IOU_IMPORT` (по умолчанию как выше, `slot.env.example`). Контракт — `manager/docs/CONTRACTS.md` §4.2, проект —
+  `docs/lab-constructor/README.md` §15.3.
+- Проверка на стенде (владелец): `docs/lab-constructor/README.md` §15.5. Тест `test_real_gns3server_roundtrip` на стенде и там,
+  где есть gns3server, проверяет пару `nvram_import`/`nvram_export` на настоящих модулях (в других местах пропускается).
 
 ## Версия 0.9.0: коллектор `ios.config/1`
 

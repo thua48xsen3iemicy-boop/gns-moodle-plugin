@@ -67,6 +67,8 @@ def mock_server(tmp_path, monkeypatch):
                     node = json.loads(req.content)
                     node["status"] = "stopped"
                     node["console"] = 5001
+                    if node["node_type"] == "iou":  # GNS3 hands out application ids
+                        node["properties"]["application_id"] = len(nodes[pid]) + 1
                     nodes[pid].append(node)
                     return reply(201, node)
                 if len(path) == 3 and req.method == "GET":
