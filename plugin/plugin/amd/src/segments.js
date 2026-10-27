@@ -246,7 +246,11 @@ export const previewFacts = (lab, images) => {
         const n = (lab.nodes || []).find(x => x.name === name);
         return n ? images.get(n.image) || null : null;
     };
-    const nodeFacts = name => facts.nodes[name] = facts.nodes[name] || {name, status: "started", interfaces: []};
+    const nodeFacts = name => {
+        const node = facts.nodes[name] || {name, status: "started", interfaces: []};
+        facts.nodes[name] = node;
+        return node;
+    };
     const switchportToward = peer => {
         if (category(peer.node) === "switch") {
             return {mode: "trunk", allowed: "all"};
