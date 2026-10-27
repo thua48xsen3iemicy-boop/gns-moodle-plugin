@@ -29,6 +29,7 @@
       "kind": "qemu",
       "category": "host",
       "symbol": ":/symbols/computer.svg",
+      "net_config": "ifupdown",
       "file": "debian12.qcow2",
       "ram_mb": {"default": 768, "min": 512, "max": 4096},
       "cpus": {"default": 1, "min": 1, "max": 2},

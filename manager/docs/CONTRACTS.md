@@ -225,8 +225,12 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
              "ram_mb": {"default": 768, "min": 512, "max": 4096},
              "cpus": {"default": 1, "min": 1, "max": 2},
              "adapters": {"default": 1, "min": 1, "max": 4},
-             "port_name": "Ethernet{adapter}", "ports_per_adapter": 1}]}
+             "port_name": "Ethernet{adapter}", "ports_per_adapter": 1, "preconfig": true}]}
 ```
+
+🆕 `preconfig` — можно ли ставить ноду с этим образом в сегмент (см. `gns3lab.lab/2` ниже): `true` у `vpcs` и у образа,
+для которого администратор указал в каталоге `net_config` (механизм сети гостя: `ifupdown`, `networkmanager`, `netplan`,
+`networkd`; только `qemu`; `template` пока не принимается). Самого `net_config` в ответе нет. Нет поля — `false`.
 
 `cpus` есть только у `qemu`; у `vpcs` `ram_mb`, `cpus`, `adapters` — `null` (один порт 0/0).
 `port_name` — как GNS3 2.2.61 называет порты нод слота: `iou` — `Ethernet{adapter}/{port}`
@@ -250,10 +254,53 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `links[]` | до 1000. Концы — `{node, adapter, port}` (`adapter`/`port` по умолчанию 0); порт существует у ноды (`adapter < adapters`, `port < ports_per_adapter`), занят не больше одним линком; нода не соединяется сама с собой |
 | прочее | неизвестное поле на любом уровне — `unknown_field`; весь документ — до 256 КБ |
 
+🆕 **Определение `gns3lab.lab/2`** (`info.features` содержит `lab_constructor`, `lab_formats` — `["gns3lab.lab/1", "gns3lab.lab/2"]`) —
+`lab/1` плюс `segments`: преподаватель описывает намерение, а настройку гостей строит менеджер (проект —
+`docs/lab-constructor/README.md`). Этап 2: фиксированные значения, ноды `qemu` с `net_config` и `vpcs`. `lab/1` принимается как
+раньше, его `lab_def` не меняется. Без `segments` плагин присылает `lab/1`.
+
+```json
+{"format": "gns3lab.lab/2", "nodes": [], "links": [],
+ "segments": [{"name": "LAN1", "vlan": {"fixed": 10}, "subnet": {"fixed": "192.168.10.0/24"},
+               "gateway": {"node": "R1", "adapter": 1, "port": 0},
+               "members": [{"node": "PC1", "adapter": 0, "port": 0}, {"node": "PC2", "host": 20}]}]}
+```
+
+| Поле | Правило |
+|---|---|
+| `segments[]` | до 100. Неизвестные в этом этапе поля (`values`, `faults`, `vlan.random`, `subnet.random`) — `unknown_field`; в `lab/1` само `segments` — `unknown_field` |
+| `name` | `^[A-Za-z][A-Za-z0-9_]{0,31}$`, уникально |
+| `vlan` | `{"fixed": N}`, 2…4094 без 1002–1005; нет поля — сегмент без VLAN |
+| `subnet` | обязательно, `{"fixed": "A.B.C.D/N"}`: сеть IPv4 (без хостовых битов) от `/8` до `/30`, не 0/8, не loopback, не link-local, не multicast, не 240/4 |
+| `gateway` | необязательно: `{node, adapter, port[, host]}`, нода — образа категории `router`. Этап 2 маршрутизатор не настраивает: адрес шлюза студент задаёт сам (предупреждение `gateway_not_configured`) |
+| `members[]` | непустой, до 100: `{node, adapter, port[, host]}` — `adapter`/`port` по умолчанию 0; образ ноды с `preconfig: true`. Коммутаторы между ними не перечисляются: путь выводится из `links` |
+| `host` | номер адреса в подсети, 1…число рабочих адресов. Без него: шлюз — последний рабочий адрес (`.254` у `/24`), участники — с первого рабочего (`.1`, `.2`…), занятые пропускаются |
+
+Все поля входят в `lab_def`; порядок `members` — тоже (по нему раздаются адреса). Порт ноды — не больше чем в одном сегменте
+(участником или шлюзом); у ноды-участника не больше одного сегмента со шлюзом.
+
+Новые `code` в `problems` (путь вида `segments[i].members[j]`, `segments[i].gateway`, `segments[i].subnet.fixed`):
+`segment_not_connected` (участник или шлюз не связан по L2 с первым участником через `links` и ноды категории `switch`; на
+хосте и маршрутизаторе путь заканчивается), `segment_overlap` (два сегмента на общем коммутаторе: оба без VLAN или с одной VLAN),
+`member_in_two_segments`, `gateway_not_router`, `unsupported_image` (участник с образом без `preconfig`), `subnet_too_small`
+(длиннее `/30` или адресов не хватает на участников и шлюз), `bad_subnet`, `vlan_out_of_range`, `host_out_of_range`,
+`host_in_use` (два участника или шлюз на одном адресе; путь — второй), `multiple_gateways`, `duplicate_segment`, а также общие
+`required`, `unknown_field`, `bad_type`, `bad_name`, `unknown_node`, `bad_port`; `too_large` — ещё и когда скрипт гостя не
+помещается в 8192 символа. В `warnings` (лаба запускается) — `{path, code, message}`: `gateway_not_configured`
+(`segments[i].gateway`), `switch_not_configured` (`segments[i].vlan`: путь идёт через коммутатор, настроит студент).
+
+**Что менеджер делает с сегментами** (в `deploy_ticket`, слот не меняется; применяется один раз при создании проекта, как
+`provisioning`): участнику-QEMU — одна `ProvisionCommand` (`timeout_seconds: 120`) после команд образа: скрипт `/bin/sh` по
+`net_config` образа (`lab_manager/netconfig.py`, проект §4.1): проверяет, что механизм работает в госте (иначе выход с
+`net_config mismatch: declared X, found Y` и лаба `FAILED`), находит интерфейс по MAC (адаптер N — N-й по возрастанию MAC), пишет
+файлы механизма, убирает мешающие конфигурации, применяет; задаётся статический IPv4 и маршрут по умолчанию. Участнику-VPCS —
+строка `ip A/N [G]` в конце `startup_script`. Остальные ноды не меняются. Тикет детерминирован. Ожидаемые факты
+(`gns3lab.facts/1` после преднастройки) менеджер умеет строить (`segments.expected_facts`), но в API этапа 2 не отдаёт.
+
 **`POST /api/v1/labs/validate`**, тело `{"lab": {…}}`, ничего не сохраняет:
 
 ```json
-200 {"lab_def": "sha256:9c1f…", "resources": {"cores": 4, "memory_mb": 4608}, "warnings": []}
+200 {"lab_def": "sha256:9c1f…", "resources": {"cores": 4, "memory_mb": 4608}, "warnings": []}   (warnings — для lab/2, см. выше)
 422 {"error": "lab_invalid", "message": "…",
      "problems": [{"path": "nodes[2].adapters", "code": "out_of_range", "message": "1..4"}]}
 ```
@@ -717,6 +764,7 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 | `resume` | менеджер | следующий запуск продолжает проект студента (всегда, с менеджера 0.5.1) |
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
+| `lab_constructor` | менеджер | 🆕 `gns3lab.lab/2`: сегменты, `preconfig` образов, `warnings` в `validate` (§2.6); объявляется вместе с `lab_definitions` |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `vnc` | слот | 🆕 `NodeSpec.console: "vnc"` и сырой поток RFB в консольном WS (§4.2); слот объявляет её в `features` (0.8.0); когда появится `requires`, лабы с такими узлами будут требовать её |

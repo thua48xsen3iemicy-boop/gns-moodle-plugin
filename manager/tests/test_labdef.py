@@ -87,7 +87,7 @@ def test_valid_lab_hash_resources_and_ticket():
 
 
 @pytest.mark.parametrize("lab,expected", [
-    (changed(format="gns3lab.lab/2"), ("format", "bad_format")),
+    (changed(format="gns3lab.lab/3"), ("format", "bad_format")),
     (changed(format=...), ("format", "required")),
     (changed(extra=1), ("extra", "unknown_field")),
     (changed(nodes__0__console="telnet"), ("nodes[0].console", "unknown_field")),
