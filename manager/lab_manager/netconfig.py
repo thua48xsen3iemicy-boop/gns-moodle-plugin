@@ -4,7 +4,9 @@ The script runs once as a `ProvisionCommand` through QGA, after the commands of 
   1. checks that the network mechanism declared by the image (`net_config`) really runs in the guest,
   2. finds the interfaces by MAC (the guest's ethernet interfaces sorted by MAC; adapter N is the N-th,
      because GNS3 gives adapter N the base MAC + N), never by name,
-  3. writes the files of the mechanism, removes what would override them, and applies them.
+  3. writes the files of the mechanism, removes what would override them, and applies them,
+  4. switches cloud-init's network part off (when the guest has cloud-init), so that it cannot rewrite the files
+     on the next boot.
 
 Nothing but validated addresses (ipaddress) and adapter numbers is put into the text: the guest's
 MAC and interface names are read in the guest and checked there against a pattern. Set ROOT in the
@@ -35,9 +37,15 @@ R="${ROOT-}"
 die() { echo "$*" >&2; exit 1; }
 has() { command -v "$1" >/dev/null 2>&1; }
 active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+cloud_off() {
+  if [ -d "$R/etc/cloud/cloud.cfg.d" ]; then
+    printf 'network: {config: disabled}\n' > "$R/etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg"
+  fi
+}
+finish() { cloud_off; apply; }
 found=none
-if has netplan; then found=netplan
-elif active NetworkManager; then found=networkmanager
+if active NetworkManager; then found=networkmanager
+elif has netplan && active systemd-networkd; then found=netplan
 elif active systemd-networkd; then found=networkd
 elif has ifup; then found=ifupdown; fi
 '''
@@ -46,7 +54,7 @@ elif has ifup; then found=ifupdown; fi
 CHECKS = {
     "ifupdown": "has ifup && ! active NetworkManager && ! active systemd-networkd",
     "networkmanager": "active NetworkManager",
-    "netplan": "has netplan",
+    "netplan": "has netplan && active systemd-networkd",
     "networkd": "active systemd-networkd",
 }
 
@@ -72,7 +80,7 @@ pick() {
 }
 '''
 
-# cfg ADAPTER ADDRESS/PREFIX NETMASK [GATEWAY] writes the config; finish applies it.
+# cfg ADAPTER ADDRESS/PREFIX NETMASK [GATEWAY] writes the config; finish = cloud_off + apply.
 BODIES = {
     "ifupdown": r'''D="$R/etc/network"
 F="$D/interfaces.d/gns3lab"
@@ -85,7 +93,7 @@ cfg() {
     if [ -n "${4-}" ]; then echo "    gateway $4"; fi; } >> "$F"
   NAMES="$NAMES $IF"
 }
-finish() {
+apply() {
   if ! grep -Eqs '^[[:space:]]*source(-directory)?[[:space:]]+/etc/network/interfaces\.d' "$D/interfaces"; then
     echo 'source /etc/network/interfaces.d/*' >> "$D/interfaces"
   fi
@@ -127,7 +135,7 @@ cfg() {
   chmod 600 "$f"
   IDS="$IDS $id"
 }
-finish() {
+apply() {
   nmcli connection reload
   for id in $IDS; do nmcli connection up "$id"; done
 }
@@ -139,17 +147,14 @@ mkdir -p "$D/gns3lab-disabled"
 for f in "$D"/*.yaml; do
   if [ -f "$f" ] && [ "$f" != "$F" ]; then mv "$f" "$D/gns3lab-disabled/"; fi
 done
-printf 'network:\n  version: 2\n  ethernets:\n' > "$F"
+printf 'network:\n  version: 2\n  renderer: networkd\n  ethernets:\n' > "$F"
 cfg() {
   pick "$1"
   { printf '    gns3lab%s:\n      match:\n        macaddress: "%s"\n      dhcp4: false\n      addresses: [%s]\n' "$1" "$MAC" "$2"
     if [ -n "${4-}" ]; then printf '      routes:\n        - to: 0.0.0.0/0\n          via: %s\n' "$4"; fi; } >> "$F"
 }
-finish() {
+apply() {
   chmod 600 "$F"
-  if [ -d "$R/etc/cloud/cloud.cfg.d" ]; then
-    printf 'network: {config: disabled}\n' > "$R/etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg"
-  fi
   netplan apply
 }
 ''',
@@ -162,7 +167,7 @@ cfg() {
     if [ -n "${4-}" ]; then printf 'Gateway=%s\n' "$4"; fi; } > "$D/10-gns3lab-$MACH.network"
   NAMES="$NAMES $IF"
 }
-finish() {
+apply() {
   networkctl reload
   for i in $NAMES; do networkctl reconfigure "$i"; done
 }

@@ -298,7 +298,7 @@ export const init = (prefix) => {
   const tapMember = idx => {
     const n = st.lab.nodes[idx], i = st.sel.i;
     if (!canPreconfig(n)) {
-      toast(str("ed_nopreconfig", n.name), true);
+      toast(str(Seg.notMemberKey(imageOf(n)), n.name), true);
       return;
     }
     const free = segPorts(n);
@@ -604,11 +604,14 @@ export const init = (prefix) => {
     });
     const gwOptions = routerPorts(g.gateway ? Seg.portKey(g.gateway) : "");
     const gwSel = g.gateway ? Seg.portKey(g.gateway) : "";
-    const gwHTML = `<label class="ed-field"><span>${esc(str("ed_seggateway"))}</span>
+    const hasRouter = st.lab.nodes.some(n => category(n) === "router");
+    const gwHTML = (hasRouter ? `<label class="ed-field"><span>${esc(str("ed_seggateway"))}</span>
       <select class="form-select form-select-sm${flag("gateway")}" data-seg="gateway"><option value="">${
         esc(str("ed_nogateway"))}</option>` +
       gwOptions.map(o => `<option value="${esc(o.key)}"${o.key === gwSel ? " selected" : ""}>${esc(o.node)} · ` +
-        `${esc(portName(byName(o.node), o.adapter, o.port))}</option>`).join("") + `</select></label>` +
+        `${esc(portName(byName(o.node), o.adapter, o.port))}</option>`).join("") + `</select></label>` :
+        `<div class="ed-field" data-region="nogatewayhelp"><span>${esc(str("ed_seggateway"))}</span>
+      <small>${esc(str("ed_nogateway_norouter"))}</small></div>`) +
       (g.gateway ? `<label class="ed-field"><span>${esc(str("ed_hostnumber"))}</span>
         <input type="number" class="form-control form-control-sm" data-seg="gwhost" min="1" step="1"
           value="${Number.isInteger(g.gateway.host) ? g.gateway.host : ""}" placeholder="${

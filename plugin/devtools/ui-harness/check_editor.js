@@ -107,10 +107,11 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
 
         await tap(page, PC1);
         await tap(page, SW1);
-        check('a switch cannot join: the image has no preconfig, the toast says why',
-            /cannot join a segment/.test(await page.locator('[data-region="toast"]').innerText()));
+        check('a switch cannot join, and the toast says it is a switch whose path the manager finds itself',
+            /SW1 is a switch: it need not be added/.test(await page.locator('[data-region="toast"]').innerText()));
         await tap(page, R1);
-        check('...nor a router as a member', (await page.locator('.ed-members tr').count()) === 1);
+        check('...nor a router as a member: the toast sends to the Gateway field', (await page.locator('.ed-members tr').count()) === 1
+            && /R1 is a router: pick its port in the Gateway field/.test(await page.locator('[data-region="toast"]').innerText()));
         await tap(page, PC2);
         const pick = await until(async() => (await page.locator('[data-pick] option').count()) === 2);
         check('PC2 has two free ports: the panel asks for one', !!pick);
@@ -224,6 +225,20 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await sleep(150);
         check('the preview works on an opened lab', (await svgTexts(page, '.pv-ip')).length === 2);
         await page.screenshot({path: path.join(SHOTS, 'editor-3-dark-ru.png')});
+        await page.locator('.seglist .rowbtn').first().click();
+        await page.locator('[data-act="addmembers"]').click();
+        await tap(page, SW1);
+        check('the toast about a switch is Russian too', /SW1 — коммутатор: его не нужно добавлять/.test(
+            await page.locator('[data-region="toast"]').innerText()));
+
+        // ---- a lab without a router
+        await page.goto(`${BASE}/editor.en.norouter.html${MIN}`);
+        await until(async() => (await page.locator('.node').count()) === 4);
+        await page.locator('.seglist .rowbtn').first().click();
+        check('without a router the Gateway field explains instead of listing nothing',
+            (await page.locator('[data-seg="gateway"]').count()) === 0
+            && /The lab has no router \(an image of the router category in the catalog\)/.test(
+                await page.locator('[data-region="nogatewayhelp"]').innerText()));
 
         check('no errors in the page', problems.length === 0, problems.join(' | '));
     } catch (e) {

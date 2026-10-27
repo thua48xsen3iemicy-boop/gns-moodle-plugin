@@ -146,5 +146,13 @@ check('taken ports and the preconfig flag', () => {
     assert.ok(S.isPreconfig(images.get('vpcs')) && !S.isPreconfig(images.get('linux-switch')) && !S.isPreconfig(null));
 });
 
+check('why a node cannot join a segment depends on the category of its image', () => {
+    assert.equal(S.notMemberKey(images.get('l3')), 'ed_nopreconfig_router');
+    assert.equal(S.notMemberKey(images.get('linux-switch')), 'ed_nopreconfig_switch');
+    assert.equal(S.notMemberKey(image('other', 'qemu', 'host')), 'ed_nopreconfig');
+    assert.equal(S.notMemberKey(image('x', 'qemu', '')), 'ed_nopreconfig');
+    assert.equal(S.notMemberKey(null), 'ed_nopreconfig');
+});
+
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

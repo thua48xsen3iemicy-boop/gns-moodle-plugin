@@ -148,7 +148,7 @@
 |---|---|---|---|
 | `ifupdown` | `/etc/network/interfaces.d/gns3lab` (и строка `source /etc/network/interfaces.d/*`, если её нет) | `ifdown --force <if>; ifup <if>` | строфы этого интерфейса в `/etc/network/interfaces` и других файлах `interfaces.d` закомментировать |
 | `networkmanager` | keyfile `/etc/NetworkManager/system-connections/gns3lab-<mac>.nmconnection` (права 0600), `[ethernet] mac-address=` | `nmcli connection reload; nmcli connection up gns3lab-<mac>` | `/etc/NetworkManager/conf.d/90-gns3lab.conf` с `no-auto-default=*` (нет автоматического «Wired connection 1» с DHCP); у профиля `autoconnect-priority=100` |
-| `netplan` | `/etc/netplan/90-gns3lab.yaml` (права 0600), `match: macaddress:` | `netplan apply` | остальные файлы `/etc/netplan/*.yaml` переносятся в `/etc/netplan/gns3lab-disabled/`, сетевая часть cloud-init выключается (`/etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg`: `network: {config: disabled}`) |
+| `netplan` | `/etc/netplan/90-gns3lab.yaml` (права 0600), `renderer: networkd`, `match: macaddress:` | `netplan apply` | остальные файлы `/etc/netplan/*.yaml` переносятся в `/etc/netplan/gns3lab-disabled/` |
 | `networkd` | `/etc/systemd/network/10-gns3lab-<mac>.network`, `[Match] MACAddress=` | `networkctl reload; networkctl reconfigure <if>` | ничего: первым по имени файлу networkd отдаёт интерфейс сам |
 | `template` | шаблон администратора в каталоге (позже, не этап 2) | — | — |
 
@@ -158,13 +158,20 @@
   находит его в госте: ethernet-интерфейсы с MAC по возрастанию, адаптер N — N-й. Дальше конфиг ссылается на MAC
   (у ifupdown — на имя этого интерфейса). Так преднастройка не зависит от `ens3`/`enp0s3` и переживёт этап 5.
 - **Записывается в файлы и переживает перезагрузку гостя**; применяется штатной командой механизма.
+- **cloud-init выключается при любом механизме.** Если в госте есть `/etc/cloud/cloud.cfg.d`, скрипт пишет
+  `99-gns3lab-network.cfg` (`network: {config: disabled}`): иначе cloud-init при загрузке перепишет сетевые файлы
+  (`interfaces.d/50-cloud-init`, профили NetworkManager, netplan, `.network`) и преднастройка не переживёт перезагрузку.
+  У `ifupdown` файл `interfaces.d/50-cloud-init` обрабатывается так же, как остальные: строфы наших интерфейсов
+  закомментированы.
 - **Что задаётся:** статический IPv4 `A/N` на порту участника сегмента, маршрут по умолчанию через шлюз сегмента
   (у ноды — не больше одного сегмента со шлюзом, иначе `multiple_gateways`). Остальные интерфейсы гостя не трогаются.
 - **Проверка механизма.** Первым шагом скрипт проверяет, что заявленный механизм в госте действительно работает
   (`networkmanager` — `systemctl is-active NetworkManager`; `networkd` — `systemctl is-active systemd-networkd`;
-  `netplan` — есть `netplan`; `ifupdown` — есть `ifup`, а NetworkManager и networkd не активны). Не так — выход с
+  `netplan` — есть `netplan` **и** активен `systemd-networkd`, в `90-gns3lab.yaml` явный `renderer: networkd`;
+  `ifupdown` — есть `ifup`, а NetworkManager и networkd не активны). Не так — выход с
   ненулевым кодом и сообщением `net_config mismatch: declared X, found Y`; слот ставит лабе `FAILED` (как любой
-  ненулевой `provisioning`).
+  ненулевой `provisioning`). Образ, где netplan передаёт сеть NetworkManager (Ubuntu Desktop), указывается как
+  `networkmanager`; при `netplan` скрипт показал бы `found networkmanager` и ничего не тронул бы.
 - **Без подстановки чужого текста в shell.** Адреса проверены `ipaddress`, MAC и имена — по шаблонам; имена
   сегментов и узлов в скрипт не попадают. Скрипт — один вызов `/bin/sh -c` (до 8192 символов, тайм-аут до 120 с,
   `ProvisionCommand`), после команд образа из `slot.provisioning`.
@@ -483,3 +490,55 @@ PHP — `classes/local/reveal.php`, `classes/external/{get_reveal,reveal}.php`, 
   (`lab_definition::from_json`), значения проверяет менеджер.
 - Сверх §13.2: пустой сегмент можно сохранить в черновик (менеджер отклонит его при проверке), подсеть, номера VLAN и адресов
   редактор проверяет на месте теми же правилами, что менеджер.
+
+## 14. Правки после этапа 2: задание исполнителю (менеджер и плагин)
+
+Ревью этапа 2 и первая попытка на стенде. Слот не меняется. Коммиты — менеджер и плагин отдельно (`AGENTS.md`).
+
+### 14.1. Менеджер (`lab_manager/netconfig.py`), версия 0.10.1
+
+1. **cloud-init — во всех механизмах, не только в `netplan`.** Если в госте есть `/etc/cloud/cloud.cfg.d`, скрипт
+   любого `net_config` пишет `99-gns3lab-network.cfg` (`network: {config: disabled}`). Зачем: в облачных образах
+   cloud-init сам пишет сетевые файлы (`/etc/network/interfaces.d/50-cloud-init`, профили NetworkManager, файлы
+   netplan, `.network` networkd) и может переписать их при загрузке. Тогда после перезагрузки гостя у интерфейса две
+   настройки, и преднастройка не переживает перезагрузку (§4.1). Для `ifupdown` дополнительно: файл
+   `interfaces.d/50-cloud-init` обрабатывается тем же правилом, что остальные (строфы наших интерфейсов
+   закомментированы), — проверить тестом.
+2. **`netplan` — только поверх networkd.** Проверка механизма для `netplan`: есть `netplan` **и**
+   `systemctl is-active systemd-networkd`. В сгенерированном `90-gns3lab.yaml` — явный `renderer: networkd`. Причина:
+   скрипт уносит остальные файлы netplan, в том числе `01-network-manager-all.yaml` у образов, где netplan передаёт
+   настройку NetworkManager (Ubuntu Desktop); после этого netplan переключается на networkd, а он там выключен, и сеть
+   молча не поднимается. Такие образы указываются как `networkmanager`. При несовпадении — тот же
+   `net_config mismatch: declared netplan, found …`, лаба `FAILED`; в `found` у образа с netplan поверх NetworkManager
+   должно получиться `networkmanager` (порядок проверок в прелюдии поправить так, чтобы это было так).
+3. В §4.1 этого документа, `CONTRACTS.md` (поле `net_config`) и README менеджера записать оба правила; в README — как
+   администратор узнаёт механизм образа (команды из §13.4.1) и что поле ставится в **каталоге стенда**
+   `secrets/manager/images.json`, а не в `manager/examples/images.json`.
+4. Тесты на поддельном корне: cloud-init выключается у каждого механизма, когда есть `/etc/cloud/cloud.cfg.d`, и не
+   трогается, когда нет; `50-cloud-init` у `ifupdown` закомментирован; `netplan` при неактивном networkd —
+   ненулевой код и `found networkmanager` (если NetworkManager активен); `renderer: networkd` в файле.
+
+### 14.2. Плагин (редактор), версия 0.10.1
+
+Сейчас при клике по любой ноде, которую нельзя сделать участником, — одно сообщение «менеджер лаб не умеет
+настраивать сеть этого образа». Для Cisco это сбивает с толку: участниками этапа 2 бывают только хосты (Linux и VPCS),
+а Cisco в сегменте играет другую роль.
+
+1. **Сообщение по роли ноды** (категория образа из `GET /images`):
+   - `router` — «R1 — маршрутизатор: выберите его порт в поле «Шлюз» сегмента»;
+   - `switch` — «SW1 — коммутатор: его не нужно добавлять, путь через коммутаторы менеджер находит по кабелям»;
+   - остальные без `preconfig` — как сейчас, плюс подсказка администратору: «укажите `net_config` образа в каталоге
+     менеджера».
+2. **Поле «Шлюз» без вариантов.** Если в лабе нет ни одной ноды категории `router`, в поле — пояснение «в лабе нет
+   маршрутизатора (образ категории `router` в каталоге)», а не пустой список.
+3. Строки en/ru, версия, README плагина. Проверки: `check_segments.mjs` — выбор текста по категории;
+   `ui-harness/check_editor.js` — клик по коммутатору и маршрутизатору даёт свои сообщения, лаба без маршрутизатора
+   показывает пояснение в поле «Шлюз». `amd/build` — штатно или запасным путём отдельным коммитом.
+
+### 14.3. Проверка на стенде (владелец)
+
+1. В `secrets/manager/images.json` у `debian12` — `net_config` по §13.4.1, шаг `manager` в `lab-provision`, сброс
+   кэшей Moodle. Debian добавляется в сегмент.
+2. Клик по IOL-коммутатору и маршрутизатору — свои сообщения; маршрутизатор выбирается шлюзом.
+3. Лаба из §13.4.2; после запуска — перезагрузить гостя Debian (`reboot`): адреса и маршрут по умолчанию остались,
+   в `/etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg` (если cloud-init есть) — выключенная сеть.

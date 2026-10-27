@@ -118,13 +118,13 @@ def test_networkmanager(tmp_path):
 
 
 def test_netplan(tmp_path):
-    done, root, calls = run("netplan", TWO, tmp_path, stubs=("systemctl", "netplan"), files={
+    done, root, calls = run("netplan", TWO, tmp_path, stubs=("systemctl", "netplan"), active=("systemd-networkd",), files={
         "etc/netplan/50-cloud-init.yaml": "network: {}\n", "etc/netplan/01-x.yaml": "network: {}\n",
         "etc/cloud/cloud.cfg.d/90-dpkg.cfg": "x\n"})
     assert done.returncode == 0, done.stderr
     f = root / "etc/netplan/90-gns3lab.yaml"
     assert f.read_text() == (
-        'network:\n  version: 2\n  ethernets:\n    gns3lab0:\n      match:\n        macaddress: "0c:aa:00:00:00:00"\n'
+        'network:\n  version: 2\n  renderer: networkd\n  ethernets:\n    gns3lab0:\n      match:\n        macaddress: "0c:aa:00:00:00:00"\n'
         '      dhcp4: false\n      addresses: [192.168.10.1/24]\n      routes:\n        - to: 0.0.0.0/0\n'
         '          via: 192.168.10.254\n    gns3lab1:\n      match:\n        macaddress: "0c:aa:00:00:00:01"\n'
         '      dhcp4: false\n      addresses: [10.0.0.5/30]\n')
@@ -137,7 +137,7 @@ def test_netplan(tmp_path):
 
 
 def test_netplan_without_cloud_init_leaves_etc_cloud_alone(tmp_path):
-    done, root, _ = run("netplan", ONE, tmp_path, stubs=("systemctl", "netplan"))
+    done, root, _ = run("netplan", ONE, tmp_path, stubs=("systemctl", "netplan"), active=("systemd-networkd",))
     assert done.returncode == 0, done.stderr
     assert not (root / "etc/cloud").exists()
 
@@ -177,6 +177,8 @@ def test_a_missing_adapter_fails(tmp_path):
     ("networkmanager", ("systemctl", "ifup"), (), "ifupdown"),
     ("networkd", ("systemctl", "nmcli"), ("NetworkManager",), "networkmanager"),
     ("netplan", ("systemctl",), ("systemd-networkd",), "networkd"),
+    ("netplan", ("systemctl", "netplan"), ("NetworkManager",), "networkmanager"),
+    ("netplan", ("systemctl", "netplan"), (), "none"),
     ("ifupdown", ("systemctl", "ifup"), ("NetworkManager",), "networkmanager"),
     ("ifupdown", ("systemctl", "ifup"), ("systemd-networkd",), "networkd"),
     ("networkd", ("systemctl",), (), "none"),
@@ -186,3 +188,53 @@ def test_wrong_mechanism_fails_before_any_change(tmp_path, mechanism, stubs, act
     assert done.returncode != 0
     assert done.stderr.strip() == f"net_config mismatch: declared {mechanism}, found {found}"
     assert calls == [] and not (root / "etc").exists()
+
+
+MECHANISM_SETUP = {
+    "ifupdown": (("systemctl", "ifup", "ifdown"), ()),
+    "networkmanager": (("systemctl", "nmcli"), ("NetworkManager",)),
+    "netplan": (("systemctl", "netplan"), ("systemd-networkd",)),
+    "networkd": (("systemctl", "networkctl"), ("systemd-networkd",)),
+}
+
+
+@pytest.mark.parametrize("mechanism", netconfig.MECHANISMS)
+def test_cloud_init_network_is_switched_off_by_every_mechanism(tmp_path, mechanism):
+    stubs, active = MECHANISM_SETUP[mechanism]
+    done, root, _ = run(mechanism, ONE, tmp_path, stubs=stubs, active=active,
+                        files={"etc/cloud/cloud.cfg.d/90-dpkg.cfg": "x\n"})
+    assert done.returncode == 0, done.stderr
+    assert (root / "etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg").read_text() == "network: {config: disabled}\n"
+    assert (root / "etc/cloud/cloud.cfg.d/90-dpkg.cfg").read_text() == "x\n"
+
+
+@pytest.mark.parametrize("mechanism", netconfig.MECHANISMS)
+def test_cloud_init_is_left_alone_when_the_guest_has_none(tmp_path, mechanism):
+    stubs, active = MECHANISM_SETUP[mechanism]
+    done, root, _ = run(mechanism, ONE, tmp_path, stubs=stubs, active=active)
+    assert done.returncode == 0, done.stderr
+    assert not (root / "etc/cloud").exists()
+
+
+def test_ifupdown_comments_out_the_cloud_init_stanza(tmp_path):
+    done, root, _ = run("ifupdown", TWO, tmp_path, stubs=("systemctl", "ifup", "ifdown"), files={
+        "etc/network/interfaces": "source /etc/network/interfaces.d/*\n",
+        "etc/network/interfaces.d/50-cloud-init": "auto ens9\niface ens9 inet dhcp\n\nauto ens4\niface ens4 inet dhcp\n",
+        "etc/cloud/cloud.cfg.d/90-dpkg.cfg": "x\n"})
+    assert done.returncode == 0, done.stderr
+    assert (root / "etc/network/interfaces.d/50-cloud-init").read_text() == (
+        "# gns3lab: auto ens9\n# gns3lab: iface ens9 inet dhcp\n# gns3lab: \nauto ens4\niface ens4 inet dhcp\n")
+    assert (root / "etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg").exists()
+
+
+def test_netplan_on_networkmanager_is_refused_before_any_change(tmp_path):
+    done, root, calls = run("netplan", ONE, tmp_path, stubs=("systemctl", "netplan", "nmcli"),
+                            active=("NetworkManager",), files={
+                                "etc/netplan/01-network-manager-all.yaml": "network: {renderer: NetworkManager}\n",
+                                "etc/cloud/cloud.cfg.d/90-dpkg.cfg": "x\n"})
+    assert done.returncode != 0
+    assert done.stderr.strip() == "net_config mismatch: declared netplan, found networkmanager"
+    assert calls == []
+    assert (root / "etc/netplan/01-network-manager-all.yaml").exists()
+    assert not (root / "etc/netplan/gns3lab-disabled").exists()
+    assert not (root / "etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg").exists()
