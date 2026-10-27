@@ -88,6 +88,15 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         $mform->hideIf('fogstart', 'factsview', 'neq', \mod_gns3lab\local\reveal::FOG);
         $mform->addHelpButton('fogstart', 'fogstart', 'gns3lab');
 
+        // Parallel work under one account (docs/seat.md): by default a lab is driven from one browser page at a time.
+        $mform->addElement('select', 'seatmode', get_string('seatmode', 'gns3lab'), [
+            \mod_gns3lab\local\seat::TAB => get_string('seatmode_tab', 'gns3lab'),
+            \mod_gns3lab\local\seat::LOGIN => get_string('seatmode_login', 'gns3lab'),
+            \mod_gns3lab\local\seat::OFF => get_string('seatmode_off', 'gns3lab'),
+        ]);
+        $mform->setDefault('seatmode', \mod_gns3lab\local\seat::TAB);
+        $mform->addHelpButton('seatmode', 'seatmode', 'gns3lab');
+
         $this->standard_coursemodule_elements();
         $this->add_action_buttons();
     }

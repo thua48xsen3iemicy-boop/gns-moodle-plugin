@@ -24,6 +24,7 @@ use core_external\external_value;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\reveal as reveal_store;
+use mod_gns3lab\local\seat;
 
 /**
  * Adds items to the mask of the current user: what the student's commands and the cables of the lab uncovered.
@@ -54,6 +55,7 @@ class reveal extends external_api {
                     ''
                 ),
             ]), 'What to uncover, up to ' . reveal_store::MAX_PER_CALL . ' items'),
+            'tabid' => new external_value(PARAM_ALPHANUMEXT, 'Id of this page load (one-seat rule)', VALUE_DEFAULT, ''),
         ]);
     }
 
@@ -62,19 +64,22 @@ class reveal extends external_api {
      *
      * @param int $cmid course module id
      * @param array $items each: nodeid, kind, item
+     * @param string $tabid page id for the one-seat rule
      * @return array
      */
-    public static function execute(int $cmid, array $items): array {
+    public static function execute(int $cmid, array $items, string $tabid = ''): array {
         global $USER;
 
-        ['cmid' => $cmid, 'items' => $items] = self::validate_parameters(
+        ['cmid' => $cmid, 'items' => $items, 'tabid' => $tabid] = self::validate_parameters(
             self::execute_parameters(),
-            ['cmid' => $cmid, 'items' => $items]
+            ['cmid' => $cmid, 'items' => $items, 'tabid' => $tabid]
         );
         $access = lab_access::from_cmid($cmid);
         self::validate_context($access->context);
         // Only the owner of the lab uncovers anything: no other user can be named.
         [$userid] = $access->resolve_user(0);
+        // What a second login "uncovers" would end up in the student's mask (docs/seat.md).
+        seat::require_seat($access, $userid, $tabid);
 
         $client = \core\di::get(manager_client::class);
         $session = $client->find_session($userid, (int) $access->instance->id);

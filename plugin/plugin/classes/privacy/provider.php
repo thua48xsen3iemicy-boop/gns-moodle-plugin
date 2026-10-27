@@ -24,6 +24,7 @@ use core_privacy\local\request\transform;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
 use mod_gns3lab\local\reveal;
+use mod_gns3lab\local\seat;
 
 /**
  * Privacy provider for mod_gns3lab.
@@ -34,6 +35,9 @@ use mod_gns3lab\local\reveal;
  * scheme (names and identifiers, no values).
  * The labs are shared content: deleting a user's data hands their labs over to the main administrator.
  * The uncovered items belong to the student and activity: they are deleted with the user's data in the activity.
+ * The seat (which login and page drive the lab of a student, docs/seat.md) lives a minute and a half after the last
+ * sign of life; it is declared and deleted with the user's data, but not exported: it holds a hash and a random id of
+ * a page that mean nothing outside the running page.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -75,12 +79,20 @@ class provider implements
             'item' => 'privacy:metadata:gns3lab_reveal:item',
             'timecreated' => 'privacy:metadata:gns3lab_reveal:timecreated',
         ], 'privacy:metadata:gns3lab_reveal');
+        $collection->add_database_table('gns3lab_seat', [
+            'gns3labid' => 'privacy:metadata:gns3lab_seat:gns3labid',
+            'userid' => 'privacy:metadata:gns3lab_seat:userid',
+            'sessionkey' => 'privacy:metadata:gns3lab_seat:sessionkey',
+            'tabid' => 'privacy:metadata:gns3lab_seat:tabid',
+            'timeclaimed' => 'privacy:metadata:gns3lab_seat:timeclaimed',
+            'timemodified' => 'privacy:metadata:gns3lab_seat:timemodified',
+        ], 'privacy:metadata:gns3lab_seat');
         return $collection;
     }
 
     /**
      * The system context, if the user created or changed a lab of the library, and the activities in which the user
-     * has uncovered something on the scheme.
+     * has uncovered something on the scheme or holds (or held) the seat.
      *
      * @param int $userid user id
      * @return contextlist
@@ -96,8 +108,18 @@ class provider implements
                JOIN {course_modules} cm ON cm.id = c.instanceid AND c.contextlevel = :contextlevel
                JOIN {modules} m ON m.id = cm.module AND m.name = :modname
                JOIN {gns3lab_reveal} r ON r.gns3labid = cm.instance
-              WHERE r.userid = :userid',
-            ['contextlevel' => CONTEXT_MODULE, 'modname' => 'gns3lab', 'userid' => $userid]
+              WHERE r.userid = :userid
+             UNION
+             SELECT c2.id
+               FROM {context} c2
+               JOIN {course_modules} cm2 ON cm2.id = c2.instanceid AND c2.contextlevel = :contextlevel2
+               JOIN {modules} m2 ON m2.id = cm2.module AND m2.name = :modname2
+               JOIN {gns3lab_seat} s ON s.gns3labid = cm2.instance
+              WHERE s.userid = :userid2',
+            [
+                'contextlevel' => CONTEXT_MODULE, 'modname' => 'gns3lab', 'userid' => $userid,
+                'contextlevel2' => CONTEXT_MODULE, 'modname2' => 'gns3lab', 'userid2' => $userid,
+            ]
         );
         return $contextlist;
     }
@@ -116,6 +138,15 @@ class provider implements
                    FROM {course_modules} cm
                    JOIN {modules} m ON m.id = cm.module AND m.name = :modname
                    JOIN {gns3lab_reveal} r ON r.gns3labid = cm.instance
+                  WHERE cm.id = :cmid',
+                ['modname' => 'gns3lab', 'cmid' => $context->instanceid]
+            );
+            $userlist->add_from_sql(
+                'userid',
+                'SELECT s.userid
+                   FROM {course_modules} cm
+                   JOIN {modules} m ON m.id = cm.module AND m.name = :modname
+                   JOIN {gns3lab_seat} s ON s.gns3labid = cm.instance
                   WHERE cm.id = :cmid',
                 ['modname' => 'gns3lab', 'cmid' => $context->instanceid]
             );
@@ -207,6 +238,7 @@ class provider implements
 
         if ($context->contextlevel == CONTEXT_MODULE) {
             reveal::delete(self::instance_of($context));
+            seat::delete(self::instance_of($context));
             return;
         }
         if ($context->contextlevel != CONTEXT_SYSTEM) {
@@ -230,6 +262,7 @@ class provider implements
                 self::hand_over([$userid]);
             } else if ($context->contextlevel == CONTEXT_MODULE) {
                 reveal::delete(self::instance_of($context), [$userid]);
+                seat::delete(self::instance_of($context), [$userid]);
             }
         }
     }
@@ -246,6 +279,7 @@ class provider implements
             self::hand_over($userids);
         } else if ($context->contextlevel == CONTEXT_MODULE) {
             reveal::delete(self::instance_of($context), $userids);
+            seat::delete(self::instance_of($context), $userids);
         }
     }
 

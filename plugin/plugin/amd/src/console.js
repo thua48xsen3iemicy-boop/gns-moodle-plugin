@@ -28,6 +28,7 @@
  */
 
 import Ajax from 'core/ajax';
+import {reportRefusal, tabId} from 'mod_gns3lab/seat';
 
 /** Close code of the gateway: the console closed on the slot side. */
 export const CLOSE_UPSTREAM = 4000;
@@ -203,9 +204,10 @@ export class ConsoleConnection {
         try {
             [ticket] = await Promise.all(Ajax.call([{
                 methodname: 'mod_gns3lab_get_console_ticket',
-                args: {cmid: this.cmid, nodeid: this.nodeId, userid: this.userid},
+                args: {cmid: this.cmid, nodeid: this.nodeId, userid: this.userid, tabid: tabId()},
             }]));
         } catch (error) {
+            reportRefusal(error);
             if (this.state === 'closed') {
                 return;
             }

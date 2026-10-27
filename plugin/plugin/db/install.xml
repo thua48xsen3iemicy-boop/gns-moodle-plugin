@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/gns3lab/db" VERSION="20261027" COMMENT="XMLDB file for Moodle mod_gns3lab"
+<XMLDB PATH="mod/gns3lab/db" VERSION="20261031" COMMENT="XMLDB file for Moodle mod_gns3lab"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
 >
@@ -16,6 +16,7 @@
         <FIELD NAME="labversionid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Published lab version from the site lab library; 0 means labref is used"/>
         <FIELD NAME="factsview" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="live" SEQUENCE="false" COMMENT="What the scheme shows a student: live, seen or fog"/>
         <FIELD NAME="fogstart" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Names of the nodes a fog starts from as a JSON list; empty means every node is a silhouette"/>
+        <FIELD NAME="seatmode" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="tab" SEQUENCE="false" COMMENT="Who may drive a student's lab at the same time: tab (one browser page), login (one Moodle login) or off"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
@@ -83,6 +84,25 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="uniqueitem" UNIQUE="true" FIELDS="gns3labid, userid, nodeid, kind, item"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="gns3lab_seat" COMMENT="Who may drive a student's lab right now (docs/seat.md): one row per student and activity, alive for a minute and a half after the last sign of life of the holder">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="gns3labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Activity"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Owner of the lab"/>
+        <FIELD NAME="sessionkey" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="SHA-256 of the Moodle session id of the holder: tells one login from another, cannot be turned back into the session id"/>
+        <FIELD NAME="tabid" TYPE="char" LENGTH="64" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Random id of the holder's page load; empty from a page that sends none"/>
+        <FIELD NAME="timeclaimed" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the seat last changed hands"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Last sign of life of the holder"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="gns3labid" TYPE="foreign" FIELDS="gns3labid" REFTABLE="gns3lab" REFFIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="oneseat" UNIQUE="true" FIELDS="gns3labid, userid"/>
       </INDEXES>
     </TABLE>
   </TABLES>

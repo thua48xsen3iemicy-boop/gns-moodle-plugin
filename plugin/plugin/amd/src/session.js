@@ -24,6 +24,7 @@
  */
 
 import Ajax from 'core/ajax';
+import {reportRefusal, tabId} from 'mod_gns3lab/seat';
 import {saveCancelPromise} from 'core/notification';
 
 /** Statuses that change by themselves: poll often. */
@@ -122,12 +123,14 @@ export class Session {
         this.busy = true;
         this.render();
         try {
-            const [session] = await Promise.all(Ajax.call([{methodname, args: {cmid: this.cmid}}]));
+            const [session] = await Promise.all(Ajax.call([{methodname, args: {cmid: this.cmid, tabid: tabId()}}]));
             this.showMessage('');
             this.apply({...this.state, session});
         } catch (error) {
             // A conflict names the activity with the other running lab and links to it.
             const link = error.errorcode === 'sessionconflictat' ? error.link : null;
+            // The lab is driven from another page or login: the page puts up the wall (docs/seat.md).
+            reportRefusal(error);
             this.showMessage(error.message || String(error), link);
         } finally {
             this.busy = false;

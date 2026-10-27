@@ -115,5 +115,33 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         upgrade_mod_savepoint(true, 2026102700, 'gns3lab');
     }
 
+    if ($oldversion < 2026103100) {
+        // The one-seat rule (docs/seat.md): how an activity limits parallel work under one account, and who holds the
+        // seat of a student now. Existing activities get the default, the strictest mode (one browser page).
+        $table = new xmldb_table('gns3lab');
+        $field = new xmldb_field('seatmode', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, 'tab', 'fogstart');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $table = new xmldb_table('gns3lab_seat');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('gns3labid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('sessionkey', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('tabid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('timeclaimed', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_key('gns3labid', XMLDB_KEY_FOREIGN, ['gns3labid'], 'gns3lab', ['id']);
+        $table->add_key('userid', XMLDB_KEY_FOREIGN, ['userid'], 'user', ['id']);
+        $table->add_index('oneseat', XMLDB_INDEX_UNIQUE, ['gns3labid', 'userid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026103100, 'gns3lab');
+    }
+
     return true;
 }

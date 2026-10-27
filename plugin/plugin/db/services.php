@@ -81,6 +81,13 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_claim_seat' => [
+        'classname' => \mod_gns3lab\external\claim_seat::class,
+        'description' => 'Claims the seat of the current user in an activity (one page drives a lab) or says who holds it.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_save_lab_draft' => [
         'classname' => \mod_gns3lab\external\save_lab_draft::class,
         'description' => 'Saves the draft of a library lab from the lab editor.',

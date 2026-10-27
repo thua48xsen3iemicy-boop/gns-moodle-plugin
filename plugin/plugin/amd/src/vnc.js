@@ -31,6 +31,7 @@
  */
 
 import Ajax from 'core/ajax';
+import {reportRefusal, tabId} from 'mod_gns3lab/seat';
 import {BACKOFF, CLOSE_UNAVAILABLE, CLOSE_UPSTREAM, STABLE_AFTER, consoleUrl} from 'mod_gns3lab/console';
 
 /**
@@ -126,9 +127,10 @@ export class VncConnection {
         try {
             [ticket] = await Promise.all(Ajax.call([{
                 methodname: 'mod_gns3lab_get_console_ticket',
-                args: {cmid: this.cmid, nodeid: this.nodeId, userid: this.userid},
+                args: {cmid: this.cmid, nodeid: this.nodeId, userid: this.userid, tabid: tabId()},
             }]));
         } catch (error) {
+            reportRefusal(error);
             if (this.state === 'closed') {
                 return;
             }
