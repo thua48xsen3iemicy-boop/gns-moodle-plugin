@@ -150,7 +150,7 @@ for (const lang of ['en', 'ru']) {
 // The lab editor of the library (classes/local/lab_definition.php, editor.php): a catalog of the lab manager with the
 // lab constructor, a lab of a switch, two Debian, a VPCS and a router, no segments yet. editor.<lang>.html is a manager
 // with the lab constructor; editor.<lang>.plain.html is one without it (a lab/1 manager); editor.<lang>.segments.html
-// opens a lab that already has a segment.
+// opens a lab that already has a segment; editor.<lang>.norouter.html is one without a router.
 const image = (id, title, kind, category, extra = {}) => ({
     id, title, kind, category, symbol: ':/symbols/x.svg', console_type: 'telnet', ram_mb: null, cpus: null,
     adapters: {default: 1, min: 1, max: 8}, port_name: kind === 'iou' ? 'Ethernet{adapter}/{port}' : 'Ethernet{adapter}',
@@ -181,6 +181,13 @@ const EDITOR_SEGMENTED = {
     ...EDITOR_LAB, format: 'gns3lab.lab/2',
     segments: [{name: 'LAN1', subnet: {fixed: '192.168.10.0/24'}, vlan: {fixed: 10}, gateway: end('R1', 0, 0),
         members: [end('PC1', 0), {...end('PC3', 0), host: 20}]}],
+};
+// A lab without a router: the Gateway field of the segment has nothing to offer and says why.
+const EDITOR_NOROUTER = {
+    format: 'gns3lab.lab/2',
+    nodes: EDITOR_LAB.nodes.filter(n => n.name !== 'R1'),
+    links: EDITOR_LAB.links.filter(l => l.b.node !== 'R1'),
+    segments: [{name: 'LAN1', subnet: {fixed: '192.168.10.0/24'}, members: [end('PC1', 0)]}],
 };
 /**
  * Renders the real template of the lab editor with the strings editor.php sends.
@@ -224,6 +231,8 @@ for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `editor.${lang}.plain.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, false), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.segments.html`),
         shell(lang, '', editorPage(lang, EDITOR_SEGMENTED, true), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `editor.${lang}.norouter.html`),
+        shell(lang, '', editorPage(lang, EDITOR_NOROUTER, true), 'live', '', EDITOR_INIT));
 }
 
 // A user who may only look: no session bar.

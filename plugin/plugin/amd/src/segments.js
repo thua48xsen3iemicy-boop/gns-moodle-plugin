@@ -41,6 +41,18 @@ const PORT_NAMES = {iou: "Ethernet{adapter}/{port}", qemu: "Ethernet{adapter}", 
 export const isPreconfig = image => !!image && image.preconfig === true;
 
 /**
+ * The language string that tells why a node cannot join a segment, by the category of its image: a router is picked as
+ * the gateway of the segment, a switch is found on the way by the cables, anything else lacks the network mechanism.
+ *
+ * @param {object|null} image image of the catalog
+ * @returns {string} key of the string in mod_gns3lab, the node name is its parameter
+ */
+export const notMemberKey = image => {
+    const category = (image || {}).category;
+    return category === "router" ? "ed_nopreconfig_router" : category === "switch" ? "ed_nopreconfig_switch" : "ed_nopreconfig";
+};
+
+/**
  * Formats a 32-bit address.
  *
  * @param {number} v address

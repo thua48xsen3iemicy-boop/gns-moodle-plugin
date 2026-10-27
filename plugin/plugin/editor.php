@@ -70,7 +70,8 @@ $keys = [
     'ed_ram', 'ed_range', 'ed_cpus', 'ed_saved', 'ed_saving', 'ed_summary', 'ed_unknownimage', 'ed_unsaved', 'ed_valid',
     'ed_version', 'ed_cannotpublish', 'ed_segments', 'ed_segment', 'ed_addsegment', 'ed_nosegments', 'ed_segname',
     'ed_segvlan', 'ed_segvlan_help', 'ed_segsubnet', 'ed_seggateway', 'ed_nogateway', 'ed_members', 'ed_nomembers',
-    'ed_addmembers', 'ed_addmembers_done', 'ed_removemember', 'ed_hostnumber', 'ed_nopreconfig', 'ed_pickport',
+    'ed_addmembers', 'ed_addmembers_done', 'ed_removemember', 'ed_hostnumber', 'ed_nopreconfig', 'ed_nopreconfig_router',
+    'ed_nopreconfig_switch', 'ed_nogateway_norouter', 'ed_pickport',
     'ed_addport', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
     'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
 ];
