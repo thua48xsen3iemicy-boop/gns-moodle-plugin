@@ -317,7 +317,8 @@ export const init = (prefix) => {
     const out = [], used = taken();
     st.lab.nodes.filter(n => category(n) === "router").forEach(n => portsOf(n).forEach(p => {
       const key = Seg.portKey({node: n.name, adapter: p.adapter, port: p.port});
-      if (!used.has(key) || key === current) {
+      /* a port that is the gateway of another segment may be a gateway again (in another VLAN: router-on-a-stick) */
+      if (!used.has(key) || used.get(key).member === -1 || key === current) {
         out.push({node: n.name, adapter: p.adapter, port: p.port, key});
       }
     }));
@@ -616,6 +617,10 @@ export const init = (prefix) => {
         <input type="number" class="form-control form-control-sm" data-seg="gwhost" min="1" step="1"
           value="${Number.isInteger(g.gateway.host) ? g.gateway.host : ""}" placeholder="${
             pl && pl.gateway ? esc(pl.gateway) : ""}"></label>` : "");
+    /* which IOL devices the lab manager sets up for this segment: the student need not touch them */
+    const managed = withSegments ? Seg.managedNodes(st.lab, images, i) : [];
+    const managedHTML = managed.length
+      ? `<p class="ed-note" data-region="managed">${esc(str("ed_managed", managed.join(", ")))}</p>` : "";
     const rows = g.members.map((m, j) => {
       const node = byName(m.node), ip = pl && pl.members[j] ? `${pl.members[j]}/${net.prefix}` : "";
       return `<tr class="${bad.members.has(j) ? "bad" : ""}"><td><button type="button" class="rowbtn" data-select-node="${
@@ -648,6 +653,7 @@ export const init = (prefix) => {
           esc((g.subnet || {}).fixed || "")}"
           placeholder="192.168.10.0/24" autocomplete="off" spellcheck="false"></label>
       ${gwHTML}
+      ${managedHTML}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
       <h3>${esc(str("ed_members"))}</h3>
       ${rows ? `<table class="ed-ports ed-members"><tbody>${rows}</tbody></table>`

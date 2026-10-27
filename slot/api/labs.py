@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
+from api import iol_nvram
 from api.client import call, get_lifecycle
 from api.models import DeployTicket, NodeSpec
 
@@ -114,6 +115,14 @@ async def create_project(request: Request, ticket: DeployTicket):
     for node, payload in prepared:
         created = await call(request, "POST", f"projects/{project_id}/nodes", payload)
         ids[node.name] = created["node_id"]
+        if node.nvram_config is not None:
+            # Once, here: the node has not started yet, and a resumed project never gets here.
+            try:
+                iol_nvram.preset(project_id, created, node.nvram_config)
+            except iol_nvram.NvramError as exc:
+                from api.lifecycle import LabError
+
+                raise LabError(exc.code, str(exc)) from exc
     for link in ticket.links:
         payload = {
             "nodes": [

@@ -1,8 +1,10 @@
-"""Segments of a gns3lab.lab/2 definition: checking, addresses, compilation (lab constructor README §3, §4, §13).
+"""Segments of a gns3lab.lab/2 definition: checking, addresses, compilation (lab constructor README §3, §4, §13, §15).
 
 A segment says "these ports are one broadcast domain with this subnet, this VLAN and this gateway"; the
 teacher never writes device commands. Stage 2 knows fixed values only and presets Linux (QGA script,
-netconfig.py) and VPCS (`ip` line of the startup script) members; switches and routers stay the student's job.
+netconfig.py) and VPCS (`ip` line of the startup script) members. Stage 3 presets the IOL switches on the path of a
+segment and the IOL router that is its gateway (ios_plans, iosconfig.py: `nvram_config`); other switches and routers
+stay the student's job.
 
 check() is called by labdef.check and reports problems with a path the editor can highlight
 (`segments[i].members[j]`). Everything here is pure: the same definition gives the same text.
@@ -12,7 +14,7 @@ import ipaddress
 import re
 from dataclasses import dataclass
 
-from . import netconfig
+from . import iosconfig, netconfig
 from .images import PORT_NAMES
 
 SEGMENT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
@@ -132,6 +134,28 @@ class Fabric:
                 ends.add(port)
         return ends, passed
 
+    def tree(self, keys, passed):
+        """(switches, links) on the paths between the segment's end ports `keys`; `passed` is what reach() found.
+
+        A switch that no end port is cabled to and that has one cable at most inside the set (a spur) is not on a
+        path; leaving such switches out repeatedly keeps the cycles (a ring is entirely on the path: the loop is
+        STP's business). links: [(port, port)] between two switches of the set, one entry per cable.
+        """
+        cables = {frozenset((port, self.peer[port])) for name in passed for port in self.ports[name]
+                  if self.peer[port][0] in passed}
+        attached = {self.peer[key][0] for key in keys if key in self.peer}
+        keep = set(passed)
+        while True:
+            def degree(name):
+                return sum(1 for cable in cables if any(port[0] == name for port in cable)
+                           and all(port[0] in keep for port in cable))
+            spur = sorted(name for name in keep if name not in attached and degree(name) <= 1)
+            if not spur:
+                break
+            keep.discard(spur[0])
+        links = sorted(tuple(sorted(cable)) for cable in cables if all(port[0] in keep for port in cable))
+        return keep, links
+
 
 def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error, problem, warn, connected: bool):
     """Validate `segments`; returns the normalized list (only meaningful when `problem` was not called).
@@ -148,6 +172,8 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
         raw = raw[:MAX_SEGMENTS]
     fabric = Fabric(nodes, links, images) if connected else None
     out, names, owner, gateway_of_node = [], {}, {}, {}
+    gateways = {}  # port -> [(path, VLAN number or None)] of the segments whose gateway it is
+    conflicts = set()  # paths of the segments already reported as gateway_port_conflict
     traced = []  # (index, vlan, switches passed) of the segments whose members are all connected
 
     def endpoint(item, path, keys):
@@ -248,7 +274,14 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                     problem(f"{path}.gateway", "member_in_two_segments", f"{port[0]} {port[1]}/{port[2]}")
                     sound = False
                 else:
-                    owner[port] = path
+                    # One router port may be the gateway of several segments (router-on-a-stick): one of them
+                    # on the port itself, the others in their own VLANs on subinterfaces.
+                    vlan = norm.get("vlan", {}).get("fixed")
+                    if any(vlan == other for _, other in gateways.get(port, ())):
+                        problem(f"{path}.gateway", "gateway_port_conflict", f"{port[0]} {port[1]}/{port[2]}")
+                        conflicts.add(path)
+                        sound = False
+                    gateways.setdefault(port, []).append((path, vlan))
                 norm["gateway"] = gateway
 
         members_raw = seg.get("members")
@@ -275,7 +308,7 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                     problem(mpath, "unsupported_image", images[nodes[member["node"]]["image"]].id)
                     sound = False
                 port = (member["node"], member["adapter"], member["port"])
-                if port in owner:
+                if port in owner or port in gateways:
                     problem(mpath, "member_in_two_segments", f"{port[0]} {port[1]}/{port[2]}")
                     sound = False
                 else:
@@ -302,7 +335,7 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                 else:
                     problem(f"{path}.members[{where}]", code, f"1..{usable(network)}" if code == "host_out_of_range"
                             else f"host {hosts[where]}")
-        if gateway is not None:
+        if gateway is not None and images[nodes[gateway["node"]]["image"]].kind != "iou":
             warn(f"{path}.gateway", "gateway_not_configured", "the router is set by the student")
 
         if fabric is not None and sound and "subnet" in norm and "name" in norm:
@@ -317,12 +350,25 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                     lost = True
             if not lost:
                 traced.append((i, norm.get("vlan"), passed))
-                if norm.get("vlan") and passed:
-                    warn(f"{path}.vlan", "switch_not_configured", "the switches on the path are set by the student")
+                if norm.get("vlan"):
+                    left = sorted(name for name in fabric.tree([key for _, key in keys], passed)[0]
+                                  if images[nodes[name]["image"]].kind != "iou")
+                    if left:
+                        warn(f"{path}.vlan", "switch_not_configured",
+                             f"set by the student: {', '.join(left)}")
         if sound and "subnet" in norm and "name" in norm and "members" in norm:
             out.append({"name": norm["name"], **({"vlan": norm["vlan"]} if "vlan" in norm else {}),
                         "subnet": norm["subnet"], **({"gateway": norm["gateway"]} if "gateway" in norm else {}),
                         "members": norm["members"]})
+
+    if fabric is not None:
+        for port, owners in gateways.items():
+            peer = fabric.peer.get(port)
+            if len(owners) > 1 and peer is not None and peer[0] not in fabric.switches:
+                # No switch behind the port: there is nothing to tell the VLANs apart.
+                for gpath, _ in owners[1:]:
+                    if gpath not in conflicts:
+                        problem(f"{gpath}.gateway", "gateway_port_conflict", f"{port[0]} {port[1]}/{port[2]}")
 
     for n, (i, vlan, passed) in enumerate(traced):
         for k, other_vlan, other_passed in traced[:n]:
@@ -347,8 +393,78 @@ def assignments(definition: dict) -> list[Assignment]:
     return result
 
 
+def gateway_interface(seg: dict):
+    """IPv4Interface of the gateway of a checked segment (None: no gateway)."""
+    gateway = seg.get("gateway")
+    if gateway is None:
+        return None
+    network = ipaddress.IPv4Network(seg["subnet"]["fixed"])
+    gw, _, _ = plan(network, True, gateway.get("host"), [m.get("host") for m in seg["members"]])
+    return ipaddress.IPv4Interface((gw, network.prefixlen))
+
+
+def ios_plans(definition: dict, images: dict) -> dict:
+    """{node name: SwitchPlan | RouterPlan} of the IOL nodes the manager configures (lab constructor README §15.2).
+
+    A switch (image `kind: iou`, category `switch`) is configured when it is on the path of a segment (Fabric.tree);
+    a router (`iou`, category `router`) when one of its ports is the gateway of a segment. A segment without `vlan`
+    is VLAN 1. A switch port is a trunk when it is cabled to another switch of the path, to a gateway port that has
+    subinterfaces, or when more than one segment goes through it; otherwise an access port.
+    """
+    nodes = {n["name"]: n for n in definition["nodes"]}
+    fabric = Fabric(nodes, definition["links"], images)
+    iol = {name for name, node in nodes.items() if images[node["image"]].kind == "iou"}
+    plans = {}
+    ports = {}  # (switch, adapter, port) -> [trunk?, VLANs, number of end ports of segments cabled to it]
+    for seg in definition.get("segments", []):
+        tagged = "vlan" in seg
+        vlan = seg["vlan"]["fixed"] if tagged else 1
+        gateway = seg.get("gateway")
+        ends = ([gateway] if gateway else []) + seg["members"]
+        keys = [(end["node"], end["adapter"], end["port"]) for end in ends]
+        passed = fabric.reach(keys[0])[1]
+        on_path, cables = fabric.tree(keys, passed)
+        for name in sorted(on_path & iol):
+            switch = plans.setdefault(name, iosconfig.SwitchPlan())
+            if tagged:
+                switch.vlans[vlan] = seg["name"]
+        for cable in cables:
+            for port in cable:
+                if port[0] in iol:
+                    entry = ports.setdefault(port, [False, set(), 0])
+                    entry[0] = True
+                    entry[1].add(vlan)
+        for index, key in enumerate(keys):
+            peer = fabric.peer.get(key)
+            if peer is None or peer[0] not in on_path or peer[0] not in iol:
+                continue
+            entry = ports.setdefault(peer, [False, set(), 0])
+            entry[1].add(vlan)
+            entry[2] += 1
+            if gateway and index == 0 and tagged:
+                entry[0] = True  # The gateway tags: subinterfaces behind this port
+        if gateway and gateway["node"] in iol and images[nodes[gateway["node"]]["image"]].category == "router":
+            router = plans.setdefault(gateway["node"], iosconfig.RouterPlan())
+            interface = gateway_interface(seg)
+            at = (gateway["adapter"], gateway["port"])
+            router.up.add(at)
+            peer = fabric.peer.get(keys[0])
+            if tagged and peer is not None and peer[0] in fabric.switches:
+                router.subifs[(*at, vlan)] = interface
+            else:
+                router.addresses[at] = interface
+    for (name, adapter, port), (trunk, vlans, count) in ports.items():
+        if trunk or count > 1:
+            setting = iosconfig.SwitchPort(allowed=frozenset(vlans))
+        else:
+            setting = iosconfig.SwitchPort(vlan=min(vlans))
+        plans[name].ports[adapter, port] = setting
+    return plans
+
+
 def setup(definition: dict, images: dict) -> dict:
-    """What the members get: {node name: {"command": sh script}} for qemu, {"startup_line": "ip A/N [G]"} for vpcs."""
+    """What the nodes get: {node name: {"command": sh script}} for qemu, {"startup_line": "ip A/N [G]"} for vpcs,
+    {"nvram_config": startup-config} for the IOL switches and routers the manager configures."""
     by_node = {}
     for item in assignments(definition):
         by_node.setdefault(item.node, []).append(item)
@@ -363,6 +479,8 @@ def setup(definition: dict, images: dict) -> dict:
         else:
             ifaces = [netconfig.Iface(i.adapter, i.address, i.gateway) for i in items]
             result[name] = {"command": netconfig.script(image.net_config, ifaces)}
+    for name, node_plan in ios_plans(definition, images).items():
+        result[name] = {"nvram_config": iosconfig.render(name, node_plan)}
     return result
 
 
@@ -388,4 +506,6 @@ def expected_facts(definition: dict, images: dict) -> dict:
                 iface["gateway"] = str(item.gateway)
             interfaces.append(iface)
         nodes[name] = {"name": name, "status": "started", "interfaces": interfaces}
+    for name, node_plan in ios_plans(definition, images).items():
+        nodes[name] = {"name": name, "status": "started", **iosconfig.facts(node_plan)}
     return {"schema": "gns3lab.facts/1", "nodes": nodes}

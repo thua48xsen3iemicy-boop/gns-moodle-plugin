@@ -205,11 +205,30 @@ export const expectedFacts = (lab, images) => {
 };
 
 /**
- * Facts for the preview in the editor: the expected facts of the members plus the switches as the segments intend
- * them (docs: lab constructor README §6). The lab manager does not set switches at this stage, so the L2 layer of the
- * preview shows the intended lab: a switch port towards a segment member is an access port in the VLAN of the segment
- * (1 without a VLAN), a port towards another switch is a trunk. Without them the viewer would report every subnet
- * as torn apart on L2.
+ * Gateways by router port: port key to [{segment, vlan}] (vlan 0: the segment has none). One router port may be the gateway
+ * of several segments with different VLANs (router-on-a-stick, manager/docs/CONTRACTS.md §2.6).
+ *
+ * @param {object} lab lab with segments
+ * @returns {Map}
+ */
+export const gatewayUse = lab => {
+    const m = new Map();
+    (lab.segments || []).forEach((seg, i) => {
+        if (seg.gateway) {
+            const key = portKey(seg.gateway);
+            m.set(key, (m.get(key) || []).concat([{segment: i, vlan: seg.vlan ? +seg.vlan.fixed : 0}]));
+        }
+    });
+    return m;
+};
+
+/**
+ * Facts for the preview in the editor: the expected facts of the members plus the switches and the gateways as the
+ * segments intend them (docs: lab constructor README §6, §15.4). The preview shows the intended lab whoever sets the
+ * devices (the lab manager sets IOL, the student the rest): a switch port towards a segment member is an access port in
+ * the VLAN of the segment (1 without a VLAN), a port towards another switch is a trunk, a port towards a gateway with
+ * VLANs is a trunk of them; a gateway has the address of its segment on the port, or on the subinterface of the VLAN when
+ * a switch is behind the port. Without them the viewer would report every subnet as torn apart on L2.
  *
  * @param {object} lab lab with nodes, links and segments
  * @param {Map} images image catalog by id
@@ -222,24 +241,55 @@ export const previewFacts = (lab, images) => {
         const image = n && images.get(n.image);
         return image ? image.category : "";
     };
-    const taken = takenPorts(lab);
+    const taken = takenPorts(lab), gateways = gatewayUse(lab);
     const imageOf = name => {
         const n = (lab.nodes || []).find(x => x.name === name);
         return n ? images.get(n.image) || null : null;
+    };
+    const nodeFacts = name => facts.nodes[name] = facts.nodes[name] || {name, status: "started", interfaces: []};
+    const switchportToward = peer => {
+        if (category(peer.node) === "switch") {
+            return {mode: "trunk", allowed: "all"};
+        }
+        const use = gateways.get(portKey(peer));
+        if (use && use.some(u => u.vlan)) {
+            const allowed = new Set(use.map(u => u.vlan || 1));
+            return {mode: "trunk", allowed: [...allowed].sort((x, y) => x - y), native: 1};
+        }
+        const owner = taken.get(portKey(peer));
+        const seg = owner ? lab.segments[owner.segment] : null;
+        return {mode: "access", vlan: seg && seg.vlan ? seg.vlan.fixed : 1};
     };
     (lab.links || []).forEach(l => {
         [[l.a, l.b], [l.b, l.a]].forEach(([own, peer]) => {
             if (category(own.node) !== "switch") {
                 return;
             }
-            const owner = taken.get(portKey(peer));
-            const seg = owner ? lab.segments[owner.segment] : null;
-            const switchport = category(peer.node) === "switch" ? {mode: "trunk", allowed: "all"}
-                : {mode: "access", vlan: seg && seg.vlan ? seg.vlan.fixed : 1};
-            const node = facts.nodes[own.node] = facts.nodes[own.node] || {name: own.node, status: "started", interfaces: []};
-            node.interfaces.push({name: portText(imageOf(own.node), own.adapter, own.port), kind: "physical",
-                port: {adapter: own.adapter, port: own.port}, admin: "up", oper: "up", switchport});
+            nodeFacts(own.node).interfaces.push({name: portText(imageOf(own.node), own.adapter, own.port), kind: "physical",
+                port: {adapter: own.adapter, port: own.port}, admin: "up", oper: "up", switchport: switchportToward(peer)});
         });
+    });
+    (lab.segments || []).forEach(seg => {
+        const net = seg.gateway ? parseSubnet(seg.subnet && seg.subnet.fixed) : null;
+        const address = net ? plan(net, seg.gateway, seg.members || []).gateway : null;
+        if (!address) {
+            return;
+        }
+        const gw = seg.gateway, name = portText(imageOf(gw.node), gw.adapter, gw.port), node = nodeFacts(gw.node);
+        const cable = (lab.links || []).find(l => portKey(l.a) === portKey(gw) || portKey(l.b) === portKey(gw));
+        const far = cable ? (portKey(cable.a) === portKey(gw) ? cable.b : cable.a) : null;
+        let own = node.interfaces.find(i => i.name === name);
+        if (!own) {
+            own = {name, kind: "physical", port: {adapter: gw.adapter, port: gw.port}, admin: "up", oper: "up"};
+            node.interfaces.push(own);
+        }
+        const text = `${address}/${net.prefix}`;
+        if (seg.vlan && far && category(far.node) === "switch") {
+            node.interfaces.push({name: `${name}.${+seg.vlan.fixed}`, kind: "subif", parent: name, dot1q: +seg.vlan.fixed,
+                admin: "up", oper: "up", ipv4: [text]});
+        } else {
+            own.ipv4 = [text];
+        }
     });
     return facts;
 };
@@ -316,4 +366,93 @@ export const takenPorts = lab => {
         (seg.members || []).forEach((x, j) => m.set(portKey(x), {segment: i, member: j}));
     });
     return m;
+};
+
+/**
+ * Layer 2 of a lab as the cables make it: the other end of every port and the switches (category `switch`) that flood.
+ *
+ * @param {object} lab lab with nodes and links
+ * @param {Map} images image catalog by id
+ * @returns {{peer: Map, ports: Map, switches: Set}}
+ */
+const fabricOf = (lab, images) => {
+    const peer = new Map(), ports = new Map();
+    (lab.links || []).forEach(l => {
+        peer.set(portKey(l.a), l.b);
+        peer.set(portKey(l.b), l.a);
+        [l.a, l.b].forEach(e => ports.set(e.node, (ports.get(e.node) || []).concat([e])));
+    });
+    const switches = new Set((lab.nodes || []).filter(n => {
+        const image = images.get(n.image);
+        return image && image.category === "switch";
+    }).map(n => n.name));
+    return {peer, ports, switches};
+};
+
+/**
+ * The switches on the path of a segment: those between its end ports. Switches reached from the first end port by the
+ * cables, minus spurs (no end port cabled to the switch and one cable at most to the rest); cycles stay whole. The same
+ * rule as `Fabric.tree` of the lab manager.
+ *
+ * @param {object} lab lab with nodes, links and segments
+ * @param {Map} images image catalog by id
+ * @param {object} seg segment
+ * @returns {Set<string>} names of the switches
+ */
+export const pathSwitches = (lab, images, seg) => {
+    const {peer, ports, switches} = fabricOf(lab, images);
+    const ends = (seg.gateway ? [seg.gateway] : []).concat(seg.members || []);
+    const first = ends.map(portKey).find(k => peer.has(k));
+    const passed = new Set(), stack = first ? [peer.get(first)] : [];
+    while (stack.length) {
+        const e = stack.pop();
+        if (switches.has(e.node) && !passed.has(e.node)) {
+            passed.add(e.node);
+            (ports.get(e.node) || []).filter(o => portKey(o) !== portKey(e)).forEach(o => stack.push(peer.get(portKey(o))));
+        }
+    }
+    const cables = [];
+    passed.forEach(name => (ports.get(name) || []).forEach(o => {
+        const far = peer.get(portKey(o));
+        if (passed.has(far.node)) {
+            cables.push([o.node, far.node]);
+        }
+    }));
+    const attached = new Set(ends.map(e => peer.get(portKey(e))).filter(Boolean).map(e => e.node));
+    const keep = new Set(passed);
+    for (let spur = true; spur;) {
+        const degree = name => cables.filter(c => c[0] === name && keep.has(c[1])).length;
+        const out = [...keep].find(name => !attached.has(name) && degree(name) <= 1);
+        spur = out !== undefined;
+        if (spur) {
+            keep.delete(out);
+        }
+    }
+    return keep;
+};
+
+/**
+ * Names of the nodes the lab manager sets up for a segment: the IOL switches (image of kind `iou`, category `switch`) on
+ * its path and the IOL router (`iou`, category `router`) that is its gateway (docs: lab constructor README §15.2.1).
+ * Other switches and routers stay the student's job.
+ *
+ * @param {object} lab lab with nodes, links and segments
+ * @param {Map} images image catalog by id
+ * @param {number} i index of the segment
+ * @returns {string[]} node names in the order of the lab
+ */
+export const managedNodes = (lab, images, i) => {
+    const seg = (lab.segments || [])[i];
+    if (!seg) {
+        return [];
+    }
+    const iol = name => {
+        const n = (lab.nodes || []).find(x => x.name === name), image = n && images.get(n.image);
+        return !!image && image.kind === "iou" ? image : null;
+    };
+    const names = new Set([...pathSwitches(lab, images, seg)].filter(iol));
+    if (seg.gateway && iol(seg.gateway.node) && iol(seg.gateway.node).category === "router") {
+        names.add(seg.gateway.node);
+    }
+    return (lab.nodes || []).map(n => n.name).filter(name => names.has(name));
 };

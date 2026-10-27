@@ -240,10 +240,13 @@ define([], function() {
             if (!g.members.length) {
                 problems.push({path: `segments[${i}].members`, code: 'required', message: 'non-empty list'});
             }
-            if (g.gateway) {
+            // As the lab manager: the notes only for what it does not set up, and it sets up Cisco IOL (image ids cisco-iou-*).
+            const iol = name => /^cisco-iou-/.test(((def.nodes || []).find(n => n.name === name) || {}).image || '');
+            if (g.gateway && !iol(g.gateway.node)) {
                 warnings.push({path: `segments[${i}].gateway`, code: 'gateway_not_configured', message: ''});
             }
-            if (g.vlan) {
+            const switches = (def.nodes || []).filter(n => /switch/.test(n.image) || n.image === 'cisco-iou-l2');
+            if (g.vlan && switches.some(n => !iol(n.name))) {
                 warnings.push({path: `segments[${i}].vlan`, code: 'switch_not_configured', message: ''});
             }
         });

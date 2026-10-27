@@ -92,7 +92,8 @@ def test_lab1_is_unchanged_to_the_byte():
 
 
 def test_valid_lab_addresses_and_warnings():
-    lab = check(LAB2, IMAGES, ALL)
+    assert check(LAB2, IMAGES, ALL).warnings == ()  # The gateway is an IOL router: the manager sets it (stage 3)
+    lab = check(mk(nodes__4__image="vyos"), IMAGES, ALL)  # ... and a VyOS router is the student's job
     assert lab.definition["format"] == "gns3lab.lab/2"
     assert [w["code"] for w in lab.warnings] == ["gateway_not_configured"]
     assert lab.warnings[0]["path"] == "segments[0].gateway"
@@ -103,6 +104,8 @@ def test_valid_lab_addresses_and_warnings():
     assert facts["PC3"]["interfaces"][0]["ipv4"] == ["192.168.10.3/24"]
     assert {n["interfaces"][0]["gateway"] for n in facts.values()} == {"192.168.10.254"}
     assert "R1" not in facts and "SW1" not in facts
+    assert expected_facts(check(LAB2, IMAGES, ALL).definition, IMAGES)["nodes"]["R1"]["interfaces"][0]["ipv4"] == \
+        ["192.168.10.254/24"]
 
 
 def test_lab_def_covers_segments_and_not_the_title():
@@ -194,7 +197,8 @@ def test_a_port_in_two_segments_is_reported_once_at_the_second():
     assert found(mk(segments=[mk()["segments"][0], second])) == [("segments[1].members[0]", "member_in_two_segments")]
     second["gateway"] = {"node": "R1", "adapter": 0, "port": 0}
     second["members"] = [{"node": "PC3"}]
-    assert ("segments[1].gateway", "member_in_two_segments") in found(mk(segments=[mk()["segments"][0], second]))
+    # Two segments without VLAN cannot share the router port (stage 3: with different VLANs they can)
+    assert ("segments[1].gateway", "gateway_port_conflict") in found(mk(segments=[mk()["segments"][0], second]))
 
 
 def test_segment_not_connected_names_the_member_that_is_lost():
@@ -224,8 +228,7 @@ def test_segment_overlap_and_switch_warnings():
     lab["segments"][1]["vlan"] = {"fixed": 20}
     done = check(lab, IMAGES, ALL)
     assert [(w["path"], w["code"]) for w in done.warnings] == [
-        ("segments[0].gateway", "gateway_not_configured"), ("segments[0].vlan", "switch_not_configured"),
-        ("segments[1].vlan", "switch_not_configured")]
+        ("segments[0].vlan", "switch_not_configured"), ("segments[1].vlan", "switch_not_configured")]
     del lab["segments"][1]["vlan"]  # A VLAN and a plain segment on one switch: the student sets the switch
     assert check(lab, IMAGES, ALL).definition["segments"][1]["name"] == "LAN2"
 

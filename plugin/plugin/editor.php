@@ -72,7 +72,7 @@ $keys = [
     'ed_segvlan', 'ed_segvlan_help', 'ed_segsubnet', 'ed_seggateway', 'ed_nogateway', 'ed_members', 'ed_nomembers',
     'ed_addmembers', 'ed_addmembers_done', 'ed_removemember', 'ed_hostnumber', 'ed_nopreconfig', 'ed_nopreconfig_router',
     'ed_nopreconfig_switch', 'ed_nogateway_norouter', 'ed_pickport',
-    'ed_addport', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
+    'ed_addport', 'ed_managed', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
     'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
 ];
 $codes = [
@@ -80,9 +80,9 @@ $codes = [
     'image_not_allowed', 'out_of_range', 'unknown_node', 'bad_port', 'port_in_use', 'self_link', 'too_many_nodes',
     'limit_exceeded', 'too_large', 'segment_not_connected', 'segment_overlap', 'member_in_two_segments',
     'gateway_not_router', 'unsupported_image', 'subnet_too_small', 'bad_subnet', 'vlan_out_of_range',
-    'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment',
+    'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment', 'gateway_port_conflict',
 ];
-$warningcodes = ['gateway_not_configured', 'switch_not_configured'];
+$warningcodes = ['gateway_not_configured', 'switch_not_configured', 'hostname_not_set'];
 foreach ($keys as $key) {
     $strings[$key] = get_string($key, 'gns3lab');
 }

@@ -216,6 +216,10 @@ async def test_segments_validate_images_and_session(tmp_path, dsn):
         assert flags["vpcs"] and flags["debian12"] and not flags["linux-switch"] and not flags["cisco-iou-l3"]
         r = await env.client.post("/api/v1/labs/validate", json={"lab": LAB2})
         assert r.status_code == 200, r.text
+        assert r.json()["warnings"] == []  # The gateway is an IOL router: the manager sets it (stage 3)
+        student_router = copy.deepcopy(LAB2)
+        student_router["nodes"][4]["image"] = "vyos"
+        r = await env.client.post("/api/v1/labs/validate", json={"lab": student_router})
         assert r.json()["warnings"] == [{"path": "segments[0].gateway", "code": "gateway_not_configured",
                                          "message": "the router is set by the student"}]
         bad = copy.deepcopy(LAB2)
@@ -232,3 +236,6 @@ async def test_segments_validate_images_and_session(tmp_path, dsn):
         nodes = {n["name"]: n for n in ticket["nodes"]}
         assert nodes["PC1"]["provisioning"][0]["timeout_seconds"] == 120
         assert nodes["PC3"]["startup_script"] == "ip 192.168.10.3/24 192.168.10.254\n"
+        assert "interface Ethernet0/0\n no shutdown\n ip address 192.168.10.254 255.255.255.0\n" in \
+            nodes["R1"]["nvram_config"]
+        assert "nvram_config" not in nodes["PC1"] and "nvram_config" not in nodes["SW1"]  # SW1 is a Linux switch
