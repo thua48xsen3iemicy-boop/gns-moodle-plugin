@@ -147,6 +147,13 @@ for (const lang of ['en', 'ru']) {
     }
 }
 
+// The seat (classes/local/seat.php, docs/seat.md): the activity lets one browser page drive the lab, index.<lang>.seat.html;
+// ?seat=othertab or ?seat=otherlogin opens it with the seat held by somebody else.
+for (const lang of ['en', 'ru']) {
+    const body = page(lang, {datajson: JSON.stringify({...data, seatmode: 'tab'})});
+    fs.writeFileSync(path.join(dist, `index.${lang}.seat.html`), shell(lang, '', body));
+}
+
 // The lab editor of the library (classes/local/lab_definition.php, editor.php): a catalog of the lab manager with the
 // lab constructor, a lab of a switch, two Debian, a VPCS and a router, no segments yet. editor.<lang>.html is a manager
 // with the lab constructor; editor.<lang>.plain.html is one without it (a lab/1 manager); editor.<lang>.segments.html

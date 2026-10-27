@@ -4,6 +4,12 @@
  * One lab session in memory: start → starting → running, stop → stopping → stopped. The live topology is the demo
  * lab. Tests reach into window.__stub to stop and start nodes.
  *
+ * The seat (classes/local/seat.php, docs/seat.md): who drives the lab is `seat.holder` — `me` (this page), `othertab`
+ * (another page of this login) or `otherlogin` (another login of the account); `?seat=othertab|otherlogin` opens the
+ * page with the seat held by somebody else. A page that does not hold it is refused at start, stop, console tickets and
+ * the mask, like the server refuses; claim_seat gives the seat to a page that was just opened or chose to use it, but
+ * never takes it from another login. window.__stub.seat.give(<holder>) moves it, as another page or login would.
+ *
  * Live facts (get_facts, refresh_facts) are the demo fixtures: a refresh switches between the correct and the broken
  * configuration and moves rev, like mock-manager does. window.__stub.facts changes them: empty() (rev 0, no data),
  * fail(nodeId, code) (the last collection of a node failed), stale(true) (the collection stopped long ago).
@@ -14,6 +20,19 @@ define([], function() {
     let session = cfg.observer ? {status: 'running', stage: 'ready', progress: 100, at: 0, start: Math.floor(Date.now() / 1000)} : null;
     let demo = null;
     const nodeStatus = {};
+    const seat = {holder: ['othertab', 'otherlogin'].includes(cfg.seat) ? cfg.seat : 'me', tabid: ''};
+    // The page that asks for the seat (no id: a call from a test) is the page that holds it.
+    const needSeat = (args, name) => {
+        window.__stub.seat.gated.push({name, tabid: (args && args.tabid) || ''});
+        if (seat.holder !== 'me') {
+            const e = new Error(seat.holder === 'otherlogin'
+                ? 'This account is working in this lab in another login session.'
+                : 'The lab is open on another page.');
+            e.errorcode = 'seat' + seat.holder;
+            throw e;
+        }
+        seat.tabid = (args && args.tabid) || seat.tabid;
+    };
     const facts = {rev: cfg.factsempty ? 0 : 1, variant: 'ok', at: now(), stale: false, errors: {}, patches: []};
 
     // What the student has uncovered (mod_gns3lab_reveal): kept in the tab, so that a reload shows it again.
@@ -114,7 +133,18 @@ define([], function() {
 
     const handlers = {
         mod_gns3lab_get_state: state,
-        mod_gns3lab_start_session: async() => {
+        mod_gns3lab_claim_seat: async args => {
+            window.__stub.seat.claims.push({tabid: args.tabid, takeover: !!args.takeover});
+            if (seat.holder === 'othertab' && args.takeover) {
+                seat.holder = 'me';
+            }
+            if (seat.holder === 'me') {
+                seat.tabid = args.tabid;
+            }
+            return {status: seat.holder === 'me' ? 'held' : seat.holder, mode: 'tab', idle: seat.holder === 'me' ? 0 : 12, beat: 20};
+        },
+        mod_gns3lab_start_session: async args => {
+            needSeat(args, 'start_session');
             await loadDemo();
             if (cfg.conflict) {
                 const e = new Error('You already have a lab running in "Lab 2". Stop it first.');
@@ -125,7 +155,8 @@ define([], function() {
             session = {status: 'starting', stage: 'ct_start', progress: 40, at: Date.now(), start: now()};
             return view();
         },
-        mod_gns3lab_stop_session: async() => {
+        mod_gns3lab_stop_session: async args => {
+            needSeat(args, 'stop_session');
             session.status = 'stopping';
             session.at = Date.now();
             return view();
@@ -160,6 +191,7 @@ define([], function() {
         mod_gns3lab_get_reveal: async() => ({items: revealed()}),
         // classes/external/reveal.php and classes/local/reveal.php: only items of the live topology, only added.
         mod_gns3lab_reveal: async args => {
+            needSeat(args, 'reveal');
             await loadDemo();
             const s = await view();
             if (!s || s.status !== 'running') {
@@ -194,6 +226,9 @@ define([], function() {
             return {added};
         },
         mod_gns3lab_get_console_ticket: async args => {
+            if (!cfg.observer) {
+                needSeat(args, 'get_console_ticket');
+            }
             await loadDemo();
             const node = demo.topology.topology.nodes.find(n => n.node_id === args.nodeid);
             // classes/local/reveal.php console_allowed(): in a fog with starting nodes a node that is not found has no ticket.
@@ -311,6 +346,21 @@ define([], function() {
         reveal: {
             items: revealed,
             clear: () => keepRevealed([]),
+        },
+        seat: {
+            claims: [],
+            // The calls that need the seat, with the page id each carried.
+            gated: [],
+            get holder() {
+                return seat.holder;
+            },
+            get tabid() {
+                return seat.tabid;
+            },
+            // Another page or login takes the seat (or gives it back with 'me').
+            give: holder => {
+                seat.holder = holder;
+            },
         },
     };
 
