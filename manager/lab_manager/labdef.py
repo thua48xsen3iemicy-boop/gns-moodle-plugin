@@ -21,7 +21,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from . import netconfig
+from . import iosconfig, netconfig
 from . import segments as segments_mod
 from .images import PORTS_PER_ADAPTER, VPCS_MEMORY_MB
 
@@ -43,7 +43,9 @@ CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "dup
          # lab/2
          "segment_not_connected", "segment_overlap", "member_in_two_segments", "gateway_not_router",
          "unsupported_image", "subnet_too_small", "bad_subnet", "vlan_out_of_range", "host_out_of_range",
-         "host_in_use", "multiple_gateways", "duplicate_segment")
+         "host_in_use", "multiple_gateways", "duplicate_segment",
+         # lab/2, stage 3
+         "gateway_port_conflict")
 
 
 class LabInvalid(ValueError):
@@ -252,9 +254,14 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
     if out_segments is not None:
         definition["segments"] = out_segments
         try:
-            segments_mod.setup(definition, images)  # The scripts must fit the slot's ticket
-        except netconfig.ScriptTooLarge as exc:
+            segments_mod.setup(definition, images)  # The scripts and configurations must fit the slot's ticket
+        except (netconfig.ScriptTooLarge, iosconfig.ConfigTooLarge) as exc:
             raise LabInvalid([{"path": "segments", "code": "too_large", "message": str(exc)}]) from exc
+        configured = segments_mod.ios_plans(definition, images)
+        for i, node in enumerate(out_nodes):  # Indexes of `nodes` as sent: every node is sound when we get here
+            if node["name"] in configured and not iosconfig.hostname_ok(node["name"]):
+                warn(f"nodes[{i}].name", "hostname_not_set",
+                     "not an IOS hostname (a letter first, then letters, digits and '-', 63 characters at most)")
     return LabDef(lab_def_of(definition), definition, resources, tuple(warnings))
 
 
@@ -284,6 +291,10 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
         if "command" in preset:  # After the commands of the image
             options["provisioning"] = [*options.get("provisioning", []),
                                        {"command": preset["command"], "timeout_seconds": netconfig.TIMEOUT_SECONDS}]
+        if "nvram_config" in preset:
+            # Only a configured IOL node carries the field, so the canonical JSON and the lab_revision of the
+            # nodes without it do not change (CONTRACTS 4.2).
+            spec["nvram_config"] = preset["nvram_config"]
         if "startup_line" in preset:
             options["startup_script"] = options.get("startup_script", "").rstrip("\n")
             options["startup_script"] += ("\n" if options["startup_script"] else "") + preset["startup_line"] + "\n"
