@@ -1,6 +1,6 @@
 # Switch guest API contract v1
 
-Implementation version: 0.1.2. Scope: the API inside the Linux switch VM only.
+Implementation version: 0.2.0. Scope: the API inside the Linux switch VM only.
 This document does not change the Slot, Manager or Moodle Plugin wire contracts.
 
 ## Transport and trust
@@ -44,10 +44,11 @@ Large FDBs can therefore return RESULT_TOO_LARGE even when pagination is request
 | Method | Parameters | Result |
 |---|---|---|
 | `status` | `{}` | service_version, bridge, port_count, capture_templates, vlan_last_error |
-| `ports` | `{}` | ports: `ip -j -s link show master br0` records |
+| `ports` | `{}` | ports: `ip -j -d -s link show master br0` records |
 | `fdb` | optional offset (default 0), limit (default 256, maximum 1024) | entries, total, next_offset or null |
 | `vlans` | `{}` | desired policy or null, applied, last_error or null, actual memberships |
 | `vlan.apply` | ports map described below | applied=false, state=pending |
+| `port.configure` | port plus one access/trunk rule | applied=false, state=pending |
 | `capture.start` | port, template, optional seconds and packets | capture snapshot |
 | `capture.read` | id | capture snapshot; non-consuming |
 | `capture.stop` | id | final capture snapshot; idempotent while retained |
@@ -59,6 +60,16 @@ and state, and must not count all records as learned MACs. Pagination is not a
 transactional snapshot: MAC learning can change rows between requests.
 
 ## VLAN configuration
+
+Classic Linux bridge STP (802.1D) is enabled in the network profile and when the
+daemon applies bridge policy, including to an existing bridge after service
+restart. It uses one spanning tree shared by all VLANs, not RSTP, PVST or MSTP.
+Redundant links can be blocking while their administrative state remains UP.
+Detailed port records expose bridge slave state in linkinfo.info_slave_data when
+provided by iproute2. status includes bridge STP fields in linkinfo.info_data.
+With default STP timers, forwarding can take about 30 seconds at startup and
+reconvergence can take longer. Verify BPDUs traverse the virtual links on the lab
+platform; the unit tests do not prove real loop protection.
 
 The bridge always has VLAN filtering enabled and default PVID 0. Until a policy
 is supplied, the daemon puts all current ports into access VLAN 1. This preserves
@@ -83,6 +94,19 @@ actual. This is asynchronous, not a claim that configuration has already taken
 effect. If an apply fails, last_error is retained and the saved policy is retried
 on the next maintenance pass. BUSY means configuration was not accepted: retry.
 
+For a single-port update, use port.configure:
+
+```json
+{"port":"ens3","mode":"trunk","allowed":[10,20]}
+```
+
+Or an access rule: `{"port":"ens4","mode":"access","vlan":10}`. The same
+validation and asynchronous persistence rules apply. Other saved port rules are
+preserved, including unknown/replacement-port isolation. If there is no saved
+policy yet, other current ports retain access VLAN 1. To remove a native VLAN,
+submit the replacement trunk rule without native. Updating a port reapplies the
+complete saved policy and can briefly interrupt other ports as well.
+
 Policies bind both interface name and MAC. After a saved policy exists, additional
 or replacement cards receive no VLAN membership until a new complete policy is
 submitted. Removed ports retain saved intent and regain it if the same name/MAC
@@ -97,6 +121,10 @@ without continuous traffic inspection. It owns VLAN configuration; manual change
 or networkd reconfiguration require reapplying the policy/restarting the daemon.
 To return to the initial default, remove the saved file and restart the service
 from an administrator console; there is no remote reset method in v1.
+
+JSON presets contain guest port names, not MAC bindings. Apply a preset after the
+VM is created and actual names are known. Do not bake vlans.json into a shared
+image: saved MAC bindings intentionally do not transfer to a different VM's NICs.
 
 ## Bounded educational capture
 

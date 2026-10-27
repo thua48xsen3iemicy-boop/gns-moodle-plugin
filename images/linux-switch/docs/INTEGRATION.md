@@ -10,7 +10,7 @@ Use the existing Lifecycle.qga broker to execute switchctl, never open a QGA
 socket directly. Read stdout as the guest API envelope and check both guest exit
 code and envelope ok. Use METRICS priority and wait=False or bounded max_age for
 background status reads. Use the appropriate command priority for writes.
-Do not cache capture.start/stop or vlan.apply and do not blindly retry them.
+Do not cache capture.start/stop, vlan.apply or port.configure and do not blindly retry them.
 Capture lifetime is independent of the short QGA invocation that starts it.
 
 When constructing a shell command for the existing QGA exec path, use proper

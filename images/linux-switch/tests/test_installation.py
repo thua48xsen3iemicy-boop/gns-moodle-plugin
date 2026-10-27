@@ -35,6 +35,7 @@ def test_prepare_from_another_directory_keeps_network_untouched(tmp_path):
     check_network(root / "opt/switch-api/network-profile")
     assert (root / "usr/local/sbin/switchctl").stat().st_mode & 0o777 == 0o755
     assert (root / "opt/switch-api/switch_api/preflight.py").is_file()
+    assert (root / "opt/switch-api/examples/access-trunk-5ports.json").is_file()
     assert not (root / "etc/systemd/system/multi-user.target.wants").exists()
 
 

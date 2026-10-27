@@ -1,4 +1,4 @@
-# Linux switch guest image 0.1.2
+# Linux switch guest image 0.2.0
 
 Base: Debian 13 (trixie) minimal, amd64, Linux bridge, systemd-networkd and
 qemu-guest-agent from the maintained Debian repositories. These files configure
@@ -34,7 +34,9 @@ The initial profile is one learning bridge, with a 300-second FDB ageing time.
 VLAN filtering is enabled with no automatic PVID. switch-api assigns access VLAN 1
 to all ports until a saved policy exists; otherwise it applies the saved access/
 trunk policy. Ports have no VLAN connectivity until the service configures them.
-STP is disabled: the initial topology must be loop-free.
+Classic STP is enabled to block redundant paths. The same spanning tree applies
+to all VLANs; this is not RSTP/PVST/MSTP. Ports can take about 30 seconds to enter
+forwarding at startup, and blocking does not change the administrative UP flag.
 
 ## Prepare a dedicated guest
 

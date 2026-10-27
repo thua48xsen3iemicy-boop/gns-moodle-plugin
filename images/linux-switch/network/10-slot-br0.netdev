@@ -3,7 +3,7 @@ Name=br0
 Kind=bridge
 
 [Bridge]
-STP=false
+STP=true
 VLANFiltering=true
 DefaultPVID=none
 AgeingTimeSec=300

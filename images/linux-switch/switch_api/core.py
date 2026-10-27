@@ -69,7 +69,7 @@ class Linux:
         return json.loads(await self.run(*args))
 
     async def ports(self):
-        return await self.query("ip", "-j", "-s", "link", "show", "master", "br0")
+        return await self.query("ip", "-j", "-d", "-s", "link", "show", "master", "br0")
 
 
 def validate_policy(value, ports):
@@ -147,6 +147,28 @@ class Vlans:
         async with self.lock:
             await self._reconcile(await self.linux.ports())
 
+    async def configure_port(self, value):
+        require(isinstance(value, dict), "Expected port configuration")
+        name = value.get("port")
+        require(isinstance(name, str), "Expected port name")
+        if self.lock.locked():
+            raise ApiError("BUSY", "VLAN policy is being applied; retry later")
+        async with self.lock:
+            ports = {p["ifname"]: p["address"].lower() for p in await self.linux.ports()}
+            require(name in ports, "Port is not a current br0 member")
+            rule = {key: item for key, item in value.items() if key != "port"}
+            validated = validate_policy({"ports": {name: rule}}, {name: ports[name]})
+            # Existing unknown/replacement ports stay isolated. Before the first
+            # explicit policy, preserve the initial access-VLAN-1 default.
+            desired = (dict(self.desired) if self.desired is not None else
+                       {n: {"mode": "access", "vlan": 1, "mac": mac} for n, mac in ports.items()})
+            desired.update(validated)
+            require(len(desired) <= 64, "Too many saved port rules; replace the full VLAN policy")
+            self.save(desired)
+            self.desired = desired
+            self.applied = None
+            return {"applied": False, "state": "pending"}
+
     async def _reconcile(self, ports):
         signature = sorted((p["ifname"], p["address"].lower(), p["ifindex"]) for p in ports)
         if self.applied == signature:
@@ -154,7 +176,7 @@ class Vlans:
         try:
             # No automatic VLAN 1 membership for cards attached in the future.
             await self.linux.run("ip", "link", "set", "dev", "br0", "type", "bridge",
-                                 "vlan_default_pvid", "0", "vlan_filtering", "1")
+                                 "stp_state", "1", "vlan_default_pvid", "0", "vlan_filtering", "1")
             entries = await self.linux.query("bridge", "-j", "vlan", "show")
             targets = {p["ifname"] for p in ports} | {"br0"}
             for entry in entries:

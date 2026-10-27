@@ -35,6 +35,8 @@ def prepare(root, source=SOURCE):
     for name in preflight.NETWORK_FILES:
         install(source / "network" / name, root / "opt/switch-api/network-profile" / name)
     install(source / "sysctl/90-slot-switch.conf", root / "opt/switch-api/sysctl/90-slot-switch.conf")
+    for path in (source / "examples").glob("*.json"):
+        install(path, root / "opt/switch-api/examples" / path.name)
     preflight.check_network(root / "opt/switch-api/network-profile")
     print("Prepared API and staged all three network files. Live networking and SSH unchanged.")
     print("Next: verify QGA and console access, then run activate and reboot.")

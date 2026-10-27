@@ -98,6 +98,8 @@ def test_vlan_persistence_tagging_and_unknown_port_isolation(tmp_path):
         assert not linux.commands
         assert state.stat().st_mode & 0o777 == 0o600
         await v.reconcile()
+        bridge_command = linux.commands[0]
+        assert bridge_command[bridge_command.index("stp_state") + 1] == "1"
         assert ("bridge", "vlan", "add", "dev", "eth0", "vid", "10", "pvid", "untagged") in linux.commands
         assert ("bridge", "vlan", "add", "dev", "eth1", "vid", "10") in linux.commands
         assert ("bridge", "vlan", "add", "dev", "eth1", "vid", "20", "pvid", "untagged") in linux.commands
@@ -130,6 +132,40 @@ def test_default_vlan_and_failed_policy_retry(tmp_path):
         linux.fail = False
         await v.reconcile()
         assert v.last_error is None and v.applied is not None
+    asyncio.run(scenario())
+
+
+def test_single_port_rules_persist_preserve_other_ports_and_isolation(tmp_path):
+    async def scenario():
+        linux = FakeLinux()
+        state = tmp_path / "vlans.json"
+        v = Vlans(linux, state)
+        assert (await v.configure_port({"port": "eth0", "mode": "trunk", "allowed": [10, 20]}))["state"] == "pending"
+        assert v.desired["eth1"]["vlan"] == 1
+        await v.configure_port({"port": "eth1", "mode": "access", "vlan": 20})
+        linux.current.append({"ifname": "eth2", "address": "02:00:00:00:00:03", "ifindex": 4})
+        await v.configure_port({"port": "eth0", "mode": "trunk", "allowed": [10, 20], "native": 10})
+        assert "eth2" not in v.desired
+        assert v.desired["eth1"]["vlan"] == 20
+        await v.configure_port({"port": "eth0", "mode": "trunk", "allowed": [10, 20]})
+        assert "native" not in v.desired["eth0"]
+        restored = Vlans(linux, state)
+        await restored.reconcile()
+        assert restored.desired == v.desired
+        added = [c for c in linux.commands if c[:3] == ("bridge", "vlan", "add")]
+        assert all(c[4] != "eth2" for c in added)
+        assert ("bridge", "vlan", "add", "dev", "eth0", "vid", "10") in added
+        assert ("bridge", "vlan", "add", "dev", "eth1", "vid", "20", "pvid", "untagged") in added
+        original = state.read_bytes()
+        for invalid in ({"port": "missing", "mode": "access", "vlan": 10},
+                        {"port": "eth0", "mode": "trunk", "allowed": [10], "native": 20}):
+            with pytest.raises(ApiError):
+                await restored.configure_port(invalid)
+            assert state.read_bytes() == original
+        async with restored.lock:
+            with pytest.raises(ApiError) as error:
+                await restored.configure_port({"port": "eth0", "mode": "access", "vlan": 10})
+            assert error.value.code == "BUSY"
     asyncio.run(scenario())
 
 
@@ -326,6 +362,15 @@ def test_rpc_and_cli_over_real_unix_socket(tmp_path):
             stdout, _ = await proc.communicate()
             assert proc.returncode == 1
             assert json.loads(stdout)["error"]["code"] == "INVALID_ARGUMENT"
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "switch_api.cli", "--socket", path,
+                "port.configure", "--params", '{"port":"eth0","mode":"trunk","allowed":[10,20]}',
+                stdout=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            assert proc.returncode == 0 and json.loads(stdout)["result"]["state"] == "pending"
+            assert service.vlans.desired["eth0"]["allowed"] == [10, 20]
+            assert service.vlans.desired["eth1"]["vlan"] == 1
         finally:
             server.close()
             await server.wait_closed()

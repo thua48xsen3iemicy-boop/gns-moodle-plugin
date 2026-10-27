@@ -1,4 +1,4 @@
-# Switch API 0.1.2
+# Switch API 0.2.0
 
 Python standard-library daemon, local Unix socket and a CLI for QGA. Runtime
 dependencies inside Debian 13: python3, iproute2, tcpdump, systemd and
@@ -60,15 +60,52 @@ switchctl status
 switchctl ports
 switchctl fdb --params '{"limit":100}'
 switchctl vlans
+switchctl port.configure --params '{"port":"ens3","mode":"trunk","allowed":[10,20]}'
+switchctl port.configure --params '{"port":"ens4","mode":"access","vlan":10}'
+switchctl port.configure --params '{"port":"ens5","mode":"access","vlan":20}'
 switchctl vlan.apply --params '{"ports":{"eth0":{"mode":"access","vlan":10},"eth1":{"mode":"trunk","allowed":[10,20]}}}'
 switchctl capture.start --params '{"port":"eth0","template":"arp","seconds":10,"packets":8}'
 switchctl capture.read --params '{"id":"ID_FROM_START"}'
 switchctl capture.stop --params '{"id":"ID_FROM_START"}'
 ```
 
-Use real port names from ports; VLAN writes must include all current ports.
+Use real port names from ports. port.configure changes one saved rule while
+preserving other ports; vlan.apply replaces the full policy and must include all
+current ports. Both persist across service restart and reboot in the same VM.
 Poll vlans for applied=true and last_error=null. The capture result is parsed
 headers, not a PCAP download. The daemon never captures until asked explicitly.
+
+## Five-port preset and loop protection
+
+The installer copies an example to /opt/switch-api/examples/access-trunk-5ports.json:
+ens3 is a tagged trunk carrying VLANs 10 and 20, ens4/ens5 are access VLAN 10,
+ens6/ens7 are access VLAN 20. Adapt its interface names to switchctl ports, then:
+
+```sh
+switchctl vlan.apply --params - < /opt/switch-api/examples/access-trunk-5ports.json
+switchctl vlans
+```
+
+Apply presets after creating a VM, rather than distributing its saved MAC-bound
+/etc/switch-api/vlans.json as part of the shared image. A saved native VLAN is
+optional on trunks. Removing native from a replacement rule makes it tagged-only.
+
+STP is enabled by default and enforced when bridge policy is applied. It is the
+kernel's classic 802.1D spanning tree, shared across VLANs. A redundant link can
+be blocked while its interface remains administratively UP. Inspect detailed
+switchctl ports output or `bridge link show master br0` for the forwarding state.
+Initial forwarding can take about 30 seconds with default timers; convergence
+after failures can take longer. Test a two-switch loop with STP enabled on both
+switches and confirm a redundant path blocks before generating traffic.
+
+For an already running guest, install the updated API/profile using prepare and
+activate, then reboot. To enable STP immediately from its administrator console:
+
+```sh
+ip link set dev br0 type bridge stp_state 1
+```
+
+That one command is temporary; installing the updated profile makes it persistent.
 
 ## Development validation
 
@@ -99,6 +136,9 @@ privileged networking, VM or GNS3 environment is started.
 6. Exercise command failures, busy channels, policy application errors and daemon
    restart. Confirm captures stop and saved policy survives. Check peak RAM and
    CPU at two simultaneous captures under representative load.
+7. Connect two switches with redundant links. Confirm STP state is enabled and a
+   redundant path blocks, equal-VLAN traffic works after convergence, and link
+   failure reconverges. The same tree applies to all VLANs. Repeat after reboot.
 
 These checks require the owner's GNS3 test environment and are not replaced by
 the unit tests. The owner verified bridge creation and status/ports/vlans in a
