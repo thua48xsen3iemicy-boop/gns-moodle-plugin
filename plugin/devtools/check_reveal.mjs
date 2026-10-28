@@ -443,6 +443,20 @@ check('the groups of unknown commands follow the fields their output has', () =>
     assert.deepEqual(rv.groupsOf({label: 'show ip', fragment: {interfaces: [{name: 'eth0', mac: 'x', ipv4: []}]}}), ['l3']);
 });
 
+check('fog: live L1 exposes only ports of opened interfaces and the opened L1 group', () => {
+    const model = buildModel(DOC), doc = facts();
+    doc.nodes[R].l1_ports = {ok: true, observed_at: new Date().toISOString(), ttl: 15,
+        ports: [0, 1].map(port => ({port: {adapter: 0, port}, state: 'up'}))};
+    const mask = rv.maskFromItems([{nodeid: R, kind: 'node', item: ''},
+        {nodeid: R, kind: 'iface', item: 'Ethernet0/0'}, {nodeid: R, kind: 'group', item: 'l1'}]);
+    const visible = rv.applyReveal({mode: 'fog', model, doc, mask}).doc;
+    assert.equal(visible.nodes[R].l1_ports.ports.length, 1);
+    assert.equal(visible.nodes[R].l1_ports.ports[0].port.port, 0);
+    const hiddenMask = rv.maskFromItems([{nodeid: R, kind: 'node', item: ''}]);
+    const hidden = rv.applyReveal({mode: 'fog', model, doc, mask: hiddenMask}).doc;
+    assert.equal(hidden.nodes[R].l1_ports, undefined);
+});
+
 /* ---------------- run ---------------- */
 
 for (const [name, fn] of queue) {

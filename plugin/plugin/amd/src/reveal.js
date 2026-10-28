@@ -609,5 +609,10 @@ const filterNode = (src, groups, open) => {
             return copy;
         });
     }
+    if (groups.has('l1') && src.l1_ports && Array.isArray(src.l1_ports.ports)) {
+        const ports = (out.interfaces || []).filter(i => i.port).map(i => i.port);
+        out.l1_ports = {...src.l1_ports, ports: src.l1_ports.ports.filter(p => p && p.port &&
+            ports.some(i => i.adapter === p.port.adapter && i.port === p.port.port))};
+    }
     return out;
 };

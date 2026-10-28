@@ -105,6 +105,20 @@ final class facts_test extends \advanced_testcase {
         $this->assertSame("user_id={$this->student->id}&instance_id={$this->lab->id}", $find['query']);
     }
 
+    public function test_l1_refreshes_timestamps_even_when_revision_has_not_changed(): void {
+        $doc = fake_manager::facts();
+        $doc['nodes'][fake_manager::NODE_TELNET]['l1_ports'] = [
+            'ok' => true, 'ttl' => 15, 'observed_at' => gmdate('Y-m-d\TH:i:s\Z'),
+            'ports' => [['port' => ['adapter' => 0, 'port' => 0], 'state' => 'up']],
+        ];
+        $this->manager->on('GET', fake_manager::STATE, 200, $doc);
+        $this->setUser($this->student);
+        $result = $this->facts(0, 5);
+        $this->assertSame(5, $result['rev']);
+        $this->assertTrue($result['changed']);
+        $this->assertTrue(json_decode($result['facts'])->nodes->{fake_manager::NODE_TELNET}->l1_ports->ok);
+    }
+
     public function test_same_rev_comes_back_without_the_document(): void {
         $this->setUser($this->student);
 

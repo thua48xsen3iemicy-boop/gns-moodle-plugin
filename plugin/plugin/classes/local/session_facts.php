@@ -24,6 +24,7 @@ namespace mod_gns3lab\local;
  * only extends it. The time of the snapshot (generated_at) moves with every collection while rev stays
  * the same (CONTRACTS §2.7), so once half of the ttl has passed the snapshot is read in full again:
  * otherwise the page could not tell a healthy collector from one that stopped.
+ * Sessions with live L1 use a three-second cache and full reads to refresh independent L1 timestamps.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -48,11 +49,12 @@ class session_facts {
         $key = self::key($sessionid);
         $entry = $cache->get($key);
         $now = time();
-        if ($entry && $now - $entry->fetchedat < self::FRESH) {
+        $l1 = $entry && !empty($entry->l1);
+        if ($entry && $now - $entry->fetchedat < ($l1 ? 3 : self::FRESH)) {
             return $entry;
         }
         // While the snapshot time is recent, asking whether rev moved is enough.
-        $conditional = $entry && $entry->generatedat > 0 && $now - $entry->generatedat < $entry->ttl / 2;
+        $conditional = !$l1 && $entry && $entry->generatedat > 0 && $now - $entry->generatedat < $entry->ttl / 2;
         $facts = $client->get_session_facts($sessionid, $conditional ? $entry->rev : null);
         if ($facts === null) {
             $entry->fetchedat = $now;
@@ -92,6 +94,8 @@ class session_facts {
             'generatedat' => $generated === false ? 0 : $generated,
             'ttl' => is_int($ttl) && $ttl > 0 ? $ttl : self::DEFAULT_TTL,
             'fetchedat' => $now,
+            'l1' => count(array_filter((array) ($facts->nodes ?? []),
+                static fn($node) => isset($node->l1_ports))) > 0,
         ];
     }
 

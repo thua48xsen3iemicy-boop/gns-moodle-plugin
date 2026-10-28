@@ -944,6 +944,8 @@ class Orchestrator:
                 return
             self._facts_next[sid] = mono + self.settings.facts_poll_interval
             records = parse_slot_facts(await client.facts(project_id))
+            if any(collector == "iol.l1" for _, _, collector, _ in records):
+                self._facts_next[sid] = mono + min(self.settings.facts_poll_interval, 3)
             await self.store.record_facts(sid, records)
         except SlotOwnerLost:
             raise  # The slot no longer accepts our token: the same handling as for any other command

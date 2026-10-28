@@ -277,12 +277,13 @@ function linkHTML(l){
 function linkState(l){
   const f1 = st.der && st.der.l1.links.get(l.id);
   if (f1 && f1.down) return `<span class="tag bad">не работает</span> ${esc(f1.why.join("; "))}`;
+  if (f1 && f1.unknown) return "Нет актуальных L1-данных";
   return l.suspend ? "Приостановлен — кадры не передаются" : f1 ? "Работает" : "Активен";
 }
 /* что настроено на портах и что проходит по линку */
 function modeText(f, i){
   if (!i) return "фактов нет";
-  const sp = i.switchport, end = sp && portEnd(st.der, f, i), down = end && end.down ? " · down" : "";
+  const sp = i.switchport, end = sp && portEnd(st.der, f, i), down = end && end.unknown ? " · ?" : end && end.down ? " · down" : "";
   if (i.admin === "down" && !end) return "shutdown";
   if (sp && sp.mode === "access") return `access · VLAN ${sp.vlan}${down}`;
   if (sp && sp.mode === "none") return `без VLAN${down}`;
@@ -330,8 +331,8 @@ function nodeLayerHTML(n){
   if (L === "l3") {
     const rows = f.ifs.filter(i => v4(i).length || i.kind === "physical").map(i => {
       const ips = v4(i).map(c => `<button class="tag" type="button" data-goto-subnet="${esc(c.key)}" style="cursor:pointer;border:0">${esc(c.ip + "/" + c.pre)}</button>`).join(" ") || `<span class="peer">—</span>`;
-      const end = i.switchport && portEnd(D, f, i);   // a switch port repeats its link end, its own admin/oper are not read
-      const state = end ? (end.down ? `<span class="tag bad">down</span>` : "up")
+      const physical = portEnd(D, f, i), end = (i.switchport || (physical && physical.live)) && physical;
+      const state = end ? (end.unknown ? `<span class="peer">?</span>` : end.down ? `<span class="tag bad">down</span>` : "up")
         : i.admin === "down" ? `<span class="tag bad">shutdown</span>` : i.oper === "down" ? `<span class="tag bad">down</span>` : "up";
       return `<tr><td class="mono">${esc(i.name)}</td><td>${ips}${seenMark(i, "ipv4")}</td><td>${state}${seenMark(i, "admin", "oper")}</td></tr>`;
     }).join("");

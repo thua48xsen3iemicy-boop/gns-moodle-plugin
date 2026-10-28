@@ -761,6 +761,7 @@ export const fingerprint = (factsDoc, nodeId) => {
     const rest = {...node};
     delete rest.collected_at;
     delete rest.error;
+    delete rest.l1_ports; // Live L1 has its own priority; it must not erase console IP/VLAN observations.
     return stable(rest);
 };
 

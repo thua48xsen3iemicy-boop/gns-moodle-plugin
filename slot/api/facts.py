@@ -528,7 +528,7 @@ IOS_CONFIG = Collector(
     local=ios_config.collect,
 )
 COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET, IOS_CONFIG)
-COLLECTOR_IDS = [collector.schema for collector in COLLECTORS]
+COLLECTOR_IDS = [collector.schema for collector in COLLECTORS] + ["iol.l1/1"]
 
 
 def classify(exc):
@@ -598,6 +598,10 @@ class Facts:
         if lab and lab.get("state") == "READY":
             for node_id, entry in self.results.get(project_id, {}).items():
                 nodes[node_id] = copy.deepcopy(entry)
+            l1 = getattr(self.lc, "l1", None)
+            for node_id, entry in getattr(l1, "results", {}).get(project_id, {}).items():
+                target = nodes.setdefault(node_id, {"name": entry["name"], "collectors": {}})
+                target["collectors"].update(copy.deepcopy(entry["collectors"]))
         return {"schema": SCHEMA, "project_id": project_id, "nodes": nodes}
 
     async def run(self):

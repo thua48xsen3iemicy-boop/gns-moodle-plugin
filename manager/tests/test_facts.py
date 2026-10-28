@@ -2,6 +2,8 @@
 
 import copy
 import json
+import time
+from types import SimpleNamespace
 
 from conftest import make_env
 
@@ -86,6 +88,47 @@ def row(node_id, collector, data, *, name="PC1", ok=True, error=None, observed=T
     return {"node_id": node_id, "node_name": name, "collector": collector, "data": data, "ok": ok,
             "error": error, "observed_at": parse_time(observed) if observed else None,
             "attempted_at": parse_time(attempted)}
+
+
+def test_live_l1_preserves_interfaces_and_carries_its_own_freshness():
+    saved = {"interfaces": [{"name": "Ethernet0/0", "admin": "down", "ipv4": ["10.0.0.1/24"]}]}
+    live = {"l1_ports": {"ttl": 15, "ports": [{"port": {"adapter": 0, "port": 0},
+                                               "state": "up", "reason": "both_responding"}]}}
+    original = copy.deepcopy(live)
+    rows = [row("sw", "ios.config", saved), row("sw", "iol.l1", live, observed=T2, attempted=T2)]
+    state = build_state(1, rows, {"sw": "started"}, 90)["nodes"]["sw"]
+    assert state["interfaces"] == saved["interfaces"]
+    assert state["l1_ports"] == {**live["l1_ports"], "ok": True, "observed_at": T2}
+    assert live == original  # assembling a snapshot must not mutate stored collector data
+    rows[1].update(ok=False, error={"code": "failed", "message": "L1 unavailable"})
+    state = build_state(2, rows, {"sw": "started"}, 90)["nodes"]["sw"]
+    assert state["l1_ports"]["ok"] is False and "error" not in state
+    assert state["interfaces"] == saved["interfaces"]  # failure is scoped to L1, not the saved config
+    first = collected(live, schema="iol.l1/1")
+    heartbeat = collected(live, schema="iol.l1/1", observed=T2, attempted=T2)
+    assert not differs(first, heartbeat)
+
+
+async def test_l1_sessions_poll_fast_without_changing_guest_collection_period():
+    from lab_manager.orchestrator import Orchestrator
+
+    snapshot = {"schema": "gns3lab.slot-facts/1", "nodes": {"sw": slot_node("SW1", **{
+        "iol.l1": collected({"l1_ports": {"ttl": 15, "ports": []}}, schema="iol.l1/1")})}}
+    calls = []
+
+    async def read(_pid):
+        return snapshot
+
+    async def store(_sid, rows):
+        calls.extend(rows)
+
+    service = SimpleNamespace(_facts_next={}, _facts_refreshed={}, _slot=lambda _: SimpleNamespace(facts=read),
+                              settings=SimpleNamespace(facts_poll_interval=15),
+                              store=SimpleNamespace(record_facts=store))
+    before = time.monotonic()
+    await Orchestrator._poll_facts(service, {"id": "s", "project_id": "p"})
+    assert before + 3 <= service._facts_next["s"] <= time.monotonic() + 3
+    assert calls[0][2] == "iol.l1"
 
 
 def test_build_state_merges_collectors_and_marks_failures():

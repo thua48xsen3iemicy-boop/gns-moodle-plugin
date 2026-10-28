@@ -52,7 +52,7 @@ const overlap = (A, B) => A.net < B.net + B.size && B.net < A.net + A.size;
 
 function indexFacts(m, facts){
   if (!facts || !facts.nodes) return null;
-  const fx = { nodes: new Map(), byPort: new Map(), byRid: new Map(), at: facts.generated_at || null };
+  const fx = { nodes: new Map(), byPort: new Map(), byL1: new Map(), byRid: new Map(), at: facts.generated_at || null };
   m.nodes.forEach(n => {
     const f = facts.nodes[n.id]; if (!f) return;
     const ifs = Array.isArray(f.interfaces) ? f.interfaces.filter(i => i && i.name) : null;
@@ -68,6 +68,16 @@ function indexFacts(m, facts){
       rec.byName.set(i.name, i);
       if (i.port) fx.byPort.set(n.id + "|" + i.port.adapter + "/" + i.port.port, i);
     });
+    const live = f.l1_ports;
+    if (n.type === 'iou' && live && Array.isArray(live.ports)) {
+      const age = Date.now() - Date.parse(live.observed_at);
+      const fresh = live.ok === true && Number.isFinite(age) && age >= 0 && Number.isFinite(live.ttl)
+        && live.ttl > 0 && age <= live.ttl * 1000;
+      live.ports.forEach(p => {
+        if (p && p.port) fx.byL1.set(n.id + '|' + p.port.adapter + '/' + p.port.port,
+          {state: fresh && ['up', 'down'].includes(p.state) ? p.state : 'unknown', reason: p.reason});
+      });
+    }
     rec.subs = name => (ifs || []).filter(i => i.parent === name);
     if (rec.rid) fx.byRid.set(rec.rid, n.id);
     fx.nodes.set(n.id, rec);
@@ -111,21 +121,30 @@ export const portEnd = (der, f, i) => {
 function deriveL1(m, fx){
   const links = new Map(), ends = new Map(), issues = [];
   m.links.forEach(l => {
-    const hard = [], soft = [], mir = [], own = [];
+    const hard = [], soft = [], mir = [], own = [], uncertain = [], liveEnd = [];
     let cfg = false;                                   // причина в настройке устройства, а не в состоянии лабы
     let halted = !!l.suspend;                          // линк приостановлен или нода любого конца остановлена
     if (l.suspend) hard.push("линк приостановлен в GNS3");
     [l.a, l.b].forEach((e, k) => {
       const N = m.nodes.get(e.nodeId), f = fx.nodes.get(e.nodeId), i = endIf(fx, e);
+      const live = m.nodes.get(l.a.nodeId).type === 'iou' && m.nodes.get(l.b.nodeId).type === 'iou'
+        ? fx.byL1.get(endKey(e)) : null;
+      liveEnd[k] = !!live;
       mir[k] = !!(i && i.mirror); own[k] = false;
       if (f && NODE_OFF[f.status]) { hard.push(`${N.name} ${NODE_OFF[f.status]}`); halted = true; }
+      else if (live) {
+        uncertain[k] = live.state === 'unknown';
+        if (live.state === 'down') { soft.push(`${N.name} ${e.text}: соединение недоступно (L1)`); own[k] = true; }
+      }
       else if (i && !mir[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = true; }
       else if (i && !mir[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
     });
     const why = hard.length ? hard : soft;
     if (!hard.length && soft.length) cfg = true;
-    links.set(l.id, { down: why.length > 0, why });
-    [l.a, l.b].forEach((e, k) => ends.set(endKey(e), { down: mir[k] ? why.length > 0 : halted || own[k] }));
+    const unknown = !why.length && uncertain.some(Boolean);
+    links.set(l.id, { down: why.length > 0, unknown, why: unknown ? ['нет актуальных L1-данных'] : why });
+    [l.a, l.b].forEach((e, k) => ends.set(endKey(e), {
+      down: mir[k] ? why.length > 0 : halted || own[k], unknown: !halted && !own[k] && !!uncertain[k], live: liveEnd[k] }));
     if (why.length) issues.push({ sev: cfg ? "bad" : "info",
       text: `Линк ${epName(m, l.a)} — ${epName(m, l.b)} не работает: ${why.join("; ")}.`, go: { kind: "link", id: l.id } });
   });
@@ -199,7 +218,7 @@ function deriveL2(m, fx, l1){
     const trunk = [wa, wb].some(w => w && w.sw && w.sp.mode === "trunk"), sw = [wa, wb].some(w => w && w.sw);
     const rec = { id: l.id, kind: trunk ? "trunk" : sw ? "access" : "p2p", wa, wb, ia, ib, known: !!(wa && wb), vlans: [], tags: [], issues: [] };
     links.set(l.id, rec);
-    if (!rec.known || l1.links.get(l.id).down || wa.none || wb.none) return;
+    if (!rec.known || l1.links.get(l.id).down || l1.links.get(l.id).unknown || wa.none || wb.none) return;
     const cand = new Set([...wa.set, ...wb.set]);
     if (wa.any && wb.any) [l.a.nodeId, l.b.nodeId].forEach(idv => switchVlans(fx.nodes.get(idv)).forEach(v => cand.add(v)));
     cand.forEach(t => {

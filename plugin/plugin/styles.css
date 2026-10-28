@@ -1061,6 +1061,11 @@ body.gns3lab-fullscreen {
     stroke: var(--bad);
     stroke-dasharray: 5 5;
 }
+.gns3lab-student .link.unknown .wire {
+    stroke: var(--muted);
+    stroke-dasharray: 2 6;
+    opacity: .6;
+}
 .gns3lab-student .link.sel .wire,
 .gns3lab-student .link:focus-visible .wire {
     stroke: var(--accent);

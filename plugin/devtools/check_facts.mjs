@@ -254,6 +254,48 @@ check('MAC table: demo lab with the port of PC1 down has no entries behind that 
     assert.deepEqual(T.rows.map(r => r.iface), ['ens6', 'ens5', 'ens6']);
 });
 
+// Live IOL L1 overrides saved/console admin only on Cisco-Cisco physical pairs.
+check('IOL L1: fresh, stale, failed and unknown measurements preserve configuration', () => {
+    const model = lab(SW1, SW2);
+    model.nodes.forEach(n => { n.type = 'iou'; });
+    const live = (port, state, extra = {}) => ({ok: true, observed_at: new Date().toISOString(), ttl: 15,
+        ports: [{port: {adapter: 0, port}, state, reason: 'both_responding'}], ...extra});
+    const a = node([ifc('Ethernet0/0', 0, {admin: 'down', ipv4: ['10.0.0.1/24']})]);
+    const b = node([ifc('Ethernet0/1', 1, {admin: 'down'})]);
+    a.l1_ports = live(0, 'up'); b.l1_ports = live(1, 'up');
+    const nodes = {[SW1]: a, [SW2]: b};
+    const current = () => derive(model, doc(nodes)).der.l1.links.get('l1');
+    assert.equal(current().down, false);
+    assert.equal(current().unknown, false);
+    assert.equal(a.interfaces[0].admin, 'down'); // live state never rewrites NVRAM
+    a.l1_ports = live(0, 'down');
+    assert.equal(current().down, true);
+    a.l1_ports = live(0, 'up', {observed_at: new Date(Date.now() - 60000).toISOString()});
+    assert.equal(current().down, false);
+    assert.equal(current().unknown, true); // stale is not shutdown and not green
+    a.l1_ports = live(0, 'up', {ok: false});
+    assert.equal(current().unknown, true);
+    a.l1_ports = live(0, 'unknown');
+    assert.equal(current().unknown, true);
+    a.l1_ports = live(0, 'up');
+    model.nodes.get(SW2).type = 'qemu';
+    assert.equal(current().down, true); // Cisco-QEMU retains the old policy
+    model.nodes.get(SW2).type = 'iou';
+    b.status = 'stopped';
+    assert.equal(current().down, true); // node/link lifecycle remains authoritative
+});
+
+check('IOL L1: ports work without a saved configuration', () => {
+    const model = lab(SW1, SW2);
+    model.nodes.forEach(n => { n.type = 'iou'; });
+    const nodes = {};
+    [SW1, SW2].forEach((id, port) => { nodes[id] = {status: 'started', l1_ports: {ok: true,
+        observed_at: new Date().toISOString(), ttl: 15, ports: [{port: {adapter: 0, port}, state: 'up'}]}}; });
+    const result = derive(model, doc(nodes));
+    assert.equal(result.der.l1.links.get('l1').down, false);
+    assert.equal(endState(result.der, model.links[0].a).live, true);
+});
+
 if (failures.length) {
     console.log(`\n${failures.length} failed`);
     process.exit(1);
