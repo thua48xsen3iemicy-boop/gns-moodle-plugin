@@ -120,7 +120,7 @@ button{font-family:inherit}
 .igf{fill:var(--ico-glyph)}
 .st-stopped .ico{opacity:.38}
 .st-suspended .ico{opacity:.6}
-.sdot{fill:var(--ok);stroke:var(--canvas);stroke-width:2}
+.sdot{fill:var(--ok);stroke:none;font-size:.75em}
 .st-suspended .sdot{fill:var(--warn)}
 .st-stopped .sdot{fill:var(--off)}
 .nname{font-family:var(--display);font-weight:600;font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)));fill:var(--fg);text-anchor:middle;dominant-baseline:hanging;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
@@ -338,11 +338,11 @@ body{background:var(--canvas)}
 [data-factlayer="l3"] .link .wire{stroke:#73b5df}
 [data-factlayer="l4"] #vp{opacity:.54}
 [data-factlayer="l2"] .layer-vlan,[data-factlayer="l3"] .l2{visibility:visible;opacity:1}
-.l2-scene{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
+.l2-scene{display:none;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
 #lyrDraw,#lyrLinks,#lyrNodes,#lyrCards{transition:opacity .32s ease,visibility .32s}
 [data-factlayer="l2"] #lyrDraw,[data-factlayer="l2"] #lyrLinks,
 [data-factlayer="l2"] #lyrNodes,[data-factlayer="l2"] #lyrCards{opacity:0;visibility:hidden;pointer-events:none}
-[data-factlayer="l2"] .l2-scene{opacity:1;visibility:visible;pointer-events:auto}
+[data-factlayer="l2"] .l2-scene{display:inline;opacity:1;visibility:visible;pointer-events:auto}
 .l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:1.3;stroke-dasharray:7 5}
 .l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em}
 .l2-virtual{cursor:pointer}
@@ -353,18 +353,18 @@ body{background:var(--canvas)}
 .l2-virtual .vtitle{fill:#f2fafa;font:600 15px var(--display)}
 .l2-virtual .vsub{fill:#a6c3c9;font:500 10px var(--mono)}
 .l2-virtual:focus{outline:none}
-.l2-mac-ear{cursor:pointer}
-.l2-mac-ear rect{fill:#245364;stroke:#92d5cf;stroke-width:1}
-.l2-mac-ear text{fill:#e2fbf5;font:600 9px var(--mono);text-anchor:middle;pointer-events:none}
-.l2-mac-ear:hover rect,.l2-mac-ear:focus-visible rect{fill:#58ddcb}
-.l2-mac-ear:hover text,.l2-mac-ear:focus-visible text{fill:#102b33}
 .l2-endpoint .halo{stroke:#527886}
 .l2-endpoint .if{fill:#2b5261}
 .l2-endpoint .nname{font-size:15px}
 .l2-path{cursor:pointer}
 .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
 .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:3;stroke-linecap:round}
-.l2-path:hover .stroke,.l2-path.sel .stroke{stroke-width:5}
+.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:5}
+.link:hover .wire,.l2-path:hover .stroke{animation:linkHoverPulse 1.8s ease-in-out infinite}
+@keyframes linkHoverPulse{0%,100%{stroke-opacity:1}50%{stroke-opacity:.25}}
+@media(prefers-reduced-motion:reduce){
+  .link:hover .wire,.l2-path:hover .stroke{animation:none;stroke-opacity:.8}
+}
 .l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
 .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
   font:600 10px var(--mono);text-anchor:middle;pointer-events:none}
@@ -395,12 +395,6 @@ body{background:var(--canvas)}
 #canvasUi .domain-jump text{fill:#d7edef;font:600 10px var(--mono);text-anchor:middle;dominant-baseline:middle}
 #canvasUi .domain-jump:hover rect,#canvasUi .domain-jump:focus-visible rect{fill:#315e6a;stroke-width:2}
 #canvasUi .domain-jump:focus{outline:none}
-#canvasUi .ear{cursor:pointer;filter:drop-shadow(0 5px 8px rgb(0 0 0 / .35))}
-#canvasUi .ear rect{fill:#1b4650;stroke:#76cdbf;stroke-width:1.2}
-#canvasUi .ear text{fill:#dcfff8;font:600 9px var(--mono);text-anchor:middle;dominant-baseline:middle}
-#canvasUi .ear:hover rect,#canvasUi .ear:focus-visible rect{fill:#58ddcb}
-#canvasUi .ear:hover text,#canvasUi .ear:focus-visible text{fill:#09252b}
-#canvasUi .ear:focus{outline:none}
 #canvasUi .card-lead{stroke:#81e2d5;stroke-width:1.5;stroke-dasharray:4 4;opacity:.9;pointer-events:none}
 #canvasUi .card-anchor{fill:#81e2d5;stroke:#102633;stroke-width:3;pointer-events:none}
 #canvasUi .info-card{filter:drop-shadow(0 20px 26px rgb(0 0 0 / .5))}
@@ -475,7 +469,6 @@ body{background:var(--canvas)}
         <g id="canvasUi" aria-label="Слои и сведения на схеме">
           <g id="canvasHud"></g>
           <g id="canvasCard"></g>
-          <g id="canvasEars"></g>
         </g>
       </svg>
       <svg class="ov" id="ov" aria-hidden="true"></svg>
@@ -689,6 +682,11 @@ function renderLinks(){
   if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
   if (l2Model) renderCanvasL2();
 }
+function renderNodeName(g, n, y){
+  const label = el("text", { y, class: "nname" }, g);
+  el("tspan", { class: "sdot", "aria-hidden": "true" }, label).textContent = "● ";
+  el("tspan", {}, label).textContent = n.name;
+}
 function renderNodes(){
   L.nodes.textContent = "";
   for (const n of nodes) {
@@ -697,8 +695,7 @@ function renderNodes(){
     n.g = g;
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -22, y: -22, width: 44, height: 44, class: "ico" }, g);
-    el("circle", { cx: 19, cy: -17, r: 5.5, class: "sdot" }, g);
-    el("text", { y: 25, class: "nname" }, g).textContent = n.name;
+    renderNodeName(g, n, 25);
     const sub = subtitle(n);
     if (sub) el("text", { y: 25, dy: "1.9em", class: "nsub l2" }, g).textContent = sub;
     const adj = n.facts && n.facts.adjacencies;
@@ -735,7 +732,7 @@ function applyView(){
     if (nl >= 2) cons.forEach(c => c.renderCard());
   }
   positionOverlays();
-  positionCanvasUi();
+  positionCanvasCard();
 }
 const toScreen = (x, y) => ({ x: view.tx + view.k * x, y: view.ty + view.k * y });
 function bounds(){
@@ -774,7 +771,7 @@ function zoomBy(f){
   animateTo({ k, tx: r.width / 2 - (r.width / 2 - view.tx) * q, ty: r.height / 2 - (r.height / 2 - view.ty) * q }, 260);
 }
 function zoomToNode(n, k, anchorY){
-  const r = wrap.getBoundingClientRect(); k = k || 2.3;
+  const r = wrap.getBoundingClientRect(); k = clamp(k || 2.3, KMIN, KMAX);
   animateTo({ k, tx: r.width / 2 - k * n.cx, ty: (anchorY != null ? anchorY : r.height / 2) - k * n.cy }, 360);
 }
 function nodeNear(sx, sy, maxPx){
@@ -883,10 +880,6 @@ function onTap(e, g){
   const now = performance.now(), p = relPt(e);
   const dbl = lastTap && now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30;
   lastTap = dbl ? null : { t: now, x: p.x, y: p.y };
-  const macEar = g.target.closest && g.target.closest(".l2-mac-ear");
-  if (macEar) {
-    pinInsight(l2Model.virtuals.get(macEar.dataset.virtual), "mac"); return;
-  }
   const virtual = g.target.closest && g.target.closest(".l2-virtual");
   if (virtual) {
     const item = l2Model.virtuals.get(virtual.dataset.virtual);
@@ -933,13 +926,11 @@ function select(n){
   chip.hidden = false; clearTimeout(chipT); chipT = setTimeout(() => { chip.hidden = true; }, 3800);
 }
 svg.addEventListener("keydown", e => {
-  const mac = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-mac-ear");
   const virtual = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-virtual");
   const segment = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-path");
-  if ((e.key === "Enter" || e.key === " ") && (mac || virtual || segment)) {
+  if ((e.key === "Enter" || e.key === " ") && (virtual || segment)) {
     e.preventDefault();
-    if (mac) pinInsight(l2Model.virtuals.get(mac.dataset.virtual), "mac");
-    else if (virtual) pinInsight(l2Model.virtuals.get(virtual.dataset.virtual), "ports");
+    if (virtual) pinInsight(l2Model.virtuals.get(virtual.dataset.virtual), "ports");
     else pinInsight(l2Model.segments.find(s => s.id === segment.dataset.segment), "ports");
     return;
   }
@@ -2126,7 +2117,7 @@ function renderCanvasL2(){
       "data-id": n.id, role: "button", tabindex: "0", "aria-label": `${n.name}, ${CAT[n.cat]}` }, devices);
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -19, y: -19, width: 38, height: 38, class: "ico" }, g);
-    el("text", { y: 23, class: "nname" }, g).textContent = n.name;
+    renderNodeName(g, n, 23);
     n.l2g = g;
   });
   l2Model.virtuals.forEach(v => {
@@ -2138,10 +2129,6 @@ function renderCanvasL2(){
     el("text", { x: -27, y: -4, class: "vtitle" }, g).textContent = `VLAN ${v.vlan}`;
     el("text", { x: -43, y: 18, class: "vsub" }, g).textContent = v.domain ?
       v.domain.vlans.length > 1 ? `${v.domain.id} · VLAN ${v.domain.vlans.join("+")} !` : `${v.domain.id} · ${v.domain.members.length} участн.` : "нет связи";
-    const mac = el("g", { class: "l2-mac-ear", "data-virtual": v.id, role: "button", tabindex: "0",
-      "aria-label": `${v.orig.name}: таблица MAC` }, g);
-    el("rect", { x: 19, y: -42, width: 40, height: 20, rx: 6 }, mac);
-    el("text", { x: 39, y: -28 }, mac).textContent = "MAC";
     v.g = g;
   });
   if (old && old.virtual) insight.pinned = l2Model.virtuals.get(old.id) || null;
@@ -2176,8 +2163,8 @@ function toggleFaultDemo(){
   renderLinks(); renderCanvasHud();
 }
 
-const canvasUi = $("canvasUi"), canvasHud = $("canvasHud"), canvasEars = $("canvasEars"), canvasCard = $("canvasCard");
-const insight = { layer: "l1", pinned: null, hover: null, panel: "ports", ears: [], hideTimer: null };
+const canvasUi = $("canvasUi"), canvasHud = $("canvasHud"), canvasCard = $("canvasCard");
+const insight = { layer: "l1", pinned: null, panel: "ports" };
 const layerHelp = {
   l1: "Физика · состояние линков и портов",
   l2: "Каждый VLAN коммутатора — отдельный L2-узел",
@@ -2248,63 +2235,19 @@ function setFactLayer(layer){
   insight.layer = layer;
   insight.panel = "ports";
   svg.dataset.factlayer = layer;
-  renderCanvasHud(); renderCanvasCard(); positionCanvasUi();
-}
-function renderCanvasEars(){
-  canvasEars.textContent = ""; insight.ears = [];
-  nodes.forEach(n => {
-    const panels = n.cat === "switch" ? ["ports", "mac"] : ["ports"];
-    panels.forEach((panel, index) => {
-      const label = panel === "mac" ? "MAC" : n.cat === "switch" ? "ПОРТЫ" : "↗";
-      const w = panel === "mac" ? 39 : n.cat === "switch" ? 54 : 25;
-      const g = el("g", { class: "ear", tabindex: "0", role: "button",
-        "aria-label": `${n.name}: ${panel === "mac" ? "пример таблицы коммутации" : "сведения на схеме"}` }, canvasEars);
-      el("rect", { width: w, height: 24, rx: 8 }, g);
-      uiText(g, "", w / 2, 12, label);
-      g.addEventListener("pointerenter", () => previewInsight(n, panel));
-      g.addEventListener("pointerleave", schedulePreviewClose);
-      g.addEventListener("click", e => { e.stopPropagation(); pinInsight(n, panel); });
-      g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pinInsight(n, panel); } });
-      insight.ears.push({ g, n, index });
-    });
-  });
-  positionCanvasUi();
-}
-function positionCanvasUi(){
-  if (!insight.ears) return;
-  const w = wrap.clientWidth, h = wrap.clientHeight;
-  insight.ears.forEach(({ g, n, index }) => {
-    const p = toScreen(n.cx, n.cy), offset = Math.min(36, Math.max(21, 34 * view.k));
-    const x = p.x + offset, y = p.y - 24 + index * 26;
-    g.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-    g.style.display = (insight.layer === "l2" && n.cat === "switch") ||
-      x < -70 || x > w + 10 || y < (insight.layer === "l2" ? 170 : 112) || y > h - 28 ? "none" : "";
-  });
-  positionCanvasCard();
-}
-function previewInsight(item, panel){
-  clearTimeout(insight.hideTimer);
-  if (insight.pinned) return;
-  if (insight.hover === item && insight.panel === panel) return;
-  insight.hover = item; insight.panel = panel; renderCanvasCard();
-}
-function schedulePreviewClose(){
-  clearTimeout(insight.hideTimer);
-  insight.hideTimer = setTimeout(() => { if (!insight.pinned) { insight.hover = null; renderCanvasCard(); } }, 190);
+  renderCanvasHud(); renderCanvasCard(); positionCanvasCard();
 }
 function pinInsight(item, panel){
-  clearTimeout(insight.hideTimer);
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
-  insight.pinned = item; insight.hover = null; insight.panel = panel;
+  insight.pinned = item; insight.panel = panel;
   if (item.virtual || item.virtualLink) {
     select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
   } else if (item.isLink) selectLink(item); else select(item);
   renderCanvasCard();
 }
 function closeInsight(){
-  clearTimeout(insight.hideTimer);
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
-  insight.pinned = null; insight.hover = null; canvasCard.textContent = "";
+  insight.pinned = null; insight.cardShape = null; canvasCard.textContent = "";
 }
 function factCardData(item){
   const layer = insight.layer;
@@ -2380,7 +2323,7 @@ function factCardData(item){
 }
 function renderCanvasCard(){
   canvasCard.textContent = "";
-  const item = insight.pinned || insight.hover; if (!item) return;
+  const item = insight.pinned; if (!item) return;
   const data = factCardData(item), rows = data.rows || [];
   const w = Math.max(220, Math.min(372, wrap.clientWidth - 20));
   const footLines = [];
@@ -2425,7 +2368,7 @@ function renderCanvasCard(){
   positionCanvasCard();
 }
 function positionCanvasCard(){
-  const c = insight.cardShape, item = insight.pinned || insight.hover;
+  const c = insight.cardShape, item = insight.pinned;
   if (!c || c.item !== item || !item) return;
   const p = toScreen(item.cx, item.cy), ww = wrap.clientWidth, wh = wrap.clientHeight;
   const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : p.x - c.w / 2;
@@ -2438,22 +2381,6 @@ function positionCanvasCard(){
   c.lead.setAttribute("x2", clamp(p.x, x, x + c.w)); c.lead.setAttribute("y2", clamp(p.y, y, y + c.h));
   c.anchor.setAttribute("cx", p.x); c.anchor.setAttribute("cy", p.y);
 }
-svg.addEventListener("pointerover", e => {
-  const mac = e.target.closest && e.target.closest(".l2-mac-ear");
-  if (mac) { previewInsight(l2Model.virtuals.get(mac.dataset.virtual), "mac"); return; }
-  const virtual = e.target.closest && e.target.closest(".l2-virtual");
-  const segment = e.target.closest && e.target.closest(".l2-path");
-  if (virtual) { previewInsight(l2Model.virtuals.get(virtual.dataset.virtual), "ports"); return; }
-  if (segment) { previewInsight(l2Model.segments.find(s => s.id === segment.dataset.segment), "ports"); return; }
-  const n = e.target.closest && e.target.closest(".node");
-  const l = !n && e.target.closest && e.target.closest(".link");
-  if (n) previewInsight(byId.get(n.dataset.id), "ports");
-  else if (l) previewInsight(linkById.get(l.dataset.id), "ports");
-});
-svg.addEventListener("pointerout", e => {
-  if (e.target.closest && (e.target.closest(".node") || e.target.closest(".link") ||
-    e.target.closest(".l2-virtual") || e.target.closest(".l2-path"))) schedulePreviewClose();
-});
 document.addEventListener("keydown", e => {
   if (e.altKey && /^[1-4]$/.test(e.key)) setFactLayer("l" + e.key);
 });
@@ -2461,13 +2388,8 @@ document.addEventListener("keydown", e => {
 /* ---------------- start ---------------- */
 $("labTitle").textContent = GNS3.name;
 renderDrawings(); renderLinks(); renderNodes(); renderCanvasL2();
-renderCanvasHud(); renderCanvasEars(); setFactLayer(insight.layer);
+renderCanvasHud(); setFactLayer(insight.layer);
 fontsReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
 layout();
 requestAnimationFrame(() => { Object.assign(view, fitTarget()); applyView(); lastSize = { w: wrap.clientWidth, h: wrap.clientHeight }; });
-/* Begin with a full-width topology and a contextual switch card. */
-requestAnimationFrame(() => requestAnimationFrame(() => {
-  pinInsight(nodes.find(n => n.name === "SW1"), "ports");
-  $("chip").hidden = true;
-}));
 </script>
