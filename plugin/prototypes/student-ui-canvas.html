@@ -364,9 +364,12 @@ body{background:var(--canvas)}
 .l2-path{cursor:pointer}
 .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
 .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:3;stroke-linecap:round}
-.l2-path:hover .stroke,.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:5}
-.link:hover .wire{stroke-width:4.5;filter:drop-shadow(0 0 4px #81e6d8)}
-.l2-path:hover .stroke{filter:drop-shadow(0 0 4px #81e6d8)}
+.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:5}
+.link:hover .wire,.l2-path:hover .stroke{animation:linkHoverPulse 1.8s ease-in-out infinite}
+@keyframes linkHoverPulse{0%,100%{stroke-opacity:1}50%{stroke-opacity:.65}}
+@media(prefers-reduced-motion:reduce){
+  .link:hover .wire,.l2-path:hover .stroke{animation:none;stroke-opacity:.8}
+}
 .l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
 .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
   font:600 10px var(--mono);text-anchor:middle;pointer-events:none}
