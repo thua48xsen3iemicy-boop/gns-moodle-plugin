@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
 from api.facts import Facts
+from api.l1 import Keepalives
 from api.models import DeployTicket
 from api.qga import Priority, QgaBroker
 
@@ -198,9 +199,15 @@ class Lifecycle:
                             "message": "Explicit resume required to reacquire lock and recheck readiness",
                         },
                     )
+            self.l1 = Keepalives(self)
             self.monitor = asyncio.create_task(self.watch())
             self.facts = Facts(self)
         except BaseException:
+            for task in (getattr(self, "monitor", None),
+                         getattr(getattr(self, "facts", None), "task", None),
+                         getattr(getattr(self, "l1", None), "task", None)):
+                if task is not None:
+                    task.cancel()
             if hasattr(self, "db"):
                 self.db.close()
             self.lock.close()
@@ -246,6 +253,8 @@ class Lifecycle:
             )
         lab.update(state=state, stage=stage, **values)
         self.save("lab", lab["project_id"], lab)
+        if state != "READY" and hasattr(self, "l1"):
+            self.l1.reset()
 
     def status(self, pid):
         lab = self.get("lab", pid)
@@ -461,6 +470,7 @@ class Lifecycle:
                 or (self.boot_requires_new_owner and (epoch, generation) == (old["epoch"], old["generation"]))):
             raise HTTPException(409, {"code": "STALE_OWNER", "message": "Command owner superseded"})
         self.claimed = False
+        self.l1.reset()
         self.facts.reset()  # nothing collected for the previous owner is served to this one
         self.save("authority", "slot", {"epoch": epoch, "generation": generation})
         self.boot_requires_new_owner = False
@@ -746,10 +756,13 @@ class Lifecycle:
                         )
 
     async def close(self):
+        self.claimed = False
+        self.l1.reset()
         self.monitor.cancel()
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(self.monitor, *self.tasks, return_exceptions=True)
+        await self.l1.stop()
         await self.facts.stop()
         await self.qga.close()
         for handle in self.project_locks.values():
