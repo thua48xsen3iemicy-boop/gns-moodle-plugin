@@ -40,6 +40,33 @@ STUDENT_UID = os.environ.get("LAB_STUDENT_HOST_UID")
 STUDENT_GID = os.environ.get("LAB_STUDENT_HOST_GID")
 ALLOWED_FS = frozenset(("ceph", "fuse.ceph", "fuse.ceph-fuse"))
 
+# Limits for `pct start` and for one `pct exec` (a guest start action) on the route /start.
+PCT_START_TIMEOUT = 120
+GUEST_ACTION_TIMEOUT_MIN, GUEST_ACTION_TIMEOUT_MAX = 30, 600
+# Most guest actions one /start request may carry (Start.actions max_length).
+START_ACTIONS_MAX = 3
+
+
+def guest_action_timeout() -> int:
+    """Seconds for one `pct exec` inside the CT; administrator-defined, bounded."""
+    raw = os.environ.get("LAB_GUEST_ACTION_TIMEOUT", "120").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SystemExit("LAB_GUEST_ACTION_TIMEOUT must be an integer number of seconds")
+    if not GUEST_ACTION_TIMEOUT_MIN <= value <= GUEST_ACTION_TIMEOUT_MAX:
+        raise SystemExit(
+            f"LAB_GUEST_ACTION_TIMEOUT must be {GUEST_ACTION_TIMEOUT_MIN}-{GUEST_ACTION_TIMEOUT_MAX} seconds")
+    return value
+
+
+GUEST_ACTION_TIMEOUT = guest_action_timeout()
+
+
+def start_budget_seconds(actions: int = START_ACTIONS_MAX) -> int:
+    """Longest the route /start can take for this many guest actions (mount edits not counted)."""
+    return PCT_START_TIMEOUT + actions * GUEST_ACTION_TIMEOUT
+
 
 def ceph_subdir(name: str, default: str) -> Path:
     """Administrator-defined directory below CEPH_ROOT, on the same CephFS mount."""
@@ -167,13 +194,15 @@ def require_fence(vmid, request):
 
 app = FastAPI(
     title="Lab Node Agent",
-    version="1.2.0",
+    version="1.2.1",
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 
-def api_error(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status, {"code": code, "message": message})
+def api_error(status: int, code: str, message: str, **extra) -> HTTPException:
+    detail = {"code": code, "message": message}
+    detail.update({k: v for k, v in extra.items() if v is not None})
+    return HTTPException(status, detail)
 
 
 def conf_sections(vmid: int) -> dict[str | None, dict[str, str]]:
@@ -237,7 +266,8 @@ def run_cmd(args: list[str], timeout: int = 45) -> str:
         if mutating:
             state = fence_state(vmid)
             save_fence(vmid, dict(state, uncertain=True, command=args[1]))
-        raise api_error(504, "PCT_TIMEOUT", "Proxmox command timed out; check actual container state")
+        raise api_error(504, "PCT_TIMEOUT", "Proxmox command timed out; check actual container state",
+                        command=args[1] if len(args) > 1 and args[0] == PCT else None)
     except OSError:
         if mutating:
             save_fence(vmid, state)  # No process could be started.
@@ -368,6 +398,15 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/capabilities")
+def capabilities():
+    return {
+        "version": app.version,
+        "start_budget_seconds": start_budget_seconds(),
+        "guest_action_timeout_seconds": GUEST_ACTION_TIMEOUT,
+    }
+
+
 @app.get("/slots/{vmid}/status")
 def status(vmid: VMID):
     if not VMID_MIN <= vmid <= VMID_MAX:
@@ -401,11 +440,11 @@ def start(vmid: VMID, spec: Start, request: Request):
         vmid_allowed(vmid)
         source_paths(spec)  # Recheck immediately before pct resolves the configured paths.
         # Start happens only after the privileged mount edit succeeds.
-        run_cmd([PCT, "start", str(vmid)], timeout=120)
+        run_cmd([PCT, "start", str(vmid)], timeout=PCT_START_TIMEOUT)
         completed: list[str] = []
         for name in dict.fromkeys(spec.actions):
             # pct exec executes INSIDE guest; -- marks the following command.
-            run_cmd([PCT, "exec", str(vmid), "--", *GUEST_ACTIONS[name]], timeout=45)
+            run_cmd([PCT, "exec", str(vmid), "--", *GUEST_ACTIONS[name]], timeout=GUEST_ACTION_TIMEOUT)
             completed.append(name)
         return {"vmid": vmid, "state": lxc_state(vmid), "completed_actions": completed}
 

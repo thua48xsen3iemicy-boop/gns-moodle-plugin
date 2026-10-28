@@ -526,3 +526,58 @@ def test_clean_snapshot_name_setting(monkeypatch):
         monkeypatch.setenv("LAB_CLEAN_SNAPSHOT", value)
         with pytest.raises(SystemExit):
             agent.snapshot_name("LAB_CLEAN_SNAPSHOT", "x")
+
+
+def test_start_uses_the_guest_action_timeout(env, monkeypatch):
+    client, calls, *_ = env
+    seen = []
+    monkeypatch.setattr(agent, "GUEST_ACTION_TIMEOUT", 77)
+    # `env` replaced run_cmd with a recorder; wrap it to see the timeouts.
+    recorder = agent.run_cmd
+    def spy(args, timeout=45):
+        seen.append((args[:2], timeout))
+        return recorder(args, timeout)
+    monkeypatch.setattr(agent, "run_cmd", spy)
+    response = client.post("/slots/2201/start", json={"student_key": "student42", "actions": ["daemon_reload"]})
+    assert response.status_code == 200, response.text
+    assert ([agent.PCT, "start"], agent.PCT_START_TIMEOUT) in seen
+    assert ([agent.PCT, "exec"], 77) in seen
+
+
+@pytest.mark.parametrize("value, expected", [("30", 30), ("600", 600), (" 120 ", 120)])
+def test_guest_action_timeout_setting(monkeypatch, value, expected):
+    monkeypatch.setenv("LAB_GUEST_ACTION_TIMEOUT", value)
+    assert agent.guest_action_timeout() == expected
+
+
+@pytest.mark.parametrize("value", ["29", "601", "0", "-5", "abc", ""])
+def test_guest_action_timeout_out_of_range_stops_the_service(monkeypatch, value):
+    monkeypatch.setenv("LAB_GUEST_ACTION_TIMEOUT", value)
+    with pytest.raises(SystemExit):
+        agent.guest_action_timeout()
+
+
+def test_default_guest_action_timeout(monkeypatch):
+    monkeypatch.delenv("LAB_GUEST_ACTION_TIMEOUT", raising=False)
+    assert agent.guest_action_timeout() == 120
+
+
+def test_capabilities_report_the_start_budget(env, monkeypatch):
+    client, calls, *_ = env
+    monkeypatch.setattr(agent, "GUEST_ACTION_TIMEOUT", 90)
+    body = client.get("/capabilities").json()
+    assert body == {"version": agent.app.version, "start_budget_seconds": 120 + 3 * 90,
+                    "guest_action_timeout_seconds": 90}
+    assert calls == []
+
+
+def test_pct_timeout_body_carries_the_command(monkeypatch):
+    import subprocess
+    def run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 1)
+    monkeypatch.setattr(agent.subprocess, "run", run)
+    with pytest.raises(agent.HTTPException) as err:
+        agent.run_cmd([agent.PCT, "status", "2201"])
+    assert err.value.detail == {
+        "code": "PCT_TIMEOUT", "message": "Proxmox command timed out; check actual container state",
+        "command": "status"}

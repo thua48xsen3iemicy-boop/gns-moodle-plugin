@@ -66,6 +66,7 @@ All endpoints require a valid **client TLS certificate** signed by `manager-clie
 |---|---|---|
 | PUT | `/students/{student_key}` | Ensure a student directory with configured mapped gns3 ownership |
 | GET | `/health` | Liveness (not storage health) |
+| GET | `/capabilities` | Agent `version`, `start_budget_seconds`, `guest_action_timeout_seconds` |
 | GET | `/slots/{vmid}/status` | Running or stopped; only tagged/approved local LXC |
 | PUT | `/slots/{vmid}/mounts` | Attach approved CephFS paths while stopped |
 | POST | `/slots/{vmid}/start` | Attach approved CephFS paths, start CT, execute fixed guest actions |
@@ -153,6 +154,19 @@ curl --cert /etc/lab-manager/manager.crt \
 - `ro=1` is enforced by LXC mount policy, while `rw` is subject to CephFS permissions. Neither flag by itself solves UID/GID ownership.
 - mTLS authenticates the manager's certificate, but cannot protect a root service from bugs. Install updates, lock down firewall, rotate certs, monitor logs and audit changes. Place this service only on a trusted management network.
 - For production, pin tested package versions and run staging tests on your installed PVE release; `pct` output and flags can change between major releases.
+
+### Start timeouts
+
+`POST /slots/{vmid}/start` runs `pct start` (120 s) and then each requested guest action with `pct exec`.
+The limit for one guest action is `LAB_GUEST_ACTION_TIMEOUT` (service unit, default **120** s, allowed 30-600;
+any other value stops the service at startup). The other `pct` limits are fixed.
+`GET /capabilities` reports the worst case of the route as `start_budget_seconds` =
+120 + 3 x `LAB_GUEST_ACTION_TIMEOUT` (three actions is the request maximum; the mount edit is not counted),
+so the Manager can compare it with its own `AGENT_START_TIMEOUT`.
+
+A timeout of any mutating command, `pct exec` included, still marks the slot `uncertain`
+(`COMMAND_UNCERTAIN` until an operator reconciles); the `504 PCT_TIMEOUT` body carries `command`
+(`start`, `exec`, `stop`, ...), the same value as the fencing record. The text never contains command output.
 
 ## Smoke tests (run before enabling access for users)
 
@@ -351,7 +365,7 @@ Clients must use `code` for logic and treat unknown errors conservatively.
 | 503 | `STUDENT_IDS_NOT_CONFIGURED` | Configure mapped host UID/GID; retry alone cannot fix it |
 | 503 | `STORAGE_UNAVAILABLE` | Cannot inspect/access storage, ACL or CT configuration |
 | 503 | `PCT_UNAVAILABLE` | pct/findmnt cannot execute, or CT status is unrecognized |
-| 504 | `PCT_TIMEOUT` | Command timed out; outcome may be unknown |
+| 504 | `PCT_TIMEOUT` | Command timed out; outcome may be unknown; `detail.command` names the `pct` subcommand |
 | 500 | `AGENT_CONFIG_INVALID` | Invalid administrator-defined CephFS root |
 
 A nonzero findmnt exit returns `STORAGE_UNAVAILABLE`, rather than `PCT_FAILED`:

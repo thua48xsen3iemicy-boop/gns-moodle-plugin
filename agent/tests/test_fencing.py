@@ -102,3 +102,18 @@ def test_agent_crash_keeps_write_ahead_marker_for_next_process(env, monkeypatch)
     with pytest.raises(HTTPException) as error:
         agent.claim(2201, agent.Fence(epoch=100, generation=100))
     assert error.value.detail["code"] == "COMMAND_UNCERTAIN"
+
+
+def test_timed_out_guest_exec_quarantines_the_slot_and_names_the_command(env, monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 1)
+    monkeypatch.setattr(agent.subprocess, "run", timeout)
+    with agent.slot_lock(2201), pytest.raises(HTTPException) as err:
+        REAL_RUN([agent.PCT, "exec", "2201", "--", *agent.GUEST_ACTIONS["init_slot"]])
+    assert err.value.status_code == 504
+    assert err.value.detail["code"] == "PCT_TIMEOUT"
+    assert err.value.detail["command"] == "exec"
+    assert agent.fence_state(2201)["command"] == "exec"
+    assert agent.fence_state(2201)["uncertain"] is True
+    response = env[0].post("/slots/2201/claim", json={"epoch": 100, "generation": 100})
+    assert response.json()["detail"]["code"] == "COMMAND_UNCERTAIN"
