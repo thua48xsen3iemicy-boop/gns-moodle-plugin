@@ -28,7 +28,7 @@ async def harness(monkeypatch, directory, nodes=None, links=None):
         def __init__(self, directory, app):
             self.app = app
 
-        async def exchange(self, ports, timeout, allowed):
+        async def exchange(self, ports, timeout, allowed, max_age=None):
             assert allowed()
             ends = {(self.app, port) for port in ports}
             sent.extend(sorted(ends))
@@ -248,6 +248,69 @@ def test_existing_socket_is_not_removed():
             assert owner.local.exists()
         finally:
             owner.close()
+
+
+@pytest.mark.parametrize("app", [1, 2])
+def test_late_reply_is_consumed_next_round_once(app):
+    async def scenario(directory):
+        remote = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        remote.bind(str(directory / f"L1{app}"))
+        channel = l1.Channel(directory, app)
+        try:
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=1) == set()
+            request, sender = remote.recvfrom(4096)
+            assert l1.HEADER.unpack(request) == (app, app + 512, 0, 0, 3, 0)
+            # The real IOL trace shows RX after the short receive window, before
+            # the next send. The previous implementation discarded precisely this RX.
+            remote.sendto(l1.HEADER.pack(app + 512, app, 0, 0, 3, 0), sender)
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=1) == {0}
+            # No further replies: a previously acknowledged packet cannot mask shutdown forever.
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=1) == set()
+        finally:
+            channel.close()
+            remote.close()
+
+    with tempfile.TemporaryDirectory(prefix="l1-") as directory:
+        asyncio.run(scenario(Path(directory)))
+
+
+def test_conditional_probe_preserves_another_ports_late_reply():
+    async def scenario(directory):
+        remote = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        remote.bind(str(directory / "L11"))
+        channel = l1.Channel(directory, 1)
+        try:
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=1) == set()
+            _, sender = remote.recvfrom(4096)
+            remote.sendto(l1.HEADER.pack(513, 1, 0, 0, 3, 0), sender)
+            # A peer recovery on a parallel link must not eat port 0's response.
+            assert await channel.exchange({16}, 0.01, lambda: True, max_age=1) == set()
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=1) == {0}
+        finally:
+            channel.close()
+            remote.close()
+
+    with tempfile.TemporaryDirectory(prefix="l1-") as directory:
+        asyncio.run(scenario(Path(directory)))
+
+
+def test_reply_queued_before_long_silence_does_not_restore_peer():
+    async def scenario(directory):
+        remote = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        remote.bind(str(directory / "L11"))
+        channel = l1.Channel(directory, 1)
+        try:
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=0.02) == set()
+            _, sender = remote.recvfrom(4096)
+            remote.sendto(l1.HEADER.pack(513, 1, 0, 0, 3, 0), sender)
+            await asyncio.sleep(0.03)
+            assert await channel.exchange({0}, 0.01, lambda: True, max_age=0.02) == set()
+        finally:
+            channel.close()
+            remote.close()
+
+    with tempfile.TemporaryDirectory(prefix="l1-") as directory:
+        asyncio.run(scenario(Path(directory)))
 
 
 def test_invalid_and_colliding_application_ids_fail_closed(monkeypatch, tmp_path):

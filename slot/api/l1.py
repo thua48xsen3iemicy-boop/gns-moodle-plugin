@@ -84,6 +84,8 @@ class Channel:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.sock.setblocking(False)
         self.identity = None
+        self.sent_at = {}
+        self.received = {}
         try:
             self.sock.bind(str(self.local))  # existing/stale sockets are an explicit conflict
             info = self.local.lstat()
@@ -92,22 +94,51 @@ class Channel:
             self.sock.close()
             raise L1Error("L1_SOCKET_UNAVAILABLE", f"Cannot bind {self.local}: {exc}") from exc
 
-    async def exchange(self, ports, timeout, allowed):
+    def accept(self, packet, sender, max_age):
+        if len(packet) != HEADER.size or sender != self.remote:
+            return
+        dest, source, dest_if, source_if, kind, channel = HEADER.unpack(packet)
+        if (dest, source, kind, channel) != (self.bridge, self.app, 3, 0):
+            return
+        sent = self.sent_at.get(source_if)
+        if (dest_if == source_if and sent is not None
+                and time.monotonic() - sent <= max_age):
+            # Keep other ports too: a conditional peer probe shares this socket
+            # with the primary probes of every other physical link on this IOL.
+            self.received[source_if] = sent
+
+    def take(self, ports, max_age):
+        replies = set()
+        now = time.monotonic()
+        for port in ports:
+            sent = self.received.pop(port, None)
+            if (sent is not None and sent == self.sent_at.get(port)
+                    and now - sent <= max_age):
+                replies.add(port)
+        return replies
+
+    async def exchange(self, ports, timeout, allowed, max_age=None):
+        max_age = timeout if max_age is None else max_age
         replies = set()
         if not allowed():
             return replies
-        # No nonce exists in this protocol. Discard queued replies from previous rounds.
+        # IOL replies can arrive after the short receive deadline. Consume valid
+        # queued RX from a recent send instead of throwing it away every round.
+        # This protocol has no nonce; bound reuse by send age and consume RX once.
         for _ in range(1024):
             try:
-                self.sock.recv(4096)
+                packet, sender = self.sock.recvfrom(4096)
             except BlockingIOError:
                 break
+            self.accept(packet, sender, max_age)
+        replies.update(self.take(ports, max_age))
         for port in sorted(ports):
             if not allowed():
                 return set()
             packet = HEADER.pack(self.app, self.bridge, port, port, 3, 0)
             try:
                 self.sock.sendto(packet, self.remote)
+                self.sent_at[port] = time.monotonic()
             except (FileNotFoundError, ConnectionRefusedError, BlockingIOError):
                 continue  # a stopped/booting IOL does not acknowledge this round
         deadline = asyncio.get_running_loop().time() + timeout
@@ -121,13 +152,8 @@ class Channel:
                 )
             except TimeoutError:
                 break
-            if len(packet) != HEADER.size or sender != self.remote:
-                continue
-            dest, source, dest_if, source_if, kind, channel = HEADER.unpack(packet)
-            if (dest, source, kind, channel) != (self.bridge, self.app, 3, 0):
-                continue
-            if dest_if == source_if and source_if in ports:
-                replies.add(source_if)
+            self.accept(packet, sender, max_age)
+            replies.update(self.take(ports, max_age))
         return replies if allowed() else set()
 
     def close(self):
@@ -221,7 +247,8 @@ class Keepalives:
 
         async def one(node_id, ports):
             replies = await self.channels[node_id].exchange(
-                ports, self.timeout, lambda: self.allowed(epoch, pid)
+                ports, self.timeout, lambda: self.allowed(epoch, pid),
+                max_age=self.interval + self.timeout,
             )
             return {(node_id, port) for port in replies}
 
