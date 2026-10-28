@@ -576,11 +576,13 @@ export class Stage {
         const ia = endIf(fx, a), ib = endIf(fx, b);
         const f1 = this.der && this.der.l1.links.get(l.id);
         const down = !!(f1 && f1.down) && !l.suspend;
+        const unknown = !!(f1 && f1.unknown) && !l.suspend;
         const name = `${m.nodes.get(a.nodeId).name} ${a.text} — ${m.nodes.get(b.nodeId).name} ${b.text}`;
-        const G = el('g', {class: 'link' + (l.suspend ? ' suspended' : '') + (down ? ' down' : ''), 'data-link': l.id, tabindex: '0', role: 'button',
+        const G = el('g', {class: 'link' + (l.suspend ? ' suspended' : '') + (down ? ' down' : '') + (unknown ? ' unknown' : ''), 'data-link': l.id, tabindex: '0', role: 'button',
             'aria-label': fill(this.s('ui_link_aria'), name)}, this.L.links);
         el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'hit'}, G);
         el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'wire'}, G);
+        if (unknown) el('title', {}, G).textContent = this.s('ui_l1_unknown');
         const fl = fmtFilters(l.filters);
         if (fl.length) {
             const mx = (g.ax + g.bx) / 2, my = (g.ay + g.by) / 2, f = el('g', {class: 'l1'}, G);
@@ -590,7 +592,9 @@ export class Stage {
         }
         const d = Math.min(58, g.len * 0.36);
         [[a, ia, g.ax, g.ay, g.dx, g.dy], [b, ib, g.bx, g.by, -g.dx, -g.dy]].forEach(([e, ifc, x, y, ux, uy]) => {
-            const bad = this.endDown(e), old = this.factsFailed(e.nodeId) ? ' fstale' : '';
+            const portState = endState(this.der, e);
+            const bad = this.endDown(e);
+            const old = (portState && portState.live ? portState.unknown : this.factsFailed(e.nodeId)) ? ' fstale' : '';
             el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: 3.2, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
             if (!this.endShown(e)) return;
             const px = x + ux * d, py = y + uy * d;

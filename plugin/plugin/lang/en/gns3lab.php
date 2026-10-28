@@ -461,6 +461,7 @@ $string['ui_facts_refresh_sent'] = 'The facts are being collected; the scheme up
 $string['ui_facts_stale'] = 'the data are out of date, {$a}';
 $string['ui_facts_stale_mark'] = 'The facts are out of date: they are not being collected as usual';
 $string['ui_filter_on'] = 'Link filter: {$a}';
+$string['ui_l1_unknown'] = 'Current L1 state is unavailable';
 $string['ui_fog_found_noconsole'] = 'This device has no console: you can judge it only by its cables and its neighbours.';
 $string['ui_fog_found_note'] = 'Found by a cable. Open its console to explore the device.';
 $string['ui_fog_no_cables'] = 'No cable of this device is uncovered yet.';

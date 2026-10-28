@@ -78,6 +78,7 @@ const UI_KEYS = [
     'ui_lod0', 'ui_lod1', 'ui_lod2', 'ui_lod3', 'ui_st_started', 'ui_st_stopped', 'ui_st_suspended',
     ...CATEGORIES.map(c => 'ui_cat_' + c),
     'ui_chip_touch', 'ui_chip_mouse', 'ui_hint_touch', 'ui_hint_mouse', 'ui_link_aria', 'ui_filter_on', 'ui_port_unlinked',
+    'ui_l1_unknown',
     'ui_console', 'ui_new', 'ui_link', 'ui_status_nodata', 'ui_open_console', 'ui_console_of', 'ui_close',
     'ui_snippets', 'ui_snippets_for', 'ui_snippet_run', 'ui_snippet_type', 'ui_snip_filter', 'ui_snip_none', 'ui_snip_insert',
     'ui_snip_pin', 'ui_snip_unpin', 'ui_snip_hint_run', 'ui_snip_hint_type', 'ui_snip_keys', 'ui_snip_ios_prep',
@@ -462,9 +463,12 @@ class LabPage {
         }
         if (result) {
             this.takeFacts(result);
+        } else if (Object.values((this.factsDoc && this.factsDoc.nodes) || {}).some(n => n.l1_ports)) {
+            this.showFacts(); // Let L1 expire even when this request failed.
         }
         clearTimeout(this.factsTimer);
-        this.factsTimer = setTimeout(() => this.pollFacts(), FACTS_POLL);
+        const liveL1 = Object.values((this.factsDoc && this.factsDoc.nodes) || {}).some(n => n.l1_ports);
+        this.factsTimer = setTimeout(() => this.pollFacts(), liveL1 ? 3000 : FACTS_POLL);
     }
 
     /**
@@ -501,6 +505,9 @@ class LabPage {
                 this.seen = pruneSeen(this.seen, this.factsDoc);
             }
             this.showFacts();
+        }
+        if (!changed && this.factsDoc && Object.values(this.factsDoc.nodes || {}).some(n => n.l1_ports)) {
+            this.showFacts(); // Expiration changes L1 even when the manager is unavailable.
         }
         // What the card says changes with the minute of the collection and with going out of date.
         const shown = [at ? Math.floor(at / 60000) : 0, stale].join();

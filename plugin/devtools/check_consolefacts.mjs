@@ -735,6 +735,16 @@ for (const [name, fn] of queue) {
     }
 }
 
+check('fingerprint: independent L1 does not erase console IP and VLAN observations', () => {
+    const base = {nodes: {x: {interfaces: [{name: 'Ethernet0/0', ipv4: ['10.0.0.1/24']}]}}};
+    const heartbeat = structuredClone(base);
+    heartbeat.nodes.x.l1_ports = {ok: true, observed_at: new Date().toISOString(), ttl: 15,
+        ports: [{port: {adapter: 0, port: 0}, state: 'up'}]};
+    assert.equal(fingerprint(base, 'x'), fingerprint(heartbeat, 'x'));
+    heartbeat.nodes.x.l1_ports.ports[0].state = 'down';
+    assert.equal(fingerprint(base, 'x'), fingerprint(heartbeat, 'x'));
+});
+
 if (failures.length) {
     console.log(`\n${failures.length} failed`);
     process.exit(1);

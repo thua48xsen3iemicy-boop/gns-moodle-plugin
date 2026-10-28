@@ -78,7 +78,7 @@ class get_facts extends external_api {
             return $result;
         }
         $entry = session_facts::get($client, $session->session_id);
-        $changed = $sincerev <= 0 || $sincerev !== $entry->rev;
+        $changed = $sincerev <= 0 || $sincerev !== $entry->rev || !empty($entry->l1);
         return [
             'available' => true,
             'changed' => $changed,
@@ -97,7 +97,7 @@ class get_facts extends external_api {
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
             'available' => new external_value(PARAM_BOOL, 'The session reports facts'),
-            'changed' => new external_value(PARAM_BOOL, 'The facts differ from sincerev: the document is in facts'),
+            'changed' => new external_value(PARAM_BOOL, 'A document is included; L1 freshness may change at the same rev'),
             'rev' => new external_value(PARAM_INT, 'Rev of the facts, 0 if there were none yet'),
             'generatedat' => new external_value(PARAM_INT, 'Time of the last collection, 0 if unknown'),
             'ttl' => new external_value(PARAM_INT, 'Seconds after which the facts count as out of date'),
