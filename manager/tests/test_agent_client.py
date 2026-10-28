@@ -4,7 +4,8 @@ import httpx
 import pytest
 
 from lab_manager.agent_client import (CODES, AgentBusy, AgentClient, AgentCommandFailed, AgentNotStopped,
-                                      AgentRejected, AgentSourceMissing, AgentUncertain, AgentWrongNode)
+                                      AgentQuarantined, AgentRejected, AgentSourceMissing, AgentUncertain,
+                                      AgentWrongNode, start_budget_warnings)
 
 
 def client(handler):
@@ -34,7 +35,7 @@ async def test_requests_match_agent_api():
          {"code_revision": None, "student_key": "main-42", "data_mode": "ro"}, 120),
         ("pve2.mgmt", "POST", "/slots/2001/start",
          {"code_revision": "r7", "student_key": "main-42", "data_mode": "rw",
-          "actions": ["init_slot", "start_slot_service"]}, 420),
+          "actions": ["init_slot", "start_slot_service"]}, 720),
         ("pve2.mgmt", "POST", "/slots/2001/stop", {"force": True}, 130),
     ]
     await agent.close()
@@ -144,3 +145,71 @@ async def test_reset_answer_must_confirm_the_rollback():
     agent = client(lambda request: httpx.Response(200, json={"vmid": 2001, "state": "stopped"}))
     with pytest.raises(AgentUncertain):
         await agent.reset("pve2", 2001)
+
+
+def uncertain_reply(code, status=409, **extra):
+    return lambda request: httpx.Response(status, json={"detail": {"code": code, "message": "text", **extra}})
+
+
+@pytest.mark.parametrize("code,status", [("COMMAND_UNCERTAIN", 409), ("PCT_TIMEOUT", 504)])
+async def test_a_mark_of_the_agent_is_a_quarantine_not_a_wait(code, status):
+    agent = client(uncertain_reply(code, status, command="exec"))
+    with pytest.raises(AgentQuarantined) as err:
+        await agent.start("pve1", 2001, student_key="main-1")
+    assert isinstance(err.value, AgentUncertain)  # Code that only knows AgentUncertain still stops
+    assert err.value.code == code
+    assert err.value.command == "exec"
+
+
+async def test_pct_timeout_of_a_mutating_call_from_an_agent_without_command_is_a_quarantine():
+    agent = client(uncertain_reply("PCT_TIMEOUT", 504))  # Agent 1.2.0 names no command
+    with pytest.raises(AgentQuarantined) as err:
+        await agent.stop("pve1", 2001)
+    assert err.value.command is None
+
+
+@pytest.mark.parametrize("call", ["status", "status_command"])
+async def test_a_timed_out_status_read_leaves_no_mark_and_is_only_uncertain(call):
+    extra = {"command": "status"} if call == "status_command" else {}
+    agent = client(uncertain_reply("PCT_TIMEOUT", 504, **extra))
+    with pytest.raises(AgentUncertain) as err:
+        await agent.status("pve1", 2001)
+    assert not isinstance(err.value, AgentQuarantined)
+
+
+@pytest.mark.parametrize("code,status", [("PCT_UNAVAILABLE", 503), ("STORAGE_UNAVAILABLE", 503),
+                                         ("FENCE_STORAGE_ERROR", 503)])
+async def test_failures_without_a_mark_keep_waiting(code, status):
+    agent = client(uncertain_reply(code, status))
+    with pytest.raises(AgentUncertain) as err:
+        await agent.start("pve1", 2001, student_key="main-1")
+    assert not isinstance(err.value, AgentQuarantined)
+
+
+async def test_connection_loss_is_not_a_quarantine():
+    def handler(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    agent = client(handler)
+    with pytest.raises(AgentUncertain) as err:
+        await agent.start("pve1", 2001, student_key="main-1")
+    assert not isinstance(err.value, AgentQuarantined)
+
+
+async def test_start_budget_of_the_agent():
+    def handler(request):
+        assert request.url.path == "/capabilities"
+        return httpx.Response(200, json={"version": "1.2.1", "start_budget_seconds": 480})
+
+    assert await client(handler).start_budget("pve1") == 480
+    # An agent older than 1.2.1 has no such route.
+    assert await client(lambda r: httpx.Response(404, json={"detail": "Not Found"})).start_budget("pve1") is None
+
+
+async def test_start_budget_warning_names_the_node():
+    agent = client(lambda r: httpx.Response(200, json={"start_budget_seconds": 1920}))
+    lines = await start_budget_warnings(agent, ["pve1", "pve2"], 720)
+    assert len(lines) == 2 and "pve1" in lines[0] and "1980" in lines[0]
+    assert await start_budget_warnings(agent, ["pve1"], 3600) == []
+    old = client(lambda r: httpx.Response(404, json={"detail": "Not Found"}))
+    assert await start_budget_warnings(old, ["pve1"], 720) == []

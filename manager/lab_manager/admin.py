@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import base64
 import json
+import re
 import ssl
 import sys
 from urllib.parse import urlsplit
@@ -104,6 +105,60 @@ def cmd_gateway_env(args):
     sys.stdout.write(gateway_env(_settings()))
 
 
+async def quarantine_report(services) -> list[str]:
+    """Slots held by a quarantine (an `uncertain` mark of the agent): what the operator does next."""
+    from .agent_client import AgentError
+    from .orchestrator import QUARANTINE_MARK
+    from .proxmox import PveError
+
+    lines = []
+    for slot in await services.store.slots():
+        message = slot["state_message"] or ""
+        if slot["state"] != "maintenance" or not message.startswith(QUARANTINE_MARK):
+            continue
+        session = re.search(r"session (s-[0-9a-f]+)", message)
+        command = (re.search(r"agent command (\w+)", message) or [None, "unknown"])[1]
+        mark = "?"
+        try:
+            node = await services.pve.find_ct_node(slot["vmid"])
+            ownership = (await services.agent.slot_status(node, slot["vmid"])).get("ownership") or {}
+            mark = "present" if ownership.get("uncertain") or ownership.get("inflight") else "already cleared"
+            command = ownership.get("command") or command
+        except (AgentError, PveError):
+            pass  # The report goes on without the live mark
+        vmid = slot["vmid"]
+        lines.append(
+            f"QUARANTINED slot {vmid}: session {session.group(1) if session else '?'}, "
+            f"student {slot['student_key'] or '-'}, agent command {command}, mark {mark}. "
+            f"On the node: pct shutdown {vmid} --timeout 120 -> lab-provision reconcile {vmid} (then --yes) "
+            f"-> lab-provision enable {vmid}")
+    return lines
+
+
+def cmd_check(args):
+    """Things an operator should look at: slots in quarantine, agents too slow for AGENT_START_TIMEOUT."""
+    from .agent_client import start_budget_warnings
+
+    async def run(services):
+        from .proxmox import PveError
+
+        s = services.settings
+        try:
+            warnings = await start_budget_warnings(services.agent, await services.pve.online_nodes(),
+                                                   s.agent_start_timeout)
+        except PveError as exc:
+            warnings = [f"Proxmox API did not answer ({type(exc).__name__}): start budgets of the agents not checked"]
+        quarantined = await quarantine_report(services)
+        for line in warnings:
+            print("WARNING: " + line)
+        for line in quarantined:
+            print(line)
+        if not warnings and not quarantined:
+            print("check: no quarantined slots, start budgets fit AGENT_START_TIMEOUT")
+
+    asyncio.run(_with_services(run))
+
+
 def cmd_labs(args):
     from .labs import Catalog
 
@@ -164,6 +219,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("migrate").set_defaults(fn=cmd_migrate)
     sub.add_parser("check-config").set_defaults(fn=cmd_check_config)
+    sub.add_parser("check").set_defaults(fn=cmd_check)
     sub.add_parser("labs").set_defaults(fn=cmd_labs)
     sub.add_parser("gateway-env").set_defaults(fn=cmd_gateway_env)
     sub.add_parser("slots").set_defaults(fn=cmd_slots)

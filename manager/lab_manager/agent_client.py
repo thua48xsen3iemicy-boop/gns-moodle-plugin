@@ -6,6 +6,8 @@ general API, so the manager still uses the Proxmox API read-only to find the nod
 and to check what is configured.
 
 Agent endpoints (all synchronous, one operation per CT at a time):
+    GET  /capabilities                   -> {"version", "start_budget_seconds", "guest_action_timeout_seconds"}
+                                         (agent 1.2.1; older agents answer 404)
     GET  /slots/{vmid}/status            -> {"vmid", "state": "running"|"stopped"}
     PUT  /slots/{vmid}/mounts            {code_revision, student_key, data_mode}   (CT stopped)
     POST /slots/{vmid}/start             {..mounts.., actions[]}  mounts, pct start, guest actions
@@ -28,21 +30,25 @@ feature/proxmox-node-agent is classified by HTTP status and wording:
     422  "Required CephFS directory does not exist"                        -> AgentSourceMissing
     422  symlink, unsafe ancestor, ACL, not on CephFS, invalid request     -> AgentRejected
     503/504, connection errors, timeouts: the outcome is unknown           -> AgentUncertain
+    409 COMMAND_UNCERTAIN, 504 PCT_TIMEOUT of a mutating command          -> AgentQuarantined
+        the agent wrote an `uncertain` mark for the slot; it does not pass by itself, waiting is useless
 """
 
 import ssl
 
 import httpx
+from .config import START_BUDGET_MARGIN
 from .ownership import command_headers, current
 from .store import Fenced
 
 
 class AgentError(RuntimeError):
-    def __init__(self, status: int | None, message: str, code: str | None = None):
+    def __init__(self, status: int | None, message: str, code: str | None = None, command: str | None = None):
         super().__init__(f"Node agent {status or 'unreachable'}{' ' + code if code else ''}: {message}")
         self.status = status
         self.message = message
         self.code = code
+        self.command = command  # pct subcommand named by the agent (PCT_TIMEOUT, agent 1.2.1)
 
 
 class AgentRejected(AgentError):
@@ -74,13 +80,20 @@ class AgentUncertain(AgentError):
     """The request may or may not have been executed (timeout, 503/504, connection lost)."""
 
 
+class AgentQuarantined(AgentUncertain):
+    """The agent holds an `uncertain` mark for the slot (a mutating pct command timed out earlier, or
+    now): every changing request and claim is refused with COMMAND_UNCERTAIN until an operator
+    reconciles it. Subclass of AgentUncertain so that code which does not know it still stops; code
+    that waits for AgentUncertain must not wait for this."""
+
+
 class AgentStale(Fenced, AgentError):
     pass
 
 
 CODES = {
     "STALE_OWNER": AgentStale,
-    "COMMAND_UNCERTAIN": AgentUncertain,
+    "COMMAND_UNCERTAIN": AgentQuarantined,
     "FENCE_STORAGE_ERROR": AgentUncertain,
     "VMID_OUT_OF_RANGE": AgentRejected,
     "NOT_LAB_SLOT": AgentRejected,
@@ -97,11 +110,11 @@ CODES = {
     "PCT_FAILED": AgentCommandFailed,
     "STORAGE_UNAVAILABLE": AgentUncertain,
     "PCT_UNAVAILABLE": AgentUncertain,
-    "PCT_TIMEOUT": AgentUncertain,
+    "PCT_TIMEOUT": AgentUncertain,  # Quarantine only when a mutating command timed out, see _classify
 }
 
 
-def _classify(resp: httpx.Response) -> AgentError:
+def _classify(resp: httpx.Response, mutating: bool = False) -> AgentError:
     try:
         detail = resp.json().get("detail")
     except (ValueError, AttributeError):
@@ -109,7 +122,14 @@ def _classify(resp: httpx.Response) -> AgentError:
     status = resp.status_code
     if isinstance(detail, dict) and detail.get("code") in CODES:
         code = detail["code"]
-        return CODES[code](status, str(detail.get("message", code))[:800], code)
+        command = detail.get("command")
+        command = command[:20] if isinstance(command, str) else None
+        cls = CODES[code]
+        # The agent marks the slot uncertain when a mutating pct command times out; its `pct status`
+        # and findmnt reads leave no mark (command "status", or no command at all from agent 1.2.1).
+        if code == "PCT_TIMEOUT" and mutating and command != "status":
+            cls = AgentQuarantined
+        return cls(status, str(detail.get("message", code))[:800], code, command)
     text = detail if isinstance(detail, str) else "validation error" if detail else resp.reason_phrase
     text = str(text)[:800]
     if status == 422 and "does not exist" in text:
@@ -133,7 +153,7 @@ def _classify(resp: httpx.Response) -> AgentError:
 
 class AgentClient:
     def __init__(self, url_template: str, *, ca_file=None, cert_file=None, key_file=None,
-                 timeout: float = 30.0, start_timeout: float = 420.0, mounts_timeout: float = 120.0,
+                 timeout: float = 30.0, start_timeout: float = 720.0, mounts_timeout: float = 120.0,
                  stop_timeout: float = 130.0, reset_timeout: float = 270.0,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.url_template = url_template
@@ -170,7 +190,7 @@ class AgentClient:
             raise AgentUncertain(None, f"{type(exc).__name__}; outcome unknown"
                                  if mutating else type(exc).__name__) from exc
         if resp.status_code != 200:
-            raise _classify(resp)
+            raise _classify(resp, mutating)
         try:
             return resp.json()
         except ValueError as exc:
@@ -183,8 +203,21 @@ class AgentClient:
         except AgentError:
             return False
 
+    async def start_budget(self, node: str) -> int | None:
+        """The agent's worst case for POST /start in seconds; None for an agent older than 1.2.1."""
+        try:
+            body = await self._call("GET", node, "/capabilities")
+        except AgentWrongNode:
+            return None
+        budget = body.get("start_budget_seconds")
+        return budget if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0 else None
+
+    async def slot_status(self, node: str, vmid: int) -> dict:
+        """The agent's whole status: `state` and its `ownership` record (epoch, generation, uncertain, command)."""
+        return await self._call("GET", node, f"/slots/{vmid}/status")
+
     async def status(self, node: str, vmid: int) -> str:
-        body = await self._call("GET", node, f"/slots/{vmid}/status")
+        body = await self.slot_status(node, vmid)
         state = body.get("state")
         if state not in ("running", "stopped"):
             raise AgentUncertain(200, "Unexpected CT state from agent")
@@ -243,3 +276,19 @@ class AgentClient:
         if body.get("reset") is not True or body.get("state") != "stopped":
             raise AgentUncertain(200, "Unexpected reset response from agent")
         return body
+
+
+async def start_budget_warnings(agent: "AgentClient", nodes, start_timeout: float) -> list[str]:
+    """One line per node whose agent may need longer for POST /start than AGENT_START_TIMEOUT allows.
+
+    Agents older than 1.2.1 do not report a budget (and keep their fixed 45 s per guest action): no line."""
+    lines = []
+    for node in nodes:
+        try:
+            budget = await agent.start_budget(node)
+        except AgentError:
+            continue  # Unreachable or not an agent: the health checks say so
+        if budget is not None and budget + START_BUDGET_MARGIN > start_timeout:
+            lines.append(f"Agent on {node} may spend {budget} s on a start; AGENT_START_TIMEOUT={int(start_timeout)} s "
+                         f"is below {budget + START_BUDGET_MARGIN} s (budget + {START_BUDGET_MARGIN} s)")
+    return lines

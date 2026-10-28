@@ -48,8 +48,8 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentRejected,
-                           AgentSourceMissing, AgentUncertain, AgentWrongNode)
+from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentQuarantined,
+                           AgentRejected, AgentSourceMissing, AgentUncertain, AgentWrongNode)
 from . import labdef
 from .facts import parse_slot_facts
 from .labs import LabError, deploy_ticket
@@ -87,6 +87,11 @@ LAB_TIMEOUT_STAGES = ("student_dir",) + LAB_STAGE_TIMEOUTS
 SLOT_SUSPECT_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_STOP_FAILED"})
 # Stages of the release chain: their commands carry the odd (cleanup) generation.
 RELEASE_STAGES = ("lab_stop", "lab_stop_wait", "ct_stop", "ct_reset", "ct_park")
+
+QUARANTINE_MESSAGE = ("Слот требует проверки администратором. Повторный запуск станет возможен "
+                      "после проверки — сообщите преподавателю")
+# Starts the state_message of a slot held by _quarantine; the check of STUDENT_DIR_BUSY and the admin check read it.
+QUARANTINE_MARK = "SLOT_QUARANTINED"
 
 SLOT_STAGE_MESSAGES = {
     "DEPLOYING": "Создание или открытие проекта…",
@@ -289,6 +294,10 @@ class Orchestrator:
                 except AgentRejected as exc:
                     await self._fail(session, Failure(f"Агент узла отклонил запрос: {exc.message}", "AGENT_REJECTED"))
                     return
+                except AgentQuarantined as exc:
+                    # Raised by the claim before a stage runs; the stages' own calls are caught in step().
+                    await self._quarantine(session, exc)
+                    return
                 except (AgentError, SlotError) as exc:
                     message = f"Нет подтверждения владения слотом; слот удерживается: {exc}"[:500]
                     if session["status_message"] != message:
@@ -324,6 +333,9 @@ class Orchestrator:
             return await handler(s)
         except (Fenced, SlotOwnerLost):
             raise
+        except AgentQuarantined as exc:
+            await self._quarantine(s, exc)
+            return False
         except Failure as exc:
             await self._fail(s, exc)
             return False
@@ -415,11 +427,59 @@ class Orchestrator:
             await self.store.event(s["id"], s["slot_vmid"], "cleanup_failed",
                                    {"code": failure.code, "stage": s["stage"], "message": failure.message[:500]})
         codes = failure.code if error["code"] == failure.code else f"{error['code']}, then {failure.code}"
+        slot_state = failure.slot_state if s["slot_vmid"] is not None else "free"
+        if s["slot_vmid"] is not None and s["error"]:
+            error = self._recorded_slot_state(error, slot_state)  # The cleanup did not end as promised
         await self.store.finish_session(
             s, status="failed", message=error["message"], error=error,
-            slot_state=failure.slot_state if s["slot_vmid"] is not None else "free",
+            slot_state=slot_state,
             slot_message=f"session {s['id']}: {codes}",
         )
+
+    async def _quarantine(self, s, exc):
+        """The agent holds an `uncertain` mark for the slot (COMMAND_UNCERTAIN, or PCT_TIMEOUT of a mutating
+        command): it refuses every change and claim until an operator reconciles it, so neither waiting nor
+        the cleanup chain (ct_stop, ct_reset, ct_park all go through the agent) can end well. The session
+        fails now. The slot goes to maintenance and stays held for the student: the CT may be running with
+        the directory mounted read-write, so slots.student_key is not cleared and a new session of the same
+        student fails with STUDENT_DIR_BUSY until the operator has reconciled and enabled the slot."""
+        vmid = s["slot_vmid"]
+        node, command = None, exc.command
+        try:
+            node = await self._node(s)
+            if command is None:  # COMMAND_UNCERTAIN names nothing; the agent's status shows the mark
+                command = (await self.agent.slot_status(node, vmid)).get("ownership", {}).get("command")
+        except (PveError, AgentError, Failure):
+            pass
+        command = command if isinstance(command, str) else None
+        log.error("Session %s: slot %s on %s is quarantined at %s (agent %s, command %s)",
+                  s["id"], vmid, node, s["stage"], exc.code, command)
+        await self.store.event(s["id"], vmid, "slot_quarantined",
+                               {"vmid": vmid, "node": node, "command": command, "stage": s["stage"],
+                                "code": exc.code})
+        # A session that was already failing keeps its first error (the student sees it); the slot state
+        # of the record is what really happens to the slot.
+        error = s["error"] or {"code": "SLOT_QUARANTINED", "stage": s["stage"], "message": QUARANTINE_MESSAGE,
+                               "source": {"receiver": "agent", "code": exc.code, "command": command}}
+        error = dict(error, slot_state="maintenance")
+        await self.store.finish_session(
+            s, status="failed", message=error["message"], error=error, slot_state="maintenance",
+            slot_message=f"{QUARANTINE_MARK}, session {s['id']}, agent command {command or 'unknown'}")
+        self._forget(s)
+
+    def _forget(self, s):
+        self._health_checked.pop(s["id"], None)
+        self._facts_next.pop(s["id"], None)
+        self._facts_refreshed.pop(s["id"], None)
+        self._consoleless.pop(s["id"], None)
+
+    @staticmethod
+    def _recorded_slot_state(error, slot_state):
+        """The error record names the state the slot really ends in, not the one it was promised at the
+        first failure (a lab-side failure promises `free` once the cleanup has finished)."""
+        if error and error.get("slot_state", "free") != slot_state:
+            return dict(error, slot_state=slot_state)
+        return error
 
     async def _goto(self, s, stage, message, *, status=None, slot_state=None, **fields):
         await self.store.update_session(
@@ -551,6 +611,9 @@ class Orchestrator:
         if held is not None:
             # An earlier session failed and its CT could not be confirmed stopped: the student's
             # directory may still be writable there. Never mount it in a second slot.
+            slot = await self.store.slot(held)
+            if slot and slot["state"] == "maintenance" and (slot["state_message"] or "").startswith(QUARANTINE_MARK):
+                raise Failure(QUARANTINE_MESSAGE, "STUDENT_DIR_BUSY")
             raise Failure(f"Каталог студента ещё подключён к слоту {held}; нужен оператор", "STUDENT_DIR_BUSY")
         if not await self.store.usable_slots():
             raise Failure("Нет ни одного рабочего слота", "NO_SLOTS")
@@ -673,6 +736,8 @@ class Orchestrator:
                 result = await self.agent.start(
                     node, vmid, student_key=key, code_revision=self.settings.slot_code_revision,
                     actions=self.settings.agent_start_actions)
+            except AgentQuarantined:
+                raise  # The agent will refuse everything for this slot: no waiting, see _quarantine
             except (AgentBusy, AgentNotStopped, AgentUncertain):
                 raise Wait() from None  # Re-read the real state on the next tick
             except AgentSourceMissing as exc:
@@ -934,6 +999,8 @@ class Orchestrator:
                     await self.store.event(s["id"], vmid, "ct_hard_stop", {"node": node})
                     log.warning("Session %s: CT %s did not shut down; hard stop", s["id"], vmid)
                     await self.agent.stop(node, vmid, force=True)
+        except AgentQuarantined:
+            raise
         except (AgentBusy, AgentUncertain):
             raise Wait("Остановка контейнера слота…") from None
         if await self.agent.status(node, vmid) != "stopped":
@@ -959,6 +1026,8 @@ class Orchestrator:
         vmid, node = s["slot_vmid"], await self._node(s)
         try:
             await self.agent.reset(node, vmid)
+        except AgentQuarantined:
+            raise
         except (AgentBusy, AgentUncertain, AgentNotStopped):
             raise Wait("Очистка слота…") from None
         except (AgentRejected, AgentCommandFailed) as exc:
@@ -988,6 +1057,8 @@ class Orchestrator:
             try:
                 await self.agent.set_mounts(node, vmid, student_key=key, data_mode="ro",
                                             code_revision=self.settings.slot_code_revision)
+            except AgentQuarantined:
+                raise
             except (AgentBusy, AgentUncertain, AgentNotStopped):
                 raise Wait() from None
             except (AgentRejected, AgentCommandFailed) as exc:
@@ -1015,7 +1086,8 @@ class Orchestrator:
                     slot_message = (f"{len(lab_failures)} labs of different students failed in a row "
                                     f"(last: session {s['id']}, {s['error']['code']}); look at the slot")
                     log.error("Slot %s held: %s", s["slot_vmid"], slot_message)
-            await self.store.finish_session(s, status="failed", message=s["error"]["message"], error=s["error"],
+            await self.store.finish_session(s, status="failed", message=s["error"]["message"],
+                                            error=self._recorded_slot_state(s["error"], slot_state),
                                             slot_state=slot_state, slot_message=slot_message,
                                             lab_failures=lab_failures)
         else:
@@ -1027,10 +1099,7 @@ class Orchestrator:
             await self.store.finish_session(s, status="stopped", message=message,
                                             slot_state=slot_state, slot_message=slot_message,
                                             lab_failures=clean)
-        self._health_checked.pop(s["id"], None)
-        self._facts_next.pop(s["id"], None)
-        self._facts_refreshed.pop(s["id"], None)
-        self._consoleless.pop(s["id"], None)
+        self._forget(s)
         return False
 
     # ------------------------------------------------------------------ reads for the API
