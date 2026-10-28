@@ -13,7 +13,7 @@ from api import l1
 
 
 def node(name, app=None):
-    return {"node_id": name, "node_type": "iou" if app else "qemu", "status": "started",
+    return {"node_id": name, "name": name, "node_type": "iou" if app else "qemu", "status": "started",
             "properties": {"application_id": app, "l1_keepalives": True}}
 
 
@@ -80,6 +80,52 @@ def test_pair_shutdown_wait_recovery_and_other_end_changed(monkeypatch, tmp_path
             sent.clear()
             await service.cycle()
             assert set(sent) == {(1, 0), (2, 0)}
+        finally:
+            await service.stop()
+    asyncio.run(scenario())
+
+
+def test_l1_facts_follow_pair_and_preserve_saved_configuration(monkeypatch, tmp_path):
+    from api.facts import Facts
+
+    async def scenario():
+        service, _, disabled, topology, _ = await harness(monkeypatch, tmp_path)
+        facts = Facts.__new__(Facts)
+        facts.lc = service.lc
+        service.lc.l1 = service
+        saved = {"interfaces": [{"name": "Ethernet0/0", "admin": "down", "ipv4": ["10.0.0.1/24"]}]}
+        facts.results = {"p": {"a": {"name": "a", "collectors": {"ios.config": {"data": saved}}}}}
+
+        def result(node_id="a"):
+            return facts.snapshot("p")["nodes"][node_id]["collectors"]["iol.l1"]
+
+        try:
+            disabled.add((1, 0))
+            await service.cycle()
+            assert result()["data"]["l1_ports"]["ports"][0]["state"] == "unknown"
+            await service.cycle()
+            assert result()["data"]["l1_ports"]["ports"][0] == {
+                "port": {"adapter": 0, "port": 0}, "state": "down", "reason": "no_rx"}
+            assert result("b")["data"]["l1_ports"]["ports"][0]["reason"] == "peer_unavailable"
+            disabled.clear()
+            await service.cycle()
+            assert result()["data"]["l1_ports"]["ports"][0]["state"] == "up"
+            assert result()["ok"] and result()["observed_at"]
+            assert facts.snapshot("p")["nodes"]["a"]["collectors"]["ios.config"]["data"] == saved
+            result()["data"]["l1_ports"]["ports"].clear()
+            assert result()["data"]["l1_ports"]["ports"]  # snapshots cannot mutate controller memory
+            topology["links"][0]["suspend"] = True
+            await service.cycle()
+            assert result()["data"]["l1_ports"]["ports"][0]["reason"] == "suspended"
+            topology["links"][0]["suspend"] = False
+            topology["nodes"][1]["status"] = "stopped"
+            await service.cycle()
+            assert result()["data"]["l1_ports"]["ports"][0]["reason"] == "node_stopped"
+            topology["links"].clear()
+            await service.cycle()
+            assert result()["data"]["l1_ports"]["ports"] == []
+            service.reset()
+            assert "iol.l1" not in facts.snapshot("p")["nodes"]["a"]["collectors"]
         finally:
             await service.stop()
     asyncio.run(scenario())
@@ -345,6 +391,10 @@ def test_background_failure_closes_carrier_retries_and_logs_recovery(monkeypatch
         service, _, _, _, _ = await harness(monkeypatch, tmp_path)
         closed = []
         service.channels["a"] = SimpleNamespace(close=lambda: closed.append(True))
+        service.results = {"p": {"a": {"name": "a", "collectors": {"iol.l1": {
+            "schema": "iol.l1/1", "ok": True, "observed_at": "2000-01-01T00:00:00Z",
+            "data": {"l1_ports": {"ttl": 15, "ports": []}},
+        }}}}}
         recovered = asyncio.Event()
         attempts = 0
 
@@ -361,6 +411,9 @@ def test_background_failure_closes_carrier_retries_and_logs_recovery(monkeypatch
         try:
             await asyncio.wait_for(recovered.wait(), 1)
             assert closed == [True] and not service.channels
+            record = service.results["p"]["a"]["collectors"]["iol.l1"]
+            assert record["ok"] is False and record["observed_at"] == "2000-01-01T00:00:00Z"
+            assert record["error"]["code"] == "failed"  # the last good sample never becomes fresh on failure
             assert sum("L1_POLL_FAILED" in r.message for r in caplog.records) == 1
             assert any("L1_SERVICE_RECOVERED" in r.message for r in caplog.records)
         finally:

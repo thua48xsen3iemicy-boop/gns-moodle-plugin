@@ -1427,7 +1427,8 @@ def test_an_owner_change_during_the_question_leaves_no_family(monkeypatch):
 
 def test_the_registry_matches_the_capabilities():
     ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1"]
-    assert facts_module.COLLECTOR_IDS == [c.schema for c in COLLECTORS] == ids
+    assert [c.schema for c in COLLECTORS] == ids
+    assert facts_module.COLLECTOR_IDS == ids + ["iol.l1/1"]  # passive provider, not a guest command
 
 
 # --- routes -----------------------------------------------------------------------------------
@@ -1538,5 +1539,5 @@ def test_capabilities_announce_the_collectors(mock_server):
     client, _projects, _nodes = mock_server
     body = client.get("/v1/capabilities", headers=HEADERS).json()
     assert "collectors" in body["features"]
-    assert body["collectors"] == ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1"]
+    assert body["collectors"] == ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1", "iol.l1/1"]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"

@@ -6,6 +6,7 @@ Replies establish responsiveness, not a definitive diagnosis of `shutdown`.
 """
 
 import asyncio
+import copy
 import logging
 import math
 import os
@@ -46,6 +47,7 @@ class Pair:
     ends: tuple
     waiting: tuple | None = None
     misses: dict = field(default_factory=dict)
+    confirmed: bool = False
 
     def primary(self):
         return (self.waiting,) if self.waiting is not None else self.ends
@@ -59,17 +61,22 @@ class Pair:
         for end in self.ends:
             self.misses[end] = 0 if end in replies else self.misses.get(end, 0) + 1
         failed = [e for e in self.ends if self.misses[e] >= limit]
+        if all(e in replies for e in self.ends):
+            self.confirmed = True
         if failed:
+            self.confirmed = False
             self.waiting = failed[0]
             LOG.info("L1_WAIT endpoint=%s peer=%s", self.waiting, self.ends)
         return None
 
     def recovered(self, peer, replies):
         if peer in replies:
+            self.confirmed = True
             self.waiting = None
             self.misses.clear()
             LOG.info("L1_RECOVERED endpoints=%s", self.ends)
         else:
+            self.confirmed = False
             self.waiting = peer
 
 
@@ -182,6 +189,7 @@ class Keepalives:
         self.pairs = {}
         self.epoch = 0
         self.problem = None
+        self.results = {}
         self.task = asyncio.create_task(self.run())
 
     def reset(self):
@@ -190,6 +198,48 @@ class Keepalives:
             channel.close()
         self.channels.clear()
         self.pairs.clear()
+        self.results.clear()
+
+    def publish(self, pid, nodes, links):
+        """Publish a passive view of the pair controller, not a second probe loop."""
+        by_id = {n["node_id"]: n for n in nodes}
+        ports = {node_id: [] for node_id in self.results.get(pid, {}) if node_id in by_id}
+        for link in links:
+            sides = link.get("nodes", [])
+            if len(sides) != 2 or not all(
+                by_id.get(s["node_id"], {}).get("node_type") == "iou"
+                and (by_id[s["node_id"]].get("properties") or {}).get("l1_keepalives")
+                for s in sides
+            ):
+                continue
+            ends = tuple(sorted(endpoint(s) for s in sides))
+            pair = self.pairs.get((pid, ends))
+            state, reason = "unknown", "probing"
+            if link.get("suspend"):
+                state, reason = "down", "suspended"
+            elif any(by_id[s["node_id"]].get("status") != "started" for s in sides):
+                state, reason = "down", "node_stopped"
+            elif pair and pair.waiting is not None:
+                state, reason = "down", "no_rx"
+            elif pair and pair.confirmed:
+                state, reason = "up", "both_responding"
+            for side in sides:
+                end = endpoint(side)
+                why = "peer_unavailable" if reason == "no_rx" and end != pair.waiting else reason
+                ports.setdefault(side["node_id"], []).append({
+                    "port": {"adapter": side["adapter_number"], "port": side["port_number"]},
+                    "state": state, "reason": why,
+                })
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        results = {}
+        for node_id, entries in ports.items():
+            entries.sort(key=lambda e: (e["port"]["adapter"], e["port"]["port"]))
+            results[node_id] = {"name": by_id[node_id]["name"], "collectors": {"iol.l1": {
+                "schema": "iol.l1/1", "attempted_at": now, "observed_at": now, "ok": True, "error": None,
+                "data": {"l1_ports": {"ttl": max(15, math.ceil(3 * self.interval + 2 * self.timeout)),
+                                      "ports": entries}},
+            }}}
+        self.results = {pid: results}
 
     def allowed(self, epoch, pid):
         lab = self.lc.get("lab", pid)
@@ -279,7 +329,11 @@ class Keepalives:
                 if n.get("node_type") == "iou" and n.get("status") == "started"
                 and (n.get("properties") or {}).get("l1_keepalives")}
         if not iols:
-            self.reset()
+            for channel in self.channels.values():
+                channel.close()
+            self.channels.clear()
+            self.pairs.clear()
+            self.publish(pid, nodes, links)
             return
         self.prepare(iols.values())
         pairs, probes = {}, set()
@@ -322,6 +376,8 @@ class Keepalives:
             if self.allowed(epoch, pid):
                 for pair, peer in recovered:
                     pair.recovered(peer, replies)
+        if self.allowed(epoch, pid):
+            self.publish(pid, nodes, links)
 
     async def run(self):
         while True:
@@ -334,7 +390,14 @@ class Keepalives:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # background boundary: stop carrier and retry, never silently fail
+                previous = copy.deepcopy(self.results)
                 self.reset()
+                for records in previous.values():
+                    for entry in records.values():
+                        record = entry["collectors"]["iol.l1"]
+                        record.update(ok=False, error={"code": "failed", "message": "L1 collection unavailable"},
+                                      attempted_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                self.results = previous
                 code = exc.code if isinstance(exc, L1Error) else "L1_POLL_FAILED"
                 problem = (code, str(exc)[:300])
                 if problem != self.problem:
