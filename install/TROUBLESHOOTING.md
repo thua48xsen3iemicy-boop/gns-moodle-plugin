@@ -200,6 +200,48 @@ Proxmox не делает снимок CT, у которого есть bind-м�
 bind-монтирование: шаг называет его (`has bind mounts (mp3)`), его нужно убрать из конфига слота
 (`pct set <VMID> --delete mp3`) или заменить томом хранилища. Проверка: `pct config <VMID> | grep ^mp`.
 
+## `COMMAND_UNCERTAIN`: слот в карантине
+
+Агент записывает в `/var/lib/lab-node-agent/<VMID>.json` отметки `inflight`/`uncertain` (и `command`), когда
+изменяющая команда `pct` (`start`, `exec`, `stop`, `shutdown`, `set`, `rollback`) не уложилась в тайм-аут. Пока отметка
+стоит, агент отвечает `409 COMMAND_UNCERTAIN` на любое изменение и на `claim`. Автоматически она не снимается.
+
+**Признаки.**
+
+- У сессии `error.code` — `SLOT_QUARANTINED` (студент видит «Слот требует проверки администратором…»), слот в
+  `maintenance`, `state_message` начинается с `SLOT_QUARANTINED`, у слота остаётся `student_key`.
+- В `lab-db events <session>` есть `slot_quarantined` (`vmid`, `node`, `command`), а `ct_started` нет, если сбой был на
+  запуске. У менеджера старше 0.11.1 вместо этого 10 минут `ownership_wait` («Нет подтверждения владения слотом…»)
+  и `TIMEOUT`.
+- Повторный запуск того же студента до сверки даёт `STUDENT_DIR_BUSY`: каталог может быть примонтирован на запись в
+  работающем CT, и менеджер не даст его второму слоту.
+- `$P check` печатает `QUARANTINED slot <VMID>: session …, student …, agent command …, mark present`.
+- Ответ агента на `GET /slots/<VMID>/status` (mTLS, сертификат менеджера) содержит `"ownership": {…, "uncertain": true, "command": "exec"}`.
+
+**Что делать.** На ноде слота; сначала выяснить, чем кончилась команда (`journalctl -u lab-node-agent`, журнал
+слота в CT), и сохранить, что нужно из журналов: откат при `enable` их сотрёт.
+
+```sh
+pct status 501                          # CT может работать: слот поднялся сам, лаба шла
+pct shutdown 501 --timeout 120          # или pct stop 501
+ps -eo pid,args | grep -E 'pct|lxc-' | grep 501    # процессов pct/lxc с этим VMID быть не должно
+$P reconcile 501                        # только показать, что будет сделано и что мешает
+$P reconcile 501 --yes                  # снять inflight/uncertain/command, epoch и generation остаются
+$P enable 501                           # на ноде менеджера: откат к снимку, заглушка, слот free
+```
+
+`reconcile` отказывает (ничего не меняя), если CT не `stopped`, есть процессы `pct`/`lxc-*` с этим VMID (монитор
+остановленного CT не в счёт), агент занят слотом (держит свою блокировку), в отметке нет `uncertain`/`inflight`, а
+слот в менеджере не `maintenance` и не `failed`. Перед правкой он кладёт копию записи в
+`/root/lab-fence-<VMID>-<время>.json` (0600) и пишет новую запись атомарно (временный файл, `fsync`, `rename`, 0600).
+Файл учёта вручную не удалять и `epoch`/`generation` не обнулять: протокол владения идёт дальше от них.
+После `enable` ключ студента снимается обычным путём, и лаба запускается снова, проект продолжается.
+
+Если карантин повторяется на одном слоте на запуске, а `command` — `exec`: действие запуска в госте идёт дольше
+`LAB_GUEST_ACTION_TIMEOUT` агента (по умолчанию 120 с). Посмотрите, что тормозит (`lab-slot-init`, `systemctl start
+lab-slot.service`), и только потом поднимайте предел (до 600 с, `AGENT_START_TIMEOUT` менеджера — не меньше бюджета
+агента + 60 с, его покажет `$P check`).
+
 ## Добавить слоты на ту же ноду
 
 Пример: на ноде уже есть слоты 701 и 702 (`10.19.36.71`, `.72`), добавляем 703 и 704 (`.73`, `.74`).
@@ -340,4 +382,5 @@ pct exec $MOODLE -- runuser -u www-data -- php $ROOT/admin/cli/upgrade.php --non
 | «Ожидание свободного слота…», потом `QUEUE_TIMEOUT` | все рабочие слоты заняты |
 | «Недостаточно ресурсов на узлах, ожидание…» | свободные слоты есть, но на их нодах не хватает памяти или CPU (`NODE_MEMORY_RESERVE_MB`, `NODE_GUEST_MEMORY_MB`, `NODE_CPU_OVERCOMMIT`) |
 | «Proxmox недоступен, ожидание…» | менеджер не достучался до API Proxmox (`PVE_NODES`, токен) |
-| `STUDENT_DIR_BUSY` | у какого-то слота в `slots` стоит `student_key` этого студента: §3, потом §4 |
+| `STUDENT_DIR_BUSY` | у какого-то слота в `slots` стоит `student_key` этого студента: §3, потом §4. Текст «Слот требует проверки администратором…» — слот в карантине: раздел `COMMAND_UNCERTAIN` |
+| `SLOT_QUARANTINED` | агент держит отметку `uncertain` на слоте: раздел `COMMAND_UNCERTAIN` |
