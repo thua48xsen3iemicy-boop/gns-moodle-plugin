@@ -120,7 +120,7 @@ button{font-family:inherit}
 .igf{fill:var(--ico-glyph)}
 .st-stopped .ico{opacity:.38}
 .st-suspended .ico{opacity:.6}
-.sdot{fill:var(--ok);stroke:var(--canvas);stroke-width:2}
+.sdot{fill:var(--ok);stroke:none;font-size:.75em}
 .st-suspended .sdot{fill:var(--warn)}
 .st-stopped .sdot{fill:var(--off)}
 .nname{font-family:var(--display);font-weight:600;font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)));fill:var(--fg);text-anchor:middle;dominant-baseline:hanging;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
@@ -364,7 +364,9 @@ body{background:var(--canvas)}
 .l2-path{cursor:pointer}
 .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
 .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:3;stroke-linecap:round}
-.l2-path:hover .stroke,.l2-path.sel .stroke{stroke-width:5}
+.l2-path:hover .stroke,.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:5}
+.link:hover .wire{stroke-width:4.5;filter:drop-shadow(0 0 4px #81e6d8)}
+.l2-path:hover .stroke{filter:drop-shadow(0 0 4px #81e6d8)}
 .l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
 .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
   font:600 10px var(--mono);text-anchor:middle;pointer-events:none}
@@ -689,6 +691,11 @@ function renderLinks(){
   if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
   if (l2Model) renderCanvasL2();
 }
+function renderNodeName(g, n, y){
+  const label = el("text", { y, class: "nname" }, g);
+  el("tspan", { class: "sdot", "aria-hidden": "true" }, label).textContent = "● ";
+  el("tspan", {}, label).textContent = n.name;
+}
 function renderNodes(){
   L.nodes.textContent = "";
   for (const n of nodes) {
@@ -697,8 +704,7 @@ function renderNodes(){
     n.g = g;
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -22, y: -22, width: 44, height: 44, class: "ico" }, g);
-    el("circle", { cx: 19, cy: -17, r: 5.5, class: "sdot" }, g);
-    el("text", { y: 25, class: "nname" }, g).textContent = n.name;
+    renderNodeName(g, n, 25);
     const sub = subtitle(n);
     if (sub) el("text", { y: 25, dy: "1.9em", class: "nsub l2" }, g).textContent = sub;
     const adj = n.facts && n.facts.adjacencies;
@@ -2126,7 +2132,7 @@ function renderCanvasL2(){
       "data-id": n.id, role: "button", tabindex: "0", "aria-label": `${n.name}, ${CAT[n.cat]}` }, devices);
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -19, y: -19, width: 38, height: 38, class: "ico" }, g);
-    el("text", { y: 23, class: "nname" }, g).textContent = n.name;
+    renderNodeName(g, n, 23);
     n.l2g = g;
   });
   l2Model.virtuals.forEach(v => {
