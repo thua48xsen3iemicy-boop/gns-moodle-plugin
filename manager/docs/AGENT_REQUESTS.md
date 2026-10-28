@@ -56,7 +56,14 @@ HTTP-статусами, что сейчас. Ошибки валидации з
 | 422 | `SNAPSHOT_UNSAFE` | в снимке нет `unprivileged: 1` или тега `labslot` (откат оставил бы слот, которым агент не управляет) | то же |
 | 503 | `STORAGE_UNAVAILABLE` | CephFS не смонтирована, не проверить ACL, нет конфига CT | ждёт, перечитывает `status` |
 | 503 | `PCT_UNAVAILABLE` | `pct`/`findmnt` не запускается, непонятный вывод | то же |
-| 504 | `PCT_TIMEOUT` | команда не уложилась в таймаут | исход неизвестен: перечитывает `status` |
+| 504 | `PCT_TIMEOUT` | команда не уложилась в таймаут | агент уже поставил `uncertain` (карантин): менеджер завершает сессию `SLOT_QUARANTINED`, а не ждёт |
+
+**Агент 1.2.1.** В теле `504 PCT_TIMEOUT` — 🆕 `detail.command`: подкоманда `pct` (`start`, `exec`, `stop`, …), как
+`command` в отметке fencing. Тайм-аут одного действия запуска внутри CT (`pct exec`) — `LAB_GUEST_ACTION_TIMEOUT`,
+по умолчанию 120 с (30–600) вместо 45 с. 🆕 `GET /capabilities` →
+`{"version", "start_budget_seconds", "guest_action_timeout_seconds"}`; `start_budget_seconds` =
+120 + 3 × `LAB_GUEST_ACTION_TIMEOUT` (три действия — максимум запроса; правка монтирований не входит).
+Карантин не ослаблен: тайм-аут любой изменяющей команды ставит `uncertain`, `claim` его не снимает.
 
 Клиент менеджера (`lab_manager/agent_client.py`, `CODES`) уже понимает эти коды, а без них
 разбирает текст. Поэтому коды можно вводить постепенно, без синхронного релиза.

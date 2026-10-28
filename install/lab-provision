@@ -42,6 +42,10 @@ Usage: lab-provision <step> [args]
   moodle            give Moodle the web CA and print the plugin settings
   check             this node's agent and slots; on the manager's node also the manager and all agents
   enable [VMID...]  make the slots available in the manager (slot-enable), all of SLOTS by default
+  reconcile VMID [--yes]
+                    after an agent quarantine (COMMAND_UNCERTAIN, SLOT_QUARANTINED): clear the agent's
+                    uncertain mark of a stopped slot, on the node of the slot. Without --yes only shows
+                    what it would do (TROUBLESHOOTING.md)
 
   template          build the slot template CT (Ubuntu 24.04, GNS3 2.2.61) from SLOT_TEMPLATE
   create            create the missing manager CT (CREATE_MANAGER) and slot CTs (CREATE_SLOTS)
@@ -922,6 +926,7 @@ for n in $(echo "$PVE_NODES" | tr , " "); do
 done
 echo "services: $(systemctl is-active lab-manager lab-console-gateway nginx | paste -sd " ")"
 runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slots
+runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin check || echo "admin check failed (a manager older than 0.11.1 has no such command)"
 '
 
 cmd_check() {
@@ -938,6 +943,41 @@ cmd_check() {
   for id in "${SLOT_IDS[@]}"; do slot_agents+=("$id=${SLOT_NODE[$id]}.$AGENT_DOMAIN"); done
   log "manager CT $MANAGER_VMID"
   ct_sh "$MANAGER_VMID" "$MANAGER_CHECK" AGENTS="${agents[*]}" SLOT_AGENTS="${slot_agents[*]}"
+}
+
+cmd_slot_state() {  # Internal, on the manager's node: the state of a slot in the manager, or "unknown"
+  ct_local "$MANAGER_VMID"
+  # shellcheck disable=SC2016  # expands inside the CT
+  pct exec "$MANAGER_VMID" -- runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slots 2>/dev/null |
+    python3 -c '
+import json, sys
+state = "unknown"
+for line in sys.stdin:
+    try:
+        row = json.loads(line)
+    except ValueError:
+        continue
+    if str(row.get("vmid")) == sys.argv[1]:
+        state = str(row.get("state"))
+print(state)' "$1" || echo unknown
+}
+
+cmd_reconcile() {  # On the node of the slot: the agent's uncertain mark, by lab-reconcile.py (checks first)
+  local id=${1:-} yes=() ct_state manager_state
+  [[ $id =~ ^[0-9]+$ ]] || die "usage: lab-provision reconcile <VMID> [--yes]"
+  shift
+  case ${1:-} in --yes) yes=(--yes) ;; "") ;; *) die "unknown argument: $1" ;; esac
+  [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || die "$id is not in SLOTS of $CONF"
+  ct_local "$id"
+  need_cluster  # SELF: the same script reads the slot state on the manager's node
+  ct_state=$(pct status "$id" | awk '{print $2}')
+  if [[ $MANAGER_NODE == "$NODE" ]]; then
+    manager_state=$(cmd_slot_state "$id" | tail -n 1)
+  else
+    manager_state=$(run_on "$MANAGER_NODE" _slot-state "$id" | tail -n 1) || manager_state=unknown
+  fi
+  exec /usr/bin/python3 -I -B "${SELF%/*}/lab-reconcile.py" "$id" "${yes[@]}" \
+    --ct-state "$ct_state" --manager-state "${manager_state:-unknown}"
 }
 
 cmd_enable() {
@@ -1366,6 +1406,7 @@ main() {
     moodle) cmd_moodle ;;
     check) cmd_check ;;
     enable) cmd_enable "$@" ;;
+    reconcile) cmd_reconcile "$@" ;;
     template) cmd_template ;;
     create) cmd_create ;;
     deploy) cmd_deploy ;;
@@ -1376,6 +1417,7 @@ main() {
     _destroy) cmd_destroy "$@" ;;
     _node-reset) cmd_node_reset ;;
     _ping) echo "$NODE ok" ;;
+    _slot-state) cmd_slot_state "$@" ;;
     *) usage; exit 2 ;;
   esac
 }

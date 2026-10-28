@@ -151,6 +151,10 @@ class FakeAgent:
         self.no_snapshot = set()  # Slots without the clean snapshot: reset answers SNAPSHOT_MISSING
         self.reset_fails = False  # pct rollback fails
         self.reset_unsupported = False  # An agent older than 1.2: the route does not exist
+        self.uncertain = {}  # vmid -> pct subcommand of the `uncertain` mark: changes and claims get 409
+        self.stop_never = False  # pct shutdown and pct stop fail, the CT keeps running
+        self.start_times_out = False  # pct exec times out: the CT runs, the agent marks the slot uncertain
+        self.start_budget = 480  # start_budget_seconds of GET /capabilities; None: agent older than 1.2.1
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -177,6 +181,11 @@ class FakeAgent:
         self.requests.append((node, request.method, path, body))
         if path == "/health":
             return httpx.Response(200, json={"status": "ok"})
+        if path == "/capabilities":
+            if self.start_budget is None:
+                return self._err(404, "Not Found")
+            return httpx.Response(200, json={"version": "1.2.1", "start_budget_seconds": self.start_budget,
+                                             "guest_action_timeout_seconds": 120})
         m = re.fullmatch(r"/students/([A-Za-z0-9][A-Za-z0-9_-]{0,63})", path)
         if m and request.method == "PUT":
             key = m.group(1)
@@ -198,6 +207,9 @@ class FakeAgent:
             return self._err(403, "Container is not marked as a lab slot")
         if self.busy:
             return self._err(409, "Another operation on this slot is in progress")
+        if vmid in self.uncertain and action != "status":
+            return self._err(409, {"code": "COMMAND_UNCERTAIN",
+                                   "message": "Previous host command needs operator reconciliation"})
         if action == "claim":
             token = (body["epoch"], body["generation"])
             if token < self.fences.get(vmid, (0, 0)):
@@ -214,7 +226,10 @@ class FakeAgent:
             self.timeline.append(("agent:size", vmid))
             return httpx.Response(200, json={"vmid": vmid, **body})
         if action == "status":
-            return httpx.Response(200, json={"vmid": vmid, "state": ct["status"]})
+            ownership = {"epoch": self.fences.get(vmid, (0, 0))[0], "generation": self.fences.get(vmid, (0, 0))[1]}
+            if vmid in self.uncertain:
+                ownership.update(uncertain=True, command=self.uncertain[vmid])
+            return httpx.Response(200, json={"vmid": vmid, "state": ct["status"], "ownership": ownership})
         if action in ("mounts", "start") and ct["status"] != "stopped":
             return self._err(409, "Slot must be stopped to change mount points")
         if action == "reset":
@@ -246,6 +261,10 @@ class FakeAgent:
                 return self._err(409, f"Proxmox command failed: {self.start_fails}")
             ct["status"] = "running"
             self.timeline.append(("agent:start", body["student_key"]))
+            if self.start_times_out:
+                self.uncertain[vmid] = "exec"
+                return self._err(504, {"code": "PCT_TIMEOUT", "command": "exec",
+                                       "message": "Proxmox command timed out; check actual container state"})
             if self.lose_start_response:
                 self.lose_start_response = False
                 raise httpx.ReadTimeout("lost", request=request)
@@ -255,6 +274,8 @@ class FakeAgent:
         if ct["status"] == "stopped":
             return httpx.Response(200, json={"vmid": vmid, "state": "stopped"})
         self.timeline.append(("agent:stop", "force" if body["force"] else "shutdown"))
+        if self.stop_never:
+            return self._err(409, {"code": "PCT_FAILED", "message": "Proxmox command failed: stop"})
         if not body["force"] and self.shutdown_hangs:
             return self._err(409, "Proxmox command failed: shutdown timed out")
         if not body["force"] and self.shutdown_fails_but_stops:

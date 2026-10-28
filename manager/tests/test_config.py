@@ -53,6 +53,17 @@ def test_valid_config(env):
     assert SECRET not in repr(s)
 
 
+def test_start_timeout_covers_the_agent_start_budget(env):
+    s = load(env)
+    assert s.agent_start_timeout == 720  # 480 s of the agent's default budget + 60 s of reserve + the mount edit
+    env["AGENT_START_TIMEOUT"] = "540"
+    assert load(env).agent_start_timeout == 540
+    for value in ("420", "539"):
+        env["AGENT_START_TIMEOUT"] = value
+        with pytest.raises(ConfigError, match="AGENT_START_TIMEOUT"):
+            load(env)
+
+
 def test_ceph_layout(env):
     s = load(env)
     assert (s.agent_ceph_root, s.agent_code_dir, s.agent_students_dir) == (

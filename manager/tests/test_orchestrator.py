@@ -4,7 +4,9 @@ import pytest
 from conftest import make_env
 from fakes import GIB
 
-from lab_manager.orchestrator import Orchestrator
+from lab_manager.admin import quarantine_report
+from lab_manager.agent_client import start_budget_warnings
+from lab_manager.orchestrator import QUARANTINE_MESSAGE, Orchestrator
 
 
 async def start(env, user_id=42, instance_id=1):
@@ -866,3 +868,160 @@ async def test_failure_limit_zero_never_holds_a_slot(tmp_path, dsn):
 ])
 def test_which_lab_failures_count_against_the_slot(error, counts):
     assert Orchestrator._counts_against_slot(error) is counts
+
+
+async def events_of(env, sid):
+    async with env.services.pool.connection() as conn:
+        cur = await conn.execute("SELECT kind, detail FROM events WHERE session_id = %s ORDER BY id", (sid,))
+        return [(r["kind"], r["detail"]) for r in await cur.fetchall()]
+
+
+async def test_a_timed_out_start_quarantines_the_slot_at_once(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.agent.start_times_out = True  # pct exec ran too long: the CT runs, the agent marks the slot
+        sid = await start(env)
+        await env.run(4)
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "SLOT_QUARANTINED"
+        assert s["error"]["slot_state"] == "maintenance" and s["status_message"] == QUARANTINE_MESSAGE
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "maintenance" and slot["student_key"] == s["student_key"]  # Held for the student
+        kinds = [k for k, _ in await events_of(env, sid)]
+        assert "slot_quarantined" in kinds and "ct_started" not in kinds
+        assert "slot_ready" not in kinds and "ownership_wait" not in kinds
+        assert not any(n in ("agent:stop", "agent:reset") for n in names(env.timeline))  # No cleanup is tried
+        event = next(d for k, d in await events_of(env, sid) if k == "slot_quarantined")
+        assert event["vmid"] == 201 and event["command"] == "exec" and event["node"]
+        # The public error: not retryable, nothing about the node
+        r = await env.client.get(f"/api/v1/sessions/{sid}")
+        assert r.json()["error"] == {"code": "SLOT_QUARANTINED", "retryable": False}
+
+
+async def test_a_lost_start_response_waits_and_then_succeeds(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.agent.lose_start_response = True
+        sid = await start(env)
+        await env.run()
+        assert (await session(env, sid))["status"] == "running"
+        kinds = [k for k, _ in await events_of(env, sid)]
+        assert "slot_quarantined" not in kinds
+        assert (await env.services.store.slot(201))["state"] == "busy"
+
+
+async def test_quarantine_during_the_stop_does_not_wait_for_the_stage_timeout(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await env.run()
+        assert (await session(env, sid))["status"] == "running"
+        env.agent.uncertain[201] = "exec"  # A command timed out meanwhile; the stop cannot get ownership
+        await stop(env, sid)
+        await env.run(3)  # Far less than the 10 minutes of ownership_wait
+        s = await session(env, sid)
+        assert s["status"] == "failed" and s["error"]["code"] == "SLOT_QUARANTINED"
+        slot = await env.services.store.slot(201)
+        assert slot["state"] == "maintenance" and slot["student_key"] == s["student_key"]
+        assert env.pve.cts[201]["status"] == "running"  # Nothing could be done to it: the operator does
+        assert "ownership_wait" not in [k for k, _ in await events_of(env, sid)]
+
+
+async def test_a_student_with_a_quarantined_slot_is_told_to_wait_for_the_check(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        env.agent.start_times_out = True
+        first = await start(env)
+        await env.run(4)
+        assert (await session(env, first))["error"]["code"] == "SLOT_QUARANTINED"
+        env.agent.start_times_out = False
+        again = await start(env)  # The same student: the directory may still be writable in the held CT
+        await env.run(4)
+        s = await session(env, again)
+        assert s["status"] == "failed" and s["error"]["code"] == "STUDENT_DIR_BUSY"
+        assert s["status_message"] == QUARANTINE_MESSAGE
+        assert s["slot_vmid"] is None
+        other = await start(env, user_id=7)  # Another student gets the other slot
+        await env.run()
+        assert (await session(env, other))["status"] == "running"
+
+
+async def test_no_path_to_a_quarantine_frees_the_slot(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.agent.start_times_out = True
+        sid = await start(env)
+        for _ in range(6):
+            await env.run(1)
+            assert (await env.services.store.slot(201))["state"] != "free"
+        assert (await session(env, sid))["status"] == "failed"
+
+
+async def age_stage(env, sid):
+    async with env.services.pool.connection() as conn, conn.transaction():
+        await conn.execute("UPDATE sessions SET stage_started_at = now() - interval '2 hour' WHERE id = %s", (sid,))
+
+
+async def test_a_failed_cleanup_does_not_leave_a_free_slot_in_the_error(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await env.run()
+        env.slots[201].op_polls = 10**6  # The lab never finishes stopping: TIMEOUT promises `free`
+        await stop(env, sid)
+        await env.run(4)
+        assert (await session(env, sid))["stage"] == "lab_stop_wait"
+        await age_stage(env, sid)
+        env.agent.stop_never = True  # ... but the CT cannot be stopped either
+        await env.run(4)
+        s = await session(env, sid)
+        assert s["stage"] == "ct_stop" and s["error"]["code"] == "TIMEOUT" and s["error"]["slot_state"] == "free"
+        await age_stage(env, sid)
+        await env.run(2)
+        s = await session(env, sid)
+        slot = await env.services.store.slot(201)
+        assert s["status"] == "failed" and s["error"]["code"] == "TIMEOUT"
+        assert slot["state"] == "failed" and s["error"]["slot_state"] == "failed"
+
+
+# `lab-manager-admin check`: quarantined slots and the agents' start budget
+
+
+async def test_the_report_names_the_slot_the_session_the_student_and_the_agent_command(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        assert await quarantine_report(env.services) == []
+        env.agent.start_times_out = True
+        sid = await start(env)
+        await env.run(4)
+        (line,) = await quarantine_report(env.services)
+        s = await session(env, sid)
+        assert "slot 201" in line and sid in line and s["student_key"] in line
+        assert "agent command exec" in line and "mark present" in line
+        assert "pct shutdown 201" in line and "lab-provision reconcile 201" in line and "lab-provision enable 201" in line
+        env.agent.uncertain.clear()  # The operator reconciled the mark; the slot is still in maintenance
+        assert "mark already cleared" in (await quarantine_report(env.services))[0]
+        await env.services.store.set_slot_admin_state(201, "free")
+        assert await quarantine_report(env.services) == []
+
+
+async def test_other_maintenance_slots_are_not_reported(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        await env.services.store.set_slot_admin_state(201, "maintenance", "looking at the disk")
+        assert await quarantine_report(env.services) == []
+
+
+async def test_a_slow_agent_is_reported(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        nodes = await env.services.pve.online_nodes()
+        assert nodes
+        assert await start_budget_warnings(env.services.agent, nodes, env.settings.agent_start_timeout) == []
+        env.agent.start_budget = 1920  # LAB_GUEST_ACTION_TIMEOUT=600 on the agents
+        lines = await start_budget_warnings(env.services.agent, nodes, env.settings.agent_start_timeout)
+        assert len(lines) == len(nodes) and "1980" in lines[0]
+        env.agent.start_budget = None  # Agents older than 1.2.1 report nothing
+        assert await start_budget_warnings(env.services.agent, nodes, env.settings.agent_start_timeout) == []
+
+
+async def test_the_student_sees_why_the_stop_waits(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await env.run()
+        env.agent.busy = True  # Not a quarantine: the claim cannot be confirmed for now
+        await stop(env, sid)
+        await env.run(3)
+        body = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
+        assert body["status"] == "stopping" and body["status_message"].startswith("Нет подтверждения владения слотом")

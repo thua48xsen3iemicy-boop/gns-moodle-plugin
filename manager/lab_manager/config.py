@@ -18,6 +18,8 @@ from .images import IMAGE_ID_RE, ImageError, load_images
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # One path component, as the node agent requires
 GUEST_ACTIONS = ("init_slot", "daemon_reload", "start_slot_service", "restart_slot_service")
+# AGENT_START_TIMEOUT must exceed the start budget the agent reports (agent 1.2.1, GET /capabilities) by this.
+START_BUDGET_MARGIN = 60
 
 
 class ConfigError(RuntimeError):
@@ -152,10 +154,11 @@ class Settings:
     listen_port: int = 8090
     pve_timeout: float = 10.0
     pve_retry_after: float = 60.0
-    # Above the sum of the agent's subprocess timeouts (agent MANAGER_CONTRACT_REVIEW.md §5):
-    # start 385 s with three actions, PUT mounts 85 s, graceful stop 110 s.
+    # Above the sum of the agent's subprocess timeouts (agent MANAGER_CONTRACT_REVIEW.md §5, agent 1.2.1):
+    # start 120 s + three actions of LAB_GUEST_ACTION_TIMEOUT (120 s by default) = 480 s plus the 60 s
+    # reserve (START_BUDGET_MARGIN), PUT mounts 85 s, graceful stop 110 s.
     agent_timeout: float = 30.0
-    agent_start_timeout: float = 420.0
+    agent_start_timeout: float = 720.0
     agent_mounts_timeout: float = 120.0
     agent_stop_timeout: float = 130.0
     slot_timeout: float = 10.0
@@ -306,7 +309,7 @@ def load(env=None, check_mode=True) -> Settings:
         pve_timeout=_int(env, "PVE_TIMEOUT", 10, 1, 300),
         pve_retry_after=_int(env, "PVE_RETRY_AFTER", 60, 1, 3600),
         agent_timeout=_int(env, "AGENT_TIMEOUT", 30, 5, 300),
-        agent_start_timeout=_int(env, "AGENT_START_TIMEOUT", 420, 400, 3600),
+        agent_start_timeout=_int(env, "AGENT_START_TIMEOUT", 720, 540, 3600),
         agent_mounts_timeout=_int(env, "AGENT_MOUNTS_TIMEOUT", 120, 90, 900),
         agent_stop_timeout=_int(env, "AGENT_STOP_TIMEOUT", 130, 120, 900),
         slot_timeout=_int(env, "SLOT_TIMEOUT", 10, 1, 300),

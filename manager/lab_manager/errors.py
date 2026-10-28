@@ -33,6 +33,8 @@ SESSION_ERRORS: dict[str, bool] = {
     "NO_SLOTS": False,
     "PROJECT_MISSING": False,
     "STUDENT_DIR_BUSY": False,
+    # The agent holds the slot's `uncertain` mark: an operator reconciles it, the student's directory stays held.
+    "SLOT_QUARANTINED": False,
 }
 
 

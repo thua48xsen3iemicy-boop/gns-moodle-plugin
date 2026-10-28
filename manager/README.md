@@ -1,4 +1,4 @@
-# Lab Manager — 0.11.0
+# Lab Manager — 0.11.1
 
 Изменения протокола, порядок обновления и стендовая приёмка:
 [`docs/pilot-hardening/README.md`](../docs/pilot-hardening/README.md).
@@ -192,7 +192,7 @@ Uvicorn работает в один процесс: оркестратор жи
 | `AGENT_URL_TEMPLATE` | `https://{node}.lab.local:8443`; `{node}` — имя узла Proxmox, хост — как в SAN сертификата агента |
 | `AGENT_CA_FILE`, `AGENT_CERT_FILE`, `AGENT_KEY_FILE` | `node-server-ca.crt`, `manager.crt`, `manager.key` |
 | `LAB_CEPH_ROOT`, `LAB_CODE_DIR`, `LAB_STUDENTS_DIR` | те же, что у агентов (`/mnt/pve/cfs`, `gns3-ro/slot`, `gns3-rw/students`): по ним менеджер точно сверяет источники `mp0`/`mp1` |
-| `AGENT_START_TIMEOUT`, `AGENT_MOUNTS_TIMEOUT`, `AGENT_STOP_TIMEOUT` | 420/120/130 с — больше сумм таймаутов внутри агента |
+| `AGENT_START_TIMEOUT`, `AGENT_MOUNTS_TIMEOUT`, `AGENT_STOP_TIMEOUT` | 720/120/130 с — больше сумм таймаутов внутри агента. `AGENT_START_TIMEOUT` не меньше 540 с: агент 1.2.1 тратит на запуск до 120 с на `pct start` и по `LAB_GUEST_ACTION_TIMEOUT` (120 с, до 600 с) на каждое из трёх действий, плюс запас 60 с. Агент сообщает этот бюджет в `GET /capabilities` (`start_budget_seconds`); если он больше настройки, менеджер пишет предупреждение в журнал при старте, то же показывает `lab-manager-admin check`. Прежнее значение 420 с с агентом 1.2.1 не проходит проверку: уберите настройку или поставьте не меньше 540 |
 | `AGENT_START_ACTIONS` | действия в госте после `pct start`; по умолчанию `init_slot` (`agent/guest/lab-slot-init`) |
 | `SLOT_CODE_REVISION` | пусто: общий `<ceph>/<LAB_CODE_DIR>`; иначе `<ceph>/<LAB_CODE_DIR>/<revision>` |
 | `PLACEHOLDER_STUDENT_KEY` | обязательный каталог-заглушка RO (`placeholder`); пустое значение запрещено |
@@ -240,11 +240,24 @@ curl -s --cacert /etc/lab-manager/pve-root-ca.pem -X PUT \
 ```sh
 ADM="sudo -u lab-manager /srv/gns3-ro/manager/lab-manager-admin"
 $ADM check-config        # сводка без секретов
+$ADM check               # слоты в карантине и бюджет запуска агентов (см. ниже)
 $ADM labs                # проверка каталога лаб (lab.gns3 ↔ ticket.json)
 $ADM slots               # реестр слотов
 $ADM slot-enable 2001    # maintenance/failed → free (CT выключен, откат к снимку, заглушка)
 $ADM slot-maintenance 2001
 ```
+
+**Карантин слота.** Если агент ставит на слот отметку `uncertain` (команда `pct` не уложилась в тайм-аут,
+`COMMAND_UNCERTAIN`/`PCT_TIMEOUT`), он отклоняет любые изменения и `claim`, пока оператор не сверит слот. Ждать
+нечего, и очистка через агента невозможна, поэтому менеджер **сразу** завершает сессию кодом `SLOT_QUARANTINED`
+(`retryable: false`), не пытаясь остановить CT. Слот уходит в `maintenance` (`state_message` начинается с
+`SLOT_QUARANTINED`), `student_key` остаётся: CT может работать с каталогом студента на запись. Повторный запуск
+того же студента до сверки получает `STUDENT_DIR_BUSY` с тем же текстом («Слот требует проверки администратором…»);
+другие студенты работают на других слотах. В журнале сессии — событие `slot_quarantined` (`vmid`, `node`,
+`command`, `stage`). `$ADM check` (и `lab-provision check`) перечисляет такие слоты: VMID, сессию, студента, команду
+из отметки агента и шаги `pct shutdown` → `lab-provision reconcile <VMID>` → `lab-provision enable <VMID>`.
+После сверки ключ студента снимается обычным путём, и лаба запускается снова, проект продолжается.
+Сетевые сбои и `503` агента карантином не считаются: менеджер ждёт и перечитывает состояние.
 
 Новый слот из `slots.json` появляется в состоянии `maintenance`, пока оператор его не включит.
 Слот живёт одну сессию. При освобождении, в том числе после сбоя, менеджер останавливает лабу

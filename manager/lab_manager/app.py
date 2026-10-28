@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import VERSION, labdef
-from .agent_client import AgentClient
+from .agent_client import AgentClient, start_budget_warnings
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
 from .facts import build_state
@@ -127,6 +127,15 @@ class Services:
 
 
 def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
+    async def warn_start_budget():
+        """The agents report how long a start may take (1.2.1); a shorter AGENT_START_TIMEOUT loses starts."""
+        try:
+            for line in await start_budget_warnings(services.agent, await services.pve.online_nodes(),
+                                                    services.settings.agent_start_timeout):
+                log.warning(line)
+        except Exception as exc:  # noqa: BLE001 - a diagnostic must never stop the service
+            log.warning("Start budget of the agents not checked: %s", type(exc).__name__)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await services.pool.open(wait=True, timeout=10)
@@ -135,6 +144,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if version != latest_version():
             raise RuntimeError(f"DB schema version {version}, expected {latest_version()}: run admin migrate")
         await services.store.sync_slots(list(services.settings.slots.values()))
+        budget_task = None
+        if run_orchestrator:
+            budget_task = asyncio.create_task(warn_start_budget())
         task = None
         if run_orchestrator:
             task = asyncio.create_task(services.orchestrator.run_forever(services.leader_connection))
@@ -142,9 +154,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         try:
             yield
         finally:
-            if task:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+            for t in (task, budget_task):
+                if t:
+                    t.cancel()
+                    await asyncio.gather(t, return_exceptions=True)
             await services.close()
 
     app = FastAPI(title="Lab Manager", version=VERSION, lifespan=lifespan,

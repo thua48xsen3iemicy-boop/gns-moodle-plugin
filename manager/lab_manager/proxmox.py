@@ -186,6 +186,11 @@ class PveClient:
                 self._node_cache[res["vmid"]] = (res["node"], now)
         return resources
 
+    async def online_nodes(self) -> list[str]:
+        """Names of the cluster nodes that are online: the `{node}` of the agent URLs."""
+        return sorted(r["node"] for r in await self.cluster_resources()
+                      if r.get("type") == "node" and r.get("status") == "online")
+
     async def find_ct_node(self, vmid: int, *, max_age: float = 10.0) -> str:
         cached = self._node_cache.get(vmid)
         if cached and self.clock() - cached[1] < max_age:
