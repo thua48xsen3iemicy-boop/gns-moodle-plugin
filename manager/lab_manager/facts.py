@@ -105,12 +105,18 @@ def build_state(rev, rows, statuses, ttl):
         node = {}
         for row in items:
             node.update({k: v for k, v in (row["data"] or {}).items() if k not in NODE_KEYS})
+            if row["collector"] == "iol.l1":
+                payload = (row["data"] or {}).get("l1_ports") or {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                node["l1_ports"] = {**payload, "ok": row["ok"],
+                                    "observed_at": iso(row["observed_at"]) if row["observed_at"] else None}
         node["name"] = items[0]["node_name"]
         node["status"] = statuses.get(node_id, "stopped")
         observed = [row["observed_at"] for row in items if row["observed_at"] is not None]
         if observed:
             node["collected_at"] = iso(max(observed))
-        failing = next((row for row in items if not row["ok"]), None)
+        failing = next((row for row in items if not row["ok"] and row["collector"] != "iol.l1"), None)
         if failing is not None:
             node["error"] = dict(failing["error"] or {"code": "failed", "message": ""})
         nodes[node_id] = node
