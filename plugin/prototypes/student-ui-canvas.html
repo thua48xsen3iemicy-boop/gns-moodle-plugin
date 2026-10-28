@@ -774,7 +774,7 @@ function zoomBy(f){
   animateTo({ k, tx: r.width / 2 - (r.width / 2 - view.tx) * q, ty: r.height / 2 - (r.height / 2 - view.ty) * q }, 260);
 }
 function zoomToNode(n, k, anchorY){
-  const r = wrap.getBoundingClientRect(); k = k || 2.3;
+  const r = wrap.getBoundingClientRect(); k = clamp(k || 2.3, KMIN, KMAX);
   animateTo({ k, tx: r.width / 2 - k * n.cx, ty: (anchorY != null ? anchorY : r.height / 2) - k * n.cy }, 360);
 }
 function nodeNear(sx, sy, maxPx){
