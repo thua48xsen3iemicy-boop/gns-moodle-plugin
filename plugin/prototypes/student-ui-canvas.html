@@ -338,11 +338,11 @@ body{background:var(--canvas)}
 [data-factlayer="l3"] .link .wire{stroke:#73b5df}
 [data-factlayer="l4"] #vp{opacity:.54}
 [data-factlayer="l2"] .layer-vlan,[data-factlayer="l3"] .l2{visibility:visible;opacity:1}
-.l2-scene{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
+.l2-scene{display:none;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
 #lyrDraw,#lyrLinks,#lyrNodes,#lyrCards{transition:opacity .32s ease,visibility .32s}
 [data-factlayer="l2"] #lyrDraw,[data-factlayer="l2"] #lyrLinks,
 [data-factlayer="l2"] #lyrNodes,[data-factlayer="l2"] #lyrCards{opacity:0;visibility:hidden;pointer-events:none}
-[data-factlayer="l2"] .l2-scene{opacity:1;visibility:visible;pointer-events:auto}
+[data-factlayer="l2"] .l2-scene{display:inline;opacity:1;visibility:visible;pointer-events:auto}
 .l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:1.3;stroke-dasharray:7 5}
 .l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em}
 .l2-virtual{cursor:pointer}
@@ -2177,7 +2177,7 @@ function toggleFaultDemo(){
 }
 
 const canvasUi = $("canvasUi"), canvasHud = $("canvasHud"), canvasEars = $("canvasEars"), canvasCard = $("canvasCard");
-const insight = { layer: "l1", pinned: null, hover: null, panel: "ports", ears: [], hideTimer: null };
+const insight = { layer: "l1", pinned: null, panel: "ports", ears: [] };
 const layerHelp = {
   l1: "Физика · состояние линков и портов",
   l2: "Каждый VLAN коммутатора — отдельный L2-узел",
@@ -2261,8 +2261,6 @@ function renderCanvasEars(){
         "aria-label": `${n.name}: ${panel === "mac" ? "пример таблицы коммутации" : "сведения на схеме"}` }, canvasEars);
       el("rect", { width: w, height: 24, rx: 8 }, g);
       uiText(g, "", w / 2, 12, label);
-      g.addEventListener("pointerenter", () => previewInsight(n, panel));
-      g.addEventListener("pointerleave", schedulePreviewClose);
       g.addEventListener("click", e => { e.stopPropagation(); pinInsight(n, panel); });
       g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pinInsight(n, panel); } });
       insight.ears.push({ g, n, index });
@@ -2282,29 +2280,17 @@ function positionCanvasUi(){
   });
   positionCanvasCard();
 }
-function previewInsight(item, panel){
-  clearTimeout(insight.hideTimer);
-  if (insight.pinned) return;
-  if (insight.hover === item && insight.panel === panel) return;
-  insight.hover = item; insight.panel = panel; renderCanvasCard();
-}
-function schedulePreviewClose(){
-  clearTimeout(insight.hideTimer);
-  insight.hideTimer = setTimeout(() => { if (!insight.pinned) { insight.hover = null; renderCanvasCard(); } }, 190);
-}
 function pinInsight(item, panel){
-  clearTimeout(insight.hideTimer);
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
-  insight.pinned = item; insight.hover = null; insight.panel = panel;
+  insight.pinned = item; insight.panel = panel;
   if (item.virtual || item.virtualLink) {
     select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
   } else if (item.isLink) selectLink(item); else select(item);
   renderCanvasCard();
 }
 function closeInsight(){
-  clearTimeout(insight.hideTimer);
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
-  insight.pinned = null; insight.hover = null; canvasCard.textContent = "";
+  insight.pinned = null; insight.cardShape = null; canvasCard.textContent = "";
 }
 function factCardData(item){
   const layer = insight.layer;
@@ -2380,7 +2366,7 @@ function factCardData(item){
 }
 function renderCanvasCard(){
   canvasCard.textContent = "";
-  const item = insight.pinned || insight.hover; if (!item) return;
+  const item = insight.pinned; if (!item) return;
   const data = factCardData(item), rows = data.rows || [];
   const w = Math.max(220, Math.min(372, wrap.clientWidth - 20));
   const footLines = [];
@@ -2425,7 +2411,7 @@ function renderCanvasCard(){
   positionCanvasCard();
 }
 function positionCanvasCard(){
-  const c = insight.cardShape, item = insight.pinned || insight.hover;
+  const c = insight.cardShape, item = insight.pinned;
   if (!c || c.item !== item || !item) return;
   const p = toScreen(item.cx, item.cy), ww = wrap.clientWidth, wh = wrap.clientHeight;
   const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : p.x - c.w / 2;
@@ -2438,22 +2424,6 @@ function positionCanvasCard(){
   c.lead.setAttribute("x2", clamp(p.x, x, x + c.w)); c.lead.setAttribute("y2", clamp(p.y, y, y + c.h));
   c.anchor.setAttribute("cx", p.x); c.anchor.setAttribute("cy", p.y);
 }
-svg.addEventListener("pointerover", e => {
-  const mac = e.target.closest && e.target.closest(".l2-mac-ear");
-  if (mac) { previewInsight(l2Model.virtuals.get(mac.dataset.virtual), "mac"); return; }
-  const virtual = e.target.closest && e.target.closest(".l2-virtual");
-  const segment = e.target.closest && e.target.closest(".l2-path");
-  if (virtual) { previewInsight(l2Model.virtuals.get(virtual.dataset.virtual), "ports"); return; }
-  if (segment) { previewInsight(l2Model.segments.find(s => s.id === segment.dataset.segment), "ports"); return; }
-  const n = e.target.closest && e.target.closest(".node");
-  const l = !n && e.target.closest && e.target.closest(".link");
-  if (n) previewInsight(byId.get(n.dataset.id), "ports");
-  else if (l) previewInsight(linkById.get(l.dataset.id), "ports");
-});
-svg.addEventListener("pointerout", e => {
-  if (e.target.closest && (e.target.closest(".node") || e.target.closest(".link") ||
-    e.target.closest(".l2-virtual") || e.target.closest(".l2-path"))) schedulePreviewClose();
-});
 document.addEventListener("keydown", e => {
   if (e.altKey && /^[1-4]$/.test(e.key)) setFactLayer("l" + e.key);
 });
@@ -2465,9 +2435,4 @@ renderCanvasHud(); renderCanvasEars(); setFactLayer(insight.layer);
 fontsReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
 layout();
 requestAnimationFrame(() => { Object.assign(view, fitTarget()); applyView(); lastSize = { w: wrap.clientWidth, h: wrap.clientHeight }; });
-/* Begin with a full-width topology and a contextual switch card. */
-requestAnimationFrame(() => requestAnimationFrame(() => {
-  pinInsight(nodes.find(n => n.name === "SW1"), "ports");
-  $("chip").hidden = true;
-}));
 </script>
