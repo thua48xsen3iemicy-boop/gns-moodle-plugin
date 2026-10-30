@@ -141,6 +141,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
 | `mod_gns3lab_refresh_facts` | `cmid`, `userid=0` | те же; только `running`-сессия | `{"requested"}`; частоту ограничивает менеджер |
 | `mod_gns3lab_get_reveal` | `cmid`, `userid=0` | view; как у `get_facts`: чужой `userid` — observe + группы | `{"items": [{"nodeid","kind","item"}]}` — маска студента (§5.1, `gns3lab_reveal`) |
+| `mod_gns3lab_get_course_overview` | `courseid`, `groupid=0` | validate_context курса; для каждой лабы observe (лаба без права не попадает в ответ, нет ни одной — отказ); группа — из доступных пользователю; ячейка «студент × лаба» только при `can_observe_user()` | `{labs:[{cmid,name,error}], students:[{userid,fullname,pictureurl}], cells:[{cmid,userid,observable,session}]}`: `session` — сводка (`status`, `startedat`, `expiresat`, `facts`: yes/no/unknown) или `null`; id сессии и топологии нет; список сессий лабы кэшируется 10 с (MUC `activitysessions`); недоступный менеджер даёт `error` только у своей лабы (`docs/teacher-dashboard.md`) |
 | `mod_gns3lab_claim_seat` | `cmid`, `tabid`, `takeover=false` | use; место только владельца лабы, другого пользователя назвать нельзя | `{"status","mode","idle","beat"}`: `status` — `held`, `othertab`, `otherlogin` (`docs/seat.md`); страница спрашивает при открытии (`takeover=true`) и раз в `beat` секунд |
 | `mod_gns3lab_reveal` | `cmid`, `items` (до 500) | use; владелец запущенной сессии, другого пользователя назвать нельзя | `{"added"}`; `nodeid` и id кабеля — из живой топологии сессии, иначе отказ; только добавление, до 5000 строк на пользователя и активность (`revealfull`); строки удалённого проекта удаляются при записи |
 
@@ -173,6 +174,12 @@ Moodle никогда не держит WebSocket и не видит токен�
   консоль»; управление нодами (пуск, стоп, рестарт) и пауза линка — после появления вызовов в API менеджера; пока на их
   местах свободные кнопки.
 - Для наблюдателя: выпадающий список студентов (`list_students`) над схемой, бейдж «Только просмотр».
+- `course.php?id=<courseid>` — «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`): страница преподавателя на весь экран,
+  студенты × лабы курса с живым состоянием сессий, счётчики по лабе, поиск, сортировка, выбор группы; сводка фактов в ячейке
+  (число находок `bad` / `warn`, «без изменений N мин») и карточка «студент × лаба» (находки по слоям, устройства, кнопка
+  «Открыть схему» → `lab.php?id=&userid=&from=course`, место под историю проверок). Пункт «Лабы курса» в навигации курса и
+  ссылка на `view.php` — только при `mod/gns3lab:observe`. `lab.php` принимает `userid` наблюдателя (проверка
+  `resolve_user()` до вывода страницы, бейдж «Только просмотр»).
 - `index.php` — список активностей курса (стандартный).
 - `mod_form.php` — название, описание, выбор `lab_ref` из `/api/v1/labs` (если менеджер недоступен — текстовое поле
   и предупреждение), `maxduration`.
@@ -243,6 +250,7 @@ H.264 через WebCodecs) ломает Babel-шаг `grunt amd`, теперь 
 - ~~Режимы `seen` и `fog`, маска открытого~~ — сделано в 0.9.0 (этап 1 `docs/lab-constructor/README.md`): настройки активности
   `factsview` и `fogstart`, таблица `gns3lab_reveal`, `mod_gns3lab_get_reveal` / `_reveal`, модуль `amd/src/reveal.js`.
 - ~~noVNC для графических консолей~~ — сделано в 0.7.0 (без просмотра экрана преподавателем).
+- ~~Страница преподавателя «Лабы курса»: студенты × лабы, живые статусы и сводка фактов~~ — сделано в 0.14.0 (`docs/teacher-dashboard.md`).
 - Сниппеты из настроек активности, оценка и автопроверка, LTI-вариант.
 
 ## 7. Безопасность — чек-лист для ревью

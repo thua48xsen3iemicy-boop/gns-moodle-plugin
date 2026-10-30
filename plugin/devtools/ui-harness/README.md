@@ -56,6 +56,12 @@ PYTHON=python3 node check_vnc.js --shots /tmp/vnc-shots   # нужен Playwrigh
 Каждая проверка печатается как `PASS` / `FAIL`, код выхода — число провалов; скриншоты (панель после ввода, сетка, окна,
 пауза переподключения, шторка телефона) — в каталоге `--shots` (по умолчанию `dist/shots`).
 
+Страница преподавателя «Лабы курса» (`course.php`, `docs/teacher-dashboard.md`): `index.<язык>.course.html` — настоящий шаблон `course.mustache`
+и модуль `course.js` против заглушки `mod_gns3lab_get_course_overview` (пять студентов, две лабы, две группы; у студентов 11 и 12 есть факты — верные и с
+ошибками). `?laberror` — менеджер не ответил по второй лабе, `?coursefail` — вызов не удался. `window.__stub.course.set(cmid, userid, сводка|null)` меняет ячейку,
+`.bump(userid)` двигает rev фактов. Сквозная проверка в Chromium — `check_course.js` (таблица, цифры в ячейках, «без изменений N мин» на часах Playwright, поиск,
+сортировка, группа, карточка и её адрес, телефон 360 px, ошибка по лабе, экранирование имён): `node check_course.js [--min] [--shots <каталог>]`.
+
 Одно место на лабу (`docs/seat.md`): `index.<язык>.seat.html` — активность в режиме «одна страница»; `?seat=othertab` и
 `?seat=otherlogin` открывают её с местом, занятым другой страницей того же входа или другим входом; в консоли браузера
 `window.__stub.seat.give('me'|'othertab'|'otherlogin')` передаёт место, `__stub.seat.claims` и `.gated` показывают, что и с каким

@@ -41,12 +41,18 @@ class viewer implements renderable, templatable {
      *
      * @param \cm_info $cm course module
      * @param \stdClass $instance gns3lab record
+     * @param \stdClass|null $observed the student whose lab a teacher looks at (read only), null for the user's own lab
+     * @param bool $fromcourse the teacher came from the course page: the way back leads there
      */
     public function __construct(
         /** @var \cm_info course module */
         protected \cm_info $cm,
         /** @var \stdClass gns3lab record */
-        protected \stdClass $instance
+        protected \stdClass $instance,
+        /** @var \stdClass|null the observed student */
+        protected ?\stdClass $observed = null,
+        /** @var bool the teacher came from the course page */
+        protected bool $fromcourse = false
     ) {
     }
 
@@ -92,13 +98,20 @@ class viewer implements renderable, templatable {
         // Who may drive the lab at the same time (docs/seat.md): the page claims the seat unless the mode is `off`.
         $data->seatmode = seat::mode($this->instance);
         $mode = $data->factsview;
+        $back = $this->fromcourse && $this->observed
+            ? new url('/mod/gns3lab/course.php', ['id' => $this->cm->course])
+            : new url('/mod/gns3lab/view.php', ['id' => $this->cm->id]);
 
         return [
             'labname' => $labname,
-            'backurl' => (new url('/mod/gns3lab/view.php', ['id' => $this->cm->id]))->out(false),
+            'backurl' => $back->out(false),
+            'observing' => $this->observed !== null,
+            'studentname' => $this->observed ? fullname($this->observed) : '',
+            'userid' => $this->observed ? (int) $this->observed->id : 0,
             'isdemo' => $isdemo && !$previewerror,
             'previewerror' => $previewerror,
-            'cancontrol' => has_capability('mod/gns3lab:use', $this->cm->context),
+            // The session bar also carries the polling of the state, so an observer gets it, without the buttons.
+            'cancontrol' => $this->observed !== null || has_capability('mod/gns3lab:use', $this->cm->context),
             'cmid' => $this->cm->id,
             'modetag' => $mode === reveal::LIVE ? '' : get_string('ui_mode_' . $mode . '_tag', 'gns3lab'),
             'modehelp' => $mode === reveal::LIVE ? '' : get_string('ui_mode_' . $mode . '_help', 'gns3lab'),

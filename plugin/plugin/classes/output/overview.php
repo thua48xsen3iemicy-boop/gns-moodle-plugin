@@ -58,6 +58,9 @@ class overview implements renderable, templatable {
         return [
             'openurl' => (new url('/mod/gns3lab/lab.php', ['id' => $this->cm->id]))->out(false),
             'isdemo' => $nolab || !manager_client::is_configured(),
+            // Teachers who watch the labs get the page of the whole course next to the button (docs/teacher-dashboard.md §2).
+            'courselabsurl' => has_capability('mod/gns3lab:observe', $this->cm->context)
+                ? (new url('/mod/gns3lab/course.php', ['id' => $this->cm->course]))->out(false) : '',
         ];
     }
 }

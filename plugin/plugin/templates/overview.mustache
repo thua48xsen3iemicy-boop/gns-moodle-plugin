@@ -22,15 +22,20 @@
     Context variables required for this template:
     * openurl - URL of the full screen lab page
     * isdemo - the activity has no reference lab yet, the lab page shows a demo lab
+    * courselabsurl - URL of the labs page of the course for teachers who can observe, empty for others
 
     Example context (json):
     {
         "openurl": "https://example.org/mod/gns3lab/lab.php?id=1",
-        "isdemo": true
+        "isdemo": true,
+        "courselabsurl": "https://example.org/mod/gns3lab/course.php?id=2"
     }
 }}
 <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
     <a class="btn btn-primary btn-lg" href="{{openurl}}">{{#str}}openlab, mod_gns3lab{{/str}}</a>
+    {{#courselabsurl}}
+    <a class="btn btn-secondary btn-lg" href="{{courselabsurl}}">{{#str}}courselabs, mod_gns3lab{{/str}}</a>
+    {{/courselabsurl}}
     {{#isdemo}}
     <p class="text-muted small mb-0 flex-grow-1">{{#str}}demonotice, mod_gns3lab{{/str}}</p>
     {{/isdemo}}

@@ -23,7 +23,10 @@
 
     Context variables required for this template:
     * labname - activity name
-    * backurl - URL of the activity page
+    * backurl - URL of the activity page, or of the course page of the teacher who came from there
+    * observing - a teacher looks at the lab of a student, read only
+    * studentname - full name of that student
+    * userid - id of that student, 0 for the user's own lab
     * isdemo - demo data is shown
     * previewerror - the reference lab could not be loaded from the lab manager
     * cancontrol - the user can start the lab: show the session bar and the wall of the seat (docs/seat.md)
@@ -34,6 +37,9 @@
     {
         "labname": "Lab 4",
         "backurl": "https://example.org/mod/gns3lab/view.php?id=1",
+        "observing": false,
+        "studentname": "",
+        "userid": 0,
         "isdemo": true,
         "previewerror": false,
         "cancontrol": true,
@@ -52,6 +58,10 @@
                     <span class="pill" data-region="status" role="status"></span>
                     <span data-region="timeleft" hidden></span>
                     {{/cancontrol}}
+                    {{#observing}}
+                    <span class="demo" title="{{#str}}ui_readonly_help, mod_gns3lab{{/str}}">{{#str}}ui_readonly_tag, mod_gns3lab{{/str}}</span>
+                    <span class="student" data-region="studentname">{{studentname}}</span>
+                    {{/observing}}
                     {{#isdemo}}
                     <span class="demo" title="{{#str}}demonotice, mod_gns3lab{{/str}}">{{#str}}ui_demo_tag, mod_gns3lab{{/str}}</span>
                     {{/isdemo}}
@@ -204,6 +214,6 @@
 </div>
 {{#js}}
 require(['mod_gns3lab/lab'], function(lab) {
-    lab.init('{{uniqid}}', {{cmid}});
+    lab.init('{{uniqid}}', {{cmid}}, {{userid}});
 });
 {{/js}}

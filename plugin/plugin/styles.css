@@ -1,7 +1,8 @@
 /**
- * Styles of mod_gns3lab: the lab editor (.gns3lab-app) and the student interface (.gns3lab-student).
+ * Styles of mod_gns3lab: the lab editor (.gns3lab-app), the student interface (.gns3lab-student) and the course page of a
+ * teacher (.gns3lab-course).
  *
- * Plugin styles.css is loaded on every Moodle page, so every rule is scoped to .gns3lab-app or .gns3lab-student.
+ * Plugin styles.css is loaded on every Moodle page, so every rule is scoped to .gns3lab-app, .gns3lab-student or .gns3lab-course.
  * Colours follow the theme through Bootstrap variables; own tokens only where Bootstrap has none.
  */
 
@@ -797,6 +798,10 @@ body.gns3lab-fullscreen {
     border: 1px dashed var(--line);
     padding: 2px 6px;
     border-radius: 4px;
+}
+.gns3lab-student .student {
+    font-weight: 600;
+    color: var(--fg);
 }
 .gns3lab-student .demo.bad {
     color: var(--bad);
@@ -3590,5 +3595,511 @@ body.gns3lab-fullscreen {
         border-radius: 0;
         box-shadow: none;
         padding-top: 12px;
+    }
+}
+
+/* Course page of a teacher (course.php, amd/src/course.js): students by labs and the card of a student in a lab. */
+.gns3lab-course {
+    --bg: var(--bs-secondary-bg,#e8ecef);
+    --canvas: var(--bs-tertiary-bg,#f4f6f8);
+    --panel: var(--bs-body-bg,#fff);
+    --fg: var(--bs-body-color,#16212b);
+    --muted: var(--bs-secondary-color,#57656f);
+    --line: var(--bs-border-color,#cad2d9);
+    --wire: #566878;
+    --accent: var(--bs-primary,#1f6fc5);
+    --ok: var(--bs-success,#1e8e4f);
+    --warn: #ad7f08;
+    --bad: var(--bs-danger,#c8423a);
+    --off: #8a97a1;
+    --display: var(--bs-body-font-family,system-ui,sans-serif);
+    --body: var(--bs-body-font-family,system-ui,sans-serif);
+    --mono: var(--bs-font-monospace,ui-monospace,monospace);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    line-height: 1.4;
+    overflow: hidden;
+}
+[data-bs-theme="dark"] .gns3lab-course {
+    --wire: #8094a4;
+    --off: #5e6e7a;
+    --warn: #e0b13a;
+}
+.gns3lab-course.is-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+    height: 100dvh;
+}
+.gns3lab-course [hidden] {
+    display: none !important;
+}
+.gns3lab-course button,
+.gns3lab-course select,
+.gns3lab-course input {
+    font-family: inherit;
+}
+.gns3lab-course .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding-block: 9px;
+    padding-left: max(16px,env(safe-area-inset-left,0px));
+    padding-right: max(16px,env(safe-area-inset-right,0px));
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: none;
+}
+.gns3lab-course .ttl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.gns3lab-course .back {
+    display: inline-grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 17px;
+    text-decoration: none;
+}
+.gns3lab-course .back:hover {
+    border-color: var(--wire);
+    color: var(--fg);
+    text-decoration: none;
+}
+.gns3lab-course .ttl-h {
+    margin: 0;
+    font: 600 18px/1.2 var(--display);
+    color: var(--fg);
+}
+.gns3lab-course .meta {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-course .tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.gns3lab-course .tools select,
+.gns3lab-course .tools input {
+    height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 14px;
+}
+.gns3lab-course .fld {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+}
+.gns3lab-course .body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+.gns3lab-course .main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    padding: 12px max(16px,env(safe-area-inset-left,0px));
+    gap: 10px;
+}
+.gns3lab-course .counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    color: var(--muted);
+}
+.gns3lab-course .counts li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+}
+.gns3lab-course .counts b {
+    color: var(--fg);
+    font-weight: 600;
+}
+.gns3lab-course .counts .has-error {
+    color: var(--bad);
+}
+.gns3lab-course .notice {
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--bad);
+    border-radius: 6px;
+    color: var(--bad);
+    font-size: 13px;
+}
+.gns3lab-course .tablebox {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+}
+.gns3lab-course .empty {
+    margin: 0;
+    padding: 24px 16px;
+    color: var(--muted);
+    text-align: center;
+}
+.gns3lab-course .grid {
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 100%;
+}
+.gns3lab-course .grid th,
+.gns3lab-course .grid td {
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+    background: var(--panel);
+}
+.gns3lab-course .grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    min-width: 150px;
+    text-align: left;
+    font-weight: 600;
+}
+.gns3lab-course .grid .stud {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 170px;
+    max-width: 240px;
+    text-align: left;
+    font-weight: 500;
+    border-right: 1px solid var(--line);
+}
+.gns3lab-course .grid thead .stud {
+    z-index: 3;
+}
+.gns3lab-course .stud .pic {
+    border-radius: 50%;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+.gns3lab-course .stud .name {
+    vertical-align: middle;
+}
+.gns3lab-course .sortbtn {
+    min-height: 40px;
+    padding: 0 6px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 6px;
+}
+.gns3lab-course .sortbtn[data-dir]::after {
+    content: " ▲";
+    font-size: 10px;
+    color: var(--muted);
+}
+.gns3lab-course .sortbtn[data-dir="desc"]::after {
+    content: " ▼";
+}
+.gns3lab-course .laberr {
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--bad);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+}
+.gns3lab-course .grid td.none {
+    color: var(--muted);
+    text-align: center;
+}
+.gns3lab-course .cellbtn {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-course .cellbtn:hover {
+    border-color: var(--wire);
+}
+.gns3lab-course .cellbtn[aria-current="true"] {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.gns3lab-course .cellbtn[data-status="none"],
+.gns3lab-course .cellbtn[data-status="stopped"] {
+    color: var(--muted);
+    border-left-color: var(--off);
+}
+.gns3lab-course .cellbtn[data-status="queued"],
+.gns3lab-course .cellbtn[data-status="starting"],
+.gns3lab-course .cellbtn[data-status="stopping"] {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .cellbtn[data-status="running"] {
+    border-left-color: var(--ok);
+}
+.gns3lab-course .cellbtn[data-status="running"][data-level="warn"] {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .cellbtn[data-status="running"][data-level="bad"],
+.gns3lab-course .cellbtn[data-status="failed"] {
+    border-left-color: var(--bad);
+}
+.gns3lab-course .cellbtn[data-status="running"][data-level="stale"] {
+    border-left-color: var(--off);
+}
+.gns3lab-course .cellbtn .state {
+    font-weight: 600;
+}
+.gns3lab-course .cellbtn[data-status="failed"] .state {
+    color: var(--bad);
+}
+.gns3lab-course .cellbtn .time,
+.gns3lab-course .cellbtn .idle {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-course .cellbtn .idle {
+    flex-basis: 100%;
+}
+.gns3lab-course .finds {
+    display: inline-flex;
+    gap: 4px;
+}
+.gns3lab-course .finds .n {
+    min-width: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+}
+.gns3lab-course .finds .bad {
+    background: var(--bad);
+}
+.gns3lab-course .finds .warn {
+    background: var(--warn);
+}
+.gns3lab-course .finds .ok {
+    background: var(--ok);
+}
+.gns3lab-course .sign.unknown {
+    color: var(--muted);
+    cursor: help;
+}
+.gns3lab-course .card {
+    flex: none;
+    width: 420px;
+    max-width: 50%;
+    overflow: auto;
+    padding: 12px 16px 24px;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+}
+.gns3lab-course .chead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.gns3lab-course .ctitle {
+    flex: 1;
+    min-width: 0;
+}
+.gns3lab-course .ctitle h2 {
+    margin: 0;
+    font: 600 17px/1.2 var(--display);
+    color: var(--fg);
+}
+.gns3lab-course .ctitle .sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+.gns3lab-course .cback,
+.gns3lab-course .cclose {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 18px;
+    cursor: pointer;
+}
+.gns3lab-course .cback {
+    display: none;
+}
+.gns3lab-course .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    text-decoration: none;
+}
+.gns3lab-course .cstate {
+    margin: 12px 0 8px;
+}
+.gns3lab-course .cstate[data-status="failed"] b {
+    color: var(--bad);
+}
+.gns3lab-course .cnote {
+    margin: 10px 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+.gns3lab-course .cnote.unknown::before {
+    content: "◌ ";
+}
+.gns3lab-course .cidle {
+    margin: 4px 0 8px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.gns3lab-course .card h3 {
+    margin: 18px 0 6px;
+    font: 600 14px/1.2 var(--display);
+    color: var(--fg);
+}
+.gns3lab-course .card h4 {
+    margin: 10px 0 4px;
+    font: 600 12px/1.2 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+}
+.gns3lab-course .issues {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-course .issues li {
+    margin: 0 0 4px;
+    padding: 5px 8px;
+    border-left: 3px solid var(--line);
+    font-size: 13px;
+}
+.gns3lab-course .issues .bad {
+    border-left-color: var(--bad);
+}
+.gns3lab-course .issues .warn {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .devbox {
+    overflow-x: auto;
+}
+.gns3lab-course .devs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.gns3lab-course .devs th,
+.gns3lab-course .devs td {
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+}
+.gns3lab-course .devs .mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: pre;
+}
+.gns3lab-course .devs .dev-on {
+    color: var(--ok);
+}
+.gns3lab-course .devs .dev-off {
+    color: var(--muted);
+}
+@media (max-width: 720px) {
+    .gns3lab-course .card {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        width: auto;
+        max-width: none;
+        border-left: 0;
+    }
+    .gns3lab-course .cback {
+        display: block;
+    }
+    .gns3lab-course .cclose {
+        display: none;
+    }
+    .gns3lab-course .btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .gns3lab-course .tools {
+        width: 100%;
+    }
+    .gns3lab-course .tools input {
+        flex: 1;
+    }
+    .gns3lab-course .grid thead th {
+        min-width: 140px;
+    }
+    .gns3lab-course .grid .stud {
+        min-width: 120px;
+        max-width: 140px;
+    }
+    .gns3lab-course .stud .pic {
+        display: none;
     }
 }
