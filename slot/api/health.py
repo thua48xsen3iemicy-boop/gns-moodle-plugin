@@ -12,6 +12,7 @@ from release import VERSION, verify
 
 from api.auth import require_token
 from api.client import call
+from api import uplink
 from api.facts import COLLECTOR_IDS
 
 router = APIRouter(tags=["health"])
@@ -35,7 +36,7 @@ async def capabilities():
         "schema": "gns3lab.capabilities/1",
         "slot_version": VERSION,
         "deploy_schemas": ["gns3lab.deploy/1"],
-        "features": FEATURES,
+        "features": FEATURES + (["uplink"] if uplink.enabled() else []),
         "collectors": COLLECTOR_IDS,
     }
 

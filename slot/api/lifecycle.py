@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
+from api import uplink
 from api.client import call, get_lifecycle
 from api.facts import Facts
 from api.l1 import Keepalives
@@ -496,7 +497,9 @@ class Lifecycle:
     async def wait_nodes(self, lab, expected):
         deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
         while True:
-            nodes = await self.api("GET", f"projects/{lab['project_id']}/nodes")
+            nodes = uplink.visible_nodes(
+                lab["ticket"], await self.api("GET", f"projects/{lab['project_id']}/nodes")
+            )
             lab["nodes"] = nodes
             self.save("lab", lab["project_id"], lab)
             names = {n["name"] for n in nodes}
@@ -512,7 +515,11 @@ class Lifecycle:
 
     async def validate_topology(self, lab):
         pid = lab["project_id"]
-        nodes = await self.api("GET", f"projects/{pid}/nodes")
+        all_nodes = await self.api("GET", f"projects/{pid}/nodes")
+        all_links = await self.api("GET", f"projects/{pid}/links")
+        # The cloud node of the uplink and its link are the slot's own: not part of the inventory, but
+        # they must be there (a resumed project is never patched).
+        nodes = uplink.visible_nodes(lab["ticket"], all_nodes)
         specs = {s["name"]: s for s in lab["ticket"]["nodes"]}
         if len(nodes) != len(specs) or {n["name"] for n in nodes} != set(specs):
             raise RuntimeError(
@@ -541,13 +548,14 @@ class Lifecycle:
                 )
             )
 
-        links = await self.api("GET", f"projects/{pid}/links")
+        links = uplink.visible_links(lab["ticket"], all_nodes, all_links)
         if sorted(endpoints(l, True) for l in links) != sorted(
             endpoints(l, False) for l in lab["ticket"]["links"]
         ):
             raise RuntimeError(
                 "Project links differ from manifest; refusing automatic rebuild"
             )
+        uplink.check_attached(lab["ticket"], all_nodes, all_links)
 
     async def provision(self, lab, node, spec, initial):
         deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
@@ -728,7 +736,9 @@ class Lifecycle:
                 if lab["state"] != "READY":
                     continue
                 try:
-                    nodes = await self.api("GET", f"projects/{lab['project_id']}/nodes")
+                    nodes = uplink.visible_nodes(
+                        lab["ticket"], await self.api("GET", f"projects/{lab['project_id']}/nodes")
+                    )
                     if {n["name"] for n in nodes} != {
                         n["name"] for n in lab["ticket"]["nodes"]
                     } or any(n.get("status") != "started" for n in nodes):

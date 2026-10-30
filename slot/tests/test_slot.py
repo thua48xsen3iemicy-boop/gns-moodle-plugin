@@ -101,6 +101,7 @@ def mock_server(tmp_path, monkeypatch):
         )
         # Real AsyncClient is created in lifespan; substitute HTTP mock in the test.
         app.state.gns3_http = fake
+        app.state.mock_links = links  # for tests that look at the links the slot created
         yield client, projects, nodes
 
 
