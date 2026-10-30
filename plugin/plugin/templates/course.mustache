@@ -1,0 +1,85 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_gns3lab/course
+
+    The labs of a course for the teacher, full screen: students by labs with the live state of their sessions and the card
+    of a student in a lab. The table and the card are drawn by the AMD module mod_gns3lab/course; the template is the frame.
+
+    Context variables required for this template:
+    * courseid - course id
+    * coursename - course name
+    * courseurl - URL of the course
+    * labbase - URL of the lab page (the card adds id, userid and from)
+    * hasgroups - the user can pick a group
+    * groups - groups the user may pick: id, name
+
+    Example context (json):
+    {
+        "courseid": 2,
+        "coursename": "Networks 101",
+        "courseurl": "https://example.org/course/view.php?id=2",
+        "labbase": "https://example.org/mod/gns3lab/lab.php",
+        "hasgroups": true,
+        "groups": [{"id": 5, "name": "Group A"}]
+    }
+}}
+<div class="gns3lab-course is-fullscreen" id="{{uniqid}}-app" data-courseid="{{courseid}}" data-labbase="{{labbase}}">
+    <header class="bar">
+        <div class="ttl">
+            <a class="back" href="{{courseurl}}" title="{{#str}}cl_back, mod_gns3lab{{/str}}" aria-label="{{#str}}cl_back, mod_gns3lab{{/str}}">&larr;</a>
+            <div class="ttlbox">
+                <h1 class="ttl-h">{{#str}}courselabs, mod_gns3lab{{/str}}</h1>
+                <p class="meta">
+                    <span>{{coursename}}</span>
+                    <span data-region="updated" role="status"></span>
+                </p>
+            </div>
+        </div>
+        <div class="tools">
+            {{#hasgroups}}
+            <label class="fld">
+                <span class="wide">{{#str}}cl_group, mod_gns3lab{{/str}}</span>
+                <select data-region="group" aria-label="{{#str}}cl_group, mod_gns3lab{{/str}}">
+                    <option value="0">{{#str}}cl_allgroups, mod_gns3lab{{/str}}</option>
+                    {{#groups}}
+                    <option value="{{id}}">{{name}}</option>
+                    {{/groups}}
+                </select>
+            </label>
+            {{/hasgroups}}
+            <input type="search" data-region="search" placeholder="{{#str}}cl_search, mod_gns3lab{{/str}}" aria-label="{{#str}}cl_search, mod_gns3lab{{/str}}" autocomplete="off">
+        </div>
+    </header>
+
+    <main class="body">
+        <section class="main" data-region="main">
+            <ul class="counts" data-region="counts"></ul>
+            <p class="notice" data-region="notice" role="alert" hidden></p>
+            <div class="tablebox" data-region="tablebox">
+                <table class="grid" data-region="table"></table>
+                <p class="empty" data-region="empty">{{#str}}cl_loading, mod_gns3lab{{/str}}</p>
+            </div>
+        </section>
+        <aside class="card" data-region="card" aria-label="{{#str}}cl_card, mod_gns3lab{{/str}}" hidden></aside>
+    </main>
+</div>
+{{#js}}
+require(['mod_gns3lab/course'], function(course) {
+    course.init('{{uniqid}}', {{courseid}});
+});
+{{/js}}

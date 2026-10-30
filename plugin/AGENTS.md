@@ -62,6 +62,10 @@ docs/          SPEC.md и прочая документация
   факты, видимая модель и отфильтрованные факты, без DOM, `../docs/lab-constructor/README.md` §2), `model.js` (модель
   `.gns3`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
   настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники).
+  Страница преподавателя «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`): `course.js` (таблица «студенты × лабы», карточка, опрос) и
+  `coursefacts.js` (сводка ячейки и данные карточки из `model.buildModel` + `facts.derive`, без DOM; проверка — `devtools/check_coursefacts.mjs`,
+  в браузере — `devtools/ui-harness/check_course.js`). Данные — `mod_gns3lab_get_course_overview` (`classes/external/`), состав страницы
+  (лабы, группы, студенты) — `classes/local/course_labs.php`, кэш сессий лабы — `classes/local/activity_sessions.php`.
   Оформление — через переменные Moodle (тема Boost/Bootstrap), корень стилей — `.gns3lab-student`; тёмную тему не ломать.
 - Колесо действий: Пуск / Стоп / Рестарт узла и пауза линка из прототипа **не перенесены** — в API менеджера таких вызовов
   нет. На их месте «свободные кнопки» («Скоро»), в `lab.js` (`actionsFor`) — для будущих действий, например документации.

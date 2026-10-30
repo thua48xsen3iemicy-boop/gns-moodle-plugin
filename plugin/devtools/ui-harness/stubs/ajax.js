@@ -13,6 +13,11 @@
  * Live facts (get_facts, refresh_facts) are the demo fixtures: a refresh switches between the correct and the broken
  * configuration and moves rev, like mock-manager does. window.__stub.facts changes them: empty() (rev 0, no data),
  * fail(nodeId, code) (the last collection of a node failed), stale(true) (the collection stopped long ago).
+ *
+ * The course page of a teacher (course.php, amd/src/course.js): mod_gns3lab_get_course_overview answers with five students
+ * and two labs (`window.__stub.course`); get_state and get_facts called with the id of a student of the page (11 to 14)
+ * play that student's lab: 11 has correct facts, 12 the broken ones, `?laberror` makes the second lab fail like a manager
+ * that does not answer. window.__stub.course.set(cmid, userid, session|null) changes a cell, .bump(userid) moves the rev of facts.
  */
 define([], function() {
     const cfg = window.GNS3LAB_STUB || {};
@@ -131,8 +136,89 @@ define([], function() {
         return out;
     };
 
+    // The course page of a teacher: students 11 to 14 in two labs, the cells as get_course_overview sends them.
+    const COURSE_USERS = {11: 'ok', 12: 'broken'};
+    const course = {
+        labs: [{cmid: 1, name: 'Lab 4 · OSPF multi-area', error: ''}, {cmid: 2, name: 'Lab 5 · Linux switch', error: cfg.laberror ? 'unreachable' : ''}],
+        students: [
+            {userid: 11, fullname: 'Alice Ivanova', groups: [5]}, {userid: 12, fullname: 'Boris Petrov', groups: [5]},
+            {userid: 13, fullname: 'Chen Wei', groups: [6]}, {userid: 14, fullname: 'Dana Kim', groups: [6]},
+            // A name that looks like markup: the page must show it as text.
+            {userid: 15, fullname: 'Eve <b>x</b> & Co', groups: [6]},
+        ],
+        rev: {},
+        cells: new Map(),
+        calls: [],
+    };
+    const summary = (status, facts = 'unknown', left = 3 * 3600) => ({
+        status,
+        startedat: status === 'none' ? 0 : now() - 600,
+        expiresat: status === 'running' ? now() + left : 0,
+        facts,
+    });
+    const setCell = (cmid, userid, session, observable = true) => course.cells.set(cmid + ':' + userid, {cmid, userid, observable, session});
+    setCell(1, 11, summary('running'));
+    setCell(1, 12, summary('running'));
+    setCell(1, 13, summary('failed'));
+    setCell(1, 14, null);
+    setCell(2, 11, summary('stopped'));
+    setCell(2, 12, null);
+    setCell(2, 13, summary('running', 'no'));
+    setCell(2, 14, null, false);
+    setCell(1, 15, null);
+    setCell(2, 15, null);
+
+    const courseOverview = async args => {
+        course.calls.push(args);
+        if (cfg.coursefail) {
+            throw new Error('The course could not be read.');
+        }
+        const students = course.students.filter(s => !args.groupid || s.groups.includes(args.groupid));
+        const cells = [];
+        students.forEach(st => course.labs.forEach(lab => cells.push({...course.cells.get(lab.cmid + ':' + st.userid)})));
+        return {
+            labs: course.labs,
+            students: students.map(st => ({userid: st.userid, fullname: st.fullname, pictureurl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'})),
+            cells,
+        };
+    };
+
+    /** The running lab of a student of the course page. */
+    const courseView = async userid => {
+        await loadDemo();
+        const doc = JSON.parse(JSON.stringify(demo.topology));
+        return {
+            sessionid: 's-' + userid, status: 'running', stage: 'ready', progress: 100, statusmessage: '', errorcode: '',
+            errorretryable: false, startedat: now() - 600, expiresat: now() + 3 * 3600, topology: JSON.stringify(doc),
+            nodes: doc.topology.nodes.map(n => ({nodeid: n.node_id, status: 'started', consoletype: n.console_type || 'none'})),
+            nodesstale: false, features: ['consoles', 'facts'],
+        };
+    };
+    const courseFacts = async args => {
+        await loadDemo();
+        const variant = COURSE_USERS[args.userid];
+        if (!variant) {
+            return {available: false, changed: false, rev: 0, generatedat: 0, ttl: 0, facts: ''};
+        }
+        const rev = course.rev[args.userid] || 1;
+        const doc = {
+            schema: 'gns3lab.facts/1', rev, ttl: 90, generated_at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+            nodes: JSON.parse(JSON.stringify(demo.facts[variant].nodes)),
+        };
+        const changed = !args.sincerev || args.sincerev !== rev;
+        return {available: true, changed, rev, generatedat: now(), ttl: 90, facts: changed ? JSON.stringify(doc) : ''};
+    };
+
     const handlers = {
-        mod_gns3lab_get_state: state,
+        mod_gns3lab_get_course_overview: courseOverview,
+        mod_gns3lab_get_state: async args => {
+            if (cfg.course && args.userid) {
+                return COURSE_USERS[args.userid]
+                    ? {canuse: false, readonly: true, managerconfigured: true, labready: true, resume: true, session: await courseView(args.userid)}
+                    : {canuse: false, readonly: true, managerconfigured: true, labready: true, resume: true};
+            }
+            return state();
+        },
         mod_gns3lab_claim_seat: async args => {
             window.__stub.seat.claims.push({tabid: args.tabid, takeover: !!args.takeover});
             if (seat.holder === 'othertab' && args.takeover) {
@@ -162,6 +248,9 @@ define([], function() {
             return view();
         },
         mod_gns3lab_get_facts: async args => {
+            if (cfg.course && args.userid) {
+                return courseFacts(args);
+            }
             const s = await view();
             if (!s || !s.features.includes('facts')) {
                 return {available: false, changed: false, rev: 0, generatedat: 0, ttl: 0, facts: ''};
@@ -311,6 +400,14 @@ define([], function() {
 
     window.__stub = {
         editor,
+        course: {
+            set: setCell,
+            // The facts of a student changed: the next read sees a new rev.
+            bump: userid => {
+                course.rev[userid] = (course.rev[userid] || 1) + 1;
+            },
+            calls: course.calls,
+        },
         // How many times each external function was called: a test tells a page that read the facts from one that did not.
         calls: {},
         setNode: (id, status) => {

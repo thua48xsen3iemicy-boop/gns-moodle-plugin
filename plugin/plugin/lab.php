@@ -25,6 +25,9 @@
 require('../../config.php');
 
 $id = required_param('id', PARAM_INT);
+// A teacher can open the lab of a student read only; `from=course` is set by the course page of the teacher.
+$userid = optional_param('userid', 0, PARAM_INT);
+$from = optional_param('from', '', PARAM_ALPHA);
 
 [$course, $cm] = get_course_and_cm_from_cmid($id, 'gns3lab');
 $instance = $DB->get_record('gns3lab', ['id' => $cm->instance], '*', MUST_EXIST);
@@ -33,14 +36,24 @@ require_login($course, true, $cm);
 $context = context_module::instance($cm->id);
 require_capability('mod/gns3lab:view', $context);
 
-$PAGE->set_url('/mod/gns3lab/lab.php', ['id' => $cm->id]);
+// Another user's lab: the same checks as the external functions, before anything is shown (observe, groups, the user can use the lab).
+$observed = null;
+if ($userid && $userid !== (int) $USER->id) {
+    [$userid] = \mod_gns3lab\local\lab_access::from_cmid($cm->id)->resolve_user($userid);
+    $observed = core_user::get_user($userid, '*', MUST_EXIST);
+} else {
+    $userid = 0;
+}
+
+$params = ['id' => $cm->id] + ($userid ? ['userid' => $userid] : []) + ($from === 'course' ? ['from' => $from] : []);
+$PAGE->set_url('/mod/gns3lab/lab.php', $params);
 $PAGE->set_pagelayout('embedded');
 $PAGE->add_body_class('gns3lab-fullscreen');
 $PAGE->set_title(format_string($instance->name));
 $PAGE->set_heading(format_string($course->fullname));
 $PAGE->set_activity_record($instance);
 
-$viewer = new \mod_gns3lab\output\viewer($cm, $instance);
+$viewer = new \mod_gns3lab\output\viewer($cm, $instance, $observed, $from === 'course');
 
 echo $OUTPUT->header();
 echo $OUTPUT->render_from_template('mod_gns3lab/viewer', $viewer->export_for_template($OUTPUT));

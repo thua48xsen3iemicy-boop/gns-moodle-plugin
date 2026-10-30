@@ -110,6 +110,42 @@ class session_data {
     }
 
     /**
+     * Short description of a session for the course page of a teacher (an entry of GET /sessions?instance_id=).
+     *
+     * The session id and the topology are not part of it. The list of the manager does not carry the features of a
+     * session (CONTRACTS §2.4), so `facts` is "unknown" until the page has opened the session itself.
+     *
+     * @param \stdClass $session session from manager_client
+     * @return array status, startedat, expiresat (0 if unknown) and facts: yes, no or unknown
+     */
+    public static function summary(\stdClass $session): array {
+        $facts = 'unknown';
+        if (is_array($session->features ?? null)) {
+            $facts = self::has_feature($session, 'facts') ? 'yes' : 'no';
+        }
+        return [
+            'status' => $session->status,
+            'startedat' => self::timestamp($session->started_at ?? null),
+            'expiresat' => self::timestamp($session->expires_at ?? null),
+            'facts' => $facts,
+        ];
+    }
+
+    /**
+     * Description of the summary above for execute_returns().
+     *
+     * @return external_single_structure
+     */
+    public static function summary_structure(): external_single_structure {
+        return new external_single_structure([
+            'status' => new external_value(PARAM_ALPHA, 'queued, starting, running, stopping, stopped or failed'),
+            'startedat' => new external_value(PARAM_INT, 'Start time, 0 if not started'),
+            'expiresat' => new external_value(PARAM_INT, 'Time the lab will be stopped, 0 if unknown'),
+            'facts' => new external_value(PARAM_ALPHA, 'The session reports facts: yes, no or unknown'),
+        ], 'Session without topology', VALUE_DEFAULT, null, NULL_ALLOWED);
+    }
+
+    /**
      * Features of a session (CONTRACTS §7): what the manager offers for it, such as consoles or facts.
      *
      * @param \stdClass $session session from manager_client

@@ -67,6 +67,13 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_get_course_overview' => [
+        'classname' => \mod_gns3lab\external\get_course_overview::class,
+        'description' => 'Students by labs of a course with the state of their sessions, for the course page of a teacher.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_get_reveal' => [
         'classname' => \mod_gns3lab\external\get_reveal::class,
         'description' => 'What the user or an observed student has uncovered on the scheme in the seen and fog modes.',

@@ -37,4 +37,10 @@ $definitions = [
         'simplekeys' => true,
         'ttl' => 600,
     ],
+    // Sessions of all students of an activity for the course page of a teacher (classes/local/activity_sessions.php).
+    'activitysessions' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'ttl' => 600,
+    ],
 ];

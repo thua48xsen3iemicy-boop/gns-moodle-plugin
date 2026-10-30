@@ -116,3 +116,27 @@ function gns3lab_prepare_view_settings(stdClass $data): void {
     // Who may drive the lab of a student at the same time (docs/seat.md); an unknown value becomes the default.
     $data->seatmode = \mod_gns3lab\local\seat::mode((object) ['seatmode' => $data->seatmode ?? '']);
 }
+
+/**
+ * Adds "Course labs" to the course navigation of a user who can watch the labs of the course.
+ *
+ * In Moodle 5.1 the item lands in the "More" menu of the secondary navigation. The list comes from the course
+ * modinfo, there is no request to the lab manager.
+ *
+ * @param navigation_node $navigation the course navigation node
+ * @param stdClass $course course record
+ * @param context_course $context course context
+ */
+function gns3lab_extend_navigation_course(navigation_node $navigation, stdClass $course, context_course $context): void {
+    if (!\mod_gns3lab\local\course_labs::has_observable($course)) {
+        return;
+    }
+    $navigation->add(
+        get_string('courselabs', 'gns3lab'),
+        new moodle_url('/mod/gns3lab/course.php', ['id' => $course->id]),
+        navigation_node::TYPE_CUSTOM,
+        null,
+        'gns3labcourse',
+        new pix_icon('i/report', '')
+    );
+}

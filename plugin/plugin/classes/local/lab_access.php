@@ -94,17 +94,33 @@ class lab_access {
      * @return bool
      */
     public function can_observe_user(int $userid): bool {
-        global $USER;
-
         if (!is_enrolled($this->context, $userid, 'mod/gns3lab:use', true)) {
             return false;
         }
+        return $this->share_group([$userid]) !== [];
+    }
+
+    /**
+     * Which of the given users the current user may observe as far as the groups go.
+     *
+     * One query for the whole list, so that a table of many students does not ask per student. The caller has made
+     * sure that the users can use the activity (can_observe_user() checks it for one user).
+     *
+     * @param int[] $userids users who can use the activity
+     * @return int[] those of them in a group of the current user, or all of them without separate groups
+     */
+    public function share_group(array $userids): array {
+        global $USER;
+
         $groupmode = groups_get_activity_groupmode($this->cm, $this->course);
-        if ($groupmode != SEPARATEGROUPS || has_capability('moodle/site:accessallgroups', $this->context)) {
-            return true;
+        if (!$userids || $groupmode != SEPARATEGROUPS || has_capability('moodle/site:accessallgroups', $this->context)) {
+            return array_values($userids);
         }
         $mine = groups_get_all_groups($this->course->id, $USER->id, $this->cm->groupingid, 'g.id');
-        $theirs = groups_get_all_groups($this->course->id, $userid, $this->cm->groupingid, 'g.id');
-        return (bool) array_intersect_key($mine, $theirs);
+        if (!$mine) {
+            return [];
+        }
+        $members = groups_get_groups_members(array_keys($mine), null, 'u.id ASC') ?: [];
+        return array_values(array_filter($userids, fn($id) => isset($members[$id])));
     }
 }

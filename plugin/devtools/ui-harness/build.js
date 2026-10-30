@@ -263,6 +263,27 @@ for (const lang of ['en', 'ru']) {
         shell(lang, '', editorPage(lang, EDITOR_NOROUTER, true), 'live', '', EDITOR_INIT));
 }
 
+// The course page of a teacher (course.php): index.<lang>.course.html, with two groups to pick from; the stub plays four
+// students in two labs (stubs/ajax.js). ?laberror makes the second lab fail, ?coursefail the whole call.
+const COURSE_INIT = "window.GNS3LAB_STUB.course = true; require(['mod_gns3lab/course'], function(course) { course.init('u1', 2); });";
+for (const lang of ['en', 'ru']) {
+    const str = strings(lang);
+    const view = {
+        uniqid: 'u1', courseid: 2, coursename: 'Networks 101', courseurl: '#course', labbase: 'lab.html',
+        hasgroups: true, groups: [{id: 5, name: 'Group A'}, {id: 6, name: 'Group B'}],
+        str: () => (text, render) => {
+            const key = render(text).split(',')[0].trim();
+            if (!(key in str)) {
+                throw new Error('Missing string ' + key);
+            }
+            return str[key];
+        },
+        js: () => () => '',
+    };
+    const body = Mustache.render(fs.readFileSync(path.join(plugin, 'templates/course.mustache'), 'utf8'), view);
+    fs.writeFileSync(path.join(dist, `index.${lang}.course.html`), shell(lang, '', body, 'live', '', COURSE_INIT));
+}
+
 // A user who may only look: no session bar.
 fs.writeFileSync(path.join(dist, 'index.viewer.html'), shell('ru', '', page('ru', {cancontrol: false})));
 

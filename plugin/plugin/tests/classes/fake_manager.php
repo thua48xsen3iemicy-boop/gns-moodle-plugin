@@ -67,7 +67,7 @@ class fake_manager {
      * Sets the answer to a request.
      *
      * @param string $method HTTP method
-     * @param string $path path without the query
+     * @param string $path path, with the query to answer only requests with exactly that query
      * @param int $status HTTP status
      * @param mixed $body answer, encoded as JSON unless it is a string
      */
@@ -326,7 +326,10 @@ class fake_manager {
             'headers' => array_map(fn($values) => implode(', ', $values), $request->getHeaders()),
             'body' => $raw === '' ? null : json_decode($raw, true),
         ];
-        $route = $this->routes[$request->getMethod() . ' ' . $request->getUri()->getPath()] ?? null;
+        // A route may name the query too ("GET /api/v1/sessions?instance_id=7"): it wins over the one for the path.
+        $route = $this->routes[$request->getMethod() . ' ' . $request->getUri()->getPath() . '?' . $request->getUri()->getQuery()]
+            ?? $this->routes[$request->getMethod() . ' ' . $request->getUri()->getPath()]
+            ?? null;
         if ($route === null) {
             return new Response(
                 404,
