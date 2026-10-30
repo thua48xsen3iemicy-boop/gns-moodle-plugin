@@ -37,6 +37,9 @@ class NodeSpec(BaseModel):
     # IOL only: the text of startup-config, put into the node's NVRAM once, when the project is
     # created, before the node first starts (CONTRACTS.md 4.2). Printable ASCII and "\n".
     nvram_config: str | None = Field(default=None, max_length=65536)
+    # QEMU only: the adapter that is the outer port of the "Internet" node. The slot gives it the
+    # SLOT_UPLINK_MAC and links it to a cloud node on eth1 (CONTRACTS.md 4.2). At most one per ticket.
+    uplink_port: int | None = Field(default=None, ge=0, le=15)
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -44,13 +47,15 @@ class NodeSpec(BaseModel):
         # stored in the lab record) and part of the idempotency fingerprint. The default
         # "telnet" must not appear in it: records written before this field existed, and a
         # manifest that omits it, keep their exact representation. The same holds for an absent
-        # nvram_config: only a node the Manager preconfigured carries it.
+        # nvram_config: only a node the Manager preconfigured carries it. The same for uplink_port.
         data = handler(self)
         if isinstance(data, dict):
             if data.get("console") == "telnet":
                 del data["console"]
             if data.get("nvram_config") is None:
                 data.pop("nvram_config", None)
+            if data.get("uplink_port") is None:
+                data.pop("uplink_port", None)
         return data
 
     @model_validator(mode="after")
@@ -70,6 +75,11 @@ class NodeSpec(BaseModel):
             raise ValueError(f"image is required for {self.kind}")
         if self.console == "vnc" and self.kind != "qemu":
             raise ValueError("console vnc is only supported for qemu nodes")
+        if self.uplink_port is not None:
+            if self.kind != "qemu":
+                raise ValueError("uplink_port is only supported for qemu nodes")
+            if self.uplink_port >= self.adapters:
+                raise ValueError("uplink_port must be less than adapters")
         if self.nvram_config is not None:
             if self.kind != "iou":
                 raise ValueError("nvram_config is only supported for iou nodes")
@@ -105,7 +115,10 @@ class DeployTicket(BaseModel):
         names = [n.name for n in self.nodes]
         if len(set(names)) != len(names):
             raise ValueError("Duplicate node names")
-        used = set()
+        if sum(n.uplink_port is not None for n in self.nodes) > 1:
+            raise ValueError("At most one node may have uplink_port")
+        # The uplink port is taken by the cloud link the slot adds itself.
+        used = {(n.name, n.uplink_port, 0) for n in self.nodes if n.uplink_port is not None}
         by_name = {n.name: n for n in self.nodes}
         for link in self.links:
             if link.a.node not in by_name or link.b.node not in by_name:

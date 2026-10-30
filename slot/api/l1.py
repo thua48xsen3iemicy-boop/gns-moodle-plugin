@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from api import uplink
+
 LOG = logging.getLogger("uvicorn.error.l1")
 HEADER = struct.Struct("!HHBBBB")
 
@@ -324,6 +326,9 @@ class Keepalives:
         links = await self.lc.api("GET", f"projects/{pid}/links")
         if not self.allowed(epoch, pid):
             return
+        # The slot's own cloud node of the uplink is not part of the lab.
+        links = uplink.visible_links(labs[0].get("ticket", {}), nodes, links)
+        nodes = uplink.visible_nodes(labs[0].get("ticket", {}), nodes)
         by_id = {n["node_id"]: n for n in nodes}
         iols = {n["node_id"]: n for n in nodes
                 if n.get("node_type") == "iou" and n.get("status") == "started"

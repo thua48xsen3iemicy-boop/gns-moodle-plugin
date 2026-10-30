@@ -547,6 +547,9 @@ class Orchestrator:
         node 2, and so on round the nodes; a lab that does not fit its turn goes to the next node.
         """
         free = await self.store.free_slots()
+        if free and await self._needs_uplink(s):
+            # A free slot is a stopped CT: what it can do comes from slots.json (SlotConfig.features).
+            free = [v for v in free if v in self.settings.slots and "uplink" in self.settings.slots[v].features]
         if not free:
             return []
         resources = await self.pve.cluster_resources()
@@ -826,6 +829,14 @@ class Orchestrator:
             raise Failure("Слот не знает проект студента; нужен оператор", "SLOT_PROJECT_UNKNOWN")
         # The slot's own code goes to the message; the session code stays from the fixed list.
         raise Failure(f"Слот отклонил {action}: {exc.code or exc.status}: {exc.message}"[:500], "SLOT_REJECTED")
+
+    async def _needs_uplink(self, s) -> bool:
+        """Does the ticket of the session have the "Internet" node (NodeSpec.uplink_port)?"""
+        try:
+            ticket, _ = await self._ticket(s)
+        except (LabError, KeyError):
+            return False  # The stage that builds the ticket reports it
+        return any(isinstance(n, dict) and n.get("uplink_port") is not None for n in ticket.get("nodes", []))
 
     async def _ticket(self, s):
         """DeployTicket of this session: the exact ticket of the workspace's first deploy (the slot

@@ -1,0 +1,15 @@
+[Unit]
+Description=Lab uplink: configuration from the node's Ethernet ports
+DefaultDependencies=no
+Before=systemd-networkd.service network-pre.target
+After=systemd-sysctl.service local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/lab-uplink
+Environment=PYTHONPATH=/opt/lab-uplink
+ExecStart=/usr/bin/python3 -m uplink_net.setup
+
+[Install]
+WantedBy=sysinit.target

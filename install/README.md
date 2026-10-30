@@ -266,6 +266,44 @@ $P enable 2101 2102 # на ноде менеджера: только новые 
   проверяет `https://PUBLIC_NAME/api/v1/info` с секретом сайта. Печатает значения для плагина
   (`secrets/moodle/plugin.txt`). Если Moodle не LXC на этой ноде, сертификат нужно поставить вручную.
 
+## Выход лабы в интернет (узел «Интернет»)
+
+Задание — `docs/lab-uplink/TASK.md`. Сервер PPPoE (BRAS) ставится отдельно; здесь — всё до него.
+
+Параметры `lab.conf` (все три — на весь кластер):
+
+| Параметр | Что |
+|---|---|
+| `INET_BRIDGE` | мост Proxmox, на котором лежит общий VLAN выхода |
+| `INET_VLAN` | тег этого VLAN (1–4094) |
+| `BRAS_MACS` | MAC сервера PPPoE через пробел (нужен только фильтру) |
+
+`INET_BRIDGE` и `INET_VLAN` пустые — всё как раньше: у слотов нет `net1`, в `slot.env` нет `SLOT_UPLINK_MAC`.
+Заданы — `template` создаёт у шаблона `net1` (`name=eth1,bridge=…,tag=…,ip=manual`, без `firewall=1`: его `macfilter`
+отбросил бы кадры облачной ВМ), `_clone-slot` переписывает `net1` клона без `hwaddr`, а `slot` кладёт в `slot.env`
+`SLOT_UPLINK_MAC=02:6c:61:XX:XX:XX`, где `XX:XX:XX` — VMID слота (повторный запуск даёт то же значение).
+Шаблон, собранный раньше без `net1`, `_clone-slot` отклоняет с подсказкой `pct set <шаблон> -net1 …`.
+
+Порядок:
+
+```sh
+# 1. lab.conf: INET_BRIDGE, INET_VLAN, BRAS_MACS; шаблон со вторым адаптером (новый или pct set …-net1)
+# 2. на КАЖДОМ узле со слотами, до первого запуска лаб с интернетом:
+/mnt/pve/cfs/gns3-ro/install/lab-uplink-filter --check     # показать правила, ничего не применяя
+/mnt/pve/cfs/gns3-ro/install/lab-uplink-filter --install   # применить и включить lab-uplink-filter.service (после перезагрузки)
+# 3. слоты: $P slot  (пересоздаёт slot.env с SLOT_UPLINK_MAC), $P snapshot
+```
+
+`lab-uplink-filter` (nftables, семейство `bridge`, таблица `lab_uplink`) работает с портами слотов `veth*i1` моста:
+от них в VLAN проходит только PPPoE (`0x8863`/`0x8864`) на MAC BRAS или широковещательный (PADI), к ним — только PPPoE
+от MAC BRAS, остальное отбрасывается, поэтому слоты друг друга не видят. Физический аплинк узла и порты BRAS не
+затрагиваются. При vlan-aware мосте `INET_BRIDGE` — сам мост (фильтр проверяет, что `veth*i1` стоят в `INET_VLAN`
+как PVID); иначе — мост VLAN, который создаёт Proxmox (`vmbr1v3000`): передайте его в `--bridge`. Скрипт идемпотентен:
+пересоздаёт только свою таблицу. Параметры берутся из `lab.conf` или из `--bridge`, `--vlan`, `--bras-macs`.
+
+Проверка: `nft list table bridge lab_uplink`; `tcpdump -e -i <мост> ether proto 0x8863` — PADI узла «Интернет»; с `eth1`
+слота `arping` на другой слот — тишина. Нужен модуль ядра `nft_meta_bridge` (правила используют `meta ibrname`).
+
 ## Смотреть базу менеджера: `lab-db`
 
 `lab-db` запускают от root на ноде, где работает LXC менеджера (`MANAGER_VMID` из `lab.conf`). Он заходит

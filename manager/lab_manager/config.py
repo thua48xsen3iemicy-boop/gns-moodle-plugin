@@ -10,6 +10,7 @@ import re
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -87,6 +88,9 @@ class SlotConfig(BaseModel):
     port: int = Field(default=8080, ge=1, le=65535)
     api_token: str = Field(min_length=32, repr=False)
     console_token: str = Field(default="", repr=False)
+    # What the slot can do beyond the basics (CONTRACTS.md 7), set by the administrator: a free slot is a
+    # stopped CT, so the manager cannot ask it. Only "uplink" is read: labs with NodeSpec.uplink_port go to such slots.
+    features: list[Literal["uplink"]] = Field(default_factory=list)
 
 
 def _int(env, name, default, low=1, high=10**9):

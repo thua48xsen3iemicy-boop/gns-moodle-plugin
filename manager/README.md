@@ -1,4 +1,9 @@
-# Lab Manager — 0.12.0
+# Lab Manager — 0.13.0
+
+Узел «Интернет»: `uplink_port` узла лабы (`gns3lab.lab/*` и эталонная `ticket.json`) идёт в `NodeSpec` слота, лаба с ним
+запускается только на слотах с `"features": ["uplink"]` в `slots.json` (`slots.json.example`), иначе `409 unsupported_lab`.
+Новые коды проверки лабы — `too_many_uplinks`, `uplink_port_in_use` (`docs/CONTRACTS.md` §2.5, §2.6). В `examples/images.json` —
+образ `lab-uplink` с `console_type: none`.
 
 Слот 0.12.0 публикует `iol.l1/1`: менеджер сохраняет его обычным журналом фактов,
 оставляет конфигурационные `interfaces` и добавляет `l1_ports` с независимым

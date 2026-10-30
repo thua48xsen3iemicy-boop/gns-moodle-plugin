@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api import iol_nvram
+from api import iol_nvram, uplink
 from api.client import call, get_lifecycle
 from api.models import DeployTicket, NodeSpec
 
@@ -50,6 +50,11 @@ def node_payload(spec: NodeSpec, node_id: str):
                 "hda_disk_interface": spec.disk_interface,
                 "linked_clone": True,
                 "options": options,
+                **(
+                    {"mac_address": uplink.base_mac(spec.uplink_port, spec.adapters)}
+                    if spec.uplink_port is not None
+                    else {}
+                ),
             },
         )
     elif spec.kind == "iou":
@@ -72,6 +77,16 @@ def node_payload(spec: NodeSpec, node_id: str):
     return common
 
 
+def require_uplink(ticket: DeployTicket):
+    """A ticket with uplink_port needs the `uplink` feature of this slot: 422, nothing is created."""
+    if uplink.spec_of(ticket) is not None and not uplink.enabled():
+        raise HTTPException(
+            422,
+            "uplink_port needs the uplink feature of the slot: "
+            "SLOT_UPLINK_MAC (locally administered unicast MAC) and the eth1 interface",
+        )
+
+
 @router.get("")
 async def list_labs(request: Request):
     return await call(request, "GET", "projects")
@@ -91,14 +106,20 @@ async def create_project(request: Request, ticket: DeployTicket):
         return {
             "result": "resumed",
             "project_id": project_id,
-            "nodes": await call(request, "GET", f"projects/{project_id}/nodes"),
+            "nodes": uplink.visible_nodes(
+                ticket, await call(request, "GET", f"projects/{project_id}/nodes")
+            ),
         }
     # Do not overwrite another project just because it happens to have the same name.
     if any(p["name"] == ticket.name for p in existing):
         raise HTTPException(
             409, "Project name already exists; specify its project_id to resume"
         )
+    require_uplink(ticket)
     prepared = [(node, node_payload(node, str(uuid4()))) for node in ticket.nodes]
+    cloud = None
+    if uplink.spec_of(ticket) is not None:
+        cloud = uplink.cloud_payload(str(uuid4()))
     QGA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     project = await call(
         request,
@@ -123,6 +144,9 @@ async def create_project(request: Request, ticket: DeployTicket):
                 from api.lifecycle import LabError
 
                 raise LabError(exc.code, str(exc)) from exc
+    cloud_id = None
+    if cloud is not None:
+        cloud_id = (await call(request, "POST", f"projects/{project_id}/nodes", cloud))["node_id"]
     for link in ticket.links:
         payload = {
             "nodes": [
@@ -135,11 +159,31 @@ async def create_project(request: Request, ticket: DeployTicket):
             ]
         }
         await call(request, "POST", f"projects/{project_id}/links", payload)
+    if cloud_id is not None:
+        owner = uplink.spec_of(ticket)
+        await call(
+            request,
+            "POST",
+            f"projects/{project_id}/links",
+            {
+                "nodes": [
+                    {"node_id": ids[owner.name], "adapter_number": owner.uplink_port, "port_number": 0},
+                    {"node_id": cloud_id, "adapter_number": 0, "port_number": 0},
+                ]
+            },
+        )
     return {
         "result": "created",
         "project_id": project["project_id"],
-        "nodes": await call(request, "GET", f"projects/{project_id}/nodes"),
+        "nodes": uplink.visible_nodes(
+            ticket, await call(request, "GET", f"projects/{project_id}/nodes")
+        ),
     }
+
+
+def lab_ticket(request: Request, pid: str):
+    lab = get_lifecycle(request).get("lab", pid)
+    return lab["ticket"] if lab else {}
 
 
 @router.get("/{project_id}")
@@ -147,20 +191,24 @@ async def status(request: Request, project_id: UUID):
     pid = str(project_id)
     project = await call(request, "GET", f"projects/{pid}")
     nodes = await call(request, "GET", f"projects/{pid}/nodes")
-    return {"project": project, "nodes": nodes}
+    return {"project": project, "nodes": uplink.visible_nodes(lab_ticket(request, pid), nodes)}
 
 
 @router.get("/{project_id}/topology")
 async def topology(request: Request, project_id: UUID):
     pid = str(project_id)
+    ticket = lab_ticket(request, pid)
+    nodes = await call(request, "GET", f"projects/{pid}/nodes")
+    links = await call(request, "GET", f"projects/{pid}/links")
     return {
-        "nodes": await call(request, "GET", f"projects/{pid}/nodes"),
-        "links": await call(request, "GET", f"projects/{pid}/links"),
+        "nodes": uplink.visible_nodes(ticket, nodes),
+        "links": uplink.visible_links(ticket, nodes, links),
     }
 
 
 @router.post("/deploy", status_code=202)
 async def deploy(request: Request, ticket: DeployTicket):
+    require_uplink(ticket)
     return get_lifecycle(request).submit(
         "deploy", ticket=ticket, key=request.headers.get("Idempotency-Key")
     )
