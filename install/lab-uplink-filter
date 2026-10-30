@@ -1,0 +1,133 @@
+#!/bin/bash
+# Bridge filter of the labs' internet uplink (docs/lab-uplink/TASK.md): nftables, family bridge, on every
+# Proxmox node with slots. Slot ports of the uplink VLAN (veth<vmid>i1, the net1 of the slots) may only carry
+# PPPoE (0x8863 discovery, 0x8864 session): from a slot to the BRAS (or PADI broadcast), to a slot from the BRAS.
+# Everything else of a slot port is dropped, so two slots never see each other. The node's uplink to the physical
+# network and the BRAS ports are not touched. Repeatable: the script deletes and recreates only its own table.
+#
+#   install/lab-uplink-filter [--check] [--install] [--bridge BR] [--vlan TAG] [--bras-macs "MAC MAC"]
+#
+# Without options: INET_BRIDGE, INET_VLAN and BRAS_MACS from ${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}.
+# --check prints the rules and applies nothing; --install also writes and enables lab-uplink-filter.service,
+# so the filter returns after a reboot. Needs the bridge that holds the slot ports: with a vlan-aware bridge it
+# is INET_BRIDGE itself, otherwise Proxmox's per-VLAN bridge (vmbr1v3000).
+set -euo pipefail
+
+CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
+TABLE=lab_uplink
+SLOT_PORT='veth*i1'
+BCAST=ff:ff:ff:ff:ff:ff
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,/^set -e/p' "$0" | sed -n '/^#/s/^# \{0,1\}//p'; }
+
+rules() {  # rules <bridge> <vlan> <mac...>: the whole nftables script
+  local bridge=$1 vlan=$2 macs
+  shift 2
+  macs=$(printf '%s, ' "$@")
+  macs=${macs%, }
+  # meta protocol, not "ether type": on a vlan-aware bridge the tag is already taken off the frame's header.
+  cat <<RULES
+table bridge $TABLE
+delete table bridge $TABLE
+table bridge $TABLE {
+	comment "lab uplink: slot ports $SLOT_PORT of $bridge (VLAN $vlan) carry PPPoE to the BRAS only"
+	set bras {
+		type ether_addr
+		elements = { $macs }
+	}
+	set to_bras {
+		type ether_addr
+		elements = { $BCAST, $macs }
+	}
+	chain from_slot {
+		meta protocol { 0x8863, 0x8864 } ether daddr @to_bras accept
+		drop
+	}
+	chain to_slot {
+		meta protocol { 0x8863, 0x8864 } ether saddr @bras accept
+		drop
+	}
+	chain forward {
+		type filter hook forward priority -200; policy accept;
+		meta ibrname "$bridge" iifname "$SLOT_PORT" jump from_slot
+		meta obrname "$bridge" oifname "$SLOT_PORT" jump to_slot
+	}
+}
+RULES
+}
+
+check_ports() {  # A vlan-aware bridge: the existing slot ports must sit in the uplink VLAN, or they would be filtered
+  local bridge=$1 vlan=$2 p bad=()
+  [[ $(cat "/sys/class/net/$bridge/bridge/vlan_filtering" 2>/dev/null || echo 0) == 1 ]] || return 0
+  for p in /sys/class/net/"$bridge"/brif/veth*i1; do
+    [[ -e $p ]] || continue
+    bridge vlan show dev "${p##*/}" | grep -q "[[:space:]]$vlan .*PVID" || bad+=("${p##*/}")
+  done
+  ((${#bad[@]} == 0)) || die "ports of $bridge not in VLAN $vlan as PVID: ${bad[*]} (net1 of another network?)"
+}
+
+install_unit() {
+  local self args=$*
+  self=$(readlink -f "$0")
+  cat >/etc/systemd/system/lab-uplink-filter.service <<UNIT
+[Unit]
+Description=Lab uplink bridge filter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$self $args
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable lab-uplink-filter.service >/dev/null
+}
+
+main() {
+  local check=0 install=0 bridge='' vlan='' macs='' conf_macs
+  while (($#)); do
+    case $1 in
+      --check) check=1 ;;
+      --install) install=1 ;;
+      --bridge) bridge=${2:?--bridge needs a value}; shift ;;
+      --vlan) vlan=${2:?--vlan needs a value}; shift ;;
+      --bras-macs) macs=${2:?--bras-macs needs a value}; shift ;;
+      -h | --help) usage; exit 0 ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    shift
+  done
+  if [[ -z $bridge || -z $vlan || -z $macs ]]; then
+    [[ -f $CONF ]] || die "no $CONF and no --bridge/--vlan/--bras-macs"
+    # shellcheck source=/dev/null
+    conf_macs=$(. "$CONF" && printf '%s\n%s\n%s' "${INET_BRIDGE:-}" "${INET_VLAN:-}" "${BRAS_MACS:-}")
+    : "${bridge:=$(sed -n 1p <<<"$conf_macs")}" "${vlan:=$(sed -n 2p <<<"$conf_macs")}" "${macs:=$(sed -n 3p <<<"$conf_macs")}"
+  fi
+  [[ $bridge =~ ^[A-Za-z][A-Za-z0-9_.-]{0,14}$ ]] || die "bridge must be a Linux bridge name (INET_BRIDGE)"
+  [[ $vlan =~ ^[0-9]{1,4}$ ]] && ((10#$vlan >= 1 && 10#$vlan <= 4094)) || die "VLAN must be 1-4094 (INET_VLAN)"
+  vlan=$((10#$vlan))
+  local mac list=()
+  for mac in $macs; do
+    [[ $mac =~ ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]] || die "invalid MAC in BRAS_MACS: $mac"
+    mac=${mac,,}
+    [[ $mac != "$BCAST" && ${mac:1:1} =~ [02468ace] ]] || die "BRAS_MACS: $mac is not a unicast address"
+    list+=("$mac")
+  done
+  ((${#list[@]})) || die "BRAS_MACS is empty: the filter would cut off every lab (set it in $CONF)"
+  if ((check)); then rules "$bridge" "$vlan" "${list[@]}"; return 0; fi
+  [[ $EUID == 0 ]] || die "run as root on the Proxmox node"
+  type -P nft >/dev/null || die "nft not found (apt install nftables)"
+  [[ -d /sys/class/net/$bridge/bridge ]] || die "$bridge is not a bridge of this node"
+  check_ports "$bridge" "$vlan"
+  rules "$bridge" "$vlan" "${list[@]}" | nft -f -
+  printf '==> uplink filter on %s (VLAN %s): %d BRAS MAC(s)\n' "$bridge" "$vlan" "${#list[@]}"
+  ((install == 0)) || install_unit --bridge "$bridge" --vlan "$vlan" --bras-macs "'${list[*]}'"
+}
+
+[[ ${BASH_SOURCE[0]} != "$0" ]] || main "$@"

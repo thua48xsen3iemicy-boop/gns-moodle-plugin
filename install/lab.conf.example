@@ -74,3 +74,13 @@ CT_NAMESERVER=10.10.12.1
 # Name of the snapshot a slot is rolled back to after every session (the agent's LAB_CLEAN_SNAPSHOT). A letter,
 # then letters, digits, _ and -. 'slot' and 'snapshot' take it, 'agent' passes the name to the agent.
 #CLEAN_SNAPSHOT=lab-clean
+
+# Internet uplink of the labs (docs/lab-uplink/TASK.md). Both set: the slot template gets a second NIC net1
+# (eth1, no IP) on this bridge and VLAN, and every slot.env gets its own SLOT_UPLINK_MAC. The VLAN is shared by
+# all nodes and ends at the PPPoE server (BRAS), which the owner installs separately. Run install/lab-uplink-filter
+# on every node before the first lab with internet. Both empty: no net1, the slots behave as before.
+# A template built before this setting has no net1: run 'pct set <template> -net1 name=eth1,bridge=<bridge>,tag=<vlan>,ip=manual'.
+#INET_BRIDGE=vmbr1
+#INET_VLAN=3000
+# MAC addresses of the BRAS (PPPoE server) in the uplink VLAN, space separated: lab-uplink-filter lets the slots talk to them only.
+#BRAS_MACS="aa:bb:cc:00:00:01"

@@ -75,6 +75,13 @@ load_conf() {
   CLEAN_SNAPSHOT=${CLEAN_SNAPSHOT:-lab-clean}  # LAB_CLEAN_SNAPSHOT of the agent
   [[ $CLEAN_SNAPSHOT =~ ^[A-Za-z][A-Za-z0-9_-]{0,39}$ ]] ||
     die "CLEAN_SNAPSHOT must be a Proxmox snapshot name: a letter, then letters, digits, _ and -, up to 40"
+  INET_BRIDGE=${INET_BRIDGE:-} INET_VLAN=${INET_VLAN:-}  # The labs' internet uplink: net1 of the slots (docs/lab-uplink/TASK.md)
+  [[ -z $INET_BRIDGE && -z $INET_VLAN ]] || {
+    [[ $INET_BRIDGE =~ ^[A-Za-z][A-Za-z0-9_.-]{0,14}$ ]] || die "INET_BRIDGE must be a Proxmox bridge name, set together with INET_VLAN"
+    [[ $INET_VLAN =~ ^[0-9]{1,4}$ ]] && ((10#$INET_VLAN >= 1 && 10#$INET_VLAN <= 4094)) ||
+      die "INET_VLAN must be a VLAN tag 1-4094, set together with INET_BRIDGE"
+    INET_VLAN=$((10#$INET_VLAN))
+  }
   SLOT_CLONE=${SLOT_CLONE:-full}
   [[ $SLOT_CLONE == full || $SLOT_CLONE == linked ]] || die "SLOT_CLONE must be full or linked, got '$SLOT_CLONE'"
   [[ $REPO_DIR == "$CEPH_ROOT"/* ]] || die "REPO_DIR must be below CEPH_ROOT"
@@ -398,6 +405,10 @@ render_slot_env() {  # From the slot's own example, so new settings keep their d
       -e "s|^SLOT_LISTEN_HOST=.*|SLOT_LISTEN_HOST=$(ct_ip "$id")|" \
       "$REPO_DIR/slot/slot.env.example" >"$f.tmp"
   grep -q "^SLOT_LISTEN_HOST=$(ct_ip "$id")\$" "$f.tmp" || die "slot.env.example has no SLOT_LISTEN_HOST"
+  if inet_on; then  # The MAC of the "Internet" node's outer port: from the VMID, so it is the same on every run
+    sed -i "s|^SLOT_UPLINK_MAC=.*|SLOT_UPLINK_MAC=$(uplink_mac "$id")|" "$f.tmp"
+    grep -q "^SLOT_UPLINK_MAC=" "$f.tmp" || die "slot.env.example has no SLOT_UPLINK_MAC"
+  fi
   mv "$f.tmp" "$f"
 }
 
@@ -1006,6 +1017,18 @@ net0() {  # net0 <ip|dhcp>: the network line of a CT the script creates
   echo "name=eth0,bridge=$CT_BRIDGE,ip=$ip${CT_VLAN:+,tag=$CT_VLAN}"
 }
 
+inet_on() { [[ -n ${INET_BRIDGE:-} ]]; }
+
+net1() {  # The second NIC of the slots (eth1, no IP): the labs' uplink. No firewall=1: its macfilter would drop the
+          # frames of the cloud node, whose MAC is not the hwaddr of net1. The VLAN is guarded by lab-uplink-filter.
+  echo "name=eth1,bridge=$INET_BRIDGE,tag=$INET_VLAN,ip=manual"
+}
+
+uplink_mac() {  # uplink_mac <vmid>: 02:6c:61 (locally administered unicast) and the VMID in the low three bytes
+  [[ $1 =~ ^[0-9]+$ ]] && (($1 < 16777216)) || die "VMID $1 does not fit SLOT_UPLINK_MAC (up to 16777215)"
+  printf '02:6c:61:%02x:%02x:%02x\n' $(($1 >> 16 & 255)) $(($1 >> 8 & 255)) $(($1 & 255))
+}
+
 CT_DNS=()  # pct create options for DNS, if lab.conf sets them
 ct_dns() {
   CT_DNS=()
@@ -1135,6 +1158,8 @@ journalctl --rotate >/dev/null 2>&1 || true
 journalctl --vacuum-time=1s >/dev/null 2>&1 || true
 '
 
+have_kvm() { [[ -c /dev/kvm ]]; }
+
 cmd_template() {
   [[ -n $TEMPLATE_VMID ]] || die "SLOT_TEMPLATE is not set in $CONF"
   [[ $TEMPLATE_NODE == "$NODE" ]] || die "the template is planned on $TEMPLATE_NODE: run this step there"
@@ -1145,13 +1170,15 @@ cmd_template() {
     if pct config "$id" | grep -q '^template: 1'; then log "slot template $id exists"; return 0; fi
     die "CT $id exists and is not a template (a failed build?): check it, destroy it ('pct destroy $id') and repeat"
   fi
-  [[ -c /dev/kvm ]] || die "this node has no /dev/kvm: the slots run QEMU with KVM"
+  have_kvm || die "this node has no /dev/kvm: the slots run QEMU with KVM"
   vol=$(ostemplate)
   ct_dns
+  local net1_opt=()
+  ! inet_on || net1_opt=(--net1 "$(net1)")  # Clones inherit it; the uplink is the same for all slots
   log "slot template $id from $vol"
   pct create "$id" "$vol" --hostname lab-slot-template --unprivileged 1 --features nesting=1 --ostype ubuntu \
     --cores 2 --memory 4096 --swap 0 --rootfs "$CT_STORAGE:${SLOT_DISK_GB:-32}" --net0 "$(net0 "${PLAN_IP[$id]}")" \
-    "${CT_DNS[@]}" --onboot 0 --description "Lab slot template, GNS3 $GNS3_VERSION. Created by install/lab-provision."
+    "${net1_opt[@]}" "${CT_DNS[@]}" --onboot 0 --description "Lab slot template, GNS3 $GNS3_VERSION. Created by install/lab-provision."
   ct_up "$id"
   ct_sh "$id" "$TEMPLATE_SCRIPT" GNS3_ID="${SLOT_GNS3_ID:-1500}" GNS3_VERSION="$GNS3_VERSION"
   gid=$(ct_sh "$id" 'getent group kvm | cut -d: -f3')
@@ -1187,6 +1214,10 @@ cmd_clone_slot() {  # On the template's node: a clone (SLOT_CLONE), onto the slo
   [[ $TEMPLATE_NODE == "$NODE" ]] || die "run on the template's node $TEMPLATE_NODE"
   if ct_node "$id" >/dev/null; then log "slot CT $id exists"; return 0; fi
   pct config "$t" 2>/dev/null | grep -q '^template: 1' || die "slot template $t is missing: run 'lab-provision template'"
+  # A template built before INET_BRIDGE was set has no net1: say so instead of cloning slots without an uplink.
+  if inet_on && ! pct config "$t" | grep -q '^net1:'; then
+    die "slot template $t has no net1 (INET_BRIDGE is set): pct set $t -net1 $(net1)"
+  fi
   log "slot CT $id on $node from template $t ($SLOT_CLONE clone)"
   local opts=(--hostname "slot-$id" --description "Lab slot. Created by install/lab-provision.")
   # A linked clone shares the template's disk (a snapshot on RBD): seconds instead of copying all of it.
@@ -1197,7 +1228,10 @@ cmd_clone_slot() {  # On the template's node: a clone (SLOT_CLONE), onto the slo
   [[ $node == "$NODE" ]] || opts+=(--target "$node")
   pct clone "$t" "$id" "${opts[@]}"
   # The config now lives on $node: pvesh reaches it from here. A net0 without hwaddr gets a new MAC.
-  pvesh set "/nodes/$node/lxc/$id/config" --net0 "$(net0 "${PLAN_IP[$id]}")" --onboot 0 --tags 'labslot;labprov'
+  # net1 too: a clone may keep the template's MAC, and the MACs must be unique in the shared VLAN.
+  local net1_opt=()
+  ! inet_on || net1_opt=(--net1 "$(net1)")
+  pvesh set "/nodes/$node/lxc/$id/config" --net0 "$(net0 "${PLAN_IP[$id]}")" "${net1_opt[@]}" --onboot 0 --tags 'labslot;labprov'
 }
 
 cmd_create() {
@@ -1422,4 +1456,4 @@ main() {
   esac
 }
 
-main "$@"
+[[ ${BASH_SOURCE[0]} != "$0" ]] || main "$@"  # Sourced (install/tests): only the functions
