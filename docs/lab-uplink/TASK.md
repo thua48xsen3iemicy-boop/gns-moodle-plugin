@@ -37,7 +37,9 @@
 
 1. Параметры в `lab.conf.example`: `INET_BRIDGE` (мост Proxmox) и `INET_VLAN` (тег). Оба пустые — `net1` не создаётся,
    поведение как сейчас.
-2. `cmd_template`: `--net1 name=eth1,bridge=$INET_BRIDGE,tag=$INET_VLAN,ip=manual,firewall=1`.
+2. `cmd_template`: `--net1 name=eth1,bridge=$INET_BRIDGE,tag=$INET_VLAN,ip=manual`, **без `firewall=1`**: при включённом
+   фаерволе CT Proxmox по умолчанию включает `macfilter` и отбросил бы кадры облачной ВМ (её MAC не равен `hwaddr`
+   `net1`). VLAN защищает фильтр из п. 4.
    `cmd_clone_slot`: переписать `net1` без `hwaddr`, как это уже делается с `net0`. Шаблон, созданный раньше без `net1`, —
    понятная ошибка с подсказкой (`pct set <шаблон> -net1 …`), а не молчание.
 3. `render_slot_env`: `SLOT_UPLINK_MAC` — локально администрируемый unicast `02:6c:61:XX:XX:XX`, где младшие три байта —
