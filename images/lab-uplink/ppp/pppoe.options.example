@@ -1,0 +1,4 @@
+# Example of /etc/lab-uplink/pppoe.options (root, 0600). Never commit the real file.
+# tools/install_guest.py writes it from --pppoe-user and --pppoe-password.
+user "REPLACE_WITH_PPPOE_USER"
+password "REPLACE_WITH_PPPOE_PASSWORD"

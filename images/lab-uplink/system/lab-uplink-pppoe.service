@@ -1,0 +1,14 @@
+[Unit]
+Description=Lab uplink: PPPoE client
+Requires=lab-uplink-setup.service
+After=lab-uplink-setup.service systemd-networkd.service lab-uplink-nft.service
+Wants=lab-uplink-nft.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/pppd file /run/lab-uplink/pppd.options
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
