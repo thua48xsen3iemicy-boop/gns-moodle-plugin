@@ -334,7 +334,7 @@ def slot_identity(root, entries):
     nested = read_json(Path(root) / "slot/release.json")
     require(isinstance(nested, dict) and set(nested) == {"version", "build_id", "files"},
             "Unsupported Slot manifest")
-    require(nested["version"] == "0.12.0" and isinstance(nested["build_id"], str)
+    require(nested["version"] == "0.13.0" and isinstance(nested["build_id"], str)
             and nested["build_id"] and isinstance(nested["files"], dict)
             and SLOT_REQUIRED <= nested["files"].keys(), "Incomplete Slot identity")
     require(nested["files"] == slot_projection(entries), "Nested Slot manifest disagrees with payload")
@@ -618,6 +618,7 @@ SOURCE_FILES = (
     'manager/tests/test_slot_tls.py',
     'manager/tests/test_storage.py',
     'manager/tests/test_store.py',
+    'manager/tests/test_uplink.py',
     'manager/tests/test_vnc.py',
     'slot/AGENTS.md',
     'slot/CLAUDE.md',
@@ -637,6 +638,7 @@ SOURCE_FILES = (
     'slot/api/models.py',
     'slot/api/nodes.py',
     'slot/api/qga.py',
+    'slot/api/uplink.py',
     'slot/docs/ALIGNMENT.md',
     'slot/examples/cisco-3x2.json',
     'slot/lab-slot.service',
@@ -659,6 +661,7 @@ SOURCE_FILES = (
     'slot/tests/test_reliability.py',
     'slot/tests/test_slot.py',
     'slot/tests/test_student_state.py',
+    'slot/tests/test_uplink.py',
     'slot/tests/test_vnc.py',
     'slot/tools/check_slot.py',
 )

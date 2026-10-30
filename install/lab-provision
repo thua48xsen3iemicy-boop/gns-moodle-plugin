@@ -380,7 +380,7 @@ EOF
 render_json() {  # sites.json and slots.json; JSON is written by Python, never by string splicing
   local pairs=() id
   for id in "${SLOT_IDS[@]}"; do pairs+=("$id=$(ct_ip "$id")"); done
-  python3 - "$S" "$MOODLE_URL" "$SITE_SLUG" "${pairs[@]}" <<'PY'
+  SLOT_FEATURES=${INET_BRIDGE:+uplink} python3 - "$S" "$MOODLE_URL" "$SITE_SLUG" "${pairs[@]}" <<'PY'
 import json, os, sys
 s, url, slug, *pairs = sys.argv[1:]
 read = lambda *p: open(os.path.join(s, *p)).read().strip()
@@ -393,7 +393,9 @@ def write(name, data):
 write("sites.json", [{"url": url, "slug": slug, "secret": read("manager", "site-secret")}])
 write("slots.json", [{"vmid": int(vmid), "address": ip, "port": 8080,
                       "api_token": read("slots", vmid, "api-token"),
-                      "console_token": read("slots", vmid, "console-token")}
+                      "console_token": read("slots", vmid, "console-token"),
+                      # The manager sends labs with an "Internet" node only to such slots (CONTRACTS 7)
+                      **({"features": os.environ["SLOT_FEATURES"].split()} if os.environ.get("SLOT_FEATURES") else {})}
                      for vmid, ip in (p.split("=", 1) for p in pairs)])
 PY
 }

@@ -170,3 +170,20 @@ def test_filter_reads_lab_conf(tmp_path):
 def test_filter_refuses_bad_parameters(args, tmp_path):
     r = run_filter(*args, env={"PATH": "/usr/bin:/bin", "LAB_CONF": str(tmp_path / "none")})
     assert r.returncode != 0 and r.stdout == ""
+
+
+@pytest.mark.parametrize("inet,features", [("INET_BRIDGE=vmbr1 INET_VLAN=3000", ["uplink"]), ("INET_BRIDGE= INET_VLAN=", None)])
+def test_slots_json_announces_uplink(tmp_path, inet, features):
+    import json
+
+    s = tmp_path / "secrets"
+    (s / "manager").mkdir(parents=True)
+    (s / "manager/site-secret").write_text("site")
+    (s / "slots/2001").mkdir(parents=True)
+    (s / "slots/2001/api-token").write_text("api")
+    (s / "slots/2001/console-token").write_text("con")
+    r = bash(tmp_path, f'{inet}; S={s} MOODLE_URL=https://m SITE_SLUG=main SLOT_IDS=(2001); render_json')
+    assert r.returncode == 0, r.stderr
+    slot = json.loads((s / "manager/slots.json").read_text())[0]
+    assert slot.get("features") == features
+    assert slot["vmid"] == 2001 and slot["api_token"] == "api"
