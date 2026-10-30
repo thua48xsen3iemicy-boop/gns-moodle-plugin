@@ -211,6 +211,20 @@ final class course_overview_test extends \advanced_testcase {
         $this->assertTrue($this->cell($result, $second, $this->other)['observable'], 'the second lab has no groups');
     }
 
+    public function test_a_teacher_without_a_group_sees_nobody_in_a_lab_with_separate_groups(): void {
+        $gen = $this->getDataGenerator();
+        $theirs = $gen->create_group(['courseid' => $this->course->id]);
+        $gen->create_group_member(['groupid' => $theirs->id, 'userid' => $this->student->id]);
+        $this->prohibit_access_all_groups();
+        $this->setUser($this->teacher);
+        $this->separate_groups($this->lab);
+
+        $result = $this->overview();
+
+        $this->assertSame([], $result['students'], 'no group of the teacher, no student to observe');
+        $this->assertSame([], $result['cells']);
+    }
+
     public function test_a_lab_without_observe_is_not_in_the_answer(): void {
         global $DB;
         $second = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id]);

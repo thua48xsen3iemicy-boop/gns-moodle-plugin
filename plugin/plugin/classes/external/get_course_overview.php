@@ -93,9 +93,11 @@ class get_course_overview extends external_api {
                 $sessions = $entry->sessions;
             }
             $labs[] = $lab;
+            // The students are enrolled with mod/gns3lab:use already (course_labs::students), only the groups are left.
+            $shared = array_flip($access->share_group(array_map('intval', array_keys($found))));
             foreach ($found as $user) {
                 $students[$user->id] = $user;
-                $observable = $access->can_observe_user((int) $user->id);
+                $observable = isset($shared[(int) $user->id]);
                 $cells[$cm->id][$user->id] = [
                     'cmid' => $cm->id,
                     'userid' => (int) $user->id,
