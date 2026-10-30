@@ -363,6 +363,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             raise ApiError(409, "lab_invalid", str(exc)) from exc
         except StorageError as exc:
             raise ApiError(400, "invalid_request", str(exc)) from exc
+        nodes = (checked.definition["nodes"] if checked else lab.ticket["nodes"])
+        if any(n.get("uplink_port") is not None for n in nodes) and not any(
+                "uplink" in slot.features for slot in settings.slots.values()):
+            raise ApiError(409, "unsupported_lab", "The lab has a node with an internet uplink, no slot offers it")
         requested = body.options.max_duration if body.options else None
         max_duration = min(requested, settings.max_duration_limit) if requested else settings.default_max_duration
         s, created = await store.create_session(

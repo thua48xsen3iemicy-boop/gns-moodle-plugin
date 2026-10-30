@@ -35,7 +35,7 @@ MAX_LINKS = 1000
 COORD = 100_000
 TOP_KEYS = {"format", "title", "nodes", "links"}
 TOP_KEYS_2 = TOP_KEYS | {"segments"}
-NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters"}
+NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port"}
 ENDPOINT_KEYS = {"node", "adapter", "port"}
 CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "duplicate_name", "unknown_image",
          "image_not_allowed", "out_of_range", "unknown_node", "bad_port", "port_in_use", "self_link",
@@ -45,7 +45,9 @@ CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "dup
          "unsupported_image", "subnet_too_small", "bad_subnet", "vlan_out_of_range", "host_out_of_range",
          "host_in_use", "multiple_gateways", "duplicate_segment",
          # lab/2, stage 3
-         "gateway_port_conflict")
+         "gateway_port_conflict",
+         # uplink node
+         "too_many_uplinks", "uplink_port_in_use")
 
 
 class LabInvalid(ValueError):
@@ -140,7 +142,7 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
     if len(links) > MAX_LINKS:
         problem("links", "too_large", f"max {MAX_LINKS} links")
 
-    out_nodes, by_name = [], {}
+    out_nodes, by_name, uplinks = [], {}, []
     for i, node in enumerate(nodes[:MAX_NODES]):
         path = f"nodes[{i}]"
         if not isinstance(node, dict):
@@ -182,6 +184,19 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
                     problem(f"{path}.{key}", "out_of_range", f"{bounds.min}..{bounds.max}")
                 else:
                     out[key] = value
+        if "uplink_port" in node and image is not None:
+            # The outer port of the "Internet" node (CONTRACTS 4.2): QEMU only, and nothing is linked to it.
+            value = node["uplink_port"]
+            adapters = effective({**node, **out}, image)["adapters"] if image.kind == "qemu" else 0
+            if image.kind != "qemu":
+                problem(f"{path}.uplink_port", "unknown_field", f"{image.id} is not a qemu image")
+            elif not is_int(value) or not 0 <= value < adapters:
+                problem(f"{path}.uplink_port", "out_of_range", f"0..{adapters - 1}")
+            elif uplinks:
+                problem(f"{path}.uplink_port", "too_many_uplinks", "one node with uplink_port per lab")
+            else:
+                out["uplink_port"] = value
+                uplinks.append((name, value))
         if ok and image is not None:
             out = {"name": name, "image": image.id, **out}
             by_name[name] = out
@@ -215,6 +230,9 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
                 problem(epath, "bad_port", f"adapter 0..{adapters - 1}, port 0..{PORTS_PER_ADAPTER[image.kind] - 1}")
                 continue
             key = (node_name, adapter, port)
+            if "uplink_port" in target and (adapter, port) == (target["uplink_port"], 0):
+                problem(epath, "uplink_port_in_use", f"{node_name} {adapter}/{port} is the uplink port")
+                continue
             if key in used:
                 problem(epath, "port_in_use", f"{node_name} {adapter}/{port}")
                 continue
@@ -282,6 +300,10 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
             spec.update(cpus=values["cpus"], adapters=values["adapters"])
         elif image.kind == "iou":
             spec["ethernet_adapters"] = values["adapters"]
+        if "uplink_port" in node:
+            # Only the "Internet" node carries it: other nodes, and the canonical JSON and lab_revision of
+            # labs without one, do not change (CONTRACTS 4.2).
+            spec["uplink_port"] = node["uplink_port"]
         if image.console_type == "vnc":
             # Only vnc nodes carry the field: a telnet node stays byte for byte what it was, so the
             # canonical JSON and the lab_revision of existing labs do not change (CONTRACTS 4.2).

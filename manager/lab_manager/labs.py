@@ -47,6 +47,24 @@ def _load_json(path: Path):
         raise LabError(f"{path.name} is unreadable or not JSON") from exc
 
 
+def uplink_problems(ticket: dict) -> list[str]:
+    """NodeSpec.uplink_port of a catalog ticket, as the slot will check it (CONTRACTS 4.2)."""
+    marked = [n for n in ticket["nodes"] if isinstance(n, dict) and "uplink_port" in n]
+    if not marked:
+        return []
+    if len(marked) > 1:
+        return ["ticket.json: at most one node may have uplink_port"]
+    node, port = marked[0], marked[0]["uplink_port"]
+    adapters = node.get("adapters", 1)
+    if node.get("kind") != "qemu" or type(port) is not int or type(adapters) is not int or not 0 <= port < adapters:
+        return [f"ticket.json: uplink_port of {node.get('name')} must be an adapter number of a qemu node"]
+    for link in ticket.get("links", []):
+        for end in (link.get("a"), link.get("b")) if isinstance(link, dict) else ():
+            if isinstance(end, dict) and end.get("node") == node.get("name") and end.get("adapter", 0) == port:
+                return [f"ticket.json: a link uses the uplink port of {node.get('name')}"]
+    return []
+
+
 def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str]:
     """Consistency checks between lab.gns3 and ticket.json. Returns problems (empty = ok)."""
     problems = []
@@ -67,6 +85,7 @@ def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str
         missing = sorted(set(gns3_names) - set(ticket_names))
         extra = sorted(set(ticket_names) - set(gns3_names))
         problems.append(f"Node names differ: only in lab.gns3 {missing}, only in ticket.json {extra}")
+    problems += uplink_problems(ticket)
     if not isinstance(meta.get("title"), str) or not meta["title"].strip():
         problems.append("meta.json needs a title")
     res = meta.get("resources")

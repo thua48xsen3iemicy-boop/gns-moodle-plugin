@@ -24,6 +24,19 @@
       "slot": {"disk_interface": "virtio"}
     },
     {
+      "id": "lab-uplink",
+      "title": "Internet",
+      "kind": "qemu",
+      "category": "router",
+      "console_type": "none",
+      "symbol": ":/symbols/cloud.svg",
+      "file": "lab-uplink.qcow2",
+      "ram_mb": {"default": 512, "min": 256, "max": 1024},
+      "cpus": {"default": 1, "min": 1, "max": 2},
+      "adapters": {"default": 2, "min": 2, "max": 16},
+      "slot": {"disk_interface": "virtio"}
+    },
+    {
       "id": "debian12",
       "title": "Debian 12",
       "kind": "qemu",
