@@ -478,6 +478,8 @@ class Lifecycle:
             if op["status"] == "RUNNING" and (op.get("action") != "shutdown" or op["project_id"] != pid or op["node_id"] == node_id):
                 raise HTTPException(409, {"code": "OPERATION_IN_PROGRESS", "message": "Conflicting slot operation"})
         lab = self.get("lab", pid)
+        if not lab or lab["state"] != "READY":
+            raise HTTPException(409, {"code": "INVALID_TRANSITION", "message": "Shutdown requires a READY laboratory"})
         lab["generation"] = lab.get("generation", 0) + 1
         self.save("lab", pid, lab)  # Invalidate a monitor snapshot taken before admission.
         op = {"operation_id": str(uuid4()), "project_id": pid, "node_id": node_id,
