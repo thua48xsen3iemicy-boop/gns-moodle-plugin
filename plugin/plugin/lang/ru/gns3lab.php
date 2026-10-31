@@ -655,3 +655,8 @@ $string['authoringresume'] = 'Применить результат снятия
 $string['authoringresumehint'] = 'Применить завершённое снятие после закрытия или перезагрузки редактора.';
 $string['authoringdefinitionchanged'] = 'Топология изменилась после запуска. Остановите лабу и запустите актуальный черновик перед снятием образов.';
 $string['authoringretired'] = 'Мои образы вне палитры';
+
+$string['privacy:metadata:gns3labmanager:librarylabid'] = 'Лаба библиотеки, для которой выполнен авторский запуск.';
+$string['privacy:metadata:gns3labmanager:imagetitle'] = 'Название производного образа, заданное автором.';
+$string['privacy:metadata:gns3labmanager:imagedescription'] = 'Описание производного образа, заданное автором.';
+$string['privacy:metadata:gns3labmanager:imagedisk'] = 'Изменения диска, явно сохранённые автором как общий образ лабы.';

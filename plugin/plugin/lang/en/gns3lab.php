@@ -655,3 +655,8 @@ $string['authoringresume'] = 'Apply capture result';
 $string['authoringresumehint'] = 'Recover a completed capture after closing or reloading the editor.';
 $string['authoringdefinitionchanged'] = 'The topology changed after this run started. Stop the lab and run the current draft before capturing images.';
 $string['authoringretired'] = 'My retired images';
+
+$string['privacy:metadata:gns3labmanager:librarylabid'] = 'The library lab used for an authoring session.';
+$string['privacy:metadata:gns3labmanager:imagetitle'] = 'The title chosen by the author for a derived image.';
+$string['privacy:metadata:gns3labmanager:imagedescription'] = 'The description written by the author for a derived image.';
+$string['privacy:metadata:gns3labmanager:imagedisk'] = 'Disk changes explicitly saved by the author as a shared lab image.';
