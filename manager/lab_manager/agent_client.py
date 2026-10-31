@@ -92,6 +92,13 @@ class AgentStale(Fenced, AgentError):
 
 
 CODES = {
+    "CAPTURE_NODE_MISSING": AgentRejected,
+    "CAPTURE_BASE_MISMATCH": AgentRejected,
+    "CAPTURE_TOO_LARGE": AgentRejected,
+    "CAPTURE_PATH_UNSAFE": AgentRejected,
+    "IMAGE_EXISTS": AgentRejected,
+    "STUDENT_DIR_BUSY": AgentRejected,
+    "TIMEOUT": AgentUncertain,
     "STALE_OWNER": AgentStale,
     "COMMAND_UNCERTAIN": AgentQuarantined,
     "FENCE_STORAGE_ERROR": AgentUncertain,
@@ -202,6 +209,15 @@ class AgentClient:
             return True
         except AgentError:
             return False
+
+    async def capture_capabilities(self, node):
+        try:
+            return await self._call("GET", node, "/capabilities")
+        except AgentError:
+            return {}
+
+    async def capture_image(self, node, body, timeout):
+        return await self._call("POST", node, "/images/capture", json=body, timeout=timeout)
 
     async def start_budget(self, node: str) -> int | None:
         """The agent's worst case for POST /start in seconds; None for an agent older than 1.2.1."""

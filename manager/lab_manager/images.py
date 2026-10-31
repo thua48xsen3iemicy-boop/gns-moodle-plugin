@@ -78,6 +78,11 @@ class Image(Strict):
     ram_mb: Range | None = None
     cpus: Range | None = None
     adapters: Range | None = None
+    capture: bool | None = None
+    sha256: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    derived: dict | None = None
+    featured: bool = False
+    retired: bool = False
     slot: SlotOptions = Field(default_factory=SlotOptions)
 
     @model_validator(mode="after")
@@ -129,6 +134,8 @@ class Image(Strict):
             "adapters": self.adapters.model_dump() if self.adapters else None,
             "port_name": PORT_NAMES[self.kind], "ports_per_adapter": PORTS_PER_ADAPTER[self.kind],
             "preconfig": self.preconfig,
+            "capture": self.kind == "qemu" if self.capture is None else self.capture,
+            **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }
 
 

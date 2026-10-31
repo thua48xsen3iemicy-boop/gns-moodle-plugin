@@ -154,6 +154,9 @@ class FakeAgent:
         self.uncertain = {}  # vmid -> pct subcommand of the `uncertain` mark: changes and claims get 409
         self.stop_never = False  # pct shutdown and pct stop fail, the CT keeps running
         self.start_times_out = False  # pct exec times out: the CT runs, the agent marks the slot uncertain
+        self.images_capture = True
+        self.capture_fail_node = None
+        self.captured_images = {}
         self.start_budget = 480  # start_budget_seconds of GET /capabilities; None: agent older than 1.2.1
 
     def transport(self):
@@ -185,7 +188,16 @@ class FakeAgent:
             if self.start_budget is None:
                 return self._err(404, "Not Found")
             return httpx.Response(200, json={"version": "1.2.1", "start_budget_seconds": self.start_budget,
-                                             "guest_action_timeout_seconds": 120})
+                                             "guest_action_timeout_seconds": 120, "images_capture": self.images_capture, "capture_timeout_seconds": 900})
+        if path == "/images/capture":
+            if self.capture_fail_node == body['node_name']:
+                return self._err(422, {"code": "CAPTURE_NODE_MISSING", "message": "Missing disk"})
+            if body['image_file'] in self.captured_images:
+                return self._err(409, {"code": "IMAGE_EXISTS", "message": "Already exists"})
+            result = {"image_file": body['image_file'], "size": 1024, "virtual_size": 1048576,
+                      "sha256": "sha256:" + "1" * 64, "md5": "2" * 32, "backing": body['base_file']}
+            self.captured_images[body['image_file']] = result
+            return httpx.Response(200, json=result)
         m = re.fullmatch(r"/students/([A-Za-z0-9][A-Za-z0-9_-]{0,63})", path)
         if m and request.method == "PUT":
             key = m.group(1)

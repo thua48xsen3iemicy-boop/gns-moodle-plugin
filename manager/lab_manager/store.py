@@ -23,6 +23,10 @@ SESSION_FIELDS = {
 }
 
 
+class CaptureConflict(RuntimeError):
+    pass
+
+
 class Fenced(RuntimeError):
     """The slot was re-allocated or released: this worker's view is stale."""
 
@@ -130,7 +134,7 @@ class Store:
 
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
-                             student_key, resources, lab_def=None, definition=None, ticket_factory=None):
+                             student_key, resources, lab_def=None, definition=None, ticket_factory=None, mode=None, library_lab_id=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
 
         The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
@@ -139,17 +143,27 @@ class Store:
         lab_key = lab_ref or lab_def
         label = lab_ref or "lab-" + lab_def.removeprefix("sha256:")[:8]  # Start of project names
         for _ in range(3):
-            existing = await self.live_session(site, user_id)
+            existing = await self.live_session(site, user_id, library_lab_id=library_lab_id)
             if existing:
                 return existing, False  # The caller checks it is the same activity and lab
             try:
                 async with self.pool.connection() as conn, conn.transaction():
+                    await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (student_key,))
+                    active = await conn.execute("SELECT 1 FROM image_captures WHERE student_key = %s AND state = 'running'", (student_key,))
+                    if await active.fetchone():
+                        raise CaptureConflict("Workspace capture is running")
+                    if library_lab_id is not None:
+                        # Returning to an earlier definition must still create a fresh project.
+                        previous = await conn.execute("SELECT lab_key FROM workspaces WHERE site = %s AND user_id = %s AND library_lab_id = %s ORDER BY id DESC LIMIT 1", (site, user_id, library_lab_id))
+                        last = await previous.fetchone()
+                        if last and last['lab_key'] != lab_key:
+                            await conn.execute("UPDATE workspaces SET library_lab_id = NULL WHERE site = %s AND user_id = %s AND library_lab_id = %s", (site, user_id, library_lab_id))
                     cur = await conn.execute(
                         "INSERT INTO workspaces (site, user_id, instance_id, lab_ref, lab_def, definition, lab_key,"
-                        " project_id, project_name) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '')"
-                        " ON CONFLICT (site, user_id, instance_id, lab_key) DO NOTHING RETURNING id",
+                        " project_id, project_name, library_lab_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '', %s)"
+                        " ON CONFLICT DO NOTHING RETURNING id",
                         (site, user_id, instance_id, lab_ref, lab_def,
-                         Jsonb(definition) if definition is not None else None, lab_key, uuid.uuid4()),
+                         Jsonb(definition) if definition is not None else None, lab_key, uuid.uuid4(), library_lab_id),
                     )
                     row = await cur.fetchone()
                     if row:
@@ -159,8 +173,8 @@ class Store:
                         )
                     cur = await conn.execute(
                         "SELECT * FROM workspaces WHERE site = %s AND user_id = %s"
-                        " AND instance_id = %s AND lab_key = %s FOR UPDATE",
-                        (site, user_id, instance_id, lab_key),
+                        " AND instance_id IS NOT DISTINCT FROM %s AND lab_key = %s AND library_lab_id IS NOT DISTINCT FROM %s FOR UPDATE",
+                        (site, user_id, instance_id, lab_key, library_lab_id),
                     )
                     ws = await cur.fetchone()
                     snapshot = ws["resource_snapshot"] or resources
@@ -175,11 +189,11 @@ class Store:
                     await conn.execute(
                         "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref, lab_def,"
                         " workspace_id, student_key, project_id, project_name, resources,"
-                        " status, stage, status_message, max_duration)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s)",
+                        " status, stage, status_message, max_duration, mode, library_lab_id)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s, %s, %s)",
                         (sid, site, user_id, instance_id, course_id, lab_ref, lab_def, ws["id"], student_key,
                          project_id, name, Jsonb(snapshot) if snapshot else None,
-                         "Ожидание свободного слота…", max_duration),
+                         "Ожидание свободного слота…", max_duration, mode, library_lab_id),
                     )
                     await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref, "lab_def": lab_def})
                 return await self.session(sid), True
@@ -187,13 +201,13 @@ class Store:
                 continue  # A concurrent POST won; return its session
         raise RuntimeError("Could not create or find the session")
 
-    async def live_session(self, site, user_id):
+    async def live_session(self, site, user_id, *, library_lab_id=None):
         """A student has at most one live lab on a site, in any activity."""
         async with self.pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT * FROM sessions WHERE site = %s AND user_id = %s"
-                " AND status NOT IN ('stopped', 'failed')",
-                (site, user_id),
+                " AND library_lab_id IS NOT DISTINCT FROM %s AND status NOT IN ('stopped', 'failed')",
+                (site, user_id, library_lab_id),
             )
             return await cur.fetchone()
 

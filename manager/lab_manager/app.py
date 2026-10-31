@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import VERSION, labdef
+from .derived import DerivedImages, register_routes
 from .agent_client import AgentClient, start_budget_warnings
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
@@ -23,8 +24,8 @@ from .labs import Catalog, LabError, LabNotFound, deploy_ticket
 from .orchestrator import Orchestrator
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
-from .storage import StorageError, student_key
-from .store import Store
+from .storage import StorageError, student_key, authoring_key
+from .store import Store, CaptureConflict
 
 log = logging.getLogger("lab_manager.api")
 
@@ -40,6 +41,7 @@ class Strict(BaseModel):
 
 
 class SessionOptions(Strict):
+    mode: str | None = None
     max_duration: int | None = Field(default=None, ge=0, le=7 * 24 * 60)  # Minutes; 0 = default
 
 
@@ -50,7 +52,8 @@ class ClientInfo(Strict):
 
 class SessionCreate(Strict):
     user_id: int = Field(gt=0)
-    instance_id: int = Field(gt=0)
+    instance_id: int | None = Field(default=None, gt=0)
+    library_lab_id: int | None = Field(default=None, gt=0)
     lab_ref: str | None = Field(default=None, min_length=1, max_length=64)
     lab: dict | None = None  # gns3lab.lab/1 or /2 from Moodle, checked by labdef.check (exactly one of the two)
     course_id: int | None = Field(default=None, ge=0)
@@ -108,8 +111,10 @@ class Services:
         }
         self.gateway = GatewayClient(settings.gateway_internal_url, settings.gateway_internal_key,
                                      settings.gateway_public_url, transport=gateway_transport)
+        self.derived = DerivedImages(self)
         self.orchestrator = Orchestrator(settings, self.store, self.pve, self.agent, self.slots,
                                          self.catalog)
+        self.orchestrator.derived = self.derived
 
     async def leader_connection(self):
         from psycopg.rows import dict_row
@@ -170,6 +175,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         return JSONResponse(status_code=exc.status,
                             content={"error": exc.error, "message": exc.message, **exc.extra})
 
+    @app.exception_handler(CaptureConflict)
+    async def capture_conflict(request, exc):
+        return JSONResponse(status_code=409, content={"error": "capture_in_progress", "message": str(exc)})
+
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
         errors = exc.errors()
@@ -218,6 +227,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         }
         if s["progress"] is not None:
             body["progress"] = s["progress"]
+        if s.get("mode"):
+            body["mode"] = s["mode"]
+            body["capture_nodes"] = [n["name"] for n in (s.get("topology") or {}).get("topology", {}).get("nodes", [])
+                                     if n.get("node_type") == "qemu" and n.get("status") == "started"]
         return body
 
     async def present(s):
@@ -268,14 +281,15 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                                      "checks": checks})
 
     # ------------------------------------------------------------------ SPEC §3
-    def site_images(site):
-        return {k: v for k, v in (settings.images or {}).items() if site.limits.allows(k)}
+    async def site_images(site):
+        return {k: v for k, v in (await services.derived.catalog(site.slug)).items()
+                if site.limits.allows(v.derived["base"] if v.derived else k)}
 
-    def check_lab(lab, site):
+    async def check_lab(lab, site):
         if settings.images is None:
             raise ApiError(400, "unsupported_field", "Lab definitions are not enabled (no image catalog)")
         try:
-            return labdef.check(lab, settings.images, site.limits, overhead_mb=settings.lab_memory_overhead_mb)
+            return labdef.check(lab, await services.derived.catalog(site.slug), site.limits, overhead_mb=settings.lab_memory_overhead_mb)
         except labdef.LabInvalid as exc:
             raise ApiError(422, "lab_invalid", "The lab definition is invalid", problems=exc.problems) from exc
 
@@ -283,22 +297,25 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def info(site=Depends(site_of)):
         features = ["consoles", "observer", "resume", "facts"]  # resume: the next session continues the project
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
-                "options": OPTIONS, "features": features}
+                "options": list(OPTIONS), "features": features}
         if settings.images is not None:
             features += ["images", "lab_definitions", "lab_constructor"]
             body["lab_formats"] = list(labdef.FORMATS)
             body["limits"] = site.limits.public()
+        if await services.derived.enabled():
+            features.append("image_capture")
+            body["options"].append("mode")
         return body
 
     @app.get("/api/v1/images")
     async def images(site=Depends(site_of)):
         if settings.images is None:
             raise ApiError(404, "not_found", "No image catalog")
-        return {"images": [image.public() for image in site_images(site).values()]}
+        return {"images": [image.public() for image in (await site_images(site)).values()]}
 
     @app.post("/api/v1/labs/validate")
     async def validate_lab(body: LabValidate, site=Depends(site_of)):
-        checked = check_lab(body.lab, site)
+        checked = await check_lab(body.lab, site)
         return {"lab_def": checked.lab_def, "resources": checked.resources, "warnings": list(checked.warnings)}
 
     @app.get("/api/v1/labs")
@@ -319,7 +336,18 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         return lab.topology
 
     @app.get("/api/v1/sessions")
-    async def find_session(instance_id: int, user_id: int | None = None, site=Depends(site_of)):
+    async def find_session(instance_id: int | None = None, user_id: int | None = None, library_lab_id: int | None = None, site=Depends(site_of)):
+        if library_lab_id is not None:
+            if instance_id is not None or user_id is None or library_lab_id <= 0:
+                raise ApiError(400, "invalid_request", "Invalid authoring lookup")
+            async with store.pool.connection() as conn:
+                cur = await conn.execute("SELECT * FROM sessions WHERE site = %s AND user_id = %s AND library_lab_id = %s ORDER BY created_at DESC LIMIT 1", (site.slug, user_id, library_lab_id))
+                session = await cur.fetchone()
+            if session is None:
+                raise ApiError(404, "session_not_found", "No authoring session")
+            return await present(session)
+        if instance_id is None:
+            raise ApiError(400, "invalid_request", "instance_id is required")
         if user_id is None:
             # Observer page: one entry per student of the activity, without topology (П1).
             rows = await store.activity_sessions(site.slug, instance_id)
@@ -331,14 +359,22 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.post("/api/v1/sessions")
     async def create_session(body: SessionCreate, site=Depends(site_of)):
+        mode = body.options.mode if body.options else None
+        authoring = mode == "authoring"
+        if (mode not in (None, "authoring") or
+                (authoring and (body.instance_id is not None or body.library_lab_id is None or body.lab is None or body.lab_ref is not None)) or
+                (not authoring and (body.instance_id is None or body.library_lab_id is not None))):
+            raise ApiError(400, "invalid_request", "Invalid authoring identity or mode")
+        if authoring and not await services.derived.enabled():
+            raise ApiError(400, "unsupported_field", "Authoring is unavailable")
         if (body.lab_ref is None) == (body.lab is None):
             raise ApiError(400, "invalid_request", "Exactly one of lab_ref and lab is required")
         # A definition is checked (and hashed) even for a repeated POST: lab_def identifies the lab.
-        checked = check_lab(body.lab, site) if body.lab is not None else None
+        checked = await check_lab(body.lab, site) if body.lab is not None else None
         lab_def = checked.lab_def if checked else None
 
         def same(s):
-            return s["instance_id"] == body.instance_id and s["lab_ref"] == body.lab_ref and s["lab_def"] == lab_def
+            return s["instance_id"] == body.instance_id and s.get("library_lab_id") == body.library_lab_id and s["lab_ref"] == body.lab_ref and s["lab_def"] == lab_def
 
         def conflict(s):
             # The student's own other lab, so the plugin can link to it (П3).
@@ -346,7 +382,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                             conflict={"instance_id": s["instance_id"], "course_id": s["course_id"],
                                       "lab_ref": s["lab_ref"], "lab_def": s["lab_def"], "status": s["status"]})
 
-        existing = await store.live_session(site.slug, body.user_id)
+        existing = await store.live_session(site.slug, body.user_id, library_lab_id=body.library_lab_id)
         if existing:
             if not same(existing):
                 raise conflict(existing)
@@ -356,7 +392,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             resources = checked.resources if checked else lab.resources
             if not resources or not all(resources.get(k, 0) > 0 for k in ("cores", "memory_mb")):
                 raise LabError("Explicit cores and memory_mb are required for resource reservations")
-            key = student_key(site.slug, body.user_id)
+            key = authoring_key(site.slug, body.user_id, body.library_lab_id) if authoring else student_key(site.slug, body.user_id)
         except LabNotFound as exc:
             raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
         except LabError as exc:
@@ -369,13 +405,16 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             raise ApiError(409, "unsupported_lab", "The lab has a node with an internet uplink, no slot offers it")
         requested = body.options.max_duration if body.options else None
         max_duration = min(requested, settings.max_duration_limit) if requested else settings.default_max_duration
+        if authoring:
+            max_duration = min(requested or settings.authoring_max_duration, settings.authoring_max_duration)
+        image_map = await site_images(site) if checked else {}
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
-            student_key=key, resources=resources,
+            student_key=key, resources=resources, mode=mode, library_lab_id=body.library_lab_id,
             lab_def=lab_def, definition=checked.definition if checked else None,
             ticket_factory=lambda pid, name: (
-                labdef.deploy_ticket(checked.definition, site_images(site), project_id=pid, project_name=name)
+                labdef.deploy_ticket(checked.definition, image_map, project_id=pid, project_name=name)
                 if checked else deploy_ticket(lab, project_id=pid, project_name=name)),
         )
         if not created and not same(s):
@@ -468,4 +507,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                            "issued_for_user_id": body.issued_for_user_id})
         return ticket
 
+    if not hasattr(services, "derived"):
+        services.derived = DerivedImages(services)
+    register_routes(app, services, site_of, own_session, ApiError)
     return app

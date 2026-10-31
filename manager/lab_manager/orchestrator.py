@@ -191,6 +191,7 @@ class Orchestrator:
         self.epoch = None
         self._claims = set()
         self.last_tick = None
+        self.derived = None
 
     # ------------------------------------------------------------------ loop
     def wake(self):
@@ -247,6 +248,12 @@ class Orchestrator:
             task = self._tasks.get(session["id"])
             if task is None or task.done():
                 self._tasks[session["id"]] = asyncio.create_task(self.drive(session["id"]))
+        if self.derived:
+            for row in await self.derived.pending():
+                key = "capture:" + row["session_id"]
+                task = self._tasks.get(key)
+                if task is None or task.done():
+                    self._tasks[key] = asyncio.create_task(self.derived.step(row["session_id"]))
         self._tasks = {k: t for k, t in self._tasks.items() if not t.done()}
 
     async def drain(self):
@@ -515,7 +522,7 @@ class Orchestrator:
         """Reference topology of the session's lab: lab.gns3, or symbols from the image catalog."""
         if s["lab_def"]:
             ws = await self.store.workspace(s["workspace_id"])
-            return labdef.reference_topology(ws["definition"], self.settings.images or {})
+            return labdef.reference_topology(ws["definition"], await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}))
         try:
             return self.catalog.get(s["lab_ref"]).topology
         except LabError:
@@ -585,6 +592,8 @@ class Orchestrator:
             if node is None:
                 continue  # CT unknown to the cluster or its node is offline
             name = ct["node"]
+            if s.get("mode") == "authoring" and self.derived and not await self.derived.capabilities(name):
+                continue
             want = need or int(ct.get("maxmem") or 0)
             want_cpu = cores or int(ct.get("maxcpu") or 0)
             room = int(node.get("maxmem", 0)) - int(node.get("mem", 0)) - unused[name] - reserve
@@ -607,7 +616,7 @@ class Orchestrator:
             self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
         else:
             ws = await self.store.workspace(s["workspace_id"])
-            missing = sorted({n["image"] for n in ws["definition"]["nodes"]} - set(self.settings.images or {}))
+            missing = sorted({n["image"] for n in ws["definition"]["nodes"]} - set(await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {})))
             if missing:  # Removed by the administrator since the definition was checked
                 raise LabError(f"Образы убраны из каталога: {', '.join(missing)}")
         held = await self.store.slot_holding_student(s["student_key"])
@@ -846,7 +855,7 @@ class Orchestrator:
             return ws["ticket"], ws
         if s["lab_def"]:
             try:
-                return labdef.deploy_ticket(ws["definition"], self.settings.images or {},
+                return labdef.deploy_ticket(ws["definition"], await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}),
                                             project_id=str(s["project_id"]), project_name=s["project_name"]), ws
             except KeyError as exc:
                 raise LabError(f"Образ {exc} убран из каталога образов") from exc
@@ -1147,7 +1156,7 @@ class Orchestrator:
         known = self._consoleless.get(s["id"])
         if known is None:
             ticket, _ = await self._ticket(s)
-            names = consoleless_names(ticket, self.settings.images or {})
+            names = consoleless_names(ticket, await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}))
             known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
             self._consoleless[s["id"]] = known
         return known
