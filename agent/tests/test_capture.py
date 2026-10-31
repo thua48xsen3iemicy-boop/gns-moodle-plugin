@@ -122,3 +122,44 @@ def test_no_symlink_components(capture, directory):
 def test_capture_strict_model(capture, change):
     client, body, *_ = capture
     assert client.post('/images/capture', json={**body, **change}).status_code == 422
+
+
+def test_disk_backing_must_match_expected_parent(capture):
+    client, body, images, disk, _ = capture
+    info = json.loads(disk.read_text())
+    info['backing-filename'] = '/etc/passwd'
+    disk.write_text(json.dumps(info))
+    response = client.post('/images/capture', json=body)
+    assert response.json()['detail']['code'] == 'CAPTURE_BASE_MISMATCH'
+    assert not list(images.glob('d-*.qcow2'))
+
+
+def test_capture_and_mount_share_student_lock(capture):
+    client, body, *_ = capture
+    with agent.student_lock(body['student_key']):
+        response = client.put('/slots/2201/mounts', json={'student_key': body['student_key']})
+        assert response.json()['detail']['code'] == 'STUDENT_DIR_BUSY'
+        assert client.post('/images/capture', json=body).json()['detail']['code'] == 'STUDENT_DIR_BUSY'
+
+
+def test_capture_timeout_cleans_owned_temporary_files(capture, monkeypatch):
+    client, body, images, *_ = capture
+    executable = Path(agent.shutil.which('qemu-img'))
+    executable.write_text(executable.read_text().replace("elif args[0] == 'rebase':",
+        "elif args[0] == 'rebase':\n    import time; time.sleep(2)"))
+    monkeypatch.setattr(agent, 'CAPTURE_TIMEOUT', 0.2)
+    response = client.post('/images/capture', json=body)
+    assert response.json()['detail']['code'] == 'TIMEOUT', response.text
+    assert not list(images.glob('.*.part'))
+
+
+def test_cleanup_stale_parts_skips_active_operations(capture):
+    _, body, images, *_ = capture
+    stale = images / ('.' + body['image_file'] + '.part')
+    stale.write_bytes(b'incomplete')
+    os.utime(stale, (1, 1))
+    with agent.student_lock('capture-' + body['image_file'][:-6]):
+        agent.cleanup_capture_parts()
+        assert stale.exists()
+    agent.cleanup_capture_parts()
+    assert not stale.exists()
