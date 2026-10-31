@@ -120,7 +120,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | Поле | Тип | Обяз. | Смысл |
 |---|---|---|---|
 | `user_id` | int > 0 | да | `user.id` в Moodle; вместе с сайтом даёт `student_key` |
-| `instance_id` | int > 0 | да | id записи `gns3lab` |
+| `instance_id` | int > 0 | да | id записи `gns3lab`; 🆕 у авторского запуска вместо него `library_lab_id` (§2.8) |
 | `course_id` | int ≥ 0 | нет | для журнала и подсказки при конфликте |
 | `lab_ref` | строка | одно из двух | эталонная лаба из `GET /api/v1/labs` |
 | `lab` | объект | одно из двух | ✅ определение лабы из Moodle, `gns3lab.lab/1` (§2.6); только при `lab_definitions` в `info` |
@@ -378,12 +378,13 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 
 Дизайн — [`docs/derived-images/DESIGN.md`](../../docs/derived-images/DESIGN.md). Есть, только когда в `info.features` есть
 `image_capture` (вместе с `images` и `lab_definitions`; агент узла умеет `images_capture`, §5), а в `info.options` — `mode`.
-Права в Moodle (`mod/gns3lab:authorimages`, `mod/gns3lab:manageimages`) проверяет плагин.
+Права в Moodle (`mod/gns3lab:managelabs` — запуск и снятие, `mod/gns3lab:manageimages` — `featured`) проверяет плагин.
 
-**Авторский запуск** — `POST /api/v1/sessions` (§2.2) с `lab` и `"options": {"mode": "authoring"}`; с `lab_ref` —
-`400 invalid_request`. Отличия от обычной сессии:
+**Авторский запуск** — `POST /api/v1/sessions` (§2.2) с `lab`, `"options": {"mode": "authoring"}` и `library_lab_id`
+(int > 0, `id` лабы библиотеки плагина) **вместо** `instance_id`. С `lab_ref`, с `instance_id` или без `library_lab_id` —
+`400 invalid_request`; `library_lab_id` без `mode: "authoring"` — тоже. Отличия от обычной сессии:
 - в объекте сессии `mode: "authoring"` (§2.3);
-- свой `student_key` (сайт, пользователь, `instance_id`, признак авторства): проект преподавателя для этой лабы отдельно от
+- свой `student_key` (сайт, пользователь, `library_lab_id`, признак авторства): проект преподавателя для этой лабы отдельно от
   его лаб как студента; «одна живая лаба» действует внутри этого ключа;
 - живая авторская сессия с другим `lab_def` — `409 session_conflict`, как обычно; после остановки запуск с другим
   `lab_def` начинает **новый** проект, прежний менеджер удаляет (с тем же `lab_def` — продолжает);
@@ -425,7 +426,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 {"id": "d-3f9a1c0d2b4e", "title": "OSPF-лаба — R1", "kind": "qemu", "category": "router",
  "derived": {"base": "frr9", "base_sha256": "sha256:…", "sha256": "sha256:…", "size": 412090368,
              "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z",
-             "description": "FRR 9, ospfd включён", "source": {"instance_id": 7, "node": "R1"},
+             "description": "FRR 9, ospfd включён", "source": {"library_lab_id": 12, "node": "R1"},
              "supersedes": "d-0c4e81f2aa19"},
  "featured": false, "retired": false}
 ```
