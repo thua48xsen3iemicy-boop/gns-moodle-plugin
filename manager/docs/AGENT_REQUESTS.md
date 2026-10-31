@@ -124,31 +124,33 @@ HTTP-статусами, что сейчас. Ошибки валидации з
 Дизайн — `docs/derived-images/DESIGN.md`, контракт — CONTRACTS §2.8, §5. Агент — единственный, кто может писать в
 `IMAGES_DIR` (в слоты он монтируется RO).
 
-`GET /capabilities` получает поле `"images_capture": true`. Без него менеджер маршрут не вызывает.
+`GET /capabilities` получает поля `"images_capture": true` и `capture_timeout_seconds`. Без первого менеджер маршрут
+не вызывает; второй сверяет со своим ожиданием, как `start_budget_seconds`.
 
-`POST /images/capture`, те же mTLS и правила строгости (`extra="forbid"`):
+`POST /images/capture` — одна нода за вызов, те же mTLS и правила строгости (`extra="forbid"`):
 
 ```json
-{"student_key": "a1b2…", "project_id": "0b6c9d3e-…", "node_name": "SRC",
- "base_file": "debian12.qcow2", "base_sha256": "sha256:…",
- "image_file": "d-web-srv.qcow2", "flatten": false, "max_bytes": 8589934592}
+{"student_key": "a1b2…", "project_id": "0b6c9d3e-…", "node_name": "R1",
+ "parent_file": "d-0c4e81f2aa19.qcow2", "base_file": "frr9.qcow2", "base_sha256": "sha256:…",
+ "image_file": "d-3f9a1c0d2b4e.qcow2", "max_bytes": 8589934592}
 ```
+
+`parent_file` — образ, на котором нода стояла в лабе (у первого снятия совпадает с `base_file`).
 
 Что делает агент:
 1. Каталог `students/<student_key>` не подключён ни к одному CT узла (`mp1`), иначе `409 STUDENT_DIR_BUSY`.
 2. Находит ноду по имени в `<project_id>/*.gns3` (JSON), диск — `project-files/qemu/<node_id>/hda_disk.qcow2`.
    Никаких путей от клиента; симлинки и выход за каталог студента — `422 CAPTURE_PATH_UNSAFE`. Нет файла —
    `404 CAPTURE_NODE_MISSING`.
-3. `qemu-img info --backing-chain -U --output=json`: формат `qcow2`, первый backing — `base_file` (по имени), sha256 базы
-   совпадает с `base_sha256`; иначе `422 CAPTURE_BASE_MISMATCH`. Размер больше `max_bytes` — `422 CAPTURE_TOO_LARGE`.
-4. Копирует во временный файл `IMAGES_DIR/QEMU/.incoming/<uuid>` (тот же том — для атомарного `rename`).
-   `flatten: false` — `qemu-img rebase -u -F qcow2 -b <base_file>` (относительное имя); `flatten: true` —
-   `qemu-img convert -O qcow2` всей цепочки. Затем `qemu-img check`.
+3. `qemu-img info -U --output=json`: формат `qcow2`, backing — `/opt/gns3/images/QEMU/<parent_file>`; sha256 базы
+   совпадает с `base_sha256`; если `parent_file` ≠ `base_file`, backing самого `parent_file` — `base_file`. Иначе
+   `422 CAPTURE_BASE_MISMATCH`. Размер больше `max_bytes` — `422 CAPTURE_TOO_LARGE`.
+4. Копирует во временный файл в том же каталоге — `IMAGES_DIR/QEMU/.<image_file>.part` (относительные имена backing
+   сразу верные, `rename` атомарный). `qemu-img rebase -u -F qcow2 -b <parent_file>` (только заголовок: путь слота →
+   относительное имя). Если `parent_file` ≠ `base_file` — безопасный `qemu-img rebase -F qcow2 -b <base_file>` (без `-u`):
+   отличия промежуточного образа переносятся в слой. Затем `qemu-img check` и повторная проверка размера.
 5. Пишет `<image_file>.md5sum` (формат GNS3), `chmod 0444`, `rename` в `QEMU/<image_file>`; файл уже есть —
    `409 IMAGE_EXISTS` (агент ничего не перезаписывает никогда).
 
-Ответ `200`: `{"image_file", "size", "virtual_size", "sha256", "md5", "backing": "debian12.qcow2" | null}`.
-Операция долгая (копирование гигабайтов по CephFS): тайм-аут — `LAB_CAPTURE_TIMEOUT` (по умолчанию 900 с), он же в
-`GET /capabilities` (`capture_timeout_seconds`), чтобы менеджер сверил со своим ожиданием, как `start_budget_seconds`.
-Повтор после обрыва: временные файлы `.incoming` старше тайм-аута агент удаляет сам.
-
+Ответ `200`: `{"image_file", "size", "virtual_size", "sha256", "md5", "backing": "<base_file>"}`.
+Тайм-аут — `LAB_CAPTURE_TIMEOUT` (по умолчанию 900 с). Временные `.part` старше тайм-аута агент удаляет сам.

@@ -131,7 +131,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 Любое неизвестное поле на любом уровне — `400 unsupported_field` с именем поля.
 
 Кандидаты в `options` на будущее (каждый появится вместе с возможностью в `info.options`):
-`reset: true` — начать лабу заново; `mode: "exam"` — пока не нужен.
+`reset: true` — начать лабу заново; `mode: "exam"` — пока не нужен. 🆕 `mode: "authoring"` — авторский запуск лабы преподавателем (§2.8).
 
 Ровно одно из `lab_ref` и `lab`, иначе `400 invalid_request`. Неверное определение —
 `422 lab_invalid` с `problems`, как у `POST /labs/validate` (§2.6); проверка та же.
@@ -191,7 +191,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
 | `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
-| `kind`, `draft_id` | 🆕 только у авторской сессии (§2.8): `kind: "authoring"`, `draft_id` черновика. У обычной сессии полей нет |
+| `mode` | 🆕 только у авторского запуска (§2.8): `"authoring"`. У обычной сессии поля нет |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
 ### 2.4. ✅ Остальные маршруты
@@ -374,87 +374,87 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 - Истории в этом маршруте нет. Журнал изменений менеджер хранит с самого начала (DESIGN §6.7), отдавать его
   начнёт позже.
 
-### 2.8. 🆕 Разностные образы: черновики и публикация
+### 2.8. 🆕 Разностные образы: авторский запуск и сохранение с образами
 
 Дизайн — [`docs/derived-images/DESIGN.md`](../../docs/derived-images/DESIGN.md). Есть, только когда в `info.features` есть
-`image_authoring` (вместе с `images` и `lab_definitions`; агент узла умеет `capture`, §5).
-Права в Moodle (`mod/gns3lab:authorimages`) проверяет плагин.
+`image_capture` (вместе с `images` и `lab_definitions`; агент узла умеет `images_capture`, §5), а в `info.options` — `mode`.
+Права в Moodle (`mod/gns3lab:authorimages`, `mod/gns3lab:manageimages`) проверяет плагин.
 
-**`POST /api/v1/image-drafts`** — создать черновик:
+**Авторский запуск** — `POST /api/v1/sessions` (§2.2) с `lab` и `"options": {"mode": "authoring"}`; с `lab_ref` —
+`400 invalid_request`. Отличия от обычной сессии:
+- в объекте сессии `mode: "authoring"` (§2.3);
+- свой `student_key` (сайт, пользователь, `instance_id`, признак авторства): проект преподавателя для этой лабы отдельно от
+  его лаб как студента; «одна живая лаба» действует внутри этого ключа;
+- живая авторская сессия с другим `lab_def` — `409 session_conflict`, как обычно; после остановки запуск с другим
+  `lab_def` начинает **новый** проект, прежний менеджер удаляет (с тем же `lab_def` — продолжает);
+- длительность — не больше `AUTHORING_MAX_DURATION`.
 
-```json
-{"user_id": 42, "course_id": 3, "base_image": "debian12", "title": "Веб-сервер", "uplink": true}
-```
-
-| Поле | Обяз. | Смысл |
-|---|---|---|
-| `user_id` | да | автор (`user.id` в Moodle) |
-| `course_id` | нет | курс, из редактора которого создан черновик; только для журнала (образ принадлежит автору, не курсу) |
-| `base_image` | да | `id` образа `kind: "qemu"` из `GET /images`, не `retired`; иначе `422 image_not_derivable` |
-| `title` | да | 1–100 символов |
-| `uplink` | нет | `true` — в служебной лабе есть узел «Интернет»; без слотов с `uplink` — `409 unsupported_lab` |
-
-Больше `IMAGE_DRAFTS_PER_USER` живых черновиков — `409 draft_limit`. Ответ `201` — объект черновика:
+**`POST /api/v1/sessions/{id}/capture`** — снять слои и опубликовать образы. Только у авторской сессии в `running` или
+`stopped` (иначе `409 session_not_running`; обычная сессия — `409 not_authoring`).
 
 ```json
-{"schema": "gns3lab.image-draft/1", "draft_id": "d-7c1e2a9b40f35d18", "user_id": 42, "course_id": 3,
- "base_image": "debian12", "title": "Веб-сервер", "uplink": true,
- "state": "draft", "session_id": null, "published": [], "error": null, "created_at": "2026-10-31T10:00:00Z"}
+{"nodes": [{"name": "R1", "title": "OSPF-лаба — R1", "description": "FRR 9, ospfd включён"},
+           {"name": "SRV", "title": "OSPF-лаба — веб-сервер"}]}
 ```
 
-`state`: `draft` (сессии нет) · `running` (живая авторская сессия) · `publishing` · `failed` (публикация не удалась,
-`error` — `{"code", "retryable"}`; черновик цел, можно повторить). После успешной публикации — снова `draft`,
-в `published` добавляется `id` образа.
-
-| Запрос | Ответ |
+| Поле | Смысл |
 |---|---|
-| `GET /api/v1/image-drafts?user_id=&course_id=` | список черновиков (любой из фильтров необязателен) |
-| `GET /api/v1/image-drafts/{draft_id}` | черновик; `404 draft_not_found` |
-| `POST /api/v1/image-drafts/{draft_id}/session` | тело `{}`; запустить или продолжить авторскую сессию. `201`/`200` — объект сессии (§2.3) с `kind: "authoring"` и `draft_id`; дальше — обычные маршруты §2.4 (консоли, остановка). Черновик `publishing` — `409 draft_busy` |
-| `POST /api/v1/image-drafts/{draft_id}/publish` | `202` — черновик в `publishing` (тело ниже). Живая сессия останавливается менеджером. Плагин опрашивает черновик |
-| `DELETE /api/v1/image-drafts/{draft_id}` | `204`; останавливает сессию, удаляет проект черновика. Опубликованные образы остаются |
+| `nodes[]` | 1…`IMAGE_CAPTURE_MAX_NODES`, имена без повторов. Нода есть в `lab_def` сессии (иначе `422 lab_invalid` с `problems`, код `unknown_node`), `kind: "qemu"`, образ без `capture: false` (`not_capturable`) |
+| `title` | 1–100 символов |
+| `description` | необязательно, до 2000 символов |
+
+Ответ `202` — состояние снятия (тело ниже); живую сессию менеджер останавливает сам. Повтор, пока снятие идёт, —
+`409 capture_in_progress`; после `done` новое снятие той же сессии — `409 capture_done` (нужен новый запуск).
+
+**`GET /api/v1/sessions/{id}/capture`** — состояние; снятия не было — `404 capture_not_found`.
 
 ```json
-{"image_id": "web-srv", "title": "Веб-сервер (nginx)", "description": "Debian 12 + nginx, сайт в /var/www, ufw выключен",
- "family": "web-srv", "flatten": false,
- "ram_mb": {"default": 1024}}
+{"schema": "gns3lab.capture/1", "state": "done",
+ "images": {"R1": "d-3f9a1c0d2b4e", "SRV": "d-77b0e1a92c5d"}, "error": null}
 ```
 
-`image_id` — `[a-z0-9][a-z0-9-]{0,47}`, уникален навсегда (в т. ч. среди `retired` и `IMAGES_FILE`), иначе
-`409 image_exists`. `description` — обязательно, 1–2000 символов (что установлено и настроено). `family` — группа версий для палитры (по умолчанию `image_id`). Ресурсы — только сужение
-пределов базы (`422 lab_invalid` с `problems`, как в §2.6). `flatten: true` — самостоятельный файл без backing
-(обязателен, если глубина цепочки превысит `IMAGE_MAX_DEPTH`; иначе `422 chain_too_deep`).
+`state`: `running` · `done` · `failed`. `images` — только при `done`, по всем нодам запроса: образы публикуются **все или
+ни одного** (файлы, уже снятые до сбоя, в `GET /images` не попадают; их убирает администратор). `failed` —
+`error: {"code", "retryable", "node"}` (коды ниже); проект цел, можно снять снова. При `done` плагин заменяет `image` этих
+нод в определении лабы и сохраняет лабу; новое определение даст новый `lab_def`.
 
-**Производные образы в `GET /api/v1/images`** — обычные элементы каталога с дополнительными полями (старый плагин
-их просто не читает):
+**Производные образы в `GET /api/v1/images`** — обычные элементы каталога с дополнительными полями (старый плагин их
+просто не читает):
 
 ```json
-{"id": "web-srv", "title": "Веб-сервер (nginx)", "kind": "qemu", "category": "host",
- "derived": {"base": "debian12", "family": "web-srv", "flatten": false, "size": 412090368,
-             "sha256": "sha256:…", "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z",
-             "description": "Debian 12 + nginx, сайт в /var/www, ufw выключен"},
+{"id": "d-3f9a1c0d2b4e", "title": "OSPF-лаба — R1", "kind": "qemu", "category": "router",
+ "derived": {"base": "frr9", "base_sha256": "sha256:…", "sha256": "sha256:…", "size": 412090368,
+             "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z",
+             "description": "FRR 9, ospfd включён", "source": {"instance_id": 7, "node": "R1"},
+             "supersedes": "d-0c4e81f2aa19"},
  "featured": false, "retired": false}
 ```
 
-Остальные свойства (`ram_mb`, `cpus`, `adapters`, `console_type`, `preconfig`, `symbol`) — от базы с сужениями публикации.
-Группирует плагин: свои образы (`author_user_id`), `featured` — в основной палитре, остальные — свёрнутым разделом по авторам (дизайн §5.4); `retired: true` — не предлагать для новых нод, но лабы с ним работают.
-Каталог из БД читается без перезапуска менеджера (в отличие от `IMAGES_FILE`).
+Новое необязательное поле элемента `IMAGES_FILE` — `capture: false`: с нод этого образа слой не снимают (`lab-uplink`,
+`linux-switch`); по умолчанию `true` для `kind: "qemu"`.
+
+Остальные свойства (`ram_mb`, `cpus`, `adapters`, `console_type`, `preconfig`, `symbol`) — от базы. `base` — всегда образ
+из `IMAGES_FILE`: слой пересаживается на базу при каждом снятии (дизайн §5.2). `supersedes` — прежний образ той же ноды
+той же лабы (палитра показывает только последние). Группирует плагин: свои (`author_user_id`), `featured` — в основной
+палитре, остальные — свёрнутым разделом по авторам; `retired: true` — не предлагать для новых нод, лабы с ним работают.
+Образы из БД отдаются без перезапуска менеджера (в отличие от `IMAGES_FILE`).
 
 | Запрос | Ответ |
 |---|---|
-| `PATCH /api/v1/images/{id}` | `{"featured": true}` (рекомендованный; право проверяет плагин), `{"title"}`, `{"description"}` или `{"retired": true}`; только производные образы, иначе `409 image_static` |
-| `DELETE /api/v1/images/{id}` | то же, что `retired: true` (файл не удаляется: на него опираются проекты студентов) |
+| `PATCH /api/v1/images/{id}` | любые из `{"title", "description", "featured", "retired"}`; только производные образы, иначе `409 image_static` |
 
-**Коды `error.code` публикации:** `CAPTURE_NODE_MISSING` (нет диска ноды `SRC` — нода ни разу не запускалась, нет),
-`CAPTURE_BASE_MISMATCH` (backing диска или хеш базы не совпали, нет), `CAPTURE_TOO_LARGE` (> `IMAGE_MAX_BYTES`, нет),
-`STUDENT_DIR_BUSY` (§2.5, нет), `AGENT_REJECTED` (нет), `TIMEOUT` и `INTERNAL` (да).
+Удаления нет: на файл опираются проекты студентов.
+
+**Коды `error.code` снятия:** `CAPTURE_NODE_MISSING` (у ноды нет диска — ни разу не запускалась; нет),
+`CAPTURE_BASE_MISMATCH` (backing диска или хеш базы не совпали; нет), `CAPTURE_TOO_LARGE` (> `IMAGE_MAX_BYTES`; нет),
+`STUDENT_DIR_BUSY` (§2.5; нет), `AGENT_REJECTED` (нет), `TIMEOUT` и `INTERNAL` (да).
 
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, 🆕 `draft_not_found` 404, `draft_limit` 409, `draft_busy` 409, `image_exists` 409, `image_static` 409, `image_not_derivable` 422, `chain_too_deep` 422 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `capture_not_found` 404, `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -923,9 +923,9 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 нему оператор и `lab-manager-admin check` узнают команду.
 
 **Снятие слоя образа (🆕, AGENT_REQUESTS §6).** `POST /images/capture` — агент копирует диск ноды из проекта в каталоге
-пользователя (каталог не подключён ни к одному CT) в `IMAGES_DIR/QEMU`, переписывает backing file относительным именем,
-проверяет и публикует файл атомарно. Менеджер вызывает его, только если `GET /capabilities` агента содержит
-`"images_capture": true` (§1.3); иначе `image_authoring` в `info` не объявляется.
+пользователя (каталог не подключён ни к одному CT) в `IMAGES_DIR/QEMU`, пересаживает слой на базу с относительным
+именем backing file, проверяет и публикует файл атомарно. Менеджер вызывает его, только если `GET /capabilities` агента содержит
+`"images_capture": true` (§1.3); иначе `image_capture` в `info` не объявляется.
 
 **Откат слота (агент 1.2).** `POST /slots/{vmid}/reset`, тело `{}`, те же заголовки владельца, что у
 `stop`: на остановленном CT выполняет `pct rollback` к снимку чистого слота (имя задаёт
@@ -958,7 +958,7 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
 | `lab_constructor` | менеджер | 🆕 `gns3lab.lab/2`: сегменты, `preconfig` образов, `warnings` в `validate` (§2.6); объявляется вместе с `lab_definitions` |
-| `image_authoring` | менеджер | 🆕 черновики образов, авторская сессия, публикация разностных образов (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
+| `image_capture` | менеджер | 🆕 авторский запуск (`options.mode: "authoring"`), снятие слоёв и производные образы в каталоге (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
 | `images_capture` | агент | 🆕 `POST /images/capture` (§5, AGENT_REQUESTS §6); поле `GET /capabilities` агента |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
