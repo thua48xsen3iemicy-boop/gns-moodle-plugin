@@ -630,3 +630,51 @@ $string['ui_why_viewer'] = 'Консоли доступны тем, кто за�
 $string['zoom'] = 'Масштаб';
 $string['zoomin'] = 'Увеличить';
 $string['zoomout'] = 'Уменьшить';
+
+// Derived image authoring.
+$string['gns3lab:manageimages'] = 'Управлять рекомендованными производными образами';
+$string['authoringrun'] = 'Запустить';
+$string['authoringback'] = 'Вернуться в редактор';
+$string['authoringcapture'] = 'Сохранить с образами';
+$string['authoringconsoles'] = 'Открыть консоли';
+$string['authoringcapturing'] = 'Остановка лабы и снятие образов…';
+$string['authoringsaved'] = 'Образы сохранены в черновике. Опубликуйте новую версию, когда она будет готова.';
+$string['authoringsealhint'] = 'Перед сохранением подготовьте гостевую ОС к клонированию: machine-id, SSH host keys, идентификаторы DHCP и история команд копируются студентам.';
+$string['authoringtitle'] = 'Название образа';
+$string['authoringdescription'] = 'Описание';
+$string['authoringmine'] = 'Мои образы';
+$string['authoringothers'] = 'Образы других авторов';
+$string['authoringsearch'] = 'Поиск образов и описаний';
+$string['authoringedit'] = 'Изменить образ';
+$string['authoringfeature'] = 'Рекомендовать';
+$string['authoringunfeature'] = 'Убрать из рекомендованных';
+$string['authoringretire'] = 'Убрать из палитры (существующие лабы продолжат работать)';
+$string['authoringcancel'] = 'Отмена';
+$string['authoringdraftconflict'] = 'Черновик изменился во время снятия. Полученные образы доступны в разделе «Мои образы»; откройте редактор заново, чтобы применить их к актуальному черновику.';
+$string['authoringresume'] = 'Применить результат снятия';
+$string['authoringresumehint'] = 'Применить завершённое снятие после закрытия или перезагрузки редактора.';
+$string['authoringdefinitionchanged'] = 'Топология изменилась после запуска. Остановите лабу и запустите актуальный черновик перед снятием образов.';
+$string['authoringretired'] = 'Мои образы вне палитры';
+
+$string['privacy:metadata:gns3labmanager:librarylabid'] = 'Лаба библиотеки, для которой выполнен авторский запуск.';
+$string['privacy:metadata:gns3labmanager:imagetitle'] = 'Название производного образа, заданное автором.';
+$string['privacy:metadata:gns3labmanager:imagedescription'] = 'Описание производного образа, заданное автором.';
+$string['privacy:metadata:gns3labmanager:imagedisk'] = 'Изменения диска, явно сохранённые автором как общий образ лабы.';
+
+// Guest-consistent image capture.
+$string['authoringquiescing'] = 'Выключение выбранных гостей…';
+$string['authoringquiescehint'] = 'Перед снятием работающие гости будут выключены изнутри. Если QGA недоступен, выполните sync и poweroff в госте, затем повторите сохранение.';
+$string['authoringblocked'] = 'Не всех гостей удалось штатно выключить';
+$string['authoringforce'] = 'Сохранить как есть';
+$string['authoringretry'] = 'Повторить';
+$string['authoringforcewarning'] = 'При сохранении как есть последние изменения могут потеряться, а файловая система — остаться в несогласованном состоянии. У таких образов будет предупреждение.';
+$string['authoringforcedhint'] = 'Снят без подтверждённого выключения гостя; последние изменения могут отсутствовать.';
+$string['authoringreason_GUEST_AGENT_UNAVAILABLE'] = 'Агент гостя недоступен; выключите гостя вручную.';
+$string['authoringreason_GUEST_SHUTDOWN_TIMEOUT'] = 'Истекло время ожидания выключения гостя.';
+$string['authoringreason_GUEST_SHUTDOWN_UNSUPPORTED'] = 'Слот не поддерживает штатное выключение гостя.';
+$string['authoringreason_SESSION_STOPPED'] = 'Сессия остановлена при работавшем госте. Запустите лабу снова и сохраните из работающей сессии либо сохраните как есть.';
+$string['authoringreason_other'] = 'Выключение гостя не подтверждено.';
+$string['authoringstatus_started'] = 'работает';
+$string['authoringstatus_stopped'] = 'выключена';
+$string['authoringstatus_suspended'] = 'приостановлена';
+$string['authoringstatus_unknown'] = 'статус неизвестен';

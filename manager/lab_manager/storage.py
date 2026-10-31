@@ -25,3 +25,10 @@ def student_key(site_slug: str, user_id: int) -> str:
     if not KEY_RE.fullmatch(key):
         raise StorageError("Student key does not fit the node agent rules")
     return key
+
+
+def authoring_key(site_slug, user_id, library_lab_id):
+    """Bounded, namespaced key independent of the mutable definition hash."""
+    import hashlib
+    student_key(site_slug, user_id)  # Validate the ordinary identity too.
+    return "a-" + hashlib.sha256(f"{site_slug}:{user_id}:authoring:{library_lab_id}".encode()).hexdigest()[:48]

@@ -18,7 +18,7 @@ from api.client import call, get_lifecycle
 from api.facts import Facts
 from api.l1 import Keepalives
 from api.models import DeployTicket
-from api.qga import Priority, QgaBroker
+from api.qga import Priority, QgaBroker, QgaError
 
 TRANSITIONS = {
     None: {"DEPLOYING"},
@@ -131,12 +131,16 @@ class Admission:
         if not self.future.done():
             self.future.set_result(None)
 
-    async def run(self, work):
-        """Run `work` to the end even if the HTTP client goes away."""
+    def start(self, work):
+        """Attach synchronously before an asynchronous HTTP response releases admission."""
         self.attached = True
         task = asyncio.ensure_future(work)
         task.add_done_callback(self._finished)
-        return await asyncio.shield(task)
+        return task
+
+    async def run(self, work):
+        """Run `work` to the end even if the HTTP client goes away."""
+        return await asyncio.shield(self.start(work))
 
     def _finished(self, task):
         if not task.cancelled():
@@ -285,7 +289,7 @@ class Lifecycle:
         }
         result.update(replayed=replayed, laboratory=current)
         if not compact:
-            source = lab if lab and op["status"] == "RUNNING" else op
+            source = lab if lab and op["status"] == "RUNNING" and op.get("action") != "shutdown" else op
             result.update(
                 stage=source.get("stage"),
                 progress=source.get("progress", 0),
@@ -293,6 +297,8 @@ class Lifecycle:
                 nodes=self.node_summary(source.get("nodes", [])),
                 updated_at=op.get("updated_at"),
             )
+        if op.get("action") == "shutdown":
+            result["result"] = op.get("result")
         return result
 
     def operation(self, oid):
@@ -459,6 +465,73 @@ class Lifecycle:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
         return self.present(op, compact=True)
+
+    def submit_shutdown(self, pid, node_id, timeout, key, admission):
+        fingerprint = hashlib.sha256(json.dumps(["shutdown", pid, node_id, timeout]).encode()).hexdigest()
+        dedup = key or fingerprint
+        for op in self.all("operation"):
+            if op["key"] == dedup:
+                if op["fingerprint"] != fingerprint:
+                    raise HTTPException(409, {"code": "IDEMPOTENCY_KEY_CONFLICT", "message": "Shutdown key reused"})
+                if key or op["status"] == "RUNNING":
+                    return self.present(op, replayed=True, compact=True)
+            if op["status"] == "RUNNING" and (op.get("action") != "shutdown" or op["project_id"] != pid or op["node_id"] == node_id):
+                raise HTTPException(409, {"code": "OPERATION_IN_PROGRESS", "message": "Conflicting slot operation"})
+        lab = self.get("lab", pid)
+        if not lab or lab["state"] != "READY":
+            raise HTTPException(409, {"code": "INVALID_TRANSITION", "message": "Shutdown requires a READY laboratory"})
+        lab["generation"] = lab.get("generation", 0) + 1
+        self.save("lab", pid, lab)  # Invalidate a monitor snapshot taken before admission.
+        op = {"operation_id": str(uuid4()), "project_id": pid, "node_id": node_id,
+              "action": "shutdown", "status": "RUNNING", "key": dedup,
+              "fingerprint": fingerprint, "updated_at": time.time(), "stage": "guest_shutdown",
+              "progress": 0, "error": None, "nodes": []}
+        self.save("operation", op["operation_id"], op)
+        task = admission.start(self.run_shutdown(op, timeout))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return self.present(op, compact=True)
+
+    async def run_shutdown(self, op, timeout):
+        pid, node_id = op["project_id"], op["node_id"]
+        accepted = False
+        node = None
+        try:
+            async with asyncio.timeout(timeout):
+                node = await self.api("GET", f"projects/{pid}/nodes/{node_id}")
+                if node.get("status") != "stopped":
+                    try:
+                        await self.qga.call(node_id, "guest-shutdown", {"mode": "powerdown"},
+                                            priority=Priority.LIFECYCLE, timeout=min(10, timeout), max_wait=timeout)
+                    except (QgaError, OSError, ValueError) as exc:
+                        raise LabError("GUEST_AGENT_UNAVAILABLE", "Guest agent is unavailable") from exc
+                    accepted = True
+                    while True:
+                        node = await self.api("GET", f"projects/{pid}/nodes/{node_id}")
+                        if node.get("status") == "stopped":
+                            break
+                        await asyncio.sleep(0.25)
+                op.update(status="SUCCEEDED", result="stopped", progress=100)
+        except TimeoutError:
+            op.update(status="FAILED", error={"code": "GUEST_SHUTDOWN_TIMEOUT" if accepted else "GUEST_AGENT_UNAVAILABLE",
+                                              "message": "Guest did not power down within the deadline"})
+        except asyncio.CancelledError:
+            op.update(status="FAILED", error={"code": "SERVICE_RESTART", "message": "Shutdown interrupted"})
+            raise
+        except Exception as exc:
+            op.update(status="FAILED", error={"code": exc.code if isinstance(exc, LabError) else "GUEST_AGENT_UNAVAILABLE",
+                                              "message": "Guest shutdown failed"})
+        finally:
+            # This is a node operation, not a failed laboratory lifecycle. A guest
+            # refusing shutdown must leave the other devices and lab running.
+            lab = self.get("lab", pid)
+            if lab:
+                lab["generation"] = lab.get("generation", 0) + 1
+                if node:
+                    lab["nodes"] = [node if n.get("node_id") == node_id else n for n in lab.get("nodes", [])]
+                self.save("lab", pid, lab)
+            op.update(updated_at=time.time(), nodes=[node] if node else [])
+            self.save("operation", op["operation_id"], op)
 
     async def claim(self, epoch, generation):
         """Called under command_lock. Drain accepted work before handing ownership over.
@@ -735,16 +808,21 @@ class Lifecycle:
             for lab in self.all("lab"):
                 if lab["state"] != "READY":
                     continue
+                if any(op.get("action") == "shutdown" and op["status"] == "RUNNING" and op["project_id"] == lab["project_id"]
+                       for op in self.all("operation")):
+                    continue
                 try:
                     nodes = uplink.visible_nodes(
                         lab["ticket"], await self.api("GET", f"projects/{lab['project_id']}/nodes")
                     )
                     if {n["name"] for n in nodes} != {
                         n["name"] for n in lab["ticket"]["nodes"]
-                    } or any(n.get("status") != "started" for n in nodes):
+                    } or any(n.get("status") != "started" and n.get("node_type") != "qemu" for n in nodes):
                         raise RuntimeError("Required node stopped or missing")
                     specs = {s["name"]: s for s in lab["ticket"]["nodes"]}
                     for node in nodes:
+                        if node.get("node_type") == "qemu" and node.get("status") != "started":
+                            continue  # A guest may power itself off; its disk remains usable.
                         await self.provision(lab, node, specs[node["name"]], False)
                     # A request may have started an operation while checks were awaiting IO.
                     current = self.get("lab", lab["project_id"])

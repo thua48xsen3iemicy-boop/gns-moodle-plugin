@@ -93,6 +93,13 @@ class SlotClient:
             return False, {"error": exc.code}
         return body.get("status") == "ready", body
 
+    async def capabilities(self):
+        return await self._call("GET", "/v1/capabilities")
+
+    async def shutdown(self, project_id, node_id, timeout, key):
+        return await self._call("POST", f"/v1/labs/{project_id}/nodes/{node_id}/shutdown",
+                                json={"timeout": timeout}, key=key)
+
     async def deploy(self, ticket: dict, key: str) -> dict:
         return await self._call("POST", "/v1/labs/deploy", json=ticket, key=key)
 

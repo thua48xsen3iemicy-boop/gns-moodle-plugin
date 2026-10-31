@@ -258,7 +258,7 @@ const openConsole = async(page, id) => {
 
         // ---- a text console still works next to it
         await openConsole(page, R1);
-        const term = await until(async() => (await page.locator('.xterm').count()) === 1 && /R1#/.test(await page.locator('.xterm-rows').innerText()));
+        const term = await until(async() => (await page.locator('.xterm').count()) === 1 && /R1 console/.test(await page.locator('.xterm-rows').innerText()));
         check('a text console of the same page is a terminal with snippets and font size',
             !!term && (await page.locator('.tbar .tfont').count()) === 1 && (await page.locator('.vncbar').count()) === 0);
         await context.close();

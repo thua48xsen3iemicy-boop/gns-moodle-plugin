@@ -122,8 +122,8 @@ def check_fields(body, allowed, where=""):
             check_fields(value, allowed[key], f"{where}{key}.")
 
 
-SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "lab_ref": 1, "lab": 1, "course_id": 1,
-                  "options": {"max_duration": 1}, "client": {"plugin_version": 1, "moodle_release": 1}}
+SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "library_lab_id": 1, "lab_ref": 1, "lab": 1, "course_id": 1,
+                  "options": {"max_duration": 1, "mode": 1}, "client": {"plugin_version": 1, "moodle_release": 1}}
 
 
 # Каталог образов (CONTRACTS §2.6 менеджера 0.5): у настоящего менеджера ещё файл образа, cli_prompt, qga и т. п.
@@ -153,6 +153,12 @@ IMAGES = [
      "symbol": ":/symbols/vpcs_guest.svg", "console_type": "telnet",
      "ram_mb": None, "cpus": None, "adapters": None, "port_name": "Ethernet{adapter}", "ports_per_adapter": 1},
 ]
+IMAGES.extend([
+    dict(next(i for i in IMAGES if i['id'] == 'debian12'), id='linux-switch', title='Linux switch',
+         category='switch', capture=False, console_type='none', adapters={'default': 8, 'min': 1, 'max': 16}),
+    dict(next(i for i in IMAGES if i['id'] == 'debian12'), id='lab-uplink', title='Internet',
+         category='cloud', capture=False, console_type='none'),
+])
 LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "images": "*"}
 LAB_FORMAT = "gns3lab.lab/1"
 # Проверка определения — перенос manager/lab_manager/labdef.py (ветка менеджера claude/determined-brown-lfgnxy):
@@ -194,7 +200,7 @@ def resources_of(nodes, images):
 def lab_problems(lab):
     """Checks a definition like the manager. Returns (problems, normalised definition with _resources)."""
     problems = []
-    images = {i["id"]: i for i in IMAGES if LIMITS["images"] == "*" or i["id"] in LIMITS["images"]}
+    images = {i["id"]: i for i in IMAGES if LIMITS["images"] == "*" or i.get("derived", {}).get("base", i["id"]) in LIMITS["images"]}
 
     def bad(path, code, message=""):
         problems.append({"path": path, "code": code, "message": message})
@@ -363,6 +369,11 @@ def load_labs():
 class Session:
     def __init__(self, site, user_id, instance_id, lab_ref, course_id, max_duration, fail=None, lab_def=None):
         self.id = "s-" + secrets.token_hex(8)
+        self.mode = None
+        self.library_lab_id = None
+        self.definition = None
+        self.capture = None
+        self.node_statuses = {}
         self.site, self.user_id, self.instance_id, self.lab_ref = site, user_id, instance_id, lab_ref
         self.lab_def = lab_def  # sha256:… for a lab from Moodle, then lab_ref is None
         self.key = lab_def or lab_ref  # key in Manager.labs
@@ -413,16 +424,20 @@ class Manager:
     def __init__(self):
         self.labs = load_labs()
         self.sessions: list[Session] = []
+        self.started_nodes = {}
+        self.shutdown_errors = {}
+        self.shutdown_supported = True
         self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
+        self.capture_fail = os.environ.get('MOCK_CAPTURE_FAIL') == '1'
         self.stale = False
         self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
         self.fact_changes = 0  # changes of fact_errors: they move rev of every session
         self.facts_stalled = None  # time the collection stopped, None while it works
 
-    def live(self, site, user_id):
-        return next((s for s in self.sessions if s.site == site and s.user_id == user_id
+    def live(self, site, user_id, library_lab_id=None):
+        return next((s for s in self.sessions if s.site == site and s.user_id == user_id and s.library_lab_id == library_lab_id
                      and s.status() not in ("stopped", "failed")), None)
 
     def latest(self, site, user_id, instance_id):
@@ -434,7 +449,15 @@ class Manager:
             return "stopped"
         return lab["statuses"].get(node_id, "started")
 
+    def observe(self, s):
+        if s.mode == 'authoring' and s.status() == 'running':
+            s.node_statuses = {n['name']: self.node_status(self.labs[s.key], n['node_id'])
+                               for n in self.labs[s.key]['doc']['topology']['nodes']}
+            self.started_nodes.setdefault(s.workspace, set()).update(name for name, status in s.node_statuses.items()
+                                                                    if status == 'started')
+
     def summary(self, s):
+        self.observe(s)
         status, stage, progress = s.state()
         message = MESSAGES.get(status, "Лаба не запустилась")
         if status in ("stopping", "stopped") and s.stopped_by_teacher:
@@ -453,6 +476,13 @@ class Manager:
         }
         if progress is not None:
             body["progress"] = progress
+        if s.mode:
+            body['mode'] = s.mode
+            body['capture_nodes'] = [{'name': n['name'], 'status': s.node_statuses.get(n['name'], 'unknown')}
+                                     for n in (s.definition or {}).get('nodes', [])
+                                     if n['name'] in self.started_nodes.get(s.workspace, set())
+                                     and next((i for i in IMAGES if i['id'] == n['image']), {}).get('kind') == 'qemu'
+                                     and next((i for i in IMAGES if i['id'] == n['image']), {}).get('capture') is not False]
         return body
 
     def present(self, s):
@@ -536,16 +566,16 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions"] + (["resume"] if RESUME else [])
-    return web.json_response({"schema": "gns3lab.info/1", "version": "0.5.0-mock",
-                              "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture"] + (["resume"] if RESUME else [])
+    return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
+                              "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
 
 
 async def images(request):
     site_of(request)
     allowed = LIMITS["images"]
-    return web.json_response({"images": [i for i in IMAGES if allowed == "*" or i["id"] in allowed]})
+    return web.json_response({"images": [i for i in IMAGES if allowed == "*" or i.get("derived", {}).get("base", i["id"]) in allowed]})
 
 
 async def validate_lab(request):
@@ -588,6 +618,11 @@ async def find_session(request):
     site = site_of(request)
     m: Manager = request.app["m"]
     try:
+        if 'library_lab_id' in request.query:
+            library = int(request.query['library_lab_id'])
+            user = int(request.query['user_id'])
+            sessions = [s for s in m.sessions if s.site == site and s.user_id == user and s.library_lab_id == library]
+            return web.json_response(m.present(sessions[-1])) if sessions else error(404, 'session_not_found', 'No authoring session')
         instance_id = int(request.query["instance_id"])
         user_id = int(request.query["user_id"]) if "user_id" in request.query else None
     except (KeyError, ValueError):
@@ -609,7 +644,14 @@ async def create_session(request):
     m: Manager = request.app["m"]
     try:
         body = await read_body(request, SESSION_FIELDS)
-        user_id, instance_id = int(body["user_id"]), int(body["instance_id"])
+        mode = (body.get('options') or {}).get('mode')
+        if mode not in (None, 'authoring'):
+            raise ValueError('Unknown mode')
+        authoring = mode == 'authoring'
+        library = int(body['library_lab_id']) if authoring else None
+        if (authoring and ('instance_id' in body or 'lab' not in body or library <= 0)) or (not authoring and 'library_lab_id' in body):
+            raise ValueError('Invalid authoring identity')
+        user_id, instance_id = int(body['user_id']), -library if authoring else int(body['instance_id'])
         if ("lab_ref" in body) == ("lab" in body):
             raise KeyError("lab_ref or lab")
         lab_ref = str(body["lab_ref"]) if "lab_ref" in body else None
@@ -617,14 +659,17 @@ async def create_session(request):
         return error(400, "unsupported_field", f"Unsupported field: {exc}")
     except (KeyError, ValueError, TypeError, json.JSONDecodeError):
         return error(400, "invalid_request", "Invalid fields: user_id, instance_id, lab_ref or lab")
+    if authoring and any(x.capture and x.capture['state'] == 'running' for x in m.sessions
+                         if x.site == site and x.user_id == user_id and x.library_lab_id == library):
+        return error(409, 'capture_in_progress', 'Workspace capture is running')
     lab_def = None
     if lab_ref is None:
         problems, normal = lab_problems(body["lab"])
         if problems:
             return error(422, "lab_invalid", f"{len(problems)} problem(s) in the lab", problems=problems)
         lab_def = lab_hash(normal)
-        m.labs.setdefault(lab_def, {"doc": lab_document(normal, lab_def), "statuses": {}})
-    live = m.live(site, user_id)
+        m.labs.setdefault(lab_def, {"doc": lab_document(normal, lab_def), "statuses": {}, "facts": {}})
+    live = m.live(site, user_id, library)
     if live:
         if (live.instance_id, live.key) != (instance_id, lab_def or lab_ref):
             return error(409, "session_conflict", "У студента уже запущена другая лаба; сначала остановите её",
@@ -634,10 +679,15 @@ async def create_session(request):
     if lab_ref is not None and lab_ref not in m.labs:
         return error(404, "lab_not_found", "Unknown lab_ref")
     requested = (body.get("options") or {}).get("max_duration") or 0
-    max_duration = min(int(requested), MAX_DURATION_LIMIT) if requested else DEFAULT_MAX_DURATION
+    max_duration = min(int(requested or 240), 240) if authoring else (min(int(requested), MAX_DURATION_LIMIT) if requested else DEFAULT_MAX_DURATION)
     s = Session(site, user_id, instance_id, lab_ref, body.get("course_id"), max_duration, m.fail_next, lab_def)
+    s.mode = 'authoring' if authoring else None
+    s.library_lab_id = library
+    s.definition = body.get('lab')
     m.fail_next = None
     s.workspace = m.workspaces.setdefault((site, user_id, instance_id, s.key), len(m.workspaces) + 1)
+    for node in m.labs[s.key]['doc']['topology']['nodes']:
+        m.stopped_nodes.discard(node['node_id'])
     m.sessions.append(s)
     log.info("session %s: user %s, activity %s, lab %s, %s min, client %s", s.id, user_id, instance_id, s.key,
              max_duration, body.get("client"))
@@ -663,10 +713,132 @@ async def stop_session(request):
     except Unsupported as exc:
         return error(400, "unsupported_field", f"Unsupported field: {exc}")
     if s.status() not in ("stopped", "failed") and s.stop_requested is None:
+        request.app['m'].observe(s)
         s.stop_requested = time.time()
         by = body.get("requested_by_user_id")
         s.stopped_by_teacher = by is not None and by != s.user_id
     return web.json_response(request.app["m"].present(s))
+
+
+async def image_capture(request):
+    site = site_of(request)
+    session = own(request, site)
+    if request.method == 'GET':
+        return web.json_response(session.capture) if session.capture else error(404, 'capture_not_found', 'No capture')
+    if session.mode != 'authoring':
+        return error(409, 'not_authoring', 'Authoring session required')
+    if session.capture and session.capture['state'] in ('running', 'done'):
+        code = 'capture_in_progress' if session.capture['state'] == 'running' else 'capture_done'
+        return error(409, code, code)
+    if session.status() not in ('running', 'stopped'):
+        return error(409, 'session_not_running', 'Session must run or be stopped')
+    body = await request.json()
+    force = body.get('force', False)
+    if type(force) is not bool:
+        return error(400, 'invalid_request', 'force must be boolean')
+    manager = request.app['m']
+    manager.observe(session)
+    selected = body.get('nodes')
+    names = {n['name']: n for n in (session.definition or {}).get('nodes', [])}
+    if (not isinstance(selected, list) or not 1 <= len(selected) <= 10 or
+            len({n.get('name') for n in selected}) != len(selected)):
+        return error(400, 'invalid_request', 'Invalid node selection')
+    for n in selected:
+        image = next((i for i in IMAGES if i['id'] == names.get(n.get('name'), {}).get('image')), None)
+        if not image or image['kind'] != 'qemu' or image.get('capture') is False:
+            return error(422, 'lab_invalid', 'Node cannot be captured')
+        if n['name'] not in manager.started_nodes.get(session.workspace, set()):
+            return error(422, 'lab_invalid', 'Node never started', problems=[{'code': 'never_started'}])
+    unsafe = [n['name'] for n in selected if session.node_statuses.get(n['name']) != 'stopped'] if session.status() == 'stopped' else []
+    if unsafe and not force:
+        return error(409, 'guest_not_stopped', 'Start the lab again or save as is',
+                     nodes=[{'name': name, 'reason': 'SESSION_STOPPED'} for name in unsafe])
+    session.capture = {'schema': 'gns3lab.capture/1', 'state': 'running', 'stage': 'quiesce', 'error': None}
+
+    async def finish():
+        forced = list(unsafe)
+        if session.status() == 'running':
+            await asyncio.sleep(0.15)
+            errors = []
+            ids = {n['name']: n['node_id'] for n in manager.labs[session.key]['doc']['topology']['nodes']}
+            manager.observe(session)
+            for item in selected:
+                name = item['name']
+                if session.node_statuses.get(name) == 'stopped':
+                    continue
+                reason = manager.shutdown_errors.get(name) if manager.shutdown_supported else 'GUEST_SHUTDOWN_UNSUPPORTED'
+                if reason:
+                    errors.append({'name': name, 'reason': reason})
+                else:
+                    manager.stopped_nodes.add(ids[name])
+                    for ws in list(request.app['consoles'].get(ids[name], ())):
+                        await ws.close()
+            manager.observe(session)
+            if errors and not force:
+                session.capture = {'schema': 'gns3lab.capture/1', 'state': 'failed', 'stage': 'quiesce',
+                                   'error': {'code': 'GUEST_NOT_STOPPED', 'retryable': True, 'nodes': errors}}
+                return
+            forced = [item['name'] for item in errors]
+        session.capture['stage'] = 'stopping'
+        session.stop_requested = time.time()
+        await asyncio.sleep(float(os.environ.get('MOCK_CAPTURE_DELAY', '3')) + STOPPING_FOR)
+        if request.app['m'].capture_fail:
+            session.capture = {'schema': 'gns3lab.capture/1', 'state': 'failed',
+                               'error': {'code': 'CAPTURE_NODE_MISSING', 'retryable': False, 'node': selected[-1]['name']}}
+            return
+        staged, result = [], {}
+        for n in selected:
+            parent = next(i for i in IMAGES if i['id'] == names[n['name']]['image'])
+            base_id = parent.get('derived', {}).get('base', parent['id'])
+            base = next(i for i in IMAGES if i['id'] == base_id)
+            identity = 'd-' + secrets.token_hex(6)
+            image = dict(base, id=identity, title=n['title'], featured=False, retired=False,
+                         derived={'base': base_id, 'base_sha256': 'sha256:' + 'a' * 64,
+                                  'sha256': 'sha256:' + secrets.token_hex(32), 'size': 1048576,
+                                  'author_user_id': session.user_id, 'published_at': iso(time.time()), 'forced': n['name'] in forced,
+                                  'description': n.get('description', ''),
+                                  'source': {'library_lab_id': session.library_lab_id, 'node': n['name']},
+                                  'supersedes': parent['id'] if parent.get('derived', {}).get('author_user_id') == session.user_id and parent['derived']['source'] == {'library_lab_id': session.library_lab_id, 'node': n['name']} else None})
+            previous = [i for i in IMAGES if i.get('derived', {}).get('author_user_id') == session.user_id and i['derived']['source'] == {'library_lab_id': session.library_lab_id, 'node': n['name']}]
+            image['derived']['supersedes'] = previous[-1]['id'] if previous else None
+            staged.append(image)
+            result[n['name']] = identity
+        IMAGES.extend(staged)
+        session.capture = {'schema': 'gns3lab.capture/1', 'state': 'done', 'images': result, 'forced': forced, 'error': None}
+    task = asyncio.create_task(finish())
+    request.app['capture_tasks'].add(task)
+    task.add_done_callback(request.app['capture_tasks'].discard)
+    return web.json_response(session.capture, status=202)
+
+
+async def mock_capture_failure(request):
+    request.app['m'].capture_fail = request.match_info['mode'] == 'on'
+    return web.json_response({'fail': request.app['m'].capture_fail})
+
+
+async def mock_shutdown_failure(request):
+    body = await request.json()
+    request.app['m'].shutdown_errors = body.get('nodes', {})
+    request.app['m'].shutdown_supported = body.get('supported', True)
+    return web.json_response({'nodes': request.app['m'].shutdown_errors})
+
+
+async def image_patch(request):
+    site_of(request)
+    image = next((i for i in IMAGES if i['id'] == request.match_info['image']), None)
+    if image is None:
+        return error(404, 'not_found', 'Unknown image')
+    if not image.get('derived'):
+        return error(409, 'image_static', 'Static image')
+    body = await read_body(request, {'title': 1, 'description': 1, 'featured': 1, 'retired': 1})
+    if not body:
+        return error(400, 'invalid_request', 'Empty image patch')
+    for key, value in body.items():
+        if key == 'description':
+            image['derived'][key] = value
+        else:
+            image[key] = value
+    return web.json_response(image)
 
 
 async def console_ticket(request):
@@ -1039,6 +1211,10 @@ async def slot_console(request):
             for ch in msg.data:
                 if ch in "\r\n":
                     cmd, line = line.strip(), ""
+                    if cmd == "poweroff":
+                        m.stopped_nodes.add(node_id)
+                        await ws.close()
+                        return ws
                     if cmd == "reload":
                         await ws.close()
                         return ws
@@ -1068,6 +1244,12 @@ def make_apps():
     api = web.Application()
     vnc = {}  # node_id → FakeRfb of the last screen opened on it
     api["m"], api["consoles"], api["vnc"] = manager, consoles, vnc
+    api['capture_tasks'] = set()
+    api.router.add_post('/mock/shutdown-fail', mock_shutdown_failure)
+    api.router.add_post('/mock/capture-fail/{mode}', mock_capture_failure)
+    api.router.add_post('/api/v1/sessions/{sid}/capture', image_capture)
+    api.router.add_get('/api/v1/sessions/{sid}/capture', image_capture)
+    api.router.add_patch('/api/v1/images/{image}', image_patch)
     api.router.add_get("/api/v1/info", info)
     api.router.add_get("/api/v1/labs", list_labs)
     api.router.add_get("/api/v1/images", images)
@@ -1090,6 +1272,10 @@ def make_apps():
     async def http_session(app):
         app["http"] = ClientSession()
         yield
+        tasks = list(app['capture_tasks'])
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await app["http"].close()
 
     api.cleanup_ctx.append(http_session)

@@ -36,6 +36,7 @@
  */
 
 import Ajax from 'core/ajax';
+import {authoringTransport} from 'mod_gns3lab/authoringapi';
 import {getStrings} from 'core/str';
 import {STRING_KEYS as CONSOLE_KEYS} from 'mod_gns3lab/console';
 import {addSeen, fingerprint, interpret, mergeSeen, pruneSeen} from 'mod_gns3lab/consolefacts';
@@ -116,6 +117,8 @@ class LabPage {
         this.root = root;
         this.strings = strings;
         this.data = JSON.parse(root.dataset.json || '{}');
+        this.api = this.data.authoring ? authoringTransport(this.data.authoring, this.data.definition)
+            : requests => Ajax.call(requests);
         this.liveKey = null;
         this.cmid = cmid;
         this.userid = userid;
@@ -157,6 +160,7 @@ class LabPage {
             stage: this.stage,
             strings,
             cmid,
+            api: this.api,
             userid,
             readonly: userid !== 0,
             nodeStatus: nodeId => (this.session
@@ -192,6 +196,7 @@ class LabPage {
         const controllable = !!region('start');
         this.session = controllable ? new Session(root, {
             cmid,
+            api: this.api,
             userid,
             strings,
             onState: (state, before) => this.stateChanged(state, before),

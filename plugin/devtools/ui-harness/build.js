@@ -223,7 +223,7 @@ const EDITOR_IOL = {
  * @param {boolean} constructor the manager has the lab constructor
  * @returns {string} HTML
  */
-function editorPage(lang, def, constructor) {
+function editorPage(lang, def, constructor, extra = {}) {
     const all = strings(lang);
     const texts = {};
     for (const [key, text] of Object.entries(all)) {
@@ -231,12 +231,12 @@ function editorPage(lang, def, constructor) {
             texts['problem_' + key.slice(11)] = text;
         } else if (key.startsWith('ed_warning_')) {
             texts['warning_' + key.slice(11)] = text;
-        } else if (key.startsWith('ed_')) {
+        } else if (key.startsWith('ed_') || key.startsWith('authoring') || key === 'stoplab') {
             texts[key] = text;
         }
     }
     const data = {labid: 1, definition: def, version: 1, status: 'draft', images: EDITOR_IMAGES,
-        limits: {max_nodes: 30}, canpublish: true, labconstructor: constructor, catalogerror: '', strings: texts};
+        limits: {max_nodes: 30}, canpublish: true, labconstructor: constructor, catalogerror: '', strings: texts, ...extra};
     const view = {
         uniqid: 'u1', labname: 'Lab', libraryurl: '#library', canpublish: true, labconstructor: constructor,
         datajson: JSON.stringify(data),
@@ -261,6 +261,22 @@ for (const lang of ['en', 'ru']) {
         shell(lang, '', editorPage(lang, EDITOR_IOL, true), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.norouter.html`),
         shell(lang, '', editorPage(lang, EDITOR_NOROUTER, true), 'live', '', EDITOR_INIT));
+}
+
+// Authoring uses the real mock manager through the local server's Moodle stand-in.
+const AUTHORING_LAB = {format: 'gns3lab.lab/1', nodes: [
+    {name: 'PC1', image: 'debian12', x: -100, y: 0},
+    {name: 'PC2', image: 'debian12', x: 100, y: 0},
+    {name: 'SW1', image: 'linux-switch', x: 0, y: -150},
+], links: []};
+for (const lang of ['ru', 'en']) {
+    fs.writeFileSync(path.join(dist, `editor.${lang}.authoring.html`), shell(lang, '',
+        editorPage(lang, AUTHORING_LAB, false, {imagecapture: true, userid: 42, manageimages: true,
+            labname: 'Authoring lab', authoringurl: `authoring.${lang}.html`}), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `authoring.${lang}.html`), shell(lang, '', page(lang, {
+        labname: 'Authoring lab', datajson: JSON.stringify({...data, authoring: 1,
+            definition: JSON.stringify(AUTHORING_LAB), seatmode: 'off', factsview: 'live'}),
+    })));
 }
 
 // The course page of a teacher (course.php): index.<lang>.course.html, with two groups to pick from; the stub plays four

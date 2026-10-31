@@ -334,7 +334,7 @@ def slot_identity(root, entries):
     nested = read_json(Path(root) / "slot/release.json")
     require(isinstance(nested, dict) and set(nested) == {"version", "build_id", "files"},
             "Unsupported Slot manifest")
-    require(nested["version"] == "0.13.0" and isinstance(nested["build_id"], str)
+    require(nested["version"] == "0.14.0" and isinstance(nested["build_id"], str)
             and nested["build_id"] and isinstance(nested["files"], dict)
             and SLOT_REQUIRED <= nested["files"].keys(), "Incomplete Slot identity")
     require(nested["files"] == slot_projection(entries), "Nested Slot manifest disagrees with payload")
@@ -538,6 +538,7 @@ SOURCE_FILES = (
     'agent/requirements-test.txt',
     'agent/requirements.txt',
     'agent/tests/test_agent.py',
+    'agent/tests/test_capture.py',
     'agent/tests/test_fencing.py',
     'agent/tests/test_guest_init.py',
     'agent/tests/test_tls.py',
@@ -570,6 +571,7 @@ SOURCE_FILES = (
     'manager/lab_manager/app.py',
     'manager/lab_manager/config.py',
     'manager/lab_manager/db.py',
+    'manager/lab_manager/derived.py',
     'manager/lab_manager/errors.py',
     'manager/lab_manager/facts.py',
     'manager/lab_manager/images.py',
@@ -584,6 +586,8 @@ SOURCE_FILES = (
     'manager/lab_manager/migrations/006_command_ownership.sql',
     'manager/lab_manager/migrations/007_slot_lab_failures.sql',
     'manager/lab_manager/migrations/008_facts.sql',
+    'manager/lab_manager/migrations/009_derived_images.sql',
+    'manager/lab_manager/migrations/010_guest_consistent_capture.sql',
     'manager/lab_manager/migrations/__init__.py',
     'manager/lab_manager/orchestrator.py',
     'manager/lab_manager/netconfig.py',
@@ -604,6 +608,7 @@ SOURCE_FILES = (
     'manager/tests/test_agent_client.py',
     'manager/tests/test_api.py',
     'manager/tests/test_config.py',
+    'manager/tests/test_derived.py',
     'manager/tests/test_console_gateway.py',
     'manager/tests/test_facts.py',
     'manager/tests/test_ios_config.py',
@@ -660,6 +665,7 @@ SOURCE_FILES = (
     'slot/tests/test_qga.py',
     'slot/tests/test_reliability.py',
     'slot/tests/test_slot.py',
+    'slot/tests/test_shutdown.py',
     'slot/tests/test_student_state.py',
     'slot/tests/test_uplink.py',
     'slot/tests/test_vnc.py',

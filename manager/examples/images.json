@@ -12,6 +12,7 @@
     },
     {
       "id": "linux-switch",
+      "capture": false,
       "title": "Linux Switch",
       "kind": "qemu",
       "category": "switch",
@@ -25,6 +26,7 @@
     },
     {
       "id": "lab-uplink",
+      "capture": false,
       "title": "Internet",
       "kind": "qemu",
       "category": "router",

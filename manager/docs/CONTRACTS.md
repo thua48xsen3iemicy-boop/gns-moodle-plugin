@@ -120,7 +120,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | Поле | Тип | Обяз. | Смысл |
 |---|---|---|---|
 | `user_id` | int > 0 | да | `user.id` в Moodle; вместе с сайтом даёт `student_key` |
-| `instance_id` | int > 0 | да | id записи `gns3lab` |
+| `instance_id` | int > 0 | да | id записи `gns3lab`; 🆕 у авторского запуска вместо него `library_lab_id` (§2.8) |
 | `course_id` | int ≥ 0 | нет | для журнала и подсказки при конфликте |
 | `lab_ref` | строка | одно из двух | эталонная лаба из `GET /api/v1/labs` |
 | `lab` | объект | одно из двух | ✅ определение лабы из Moodle, `gns3lab.lab/1` (§2.6); только при `lab_definitions` в `info` |
@@ -131,7 +131,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 Любое неизвестное поле на любом уровне — `400 unsupported_field` с именем поля.
 
 Кандидаты в `options` на будущее (каждый появится вместе с возможностью в `info.options`):
-`reset: true` — начать лабу заново; `mode: "exam"` — пока не нужен.
+`reset: true` — начать лабу заново; `mode: "exam"` — пока не нужен. 🆕 `mode: "authoring"` — авторский запуск лабы преподавателем (§2.8).
 
 Ровно одно из `lab_ref` и `lab`, иначе `400 invalid_request`. Неверное определение —
 `422 lab_invalid` с `problems`, как у `POST /labs/validate` (§2.6); проверка та же.
@@ -191,6 +191,8 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
 | `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
+| `capture_nodes` | у authoring: `[{"name", "status"}]`, когда-либо запускавшиеся QEMU-ноды проекта; выключенная через poweroff не пропадает |
+| `mode` | 🆕 только у авторского запуска (§2.8): `"authoring"`. У обычной сессии поля нет |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
 ### 2.4. ✅ Остальные маршруты
@@ -373,12 +375,116 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 - Истории в этом маршруте нет. Журнал изменений менеджер хранит с самого начала (DESIGN §6.7), отдавать его
   начнёт позже.
 
+### 2.8. 🆕 Разностные образы: авторский запуск и сохранение с образами
+
+Дизайн — [`docs/derived-images/DESIGN.md`](../../docs/derived-images/DESIGN.md). Есть, только когда в `info.features` есть
+`image_capture` (вместе с `images` и `lab_definitions`; агент узла умеет `images_capture`, §5), а в `info.options` — `mode`.
+Права в Moodle (`mod/gns3lab:managelabs` — запуск и снятие, `mod/gns3lab:manageimages` — `featured`) проверяет плагин.
+
+**Авторский запуск** — `POST /api/v1/sessions` (§2.2) с `lab`, `"options": {"mode": "authoring"}` и `library_lab_id`
+(int > 0, `id` лабы библиотеки плагина) **вместо** `instance_id`. С `lab_ref`, с `instance_id` или без `library_lab_id` —
+`400 invalid_request`; `library_lab_id` без `mode: "authoring"` — тоже. Отличия от обычной сессии:
+- в объекте сессии `mode: "authoring"` (§2.3); `capture_nodes` — `[{"name", "status"}]` всех QEMU-нод с capture ≠ false, когда-либо запускавшихся в этом проекте; история хранится в workspace, status — текущий либо последний перед остановкой сессии;
+- свой `student_key` (сайт, пользователь, `library_lab_id`, признак авторства): проект преподавателя для этой лабы отдельно от
+  его лаб как студента; «одна живая лаба» действует внутри этого ключа;
+- живая авторская сессия с другим `lab_def` — `409 session_conflict`, как обычно; после остановки запуск с другим
+  `lab_def` начинает **новый** проект, прежний менеджер удаляет (с тем же `lab_def` — продолжает);
+- длительность — не больше `AUTHORING_MAX_DURATION`.
+
+**Поиск авторского запуска:** `GET /api/v1/sessions?user_id=&library_lab_id=` — последний запуск
+этой лабы этого автора; `instance_id` одновременно запрещён. Авторские сессии не входят в выборки активностей.
+
+**`POST /api/v1/sessions/{id}/capture`** — снять слои и опубликовать образы. Только у авторской сессии в `running` или
+`stopped` (иначе `409 session_not_running`; обычная сессия — `409 not_authoring`).
+
+```json
+{"force": false, "nodes": [{"name": "R1", "title": "OSPF-лаба — R1", "description": "FRR 9, ospfd включён"},
+           {"name": "SRV", "title": "OSPF-лаба — веб-сервер"}]}
+```
+
+| Поле | Смысл |
+|---|---|
+| `nodes[]` | 1…`IMAGE_CAPTURE_MAX_NODES`, имена без повторов. Нода есть в `lab_def` сессии (иначе `422 lab_invalid` с `problems`, код `unknown_node`), `kind: "qemu"`, образ без `capture: false` (`not_capturable`), есть в capture_nodes (иначе `never_started`) |
+| `title` | 1–100 символов |
+| `description` | необязательно, до 2000 символов |
+| `force` | строгий bool, default false; разрешить снятие без подтверждённого выключения гостя |
+
+Ответ `202` — состояние снятия (тело ниже). Сначала этап `quiesce`: работающие выбранные ноды
+выключаются через guest-shutdown слота (§4.3a), параллельно с общим пределом времени.
+Только после подтверждения stopped менеджер ставит stop_requested и останавливает сессию обычным путём.
+Без force любая ошибка даёт failed capture `GUEST_NOT_STOPPED`, retryable true,
+`error.nodes: [{"name", "reason"}]`: GUEST_AGENT_UNAVAILABLE / GUEST_SHUTDOWN_TIMEOUT /
+GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404). Сессия остаётся running,
+уже выключенные ноды остаются выключенными. С force ошибки не мешают остановке и capture,
+их имена попадают в `forced: ["R1"]` результата done и `derived.forced: true` соответствующих образов.
+Из stopped-сессии выбранные ноды с последним pre-stop статусом started либо неизвестным
+состоянием (свежий опрос перед остановкой недоступен) без force дают
+`409 guest_not_stopped`, `nodes: [{"name", "reason": "SESSION_STOPPED"}]`: запустить лабу снова
+и сохранить из работающей либо сохранить как есть. С force они записываются в forced.
+Нода, штатно выключенная до остановки сессии, force не требует.
+
+`stage`: quiesce / stopping / capture; поле сообщает фазу, state остаётся running/done/failed.
+Повтор, пока снятие идёт, —
+`409 capture_in_progress`; после `done` новое снятие той же сессии — `409 capture_done` (нужен новый запуск).
+
+**`GET /api/v1/sessions/{id}/capture`** — состояние; снятия не было — `404 capture_not_found`.
+
+```json
+{"schema": "gns3lab.capture/1", "state": "done",
+ "images": {"R1": "d-3f9a1c0d2b4e", "SRV": "d-77b0e1a92c5d"}, "forced": [], "error": null}
+```
+
+`state`: `running` · `done` · `failed`. `images` — только при `done`, по всем нодам запроса: образы публикуются **все или
+ни одного** (файлы, уже снятые до сбоя, в `GET /images` не попадают; их убирает администратор). `failed` —
+`error: {"code", "retryable", "node"}` (коды ниже; у `GUEST_NOT_STOPPED` также `nodes`);
+проект цел, можно снять снова. При `done` плагин заменяет `image` этих
+нод в определении лабы и сохраняет лабу; новое определение даст новый `lab_def`.
+
+**Производные образы в `GET /api/v1/images`** — обычные элементы каталога с дополнительными полями (старый плагин их
+просто не читает):
+
+```json
+{"id": "d-3f9a1c0d2b4e", "title": "OSPF-лаба — R1", "kind": "qemu", "category": "router",
+ "derived": {"base": "frr9", "base_sha256": "sha256:…", "sha256": "sha256:…", "size": 412090368,
+             "author_user_id": 42, "forced": false, "published_at": "2026-10-31T11:20:00Z",
+             "description": "FRR 9, ospfd включён", "source": {"library_lab_id": 12, "node": "R1"},
+             "supersedes": "d-0c4e81f2aa19"},
+ "featured": false, "retired": false}
+```
+
+Новое необязательное поле элемента `IMAGES_FILE` — `capture: false`: с нод этого образа слой не снимают (`lab-uplink`,
+`linux-switch`); по умолчанию `true` для `kind: "qemu"`.
+
+Остальные свойства (`ram_mb`, `cpus`, `adapters`, `console_type`, `preconfig`, `symbol`) — от базы. `base` — всегда образ
+из `IMAGES_FILE`: слой пересаживается на базу при каждом снятии (дизайн §5.2). `supersedes` — прежний образ той же ноды
+той же лабы (палитра показывает только последние). Группирует плагин: свои (`author_user_id`), `featured` — в основной
+палитре, остальные — свёрнутым разделом по авторам; `retired: true` — не предлагать для новых нод, лабы с ним работают.
+Образы из БД отдаются без перезапуска менеджера (в отличие от `IMAGES_FILE`).
+Каталог производных изолирован по сайту Moodle. Клиент после capture/PATCH сбрасывает свой кеш образов.
+В административном `IMAGES_FILE` у снимаемой базы необходимо приватное поле `sha256`
+в формате `sha256:<64 hex>`: его вычисляет администратор при установке файла.
+Отсутствие хеша — `422 lab_invalid` с `not_capturable`; обычные запуски разрешены.
+Новое авторское выполнение блокируется `409 capture_in_progress` до завершения снятия.
+Снятие старой stopped-сессии после более нового запуска запрещено (`409 session_not_running`).
+После `failed` запрос можно повторить с новыми именами файлов. Если ответ агента потерян,
+операция не публикует каталог; уже созданные файлы остаются для учёта оператором.
+
+| Запрос | Ответ |
+|---|---|
+| `PATCH /api/v1/images/{id}` | любые из `{"title", "description", "featured", "retired"}`; только производные образы, иначе `409 image_static` |
+
+Удаления нет: на файл опираются проекты студентов.
+
+**Коды `error.code` снятия:** `GUEST_NOT_STOPPED` (выключение не подтверждено; да, с nodes), `CAPTURE_NODE_MISSING` (диск исчез/недоступен после проверки истории; нет),
+`CAPTURE_BASE_MISMATCH` (backing диска или хеш базы не совпали; нет), `CAPTURE_TOO_LARGE` (> `IMAGE_MAX_BYTES`; нет),
+`STUDENT_DIR_BUSY` (§2.5; нет), `AGENT_REJECTED` (нет), `TIMEOUT` и `INTERNAL` (да).
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -592,11 +698,26 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 3. Если слот понимает `deploy/2`, отправлять его; иначе `deploy/1`. В `deploy/1` нет `run`,
    поэтому сессионные данные в нём не передаются.
 
+### 4.3a. Штатное выключение гостя (`guest-shutdown`)
+
+`POST /v1/labs/{project_id}/nodes/{node_id}/shutdown`, тело `{"timeout": 120}`:
+строгий int 30–300, default 120. Только QEMU в READY-лабе, иначе 409 NOT_SUPPORTED /
+INVALID_TRANSITION. Идемпотентность и fencing — как у остальных мутаций.
+Ответ 202 + operation_id, опрос GET /v1/operations/{id}; success — SUCCEEDED,
+`result: "stopped"`. Уже stopped не требует QGA. Работающая нода получает
+QGA `guest-shutdown {mode: powerdown}` через брокер, затем слот ждёт stopped в GNS3.
+Одновременные выключения разных нод разрешены; смена владельца ждёт их завершения.
+Ошибка не вызывает hard stop и не переводит лабу в FAILED. Ручной poweroff QEMU
+также сохраняет READY лабы; монитор не проверяет сервисы выключенного гостя.
+
 ### 4.4. Ответы слота
 
 Не меняются (`slot/README.md`): `202` с `operation_id`, опрос `GET /v1/operations/{id}`, коды
 `STALE_IDEMPOTENCY_KEY`, `OPERATION_IN_PROGRESS`, `INVALID_TRANSITION`,
 `IDEMPOTENCY_KEY_CONFLICT`. Добавляется `UNSUPPORTED_REQUIREMENT`.
+Операция shutdown: `GUEST_AGENT_UNAVAILABLE` (не доступен канал QGA),
+`GUEST_SHUTDOWN_TIMEOUT` (команда отправлена, но stopped не подтверждён в срок).
+QGA не присылает успешный ответ на guest-shutdown; подтверждение — статус GNS3.
 
 ### 4.5. Владелец слота после отката
 
@@ -846,6 +967,11 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 ждёт и перечитывает состояние. `GET /slots/{vmid}/status` отдаёт `ownership` с `uncertain`, `inflight` и `command` — по
 нему оператор и `lab-manager-admin check` узнают команду.
 
+**Снятие слоя образа (🆕, AGENT_REQUESTS §6).** `POST /images/capture` — агент копирует диск ноды из проекта в каталоге
+пользователя (каталог не подключён ни к одному CT) в `IMAGES_DIR/QEMU`, пересаживает слой на базу с относительным
+именем backing file, проверяет и публикует файл атомарно. Менеджер вызывает его, только если `GET /capabilities` агента содержит
+`"images_capture": true` (§1.3); иначе `image_capture` в `info` не объявляется.
+
 **Откат слота (агент 1.2).** `POST /slots/{vmid}/reset`, тело `{}`, те же заголовки владельца, что у
 `stop`: на остановленном CT выполняет `pct rollback` к снимку чистого слота (имя задаёт
 администратор агента, `LAB_CLEAN_SNAPSHOT`, по умолчанию `lab-clean`; клиент его не передаёт).
@@ -877,6 +1003,9 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
 | `lab_constructor` | менеджер | 🆕 `gns3lab.lab/2`: сегменты, `preconfig` образов, `warnings` в `validate` (§2.6); объявляется вместе с `lab_definitions` |
+| `image_capture` | менеджер | 🆕 авторский запуск (`options.mode: "authoring"`), снятие слоёв и производные образы в каталоге (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
+| `guest-shutdown` | слот | QGA powerdown выбранной QEMU-ноды и ожидание stopped, §4.3a |
+| `images_capture` | агент | 🆕 `POST /images/capture` (§5, AGENT_REQUESTS §6); поле `GET /capabilities` агента |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `vnc` | слот | 🆕 `NodeSpec.console: "vnc"` и сырой поток RFB в консольном WS (§4.2); слот объявляет её в `features` (0.8.0); когда появится `requires`, лабы с такими узлами будут требовать её |

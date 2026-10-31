@@ -191,6 +191,7 @@ class Orchestrator:
         self.epoch = None
         self._claims = set()
         self.last_tick = None
+        self.derived = None
 
     # ------------------------------------------------------------------ loop
     def wake(self):
@@ -247,6 +248,12 @@ class Orchestrator:
             task = self._tasks.get(session["id"])
             if task is None or task.done():
                 self._tasks[session["id"]] = asyncio.create_task(self.drive(session["id"]))
+        if self.derived:
+            for row in await self.derived.pending():
+                key = "capture:" + row["session_id"]
+                task = self._tasks.get(key)
+                if task is None or task.done():
+                    self._tasks[key] = asyncio.create_task(self.derived.step(row["session_id"]))
         self._tasks = {k: t for k, t in self._tasks.items() if not t.done()}
 
     async def drain(self):
@@ -515,7 +522,7 @@ class Orchestrator:
         """Reference topology of the session's lab: lab.gns3, or symbols from the image catalog."""
         if s["lab_def"]:
             ws = await self.store.workspace(s["workspace_id"])
-            return labdef.reference_topology(ws["definition"], self.settings.images or {})
+            return labdef.reference_topology(ws["definition"], await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}))
         try:
             return self.catalog.get(s["lab_ref"]).topology
         except LabError:
@@ -585,6 +592,8 @@ class Orchestrator:
             if node is None:
                 continue  # CT unknown to the cluster or its node is offline
             name = ct["node"]
+            if s.get("mode") == "authoring" and self.derived and not await self.derived.capabilities(name):
+                continue
             want = need or int(ct.get("maxmem") or 0)
             want_cpu = cores or int(ct.get("maxcpu") or 0)
             room = int(node.get("maxmem", 0)) - int(node.get("mem", 0)) - unused[name] - reserve
@@ -607,7 +616,7 @@ class Orchestrator:
             self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
         else:
             ws = await self.store.workspace(s["workspace_id"])
-            missing = sorted({n["image"] for n in ws["definition"]["nodes"]} - set(self.settings.images or {}))
+            missing = sorted({n["image"] for n in ws["definition"]["nodes"]} - set(await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {})))
             if missing:  # Removed by the administrator since the definition was checked
                 raise LabError(f"Образы убраны из каталога: {', '.join(missing)}")
         held = await self.store.slot_holding_student(s["student_key"])
@@ -846,7 +855,7 @@ class Orchestrator:
             return ws["ticket"], ws
         if s["lab_def"]:
             try:
-                return labdef.deploy_ticket(ws["definition"], self.settings.images or {},
+                return labdef.deploy_ticket(ws["definition"], await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}),
                                             project_id=str(s["project_id"]), project_name=s["project_name"]), ws
             except KeyError as exc:
                 raise LabError(f"Образ {exc} убран из каталога образов") from exc
@@ -895,6 +904,7 @@ class Orchestrator:
         if s["stop_requested"]:
             return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping",
                                     slot_state="releasing", topology=topology)
+        await self.store.observe_nodes(s, {n["name"]: n.get("status", "unknown") for n in topology["topology"]["nodes"]})
         started = now()
         return await self._goto(
             s, "ready", "Лаба запущена", status="running", slot_state="busy", topology=topology,
@@ -913,6 +923,12 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ running
     async def _stage_ready(self, s):
+        if s.get("mode") == "authoring":
+            stopping = bool(s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]))
+            _, stale = await self.live_nodes(s, fresh=stopping)
+            if stopping and stale:
+                # A stale stopped snapshot cannot prove a clean disk at power cut.
+                await self.store.observe_nodes(s, {n["name"]: "unknown" for n in s["topology"]["topology"]["nodes"]})
         if s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]):
             reason = "maxduration" if not s["stop_requested"] else (s["stop_reason"] or "user")
             msg = "Время лабы истекло, остановка…" if reason == "maxduration" else "Остановка лабы…"
@@ -1116,20 +1132,22 @@ class Orchestrator:
         return False
 
     # ------------------------------------------------------------------ reads for the API
-    async def live_nodes(self, s) -> tuple[dict, bool]:
+    async def live_nodes(self, s, *, fresh=False) -> tuple[dict, bool]:
         """Node statuses of a running session, cached a few seconds.
 
         Returns (nodes, stale): stale is True when the slot did not answer and the snapshot from
         the start of the session is returned instead (plugin request П6).
         """
         cached = self._live_cache.get(s["id"])
-        if cached and time.monotonic() - cached[0] < 3:
+        if not fresh and cached and time.monotonic() - cached[0] < 3:
             return cached[1], cached[2]
         nodes, stale = node_states(s["topology"]), True
+        observed_at = now()
         try:
             raw = await self._slot(s).topology(str(s["project_id"]))
             live = node_states(session_topology(s["project_name"], raw))
             nodes, stale = {k: live.get(k, v) for k, v in nodes.items()}, False
+            await self.store.observe_nodes(s, {n["name"]: n.get("status", "unknown") for n in raw.get("nodes", [])}, observed_at=observed_at)
         except (SlotError, Failure):
             pass
         try:
@@ -1147,7 +1165,7 @@ class Orchestrator:
         known = self._consoleless.get(s["id"])
         if known is None:
             ticket, _ = await self._ticket(s)
-            names = consoleless_names(ticket, self.settings.images or {})
+            names = consoleless_names(ticket, await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}))
             known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
             self._consoleless[s["id"]] = known
         return known

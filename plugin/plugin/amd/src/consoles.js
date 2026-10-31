@@ -359,7 +359,7 @@ class Con {
         this.screen.addEventListener('keydown', () => this.activity('in'), true);
         this.screen.addEventListener('pointerdown', () => this.activity('in'), true);
         this.conn = new VncConnection({
-            cmid: o.cmid, userid: o.userid, nodeId: this.n.id, RFB: o.RFB, screen: this.screen, strings: o.strings,
+            api: o.api, cmid: o.cmid, userid: o.userid, nodeId: this.n.id, RFB: o.RFB, screen: this.screen, strings: o.strings,
             nodeStatus: () => o.nodeStatus(this.n.id),
             onState: state => this.setState(state),
             onNote: text => {
@@ -399,7 +399,7 @@ class Con {
             });
         }
         this.conn = new ConsoleConnection({
-            cmid: o.cmid, userid: o.userid, nodeId: this.n.id, term: this.term, strings: o.strings,
+            api: o.api, cmid: o.cmid, userid: o.userid, nodeId: this.n.id, term: this.term, strings: o.strings,
             nodeStatus: () => o.nodeStatus(this.n.id),
             transform: data => o.applyCtrl(data),
             paced: CISCO_TYPES.includes(this.n.type),
@@ -586,7 +586,8 @@ export class Consoles {
      * @param {Function} [options.onSeen] called with {nodeId, kind, command, lines, partial} for a command seen in a console
      * @param {Function} [options.onScreen] called with the node id when the screen of a node answers (a fog opens the node)
      */
-    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}}) {
+    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}, api}) {
+        this.api = api;
         this.root = root;
         this.stage = stage;
         this.strings = strings;

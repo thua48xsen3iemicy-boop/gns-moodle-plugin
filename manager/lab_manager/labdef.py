@@ -163,7 +163,7 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
             problem(f"{path}.image", "required")
         elif image is None:
             problem(f"{path}.image", "unknown_image", str(image_id)[:64])
-        elif not limits.allows(image.id):
+        elif not limits.allows(image.derived["base"] if image.derived else image.id):
             problem(f"{path}.image", "image_not_allowed", image.id)
             image = None
         for axis in ("x", "y"):

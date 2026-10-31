@@ -154,14 +154,14 @@ class manager_client {
      * @return \stdClass[] images with id, title, kind, category, symbol, console_type, ram_mb, cpus, adapters,
      *     port_name, ports_per_adapter and, with the lab constructor, preconfig; empty if the manager has no catalog
      */
-    public function get_images(): array {
+    public function get_images(bool $fresh = false): array {
         if (!$this->has_feature('images')) {
             return [];
         }
         $cache = \cache::make('mod_gns3lab', 'info');
         $key = 'i' . md5($this->baseurl);
         $hit = $cache->get($key);
-        if ($hit && $hit->until > time()) {
+        if (!$fresh && $hit && $hit->until > time()) {
             return $hit->images;
         }
         $data = $this->expect_object($this->request('GET', '/api/v1/images'));
@@ -276,6 +276,45 @@ class manager_client {
             ];
         }
         return $this->expect_session($this->request('POST', '/api/v1/sessions', $body));
+    }
+
+    /** Finds the latest authoring session of the current Moodle author. */
+    public function find_authoring_session(int $userid, int $labid): ?\stdClass {
+        try {
+            return $this->expect_session($this->request('GET', '/api/v1/sessions', null,
+                ['user_id' => $userid, 'library_lab_id' => $labid]));
+        } catch (manager_exception $e) {
+            if ($e->is_not_found()) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /** Starts an authoring session using the ordinary manager session lifecycle. */
+    public function create_authoring_session(int $userid, int $labid, array $definition): \stdClass {
+        return $this->expect_session($this->request('POST', '/api/v1/sessions', [
+            'user_id' => $userid, 'library_lab_id' => $labid, 'lab' => $definition,
+            'options' => ['mode' => 'authoring'],
+        ]));
+    }
+
+    /** Starts asynchronous image capture. */
+    public function capture_images(string $sessionid, array $nodes, bool $force = false): \stdClass {
+        return $this->expect_object($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/capture',
+            ['nodes' => $nodes, 'force' => $force]));
+    }
+
+    /** Reads the durable capture result. */
+    public function capture_state(string $sessionid): \stdClass {
+        return $this->expect_object($this->request('GET', '/api/v1/sessions/' . rawurlencode($sessionid) . '/capture'));
+    }
+
+    /** Changes the presentation of a derived image; permission is checked by the external function. */
+    public function patch_image(string $imageid, array $changes): \stdClass {
+        $result = $this->expect_object($this->request('PATCH', '/api/v1/images/' . rawurlencode($imageid), $changes));
+        $this->get_images(true);
+        return $result;
     }
 
     /**

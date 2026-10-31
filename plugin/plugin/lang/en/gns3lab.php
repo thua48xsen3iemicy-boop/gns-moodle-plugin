@@ -630,3 +630,51 @@ $string['ui_why_viewer'] = 'Consoles are for those who run the lab.';
 $string['zoom'] = 'Zoom';
 $string['zoomin'] = 'Zoom in';
 $string['zoomout'] = 'Zoom out';
+
+// Derived image authoring.
+$string['gns3lab:manageimages'] = 'Manage recommended derived images';
+$string['authoringrun'] = 'Run lab';
+$string['authoringback'] = 'Back to editor';
+$string['authoringcapture'] = 'Save with images';
+$string['authoringconsoles'] = 'Open consoles';
+$string['authoringcapturing'] = 'Stopping the lab and capturing images…';
+$string['authoringsaved'] = 'Images saved in the draft. Publish a new version when ready.';
+$string['authoringsealhint'] = 'Before saving, prepare the guest for cloning: machine-id, SSH host keys, DHCP identity and shell history are copied to students.';
+$string['authoringtitle'] = 'Image title';
+$string['authoringdescription'] = 'Description';
+$string['authoringmine'] = 'My images';
+$string['authoringothers'] = 'Images by other authors';
+$string['authoringsearch'] = 'Search images and descriptions';
+$string['authoringedit'] = 'Edit image';
+$string['authoringfeature'] = 'Recommend';
+$string['authoringunfeature'] = 'Remove recommendation';
+$string['authoringretire'] = 'Retire from the palette (existing labs keep working)';
+$string['authoringcancel'] = 'Cancel';
+$string['authoringdraftconflict'] = 'The draft changed during capture. Your captured images remain in My images; reopen the editor to apply them to the current draft.';
+$string['authoringresume'] = 'Apply capture result';
+$string['authoringresumehint'] = 'Recover a completed capture after closing or reloading the editor.';
+$string['authoringdefinitionchanged'] = 'The topology changed after this run started. Stop the lab and run the current draft before capturing images.';
+$string['authoringretired'] = 'My retired images';
+
+$string['privacy:metadata:gns3labmanager:librarylabid'] = 'The library lab used for an authoring session.';
+$string['privacy:metadata:gns3labmanager:imagetitle'] = 'The title chosen by the author for a derived image.';
+$string['privacy:metadata:gns3labmanager:imagedescription'] = 'The description written by the author for a derived image.';
+$string['privacy:metadata:gns3labmanager:imagedisk'] = 'Disk changes explicitly saved by the author as a shared lab image.';
+
+// Guest-consistent image capture.
+$string['authoringquiescing'] = 'Shutting down the selected guests…';
+$string['authoringquiescehint'] = 'Running guests will shut down from inside before capture. If QGA is unavailable, run sync and poweroff in the guest, then retry.';
+$string['authoringblocked'] = 'Some guests could not shut down safely';
+$string['authoringforce'] = 'Save as is';
+$string['authoringretry'] = 'Retry';
+$string['authoringforcewarning'] = 'Saving as is may lose recent changes and leave the filesystem inconsistent. Such images will carry a warning.';
+$string['authoringforcedhint'] = 'Captured without confirmed guest shutdown; recent changes may be missing.';
+$string['authoringreason_GUEST_AGENT_UNAVAILABLE'] = 'Guest agent unavailable; power off the guest manually.';
+$string['authoringreason_GUEST_SHUTDOWN_TIMEOUT'] = 'Guest shutdown timed out.';
+$string['authoringreason_GUEST_SHUTDOWN_UNSUPPORTED'] = 'The slot does not support guest shutdown.';
+$string['authoringreason_SESSION_STOPPED'] = 'The session was stopped while this guest was running. Start it again and save from the running session, or save as is.';
+$string['authoringreason_other'] = 'Guest shutdown could not be confirmed.';
+$string['authoringstatus_started'] = 'running';
+$string['authoringstatus_stopped'] = 'stopped';
+$string['authoringstatus_suspended'] = 'suspended';
+$string['authoringstatus_unknown'] = 'status unknown';

@@ -157,3 +157,8 @@ class WipeTicket(BaseModel):
         if self.confirm is not True:
             raise ValueError("Wipe requires explicit confirm: true")
         return self
+
+
+class ShutdownTicket(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    timeout: int = Field(default=120, ge=30, le=300)

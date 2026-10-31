@@ -208,7 +208,7 @@ async def test_info(tmp_path, dsn):
 async def test_unknown_fields_are_refused(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         base = {"user_id": 42, "instance_id": 1, "lab_ref": "cisco-3x2"}
-        for body in ({**base, "maxduration": 5}, {**base, "options": {"mode": "exam"}},
+        for body in ({**base, "maxduration": 5}, {**base, "options": {"future_option": True}},
                      {**base, "client": {"browser": "x"}}):
             r = await env.client.post("/api/v1/sessions", json=body)
             assert r.status_code == 400 and r.json()["error"] == "unsupported_field", body
