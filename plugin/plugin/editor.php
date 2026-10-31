@@ -42,6 +42,7 @@ $images = [];
 $limits = null;
 $canpublish = false;
 $constructor = false;
+$imagecapture = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
     $catalogerror = get_string('librarynomanager', 'gns3lab');
@@ -52,6 +53,7 @@ if (!manager_client::is_configured()) {
         $limits = $client->get_info()->limits;
         $canpublish = $client->supports_lab_definitions();
         $constructor = $client->supports_lab_constructor();
+        $imagecapture = $client->has_feature('image_capture');
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
         }
@@ -75,6 +77,12 @@ $keys = [
     'ed_addport', 'ed_managed', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
     'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
 ];
+$keys = array_merge($keys, ['stoplab', 'ed_save']);
+foreach (array_keys(get_string_manager()->load_component_strings('gns3lab', current_language())) as $key) {
+    if (str_starts_with($key, 'authoring')) {
+        $keys[] = $key;
+    }
+}
 $codes = [
     'required', 'unknown_field', 'bad_type', 'bad_format', 'bad_name', 'duplicate_name', 'unknown_image',
     'image_not_allowed', 'out_of_range', 'unknown_node', 'bad_port', 'port_in_use', 'self_link', 'too_many_nodes',
@@ -95,10 +103,15 @@ foreach ($warningcodes as $code) {
 
 $data = [
     'labid' => (int) $lab->id,
+    'labname' => $lab->name,
+    'userid' => (int) $USER->id,
+    'manageimages' => has_capability('mod/gns3lab:manageimages', $context),
+    'imagecapture' => $imagecapture,
+    'authoringurl' => (new \core\url('/mod/gns3lab/authoring.php', ['id' => $lab->id]))->out(false),
     'definition' => $def,
     'version' => $version ? (int) $version->version : 1,
     'status' => $version ? $version->status : lab_library::DRAFT,
-    'images' => $images,
+    'images' => \mod_gns3lab\local\image_data::export($images),
     'limits' => $limits,
     'canpublish' => $canpublish,
     'labconstructor' => $constructor,

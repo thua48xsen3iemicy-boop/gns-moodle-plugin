@@ -111,3 +111,37 @@ node check_reveal.js [--min] [--shots /tmp/reveal-shots]    # нужен Playwri
 
 Не проверяет: PHP, права, настоящих менеджер и шлюз, тему Boost (в `index.template.html` — лишь несколько переменных
 Bootstrap), поведение клавиатуры телефона.
+
+## Авторский запуск и производные образы
+
+`editor.ru.authoring.html` / `editor.en.authoring.html` открывают настоящий редактор
+с capture, `authoring.<язык>.html` — существующий интерфейс сессии и консолей с
+авторским транспортом. `server.js` играет только Moodle-посредника: права и
+конкурентные правки БД проверяются в dev-Moodle, не в Node-заглушке. API снятия,
+задержка, сбой, каталог и PATCH — у настоящего `devtools/mock-manager`.
+
+В трёх терминалах (из корня репозитория; Python с зависимостями проекта):
+
+```sh
+MOCK_PORT=18090 MOCK_SLOT_PORT=18091 GW_INTERNAL_URL=http://127.0.0.1:18080 \
+  GW_PUBLIC_URL=ws://127.0.0.1:18080 MOCK_CAPTURE_DELAY=0.1 \
+  python3 plugin/devtools/mock-manager/mock_manager.py
+
+GW_PORT=18080 GW_SLOT_PORT=18091 GW_SLOT_SCHEME=ws GW_ALLOW_PLAINTEXT_SLOTS=1 \
+  GW_INTERNAL_KEY=dev-internal-key GW_ALLOWED_ORIGINS=http://127.0.0.1:18123 \
+  GW_SLOTS='{"127.0.0.1":"dev-console-token"}' python3 manager/gateway/console_gateway.py
+
+cd plugin/devtools/ui-harness
+npm install
+node build.js
+node server.js 18123
+```
+
+Проверка: `node check_derived.js [--min]` (Playwright; `CHROMIUM_BIN` — путь к Chromium,
+по умолчанию `/usr/lib/chromium/chromium`; `SHOTS` — каталог скриншотов).
+Она проверяет настоящую консоль mock-слота через шлюз, список снимаемых нод,
+успех, отсутствие частичного каталога при сбое, повтор, `supersedes`, featured,
+экранирование, поиск и мобильную страницу. Это не проверка GNS3/QEMU/CephFS.
+`MOCK_CAPTURE_FAIL=1` или `POST /mock/capture-fail/on` включает сбой;
+`POST /mock/capture-fail/off` выключает. `MOCK_CAPTURE_DELAY` — секунды до снятия
+после остановки. Эти средства предназначены только для локальной разработки.

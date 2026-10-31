@@ -61,7 +61,8 @@ export class Session {
      * @param {object} options.strings language strings
      * @param {Function} options.onState called with (state, before) after every state from the server
      */
-    constructor(root, {cmid, userid, strings, onState}) {
+    constructor(root, {cmid, userid, strings, onState, api = requests => Ajax.call(requests)}) {
+        this.api = api;
         this.root = root;
         this.cmid = cmid;
         this.userid = userid;
@@ -98,7 +99,7 @@ export class Session {
     async refresh() {
         clearTimeout(this.timer);
         try {
-            const [state] = await Promise.all(Ajax.call([{
+            const [state] = await Promise.all(this.api([{
                 methodname: 'mod_gns3lab_get_state',
                 args: {cmid: this.cmid, userid: this.userid},
             }]));
@@ -123,7 +124,7 @@ export class Session {
         this.busy = true;
         this.render();
         try {
-            const [session] = await Promise.all(Ajax.call([{methodname, args: {cmid: this.cmid, tabid: tabId()}}]));
+            const [session] = await Promise.all(this.api([{methodname, args: {cmid: this.cmid, tabid: tabId()}}]));
             this.showMessage('');
             this.apply({...this.state, session});
         } catch (error) {

@@ -116,4 +116,11 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_authoring' => [
+        'classname' => \mod_gns3lab\external\authoring::class,
+        'description' => 'Runs a library lab, captures its images and manages derived image metadata.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
 ];

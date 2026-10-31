@@ -153,7 +153,8 @@ export class ConsoleConnection {
      * @param {Function} [options.transform] changes typed input before it is sent
      * @param {boolean} [options.paced] send long pastes line by line (Cisco IOS)
      */
-    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data, paced = false}) {
+    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data, paced = false, api = requests => Ajax.call(requests)}) {
+        this.api = api;
         this.cmid = cmid;
         this.userid = userid;
         this.nodeId = nodeId;
@@ -202,7 +203,7 @@ export class ConsoleConnection {
         this.setState('connecting');
         let ticket;
         try {
-            [ticket] = await Promise.all(Ajax.call([{
+            [ticket] = await Promise.all(this.api([{
                 methodname: 'mod_gns3lab_get_console_ticket',
                 args: {cmid: this.cmid, nodeid: this.nodeId, userid: this.userid, tabid: tabId()},
             }]));

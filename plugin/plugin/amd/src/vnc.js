@@ -84,7 +84,8 @@ export class VncConnection {
      * @param {Function} options.onState called with the new state name
      * @param {Function} options.onNote called with a message to show over the screen, an empty string clears it
      */
-    constructor({cmid, userid, nodeId, RFB, screen, strings, nodeStatus, onState, onNote}) {
+    constructor({cmid, userid, nodeId, RFB, screen, strings, nodeStatus, onState, onNote, api = requests => Ajax.call(requests)}) {
+        this.api = api;
         this.cmid = cmid;
         this.userid = userid;
         this.nodeId = nodeId;
@@ -125,7 +126,7 @@ export class VncConnection {
         this.onNote(this.strings.consoleconnecting);
         let ticket;
         try {
-            [ticket] = await Promise.all(Ajax.call([{
+            [ticket] = await Promise.all(this.api([{
                 methodname: 'mod_gns3lab_get_console_ticket',
                 args: {cmid: this.cmid, nodeid: this.nodeId, userid: this.userid, tabid: tabId()},
             }]));
