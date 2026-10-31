@@ -389,7 +389,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | Поле | Обяз. | Смысл |
 |---|---|---|
 | `user_id` | да | автор (`user.id` в Moodle) |
-| `course_id` | да | курс-владелец (`scope: course`, §5.4 дизайна) |
+| `course_id` | нет | курс, из редактора которого создан черновик; только для журнала (образ принадлежит автору, не курсу) |
 | `base_image` | да | `id` образа `kind: "qemu"` из `GET /images`, не `retired`; иначе `422 image_not_derivable` |
 | `title` | да | 1–100 символов |
 | `uplink` | нет | `true` — в служебной лабе есть узел «Интернет»; без слотов с `uplink` — `409 unsupported_lab` |
@@ -415,12 +415,13 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `DELETE /api/v1/image-drafts/{draft_id}` | `204`; останавливает сессию, удаляет проект черновика. Опубликованные образы остаются |
 
 ```json
-{"image_id": "web-srv", "title": "Веб-сервер (nginx)", "family": "web-srv", "flatten": false,
+{"image_id": "web-srv", "title": "Веб-сервер (nginx)", "description": "Debian 12 + nginx, сайт в /var/www, ufw выключен",
+ "family": "web-srv", "flatten": false,
  "ram_mb": {"default": 1024}}
 ```
 
 `image_id` — `[a-z0-9][a-z0-9-]{0,47}`, уникален навсегда (в т. ч. среди `retired` и `IMAGES_FILE`), иначе
-`409 image_exists`. `family` — группа версий для палитры (по умолчанию `image_id`). Ресурсы — только сужение
+`409 image_exists`. `description` — обязательно, 1–2000 символов (что установлено и настроено). `family` — группа версий для палитры (по умолчанию `image_id`). Ресурсы — только сужение
 пределов базы (`422 lab_invalid` с `problems`, как в §2.6). `flatten: true` — самостоятельный файл без backing
 (обязателен, если глубина цепочки превысит `IMAGE_MAX_DEPTH`; иначе `422 chain_too_deep`).
 
@@ -430,17 +431,18 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 ```json
 {"id": "web-srv", "title": "Веб-сервер (nginx)", "kind": "qemu", "category": "host",
  "derived": {"base": "debian12", "family": "web-srv", "flatten": false, "size": 412090368,
-             "sha256": "sha256:…", "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z"},
- "scope": "course", "course_id": 3, "retired": false}
+             "sha256": "sha256:…", "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z",
+             "description": "Debian 12 + nginx, сайт в /var/www, ufw выключен"},
+ "featured": false, "retired": false}
 ```
 
 Остальные свойства (`ram_mb`, `cpus`, `adapters`, `console_type`, `preconfig`, `symbol`) — от базы с сужениями публикации.
-`scope`/`course_id` фильтрует плагин; `retired: true` — не предлагать для новых нод, но лабы с ним работают.
+Группирует плагин: свои образы (`author_user_id`), `featured` — в основной палитре, остальные — свёрнутым разделом по авторам (дизайн §5.4); `retired: true` — не предлагать для новых нод, но лабы с ним работают.
 Каталог из БД читается без перезапуска менеджера (в отличие от `IMAGES_FILE`).
 
 | Запрос | Ответ |
 |---|---|
-| `PATCH /api/v1/images/{id}` | `{"scope": "site"}` или `{"retired": true}`; только производные образы, иначе `409 image_static` |
+| `PATCH /api/v1/images/{id}` | `{"featured": true}` (рекомендованный; право проверяет плагин), `{"title"}`, `{"description"}` или `{"retired": true}`; только производные образы, иначе `409 image_static` |
 | `DELETE /api/v1/images/{id}` | то же, что `retired: true` (файл не удаляется: на него опираются проекты студентов) |
 
 **Коды `error.code` публикации:** `CAPTURE_NODE_MISSING` (нет диска ноды `SRC` — нода ни разу не запускалась, нет),
