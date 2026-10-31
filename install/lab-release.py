@@ -538,6 +538,7 @@ SOURCE_FILES = (
     'agent/requirements-test.txt',
     'agent/requirements.txt',
     'agent/tests/test_agent.py',
+    'agent/tests/test_capture.py',
     'agent/tests/test_fencing.py',
     'agent/tests/test_guest_init.py',
     'agent/tests/test_tls.py',
