@@ -680,11 +680,26 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 3. Если слот понимает `deploy/2`, отправлять его; иначе `deploy/1`. В `deploy/1` нет `run`,
    поэтому сессионные данные в нём не передаются.
 
+### 4.3a. Штатное выключение гостя (`guest-shutdown`)
+
+`POST /v1/labs/{project_id}/nodes/{node_id}/shutdown`, тело `{"timeout": 120}`:
+строгий int 30–300, default 120. Только QEMU в READY-лабе, иначе 409 NOT_SUPPORTED /
+INVALID_TRANSITION. Идемпотентность и fencing — как у остальных мутаций.
+Ответ 202 + operation_id, опрос GET /v1/operations/{id}; success — SUCCEEDED,
+`result: "stopped"`. Уже stopped не требует QGA. Работающая нода получает
+QGA `guest-shutdown {mode: powerdown}` через брокер, затем слот ждёт stopped в GNS3.
+Одновременные выключения разных нод разрешены; смена владельца ждёт их завершения.
+Ошибка не вызывает hard stop и не переводит лабу в FAILED. Ручной poweroff QEMU
+также сохраняет READY лабы; монитор не проверяет сервисы выключенного гостя.
+
 ### 4.4. Ответы слота
 
 Не меняются (`slot/README.md`): `202` с `operation_id`, опрос `GET /v1/operations/{id}`, коды
 `STALE_IDEMPOTENCY_KEY`, `OPERATION_IN_PROGRESS`, `INVALID_TRANSITION`,
 `IDEMPOTENCY_KEY_CONFLICT`. Добавляется `UNSUPPORTED_REQUIREMENT`.
+Операция shutdown: `GUEST_AGENT_UNAVAILABLE` (не доступен канал QGA),
+`GUEST_SHUTDOWN_TIMEOUT` (команда отправлена, но stopped не подтверждён в срок).
+QGA не присылает успешный ответ на guest-shutdown; подтверждение — статус GNS3.
 
 ### 4.5. Владелец слота после отката
 
@@ -971,6 +986,7 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
 | `lab_constructor` | менеджер | 🆕 `gns3lab.lab/2`: сегменты, `preconfig` образов, `warnings` в `validate` (§2.6); объявляется вместе с `lab_definitions` |
 | `image_capture` | менеджер | 🆕 авторский запуск (`options.mode: "authoring"`), снятие слоёв и производные образы в каталоге (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
+| `guest-shutdown` | слот | QGA powerdown выбранной QEMU-ноды и ожидание stopped, §4.3a |
 | `images_capture` | агент | 🆕 `POST /images/capture` (§5, AGENT_REQUESTS §6); поле `GET /capabilities` агента |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |

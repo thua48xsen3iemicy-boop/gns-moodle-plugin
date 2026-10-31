@@ -664,6 +664,7 @@ SOURCE_FILES = (
     'slot/tests/test_qga.py',
     'slot/tests/test_reliability.py',
     'slot/tests/test_slot.py',
+    'slot/tests/test_shutdown.py',
     'slot/tests/test_student_state.py',
     'slot/tests/test_uplink.py',
     'slot/tests/test_vnc.py',

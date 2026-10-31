@@ -77,6 +77,8 @@ class FakeAgent:
                         return
                     if self.hold is not None:
                         await self.hold.wait()
+                    if name == "guest-shutdown":
+                        continue  # QGA sends no success response for this command.
                     writer.write(self._answer(name, args))
                     await writer.drain()
             finally:
@@ -511,3 +513,12 @@ def test_routes_go_through_the_broker(mock_server):
     assert reply.status_code == 200, reply.text
     assert reply.json()["result"] == "serial_getty_enabled"
     assert [kind for kind, *_ in broker.seen[-2:]] == ["call", "exec"]
+
+
+def test_shutdown_without_response_does_not_wait_or_poison_next_call(sockdir):
+    async def scenario(agent, broker):
+        await asyncio.wait_for(broker.call("n1", "guest-shutdown", {"mode": "powerdown"}), 1)
+        assert await broker.call("n1", "guest-ping") == {}
+        assert agent.commands() == ["guest-shutdown", "guest-ping"]
+        assert agent.connections == 2
+    run(scenario, sockdir)

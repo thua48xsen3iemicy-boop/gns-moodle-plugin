@@ -1,4 +1,4 @@
-# Lab Slot — 0.13.0
+# Lab Slot — 0.14.0
 
 **Новый обязательный протокол:** до изменяющих запросов менеджер вызывает
 `POST /v1/fence` с `{epoch,generation}`; команды содержат `X-Lab-Epoch` и
@@ -749,3 +749,14 @@ venv/bin/python tools/check_slot.py --deploy --key integration-deploy-NEW001
 тесты покрывают mock GNS3, повреждение релиза, replay/stale, SQLite и блокировки.
 Ручной проверки требуют CephFS/флот LXC/права/venv/systemd и повтор основного цикла
 с реальными девятью устройствами и QCOW2. Безопасный Node Wipe по-прежнему отдельно.
+
+## Guest shutdown (0.14.0)
+
+`guest-shutdown` in capabilities enables `POST /v1/labs/{project_id}/nodes/{node_id}/shutdown`
+with `{"timeout": 120}` (30–300 seconds). The response is an asynchronous operation (202);
+its result is `stopped`, or `GUEST_AGENT_UNAVAILABLE` / `GUEST_SHUTDOWN_TIMEOUT`.
+Only QEMU is accepted; an already stopped guest needs no QGA. No forced node stop
+is performed on failure. Concurrent node shutdowns retain command admission and fencing.
+QGA has no successful reply for guest-shutdown: the broker drops its channel after
+sending, and GNS3 status confirms powerdown. A powered-off QEMU guest remains part
+of a READY lab, without provisioning checks until it is started again.
