@@ -133,3 +133,59 @@ async def test_capability_gate(tmp_path, dsn):
         env.agent.images_capture = False
         assert 'image_capture' not in (await env.client.get('/api/v1/info')).json()['features']
         assert (await start(env)).status_code == 400
+
+
+async def test_capture_resumes_checkpoints_after_worker_restart(tmp_path, dsn):
+    import asyncio
+    from lab_manager.derived import DerivedImages
+
+    async with make_env(tmp_path, dsn, images=catalog()) as env:
+        sid = (await start(env, lab(2))).json()['session_id']
+        await env.run()
+        assert (await capture(env, sid, 2)).status_code == 202
+        env.orch.derived = None  # Drive only the normal stopping lifecycle first.
+        await env.run()
+        original = env.services.agent.capture_image
+        calls = []
+
+        async def interrupted(node, body, timeout):
+            calls.append(body['node_name'])
+            if len(calls) == 2:
+                raise asyncio.CancelledError()
+            return await original(node, body, timeout)
+
+        env.services.agent.capture_image = interrupted
+        with pytest.raises(asyncio.CancelledError):
+            await env.services.derived.step(sid)
+        assert len((await env.services.derived.get(sid))['completed']) == 1
+        assert not any(i.get('derived') for i in (await env.client.get('/api/v1/images')).json()['images'])
+        env.services.agent.capture_image = original
+        restarted = DerivedImages(env.services)
+        await restarted.step(sid)
+        assert (await restarted.get(sid))['state'] == 'done'
+        assert len(env.agent.captured_images) == 2  # The first completed file was not captured twice.
+
+
+async def test_lost_agent_response_fails_safely_and_can_retry(tmp_path, dsn):
+    from lab_manager.agent_client import AgentUncertain
+
+    async with make_env(tmp_path, dsn, images=catalog()) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        original = env.services.agent.capture_image
+
+        async def lost(node, body, timeout):
+            await original(node, body, timeout)
+            raise AgentUncertain(None, 'Response lost after agent publication')
+
+        env.services.agent.capture_image = lost
+        assert (await capture(env, sid)).status_code == 202
+        await env.run()
+        result = (await env.client.get(f'/api/v1/sessions/{sid}/capture')).json()
+        assert result['state'] == 'failed' and result['error']['code'] == 'TIMEOUT'
+        assert not any(i.get('derived') for i in (await env.client.get('/api/v1/images')).json()['images'])
+        env.services.agent.capture_image = original
+        assert (await capture(env, sid)).status_code == 202
+        await env.run()
+        assert (await env.services.derived.get(sid))['state'] == 'done'
+        assert len(env.agent.captured_images) == 2

@@ -116,8 +116,11 @@ class DerivedImages:
                 raise error(422, 'lab_invalid', 'Node cannot be captured (base SHA-256 is required)',
                             problems=[{'path': 'nodes', 'code': problem, 'message': item.name}])
             identity = 'd-' + secrets.token_hex(6)
-            supersedes = image.id if image.derived and image.derived['author_user_id'] == session['user_id'] and (
-                image.derived['source'] == {'library_lab_id': session['library_lab_id'], 'node': item.name}) else None
+            async with self.store.pool.connection() as conn:
+                previous = await conn.execute("SELECT id FROM derived_images WHERE site = %s AND author_user_id = %s AND library_lab_id = %s AND node = %s ORDER BY published_at DESC, id DESC LIMIT 1",
+                                              (session['site'], session['user_id'], session['library_lab_id'], item.name))
+                previous = await previous.fetchone()
+            supersedes = previous['id'] if previous else None
             request.append(dict(item.model_dump(), id=identity, file=identity + '.qcow2', base=base.id,
                                 base_file=base.file, base_sha256=base.sha256, parent_file=image.file,
                                 supersedes=supersedes))
@@ -202,7 +205,12 @@ class DerivedImages:
                                        (item['id'], session['site'], item['file'], item['base'], item['base_file'], item['base_sha256'], result['sha256'], result['size'], session['user_id'], item['title'], item['description'], session['library_lab_id'], item['name'], item['supersedes']))
                 await conn.execute("UPDATE image_captures SET state = 'done', result = %s, updated_at = now() WHERE session_id = %s", (Jsonb({i['name']: i['id'] for i in row['request']}), sid))
         except AgentError as exc:
-            code = exc.code if exc.code in ('CAPTURE_NODE_MISSING', 'CAPTURE_BASE_MISMATCH', 'CAPTURE_TOO_LARGE', 'STUDENT_DIR_BUSY') else 'TIMEOUT' if isinstance(exc, AgentUncertain) else 'AGENT_REJECTED'
+            if exc.code in ('CAPTURE_NODE_MISSING', 'CAPTURE_BASE_MISMATCH', 'CAPTURE_TOO_LARGE', 'STUDENT_DIR_BUSY'):
+                code = exc.code
+            elif isinstance(exc, AgentUncertain):
+                code = 'TIMEOUT' if exc.code == 'TIMEOUT' or exc.status in (None, 504) else 'INTERNAL'
+            else:
+                code = 'AGENT_REJECTED'
             await self.fail(sid, code, current_node)
         except asyncio.CancelledError:
             # Persisted request/checkpoints are picked up by the next leader. An

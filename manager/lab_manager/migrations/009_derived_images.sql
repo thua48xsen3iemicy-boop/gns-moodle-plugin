@@ -6,7 +6,7 @@ ALTER TABLE sessions ADD COLUMN library_lab_id bigint;
 ALTER TABLE workspaces ADD COLUMN library_lab_id bigint;
 ALTER TABLE sessions ADD CONSTRAINT sessions_authoring_identity CHECK (
     (mode IS NULL AND instance_id IS NOT NULL AND library_lab_id IS NULL) OR
-    (mode = 'authoring' AND instance_id IS NULL AND library_lab_id > 0 AND lab_def IS NOT NULL));
+    (mode IS NOT NULL AND mode = 'authoring' AND instance_id IS NULL AND library_lab_id IS NOT NULL AND library_lab_id > 0 AND lab_def IS NOT NULL));
 CREATE UNIQUE INDEX authoring_workspace_per_definition
     ON workspaces (site, user_id, library_lab_id, lab_key) WHERE library_lab_id IS NOT NULL;
 DROP INDEX sessions_one_live_per_user;
