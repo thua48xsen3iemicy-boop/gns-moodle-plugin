@@ -20,4 +20,4 @@ ALTER TABLE image_captures ADD COLUMN quiesce jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE derived_images ADD COLUMN forced boolean NOT NULL DEFAULT true;
 ALTER TABLE derived_images ALTER COLUMN forced SET DEFAULT false;
 UPDATE image_captures c SET forced = ARRAY(SELECT n->>'name' FROM jsonb_array_elements(c.request) n)
-    WHERE state = 'done';
+    WHERE state IN ('running', 'done');
