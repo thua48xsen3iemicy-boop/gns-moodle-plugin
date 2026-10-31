@@ -118,3 +118,37 @@ HTTP-статусами, что сейчас. Ошибки валидации з
 может переименовать или удалить любой подкаталог. Планируется отдельное дерево
 `<LAB_CEPH_ROOT>/results/<key>/`. Если слоту понадобится читать результаты, нужна будет третья
 фиксированная точка монтирования (RO), например `mp2` → `/srv/results`. Пока не требуется.
+
+## 6. Снятие слоя образа — 🆕 предложение
+
+Дизайн — `docs/derived-images/DESIGN.md`, контракт — CONTRACTS §2.8, §5. Агент — единственный, кто может писать в
+`IMAGES_DIR` (в слоты он монтируется RO).
+
+`GET /capabilities` получает поле `"images_capture": true`. Без него менеджер маршрут не вызывает.
+
+`POST /images/capture`, те же mTLS и правила строгости (`extra="forbid"`):
+
+```json
+{"student_key": "a1b2…", "project_id": "0b6c9d3e-…", "node_name": "SRC",
+ "base_file": "debian12.qcow2", "base_sha256": "sha256:…",
+ "image_file": "d-web-srv.qcow2", "flatten": false, "max_bytes": 8589934592}
+```
+
+Что делает агент:
+1. Каталог `students/<student_key>` не подключён ни к одному CT узла (`mp1`), иначе `409 STUDENT_DIR_BUSY`.
+2. Находит ноду по имени в `<project_id>/*.gns3` (JSON), диск — `project-files/qemu/<node_id>/hda_disk.qcow2`.
+   Никаких путей от клиента; симлинки и выход за каталог студента — `422 CAPTURE_PATH_UNSAFE`. Нет файла —
+   `404 CAPTURE_NODE_MISSING`.
+3. `qemu-img info --backing-chain -U --output=json`: формат `qcow2`, первый backing — `base_file` (по имени), sha256 базы
+   совпадает с `base_sha256`; иначе `422 CAPTURE_BASE_MISMATCH`. Размер больше `max_bytes` — `422 CAPTURE_TOO_LARGE`.
+4. Копирует во временный файл `IMAGES_DIR/QEMU/.incoming/<uuid>` (тот же том — для атомарного `rename`).
+   `flatten: false` — `qemu-img rebase -u -F qcow2 -b <base_file>` (относительное имя); `flatten: true` —
+   `qemu-img convert -O qcow2` всей цепочки. Затем `qemu-img check`.
+5. Пишет `<image_file>.md5sum` (формат GNS3), `chmod 0444`, `rename` в `QEMU/<image_file>`; файл уже есть —
+   `409 IMAGE_EXISTS` (агент ничего не перезаписывает никогда).
+
+Ответ `200`: `{"image_file", "size", "virtual_size", "sha256", "md5", "backing": "debian12.qcow2" | null}`.
+Операция долгая (копирование гигабайтов по CephFS): тайм-аут — `LAB_CAPTURE_TIMEOUT` (по умолчанию 900 с), он же в
+`GET /capabilities` (`capture_timeout_seconds`), чтобы менеджер сверил со своим ожиданием, как `start_budget_seconds`.
+Повтор после обрыва: временные файлы `.incoming` старше тайм-аута агент удаляет сам.
+

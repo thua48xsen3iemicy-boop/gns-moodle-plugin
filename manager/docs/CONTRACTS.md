@@ -191,6 +191,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
 | `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
+| `kind`, `draft_id` | 🆕 только у авторской сессии (§2.8): `kind: "authoring"`, `draft_id` черновика. У обычной сессии полей нет |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
 ### 2.4. ✅ Остальные маршруты
@@ -373,12 +374,85 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 - Истории в этом маршруте нет. Журнал изменений менеджер хранит с самого начала (DESIGN §6.7), отдавать его
   начнёт позже.
 
+### 2.8. 🆕 Разностные образы: черновики и публикация
+
+Дизайн — [`docs/derived-images/DESIGN.md`](../../docs/derived-images/DESIGN.md). Есть, только когда в `info.features` есть
+`image_authoring` (вместе с `images` и `lab_definitions`; агент узла умеет `capture`, §5).
+Права в Moodle (`mod/gns3lab:authorimages`) проверяет плагин.
+
+**`POST /api/v1/image-drafts`** — создать черновик:
+
+```json
+{"user_id": 42, "course_id": 3, "base_image": "debian12", "title": "Веб-сервер", "uplink": true}
+```
+
+| Поле | Обяз. | Смысл |
+|---|---|---|
+| `user_id` | да | автор (`user.id` в Moodle) |
+| `course_id` | да | курс-владелец (`scope: course`, §5.4 дизайна) |
+| `base_image` | да | `id` образа `kind: "qemu"` из `GET /images`, не `retired`; иначе `422 image_not_derivable` |
+| `title` | да | 1–100 символов |
+| `uplink` | нет | `true` — в служебной лабе есть узел «Интернет»; без слотов с `uplink` — `409 unsupported_lab` |
+
+Больше `IMAGE_DRAFTS_PER_USER` живых черновиков — `409 draft_limit`. Ответ `201` — объект черновика:
+
+```json
+{"schema": "gns3lab.image-draft/1", "draft_id": "d-7c1e2a9b40f35d18", "user_id": 42, "course_id": 3,
+ "base_image": "debian12", "title": "Веб-сервер", "uplink": true,
+ "state": "draft", "session_id": null, "published": [], "error": null, "created_at": "2026-10-31T10:00:00Z"}
+```
+
+`state`: `draft` (сессии нет) · `running` (живая авторская сессия) · `publishing` · `failed` (публикация не удалась,
+`error` — `{"code", "retryable"}`; черновик цел, можно повторить). После успешной публикации — снова `draft`,
+в `published` добавляется `id` образа.
+
+| Запрос | Ответ |
+|---|---|
+| `GET /api/v1/image-drafts?user_id=&course_id=` | список черновиков (любой из фильтров необязателен) |
+| `GET /api/v1/image-drafts/{draft_id}` | черновик; `404 draft_not_found` |
+| `POST /api/v1/image-drafts/{draft_id}/session` | тело `{}`; запустить или продолжить авторскую сессию. `201`/`200` — объект сессии (§2.3) с `kind: "authoring"` и `draft_id`; дальше — обычные маршруты §2.4 (консоли, остановка). Черновик `publishing` — `409 draft_busy` |
+| `POST /api/v1/image-drafts/{draft_id}/publish` | `202` — черновик в `publishing` (тело ниже). Живая сессия останавливается менеджером. Плагин опрашивает черновик |
+| `DELETE /api/v1/image-drafts/{draft_id}` | `204`; останавливает сессию, удаляет проект черновика. Опубликованные образы остаются |
+
+```json
+{"image_id": "web-srv", "title": "Веб-сервер (nginx)", "family": "web-srv", "flatten": false,
+ "ram_mb": {"default": 1024}}
+```
+
+`image_id` — `[a-z0-9][a-z0-9-]{0,47}`, уникален навсегда (в т. ч. среди `retired` и `IMAGES_FILE`), иначе
+`409 image_exists`. `family` — группа версий для палитры (по умолчанию `image_id`). Ресурсы — только сужение
+пределов базы (`422 lab_invalid` с `problems`, как в §2.6). `flatten: true` — самостоятельный файл без backing
+(обязателен, если глубина цепочки превысит `IMAGE_MAX_DEPTH`; иначе `422 chain_too_deep`).
+
+**Производные образы в `GET /api/v1/images`** — обычные элементы каталога с дополнительными полями (старый плагин
+их просто не читает):
+
+```json
+{"id": "web-srv", "title": "Веб-сервер (nginx)", "kind": "qemu", "category": "host",
+ "derived": {"base": "debian12", "family": "web-srv", "flatten": false, "size": 412090368,
+             "sha256": "sha256:…", "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z"},
+ "scope": "course", "course_id": 3, "retired": false}
+```
+
+Остальные свойства (`ram_mb`, `cpus`, `adapters`, `console_type`, `preconfig`, `symbol`) — от базы с сужениями публикации.
+`scope`/`course_id` фильтрует плагин; `retired: true` — не предлагать для новых нод, но лабы с ним работают.
+Каталог из БД читается без перезапуска менеджера (в отличие от `IMAGES_FILE`).
+
+| Запрос | Ответ |
+|---|---|
+| `PATCH /api/v1/images/{id}` | `{"scope": "site"}` или `{"retired": true}`; только производные образы, иначе `409 image_static` |
+| `DELETE /api/v1/images/{id}` | то же, что `retired: true` (файл не удаляется: на него опираются проекты студентов) |
+
+**Коды `error.code` публикации:** `CAPTURE_NODE_MISSING` (нет диска ноды `SRC` — нода ни разу не запускалась, нет),
+`CAPTURE_BASE_MISMATCH` (backing диска или хеш базы не совпали, нет), `CAPTURE_TOO_LARGE` (> `IMAGE_MAX_BYTES`, нет),
+`STUDENT_DIR_BUSY` (§2.5, нет), `AGENT_REJECTED` (нет), `TIMEOUT` и `INTERNAL` (да).
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `draft_not_found` 404, `draft_limit` 409, `draft_busy` 409, `image_exists` 409, `image_static` 409, `image_not_derivable` 422, `chain_too_deep` 422 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -846,6 +920,11 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 ждёт и перечитывает состояние. `GET /slots/{vmid}/status` отдаёт `ownership` с `uncertain`, `inflight` и `command` — по
 нему оператор и `lab-manager-admin check` узнают команду.
 
+**Снятие слоя образа (🆕, AGENT_REQUESTS §6).** `POST /images/capture` — агент копирует диск ноды из проекта в каталоге
+пользователя (каталог не подключён ни к одному CT) в `IMAGES_DIR/QEMU`, переписывает backing file относительным именем,
+проверяет и публикует файл атомарно. Менеджер вызывает его, только если `GET /capabilities` агента содержит
+`"images_capture": true` (§1.3); иначе `image_authoring` в `info` не объявляется.
+
 **Откат слота (агент 1.2).** `POST /slots/{vmid}/reset`, тело `{}`, те же заголовки владельца, что у
 `stop`: на остановленном CT выполняет `pct rollback` к снимку чистого слота (имя задаёт
 администратор агента, `LAB_CLEAN_SNAPSHOT`, по умолчанию `lab-clean`; клиент его не передаёт).
@@ -877,6 +956,8 @@ GNS3. 🆕 Для `vnc` слот отдаёт сырой поток RFB: оба 
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
 | `lab_constructor` | менеджер | 🆕 `gns3lab.lab/2`: сегменты, `preconfig` образов, `warnings` в `validate` (§2.6); объявляется вместе с `lab_definitions` |
+| `image_authoring` | менеджер | 🆕 черновики образов, авторская сессия, публикация разностных образов (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
+| `images_capture` | агент | 🆕 `POST /images/capture` (§5, AGENT_REQUESTS §6); поле `GET /capabilities` агента |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `vnc` | слот | 🆕 `NodeSpec.console: "vnc"` и сырой поток RFB в консольном WS (§4.2); слот объявляет её в `features` (0.8.0); когда появится `requires`, лабы с такими узлами будут требовать её |
