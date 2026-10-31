@@ -9,6 +9,9 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
 from .agent_client import AgentError, AgentUncertain
+from .slot_client import SlotError
+from .ownership import command_scope
+from .store import Fenced
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ class CaptureNode(BaseModel):
 
 class CaptureRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
+    force: bool = False
     nodes: list[CaptureNode] = Field(min_length=1, max_length=100)
 
 
@@ -69,13 +73,25 @@ class DerivedImages:
             if base is None or base.derived:
                 continue
             metadata = {k: row[k] for k in ('base', 'base_sha256', 'sha256', 'size', 'author_user_id',
-                                           'description', 'supersedes')}
+                                           'description', 'supersedes', 'forced')}
             metadata['published_at'] = row['published_at'].astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
             metadata['source'] = {'library_lab_id': row['library_lab_id'], 'node': row['node']}
             images[row['id']] = base.model_copy(update=dict(id=row['id'], title=row['title'], file=row['file'],
                                                             derived=metadata, featured=row['featured'],
                                                             retired=row['retired']))
         return images
+
+    async def candidates(self, session):
+        current = await self.store.session(session['id'])
+        ws = await self.store.workspace(session['workspace_id'])
+        catalog = await self.catalog(session['site'])
+        started = set(ws['started_nodes'])
+        result = []
+        for node in ws['definition']['nodes']:
+            image = catalog.get(node['image'])
+            if node['name'] in started and image and image.kind == 'qemu' and image.capture is not False:
+                result.append({'name': node['name'], 'status': current['node_statuses'].get(node['name'], 'unknown')})
+        return result
 
     async def pending(self):
         async with self.store.pool.connection() as conn:
@@ -89,7 +105,9 @@ class DerivedImages:
 
     @staticmethod
     def public(row):
-        body = {'schema': 'gns3lab.capture/1', 'state': row['state'], 'error': row['error']}
+        body = {'schema': 'gns3lab.capture/1', 'state': row['state'], 'error': row['error'], 'stage': row['phase']}
+        if row['state'] == 'done':
+            body['forced'] = row['forced']
         if row['state'] == 'done':
             body['images'] = row['result']
         return body
@@ -101,6 +119,13 @@ class DerivedImages:
             raise error(409, 'session_not_running', 'Session must be running or stopped')
         if len(body.nodes) > self.settings.image_capture_max_nodes or len({n.name for n in body.nodes}) != len(body.nodes):
             raise error(400, 'invalid_request', 'Too many or duplicate capture nodes')
+        existing = await self.get(session['id'])
+        if existing and existing['state'] in ('running', 'done'):
+            code = 'capture_done' if existing['state'] == 'done' else 'capture_in_progress'
+            raise error(409, code, code)
+        if session['status'] == 'running':
+            await self.services.orchestrator.live_nodes(session, fresh=True)
+        candidates = {n['name']: n['status'] for n in await self.candidates(session)}
         ws = await self.store.workspace(session['workspace_id'])
         nodes = {n['name']: n for n in ws['definition']['nodes']}
         catalog = await self.catalog(session['site'])
@@ -112,6 +137,8 @@ class DerivedImages:
             base = catalog.get(image.derived['base']) if image and image.derived else image
             if not problem and (not image or image.kind != 'qemu' or image.capture is False or not base.sha256):
                 problem = 'not_capturable'
+            if not problem and item.name not in candidates:
+                problem = 'never_started'
             if problem:
                 raise error(422, 'lab_invalid', 'Node cannot be captured (base SHA-256 is required)',
                             problems=[{'path': 'nodes', 'code': problem, 'message': item.name}])
@@ -124,6 +151,11 @@ class DerivedImages:
             request.append(dict(item.model_dump(), id=identity, file=identity + '.qcow2', base=base.id,
                                 base_file=base.file, base_sha256=base.sha256, parent_file=image.file,
                                 supersedes=supersedes))
+        unsafe = [n.name for n in body.nodes if candidates[n.name] != 'stopped'] if session['status'] == 'stopped' else []
+        if unsafe and not body.force:
+            raise error(409, 'guest_not_stopped',
+                        'Запустите лабу снова и сохраните из работающей, либо сохраните как есть',
+                        nodes=[{'name': name, 'reason': 'SESSION_STOPPED'} for name in unsafe])
         async with self.store.pool.connection() as conn, conn.transaction():
             await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))', (session['student_key'],))
             existing = await conn.execute('SELECT * FROM image_captures WHERE session_id = %s FOR UPDATE', (session['id'],))
@@ -139,15 +171,95 @@ class DerivedImages:
             active = await conn.execute("SELECT 1 FROM image_captures WHERE student_key = %s AND state = 'running'", (session['student_key'],))
             if await active.fetchone():
                 raise error(409, 'capture_in_progress', 'Workspace capture is already running')
-            await conn.execute("INSERT INTO image_captures(session_id, student_key, state, request) VALUES (%s, %s, 'running', %s) ON CONFLICT(session_id) DO UPDATE SET state = 'running', request = excluded.request, completed = '[]', result = NULL, error = NULL, created_at = now(), updated_at = now()",
-                               (session['id'], session['student_key'], Jsonb(request)))
-            await conn.execute("UPDATE sessions SET stop_requested = true, stop_reason = 'image_capture' WHERE id = %s AND status = 'running'", (session['id'],))
+            await conn.execute("INSERT INTO image_captures(session_id, student_key, state, request, force, phase, forced) VALUES (%s, %s, 'running', %s, %s, %s, %s) ON CONFLICT(session_id) DO UPDATE SET state = 'running', request = excluded.request, force = excluded.force, phase = excluded.phase, forced = excluded.forced, quiesce = '{}', completed = '[]', result = NULL, error = NULL, created_at = now(), updated_at = now()",
+                               (session['id'], session['student_key'], Jsonb(request), body.force,
+                                'quiesce' if session['status'] == 'running' else 'capture', unsafe))
         return self.public(await self.get(session['id']))
 
-    async def fail(self, sid, code, node=None):
-        error = {'code': code, 'retryable': code in ('TIMEOUT', 'INTERNAL'), 'node': node}
+    async def fail(self, sid, code, node=None, nodes=None):
+        error = {'code': code, 'retryable': code in ('TIMEOUT', 'INTERNAL', 'GUEST_NOT_STOPPED'), 'node': node}
+        if nodes is not None:
+            error['nodes'] = nodes
         async with self.store.pool.connection() as conn:
             await conn.execute("UPDATE image_captures SET state = 'failed', error = %s, updated_at = now() WHERE session_id = %s AND state = 'running'", (Jsonb(error), sid))
+
+    async def quiesce(self, row, session):
+        orch = self.services.orchestrator
+        client = orch._slot(session)
+        timeout = self.settings.image_shutdown_timeout
+        await orch.live_nodes(session, fresh=True)
+        candidates = {n['name']: n['status'] for n in await self.candidates(session)}
+        errors = {}
+        current_nodes = {n['name']: n['node_id'] for n in session['topology']['topology']['nodes']}
+        operations = dict(row['quiesce'])
+        async def persist_operations(name, operation):
+            async with self.store.pool.connection() as conn:
+                await conn.execute('UPDATE image_captures SET quiesce = quiesce || %s, updated_at = now() WHERE session_id = %s',
+                                   (Jsonb({name: operation}), session['id']))
+
+        async def one(item):
+            name = item['name']
+            if candidates.get(name) == 'stopped':
+                return
+            try:
+                operation = operations.get(name)
+                if not operation:
+                    reply = await client.shutdown(str(session['project_id']), current_nodes[name], timeout,
+                                                  'capture-shutdown-' + item['id'])
+                    operation = reply['operation_id']
+                    operations[name] = operation
+                    await persist_operations(name, operation)
+                while True:
+                    result = await client.operation(operation)
+                    if result['status'] == 'SUCCEEDED':
+                        return
+                    if result['status'] != 'RUNNING':
+                        errors[name] = (result.get('error') or {}).get('code', 'GUEST_AGENT_UNAVAILABLE')
+                        return
+                    await asyncio.sleep(0.25)
+            except SlotError as exc:
+                errors[name] = 'GUEST_SHUTDOWN_UNSUPPORTED' if exc.status == 404 else 'GUEST_AGENT_UNAVAILABLE'
+            except (KeyError, TypeError):
+                errors[name] = 'GUEST_AGENT_UNAVAILABLE'
+
+        epoch = orch.epoch
+        with command_scope(epoch, max(1, 2 * session['slot_generation']),
+                           lambda: orch.leader and orch.epoch == epoch):
+            await orch._claim(session, epoch, max(1, 2 * session['slot_generation']))
+            unsupported_reason = 'GUEST_SHUTDOWN_UNSUPPORTED'
+            try:
+                caps = await client.capabilities()
+            except SlotError as exc:
+                caps = {}
+                if exc.status != 404:
+                    unsupported_reason = 'GUEST_AGENT_UNAVAILABLE'
+            if 'guest-shutdown' not in caps.get('features', []):
+                errors = {item['name']: unsupported_reason for item in row['request']
+                          if candidates.get(item['name']) != 'stopped'}
+            else:
+                try:
+                    await asyncio.wait_for(asyncio.gather(*(one(item) for item in row['request'])), timeout + 10)
+                except asyncio.TimeoutError:
+                    for item in row['request']:
+                        if candidates.get(item['name']) != 'stopped':
+                            errors.setdefault(item['name'], 'GUEST_SHUTDOWN_TIMEOUT')
+        # Trust a fresh GNS3 observation, never only an old successful operation.
+        _, stale = await orch.live_nodes(session, fresh=True)
+        latest = {n['name']: n['status'] for n in await self.candidates(session)}
+        for item in row['request']:
+            name = item['name']
+            if not stale and latest.get(name) == 'stopped':
+                errors.pop(name, None)
+            else:
+                errors.setdefault(name, 'GUEST_AGENT_UNAVAILABLE' if stale else 'GUEST_SHUTDOWN_TIMEOUT')
+        if errors and not row['force']:
+            await self.fail(session['id'], 'GUEST_NOT_STOPPED', nodes=[{'name': n, 'reason': r} for n, r in errors.items()])
+            return
+        async with self.store.pool.connection() as conn, conn.transaction():
+            await conn.execute("UPDATE image_captures SET phase = 'stopping', forced = %s, updated_at = now() WHERE session_id = %s AND state = 'running'",
+                               (sorted(errors), session['id']))
+            await conn.execute("UPDATE sessions SET stop_requested = true, stop_reason = 'image_capture' WHERE id = %s AND status = 'running'", (session['id'],))
+        orch.wake()
 
     async def step(self, sid):
         # A separate connection avoids exhausting the request pool while a capture
@@ -168,12 +280,26 @@ class DerivedImages:
         if not row or row['state'] != 'running':
             return
         session = await self.store.session(sid)
+        if row['phase'] == 'quiesce':
+            if session['status'] == 'running':
+                try:
+                    await self.quiesce(row, session)
+                except (asyncio.CancelledError, Fenced):
+                    raise
+                except Exception:
+                    log.exception('Guest quiesce failed for session %s', sid)
+                    await self.fail(sid, 'GUEST_NOT_STOPPED', nodes=[{'name': i['name'], 'reason': 'GUEST_AGENT_UNAVAILABLE'} for i in row['request']])
+            else:
+                await self.fail(sid, 'GUEST_NOT_STOPPED', nodes=[{'name': i['name'], 'reason': 'SESSION_STOPPED'} for i in row['request']])
+            return
         if session['status'] in ('running', 'stopping'):
             # The usual orchestrator performs lab_stop, ct_stop, reset and park.
             return
         if session['status'] != 'stopped':
             await self.fail(sid, 'AGENT_REJECTED')
             return
+        async with self.store.pool.connection() as conn:
+            await conn.execute("UPDATE image_captures SET phase = 'capture' WHERE session_id = %s AND state = 'running'", (sid,))
         current_node = None
         try:
             if await self.store.slot_holding_student(session['student_key']) is not None:
@@ -201,8 +327,8 @@ class DerivedImages:
             await guard.execute('SELECT 1')
             async with self.store.pool.connection() as conn, conn.transaction():
                 for item, result in zip(row['request'], completed):
-                    await conn.execute('INSERT INTO derived_images(id, site, file, base, base_file, base_sha256, sha256, size, author_user_id, title, description, library_lab_id, node, supersedes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
-                                       (item['id'], session['site'], item['file'], item['base'], item['base_file'], item['base_sha256'], result['sha256'], result['size'], session['user_id'], item['title'], item['description'], session['library_lab_id'], item['name'], item['supersedes']))
+                    await conn.execute('INSERT INTO derived_images(id, site, file, base, base_file, base_sha256, sha256, size, author_user_id, title, description, library_lab_id, node, supersedes, forced) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                                       (item['id'], session['site'], item['file'], item['base'], item['base_file'], item['base_sha256'], result['sha256'], result['size'], session['user_id'], item['title'], item['description'], session['library_lab_id'], item['name'], item['supersedes'], item['name'] in row['forced']))
                 await conn.execute("UPDATE image_captures SET state = 'done', result = %s, updated_at = now() WHERE session_id = %s", (Jsonb({i['name']: i['id'] for i in row['request']}), sid))
         except AgentError as exc:
             if exc.code in ('CAPTURE_NODE_MISSING', 'CAPTURE_BASE_MISMATCH', 'CAPTURE_TOO_LARGE', 'STUDENT_DIR_BUSY'):

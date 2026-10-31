@@ -587,6 +587,7 @@ SOURCE_FILES = (
     'manager/lab_manager/migrations/007_slot_lab_failures.sql',
     'manager/lab_manager/migrations/008_facts.sql',
     'manager/lab_manager/migrations/009_derived_images.sql',
+    'manager/lab_manager/migrations/010_guest_consistent_capture.sql',
     'manager/lab_manager/migrations/__init__.py',
     'manager/lab_manager/orchestrator.py',
     'manager/lab_manager/netconfig.py',

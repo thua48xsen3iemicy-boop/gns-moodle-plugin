@@ -229,8 +229,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             body["progress"] = s["progress"]
         if s.get("mode"):
             body["mode"] = s["mode"]
-            body["capture_nodes"] = [n["name"] for n in (s.get("topology") or {}).get("topology", {}).get("nodes", [])
-                                     if n.get("node_type") == "qemu" and n.get("status") == "started"]
+
         return body
 
     async def present(s):
@@ -243,6 +242,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             body["nodes"], stale = await services.orchestrator.live_nodes(s)
             if stale:
                 body["nodes_stale"] = True
+        if s.get("mode") == "authoring":
+            body["capture_nodes"] = await services.derived.candidates(s)
         return body
 
     async def own_session(session_id, site):

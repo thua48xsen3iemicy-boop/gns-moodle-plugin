@@ -173,6 +173,7 @@ class Settings:
     images: dict | None = None  # Image catalog by id (IMAGES_FILE); None: no labs from Moodle
     lab_memory_overhead_mb: int = 1024  # Added to node memory when sizing a CT for a lab definition
     authoring_max_duration: int = 240
+    image_shutdown_timeout: int = 120
     image_max_bytes: int = 8 * 1024**3
     image_capture_max_nodes: int = 10
     default_max_duration: int = 180  # Minutes
@@ -327,6 +328,7 @@ def load(env=None, check_mode=True) -> Settings:
         images=images,
         lab_memory_overhead_mb=_int(env, "LAB_MEMORY_OVERHEAD_MB", 1024, 0, 65536),
         authoring_max_duration=_int(env, "AUTHORING_MAX_DURATION", 240, 1, 7 * 24 * 60),
+        image_shutdown_timeout=_int(env, "IMAGE_SHUTDOWN_TIMEOUT", 120, 30, 300),
         image_max_bytes=_int(env, "IMAGE_MAX_BYTES", 8 * 1024**3, 1, 2**63-1),
         image_capture_max_nodes=_int(env, "IMAGE_CAPTURE_MAX_NODES", 10, 1, 100),
         default_max_duration=_int(env, "DEFAULT_MAX_DURATION", 180, 1, 7 * 24 * 60),

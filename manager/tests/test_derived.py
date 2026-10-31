@@ -78,7 +78,7 @@ async def test_capture_publish_patch_validate_and_repeat(tmp_path, dsn):
     async with make_env(tmp_path, dsn, images=catalog(), sites=sites) as env:
         sid = (await start(env)).json()['session_id']
         await env.run()
-        assert (await env.client.get(f'/api/v1/sessions/{sid}')).json()['capture_nodes'] == ['PC0']
+        assert (await env.client.get(f'/api/v1/sessions/{sid}')).json()['capture_nodes'] == [{'name': 'PC0', 'status': 'started'}]
         assert (await capture(env, sid)).status_code == 202
         assert (await capture(env, sid)).json()['error'] == 'capture_in_progress'
         await env.run()
@@ -144,6 +144,9 @@ async def test_capture_resumes_checkpoints_after_worker_restart(tmp_path, dsn):
         await env.run()
         assert (await capture(env, sid, 2)).status_code == 202
         env.orch.derived = None  # Drive only the normal stopping lifecycle first.
+        async with env.services.pool.connection() as conn:
+            await conn.execute("UPDATE image_captures SET phase = 'stopping' WHERE session_id = %s", (sid,))
+        await env.services.store.request_stop(sid, 'main', 'test')
         await env.run()
         original = env.services.agent.capture_image
         calls = []
@@ -189,3 +192,135 @@ async def test_lost_agent_response_fails_safely_and_can_retry(tmp_path, dsn):
         await env.run()
         assert (await env.services.derived.get(sid))['state'] == 'done'
         assert len(env.agent.captured_images) == 2
+
+
+async def test_poweroff_candidate_and_history_survive_resume(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        env.slots[201].stopped_nodes.add('PC0')
+        state = (await env.client.get(f'/api/v1/sessions/{sid}')).json()
+        # The initial cached snapshot can be at most three seconds old; capture always refreshes.
+        env.orch._live_cache.clear()
+        state = (await env.client.get(f'/api/v1/sessions/{sid}')).json()
+        assert state['capture_nodes'] == [{'name': 'PC0', 'status': 'stopped'}]
+        await env.client.post(f'/api/v1/sessions/{sid}/stop')
+        await env.run()
+        nextsid = (await start(env)).json()['session_id']
+        await env.run()
+        ws = await env.services.store.workspace((await env.services.store.session(nextsid))['workspace_id'])
+        assert ws['started_nodes'] == ['PC0']
+        assert (await env.client.get(f'/api/v1/sessions/{nextsid}')).json()['capture_nodes'] == [{'name': 'PC0', 'status': 'started'}]
+
+
+async def test_partial_guest_failure_keeps_session_running_then_manual_poweroff_retries(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env, lab(2))).json()['session_id']
+        await env.run()
+        env.slots[201].shutdown_errors['PC1'] = 'GUEST_AGENT_UNAVAILABLE'
+        assert (await capture(env, sid, 2)).status_code == 202
+        assert not (await env.services.store.session(sid))['stop_requested']
+        await env.run()
+        row = await env.services.derived.get(sid)
+        assert row['state'] == 'failed' and row['error']['code'] == 'GUEST_NOT_STOPPED'
+        assert row['error']['nodes'] == [{'name': 'PC1', 'reason': 'GUEST_AGENT_UNAVAILABLE'}]
+        assert row['error']['retryable']
+        assert (await env.services.store.session(sid))['status'] == 'running'
+        assert not env.agent.captured_images
+        assert env.slots[201].stopped_nodes == {'PC0'}
+        env.slots[201].stopped_nodes.add('PC1')  # poweroff from the console
+        assert (await capture(env, sid, 2)).status_code == 202
+        await env.run()
+        row = await env.services.derived.get(sid)
+        assert row['state'] == 'done' and row['forced'] == []
+        assert all(not i.derived['forced'] for i in (await env.services.derived.catalog('main')).values() if i.derived)
+
+
+async def test_force_marks_only_guests_that_failed_shutdown(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env, lab(2))).json()['session_id']
+        await env.run()
+        env.slots[201].shutdown_errors['PC1'] = 'GUEST_SHUTDOWN_TIMEOUT'
+        response = await env.client.post(f'/api/v1/sessions/{sid}/capture', json={
+            'nodes': [{'name': 'PC0', 'title': 'Clean'}, {'name': 'PC1', 'title': 'Forced'}], 'force': True})
+        assert response.status_code == 202
+        await env.run()
+        result = (await env.client.get(f'/api/v1/sessions/{sid}/capture')).json()
+        assert result['state'] == 'done' and result['forced'] == ['PC1'], result
+        images = {i['title']: i for i in (await env.client.get('/api/v1/images')).json()['images'] if i.get('derived')}
+        assert not images['Clean']['derived']['forced'] and images['Forced']['derived']['forced']
+        names = [entry[0] for entry in env.timeline]
+        assert names.index('slot:guest-shutdown') < names.index('slot:stop')
+
+
+async def test_stopped_session_requires_force_unless_guest_was_already_off(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        await env.client.post(f'/api/v1/sessions/{sid}/stop')
+        await env.run()
+        refused = await capture(env, sid)
+        assert refused.status_code == 409 and refused.json()['error'] == 'guest_not_stopped'
+        assert refused.json()['nodes'] == [{'name': 'PC0', 'reason': 'SESSION_STOPPED'}]
+        forced = await env.client.post(f'/api/v1/sessions/{sid}/capture', json={
+            'nodes': [{'name': 'PC0', 'title': 'Forced after stop'}], 'force': True})
+        assert forced.status_code == 202
+        await env.run()
+        assert (await env.services.derived.get(sid))['forced'] == ['PC0']
+
+
+@pytest.mark.parametrize('advertise,route', [(False, False), (True, False)])
+async def test_legacy_slot_leaves_session_running(tmp_path, dsn, advertise, route):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        env.slots[201].guest_shutdown = advertise
+        env.slots[201].shutdown_route = route
+        assert (await capture(env, sid)).status_code == 202
+        await env.run()
+        row = await env.services.derived.get(sid)
+        assert row['error']['nodes'] == [{'name': 'PC0', 'reason': 'GUEST_SHUTDOWN_UNSUPPORTED'}]
+        assert (await env.services.store.session(sid))['status'] == 'running'
+        assert not env.agent.captured_images
+
+
+async def test_never_started_node_is_rejected_before_capture(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        env.slots[201].stopped_nodes.add('PC0')
+        async with env.services.pool.connection() as conn:
+            await conn.execute('UPDATE workspaces SET started_nodes = %s', ([],))
+        response = await capture(env, sid)
+        assert response.status_code == 422 and response.json()['problems'][0]['code'] == 'never_started'
+        assert not env.agent.captured_images
+
+
+async def test_late_status_response_cannot_replace_newer_pre_stop_snapshot(tmp_path, dsn):
+    from datetime import datetime, timezone, timedelta
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        row = await env.services.store.session(sid)
+        stamp = datetime.now(timezone.utc)
+        await env.services.store.observe_nodes(row, {'PC0': 'started'}, observed_at=stamp)
+        await env.services.store.observe_nodes(row, {'PC0': 'stopped'}, observed_at=stamp - timedelta(seconds=1))
+        assert (await env.services.store.session(sid))['node_statuses'] == {'PC0': 'started'}
+
+
+async def test_unreachable_status_before_stop_requires_force(tmp_path, dsn):
+    from lab_manager.slot_client import SlotUnavailable
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        env.slots[201].stopped_nodes.add('PC0')
+        await env.orch.live_nodes(await env.services.store.session(sid), fresh=True)
+        original = env.services.slots[201].topology
+        async def unavailable(pid):
+            raise SlotUnavailable('Status temporarily unavailable')
+        env.services.slots[201].topology = unavailable
+        await env.client.post(f'/api/v1/sessions/{sid}/stop')
+        await env.run()
+        env.services.slots[201].topology = original
+        response = await capture(env, sid)
+        assert response.status_code == 409 and response.json()['error'] == 'guest_not_stopped'

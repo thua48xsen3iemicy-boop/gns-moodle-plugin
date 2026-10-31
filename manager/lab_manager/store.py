@@ -5,6 +5,7 @@ slots.generation still equals the generation the session got at allocation time.
 """
 
 import asyncio
+from datetime import datetime, timezone
 import json
 from contextlib import asynccontextmanager
 import secrets
@@ -210,6 +211,18 @@ class Store:
                 (site, user_id, library_lab_id),
             )
             return await cur.fetchone()
+
+    async def observe_nodes(self, session, statuses, *, observed_at=None):
+        """Keep a monotone project history and the last pre-stop status by name."""
+        if session.get("mode") != "authoring":
+            return
+        observed_at = observed_at or datetime.now(timezone.utc)
+        started = sorted(name for name, status in statuses.items() if status == "started")
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("UPDATE workspaces SET started_nodes = ARRAY(SELECT DISTINCT unnest(started_nodes || %s::text[])) WHERE id = %s",
+                               (started, session["workspace_id"]))
+            await conn.execute("UPDATE sessions SET node_statuses = %s, node_observed_at = %s WHERE id = %s AND status IN ('starting', 'running') AND node_observed_at <= %s",
+                               (Jsonb(statuses), observed_at, session["id"], observed_at))
 
     async def latest_session(self, site, user_id, instance_id):
         async with self.pool.connection() as conn:

@@ -191,6 +191,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
 | `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
+| `capture_nodes` | у authoring: `[{"name", "status"}]`, когда-либо запускавшиеся QEMU-ноды проекта; выключенная через poweroff не пропадает |
 | `mode` | 🆕 только у авторского запуска (§2.8): `"authoring"`. У обычной сессии поля нет |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
@@ -383,7 +384,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 **Авторский запуск** — `POST /api/v1/sessions` (§2.2) с `lab`, `"options": {"mode": "authoring"}` и `library_lab_id`
 (int > 0, `id` лабы библиотеки плагина) **вместо** `instance_id`. С `lab_ref`, с `instance_id` или без `library_lab_id` —
 `400 invalid_request`; `library_lab_id` без `mode: "authoring"` — тоже. Отличия от обычной сессии:
-- в объекте сессии `mode: "authoring"` (§2.3); `capture_nodes` — имена QEMU-нод, запущенных в сохранённом снимке топологии; список сохраняется после остановки для окна снятия;
+- в объекте сессии `mode: "authoring"` (§2.3); `capture_nodes` — `[{"name", "status"}]` всех QEMU-нод с capture ≠ false, когда-либо запускавшихся в этом проекте; история хранится в workspace, status — текущий либо последний перед остановкой сессии;
 - свой `student_key` (сайт, пользователь, `library_lab_id`, признак авторства): проект преподавателя для этой лабы отдельно от
   его лаб как студента; «одна живая лаба» действует внутри этого ключа;
 - живая авторская сессия с другим `lab_def` — `409 session_conflict`, как обычно; после остановки запуск с другим
@@ -397,29 +398,46 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 `stopped` (иначе `409 session_not_running`; обычная сессия — `409 not_authoring`).
 
 ```json
-{"nodes": [{"name": "R1", "title": "OSPF-лаба — R1", "description": "FRR 9, ospfd включён"},
+{"force": false, "nodes": [{"name": "R1", "title": "OSPF-лаба — R1", "description": "FRR 9, ospfd включён"},
            {"name": "SRV", "title": "OSPF-лаба — веб-сервер"}]}
 ```
 
 | Поле | Смысл |
 |---|---|
-| `nodes[]` | 1…`IMAGE_CAPTURE_MAX_NODES`, имена без повторов. Нода есть в `lab_def` сессии (иначе `422 lab_invalid` с `problems`, код `unknown_node`), `kind: "qemu"`, образ без `capture: false` (`not_capturable`) |
+| `nodes[]` | 1…`IMAGE_CAPTURE_MAX_NODES`, имена без повторов. Нода есть в `lab_def` сессии (иначе `422 lab_invalid` с `problems`, код `unknown_node`), `kind: "qemu"`, образ без `capture: false` (`not_capturable`), есть в capture_nodes (иначе `never_started`) |
 | `title` | 1–100 символов |
 | `description` | необязательно, до 2000 символов |
+| `force` | строгий bool, default false; разрешить снятие без подтверждённого выключения гостя |
 
-Ответ `202` — состояние снятия (тело ниже); живую сессию менеджер останавливает сам. Повтор, пока снятие идёт, —
+Ответ `202` — состояние снятия (тело ниже). Сначала этап `quiesce`: работающие выбранные ноды
+выключаются через guest-shutdown слота (§4.3a), параллельно с общим пределом времени.
+Только после подтверждения stopped менеджер ставит stop_requested и останавливает сессию обычным путём.
+Без force любая ошибка даёт failed capture `GUEST_NOT_STOPPED`, retryable true,
+`error.nodes: [{"name", "reason"}]`: GUEST_AGENT_UNAVAILABLE / GUEST_SHUTDOWN_TIMEOUT /
+GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404). Сессия остаётся running,
+уже выключенные ноды остаются выключенными. С force ошибки не мешают остановке и capture,
+их имена попадают в `forced: ["R1"]` результата done и `derived.forced: true` соответствующих образов.
+Из stopped-сессии выбранные ноды с последним pre-stop статусом started либо неизвестным
+состоянием (свежий опрос перед остановкой недоступен) без force дают
+`409 guest_not_stopped`, `nodes: [{"name", "reason": "SESSION_STOPPED"}]`: запустить лабу снова
+и сохранить из работающей либо сохранить как есть. С force они записываются в forced.
+Нода, штатно выключенная до остановки сессии, force не требует.
+
+`stage`: quiesce / stopping / capture; поле сообщает фазу, state остаётся running/done/failed.
+Повтор, пока снятие идёт, —
 `409 capture_in_progress`; после `done` новое снятие той же сессии — `409 capture_done` (нужен новый запуск).
 
 **`GET /api/v1/sessions/{id}/capture`** — состояние; снятия не было — `404 capture_not_found`.
 
 ```json
 {"schema": "gns3lab.capture/1", "state": "done",
- "images": {"R1": "d-3f9a1c0d2b4e", "SRV": "d-77b0e1a92c5d"}, "error": null}
+ "images": {"R1": "d-3f9a1c0d2b4e", "SRV": "d-77b0e1a92c5d"}, "forced": [], "error": null}
 ```
 
 `state`: `running` · `done` · `failed`. `images` — только при `done`, по всем нодам запроса: образы публикуются **все или
 ни одного** (файлы, уже снятые до сбоя, в `GET /images` не попадают; их убирает администратор). `failed` —
-`error: {"code", "retryable", "node"}` (коды ниже); проект цел, можно снять снова. При `done` плагин заменяет `image` этих
+`error: {"code", "retryable", "node"}` (коды ниже; у `GUEST_NOT_STOPPED` также `nodes`);
+проект цел, можно снять снова. При `done` плагин заменяет `image` этих
 нод в определении лабы и сохраняет лабу; новое определение даст новый `lab_def`.
 
 **Производные образы в `GET /api/v1/images`** — обычные элементы каталога с дополнительными полями (старый плагин их
@@ -428,7 +446,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 ```json
 {"id": "d-3f9a1c0d2b4e", "title": "OSPF-лаба — R1", "kind": "qemu", "category": "router",
  "derived": {"base": "frr9", "base_sha256": "sha256:…", "sha256": "sha256:…", "size": 412090368,
-             "author_user_id": 42, "published_at": "2026-10-31T11:20:00Z",
+             "author_user_id": 42, "forced": false, "published_at": "2026-10-31T11:20:00Z",
              "description": "FRR 9, ospfd включён", "source": {"library_lab_id": 12, "node": "R1"},
              "supersedes": "d-0c4e81f2aa19"},
  "featured": false, "retired": false}
@@ -457,7 +475,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 
 Удаления нет: на файл опираются проекты студентов.
 
-**Коды `error.code` снятия:** `CAPTURE_NODE_MISSING` (у ноды нет диска — ни разу не запускалась; нет),
+**Коды `error.code` снятия:** `GUEST_NOT_STOPPED` (выключение не подтверждено; да, с nodes), `CAPTURE_NODE_MISSING` (диск исчез/недоступен после проверки истории; нет),
 `CAPTURE_BASE_MISMATCH` (backing диска или хеш базы не совпали; нет), `CAPTURE_TOO_LARGE` (> `IMAGE_MAX_BYTES`; нет),
 `STUDENT_DIR_BUSY` (§2.5; нет), `AGENT_REJECTED` (нет), `TIMEOUT` и `INTERNAL` (да).
 
@@ -466,7 +484,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, 🆕 `capture_not_found` 404, `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 

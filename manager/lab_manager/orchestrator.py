@@ -904,6 +904,7 @@ class Orchestrator:
         if s["stop_requested"]:
             return await self._goto(s, "lab_stop", "Остановка лабы…", status="stopping",
                                     slot_state="releasing", topology=topology)
+        await self.store.observe_nodes(s, {n["name"]: n.get("status", "unknown") for n in topology["topology"]["nodes"]})
         started = now()
         return await self._goto(
             s, "ready", "Лаба запущена", status="running", slot_state="busy", topology=topology,
@@ -922,6 +923,12 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ running
     async def _stage_ready(self, s):
+        if s.get("mode") == "authoring":
+            stopping = bool(s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]))
+            _, stale = await self.live_nodes(s, fresh=stopping)
+            if stopping and stale:
+                # A stale stopped snapshot cannot prove a clean disk at power cut.
+                await self.store.observe_nodes(s, {n["name"]: "unknown" for n in s["topology"]["topology"]["nodes"]})
         if s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]):
             reason = "maxduration" if not s["stop_requested"] else (s["stop_reason"] or "user")
             msg = "Время лабы истекло, остановка…" if reason == "maxduration" else "Остановка лабы…"
@@ -1125,20 +1132,22 @@ class Orchestrator:
         return False
 
     # ------------------------------------------------------------------ reads for the API
-    async def live_nodes(self, s) -> tuple[dict, bool]:
+    async def live_nodes(self, s, *, fresh=False) -> tuple[dict, bool]:
         """Node statuses of a running session, cached a few seconds.
 
         Returns (nodes, stale): stale is True when the slot did not answer and the snapshot from
         the start of the session is returned instead (plugin request П6).
         """
         cached = self._live_cache.get(s["id"])
-        if cached and time.monotonic() - cached[0] < 3:
+        if not fresh and cached and time.monotonic() - cached[0] < 3:
             return cached[1], cached[2]
         nodes, stale = node_states(s["topology"]), True
+        observed_at = now()
         try:
             raw = await self._slot(s).topology(str(s["project_id"]))
             live = node_states(session_topology(s["project_name"], raw))
             nodes, stale = {k: live.get(k, v) for k, v in nodes.items()}, False
+            await self.store.observe_nodes(s, {n["name"]: n.get("status", "unknown") for n in raw.get("nodes", [])}, observed_at=observed_at)
         except (SlotError, Failure):
             pass
         try:
