@@ -47,19 +47,20 @@ class authoring extends external_api {
             'description' => new external_value(PARAM_TEXT, 'New description', VALUE_DEFAULT, ''),
             'featured' => new external_value(PARAM_INT, '-1 unchanged, 0 false, 1 true', VALUE_DEFAULT, -1),
             'retired' => new external_value(PARAM_INT, '-1 unchanged, 0 false, 1 true', VALUE_DEFAULT, -1),
+            'force' => new external_value(PARAM_BOOL, 'Capture despite unconfirmed guest shutdown', VALUE_DEFAULT, false),
         ]);
     }
 
     /** Execute one operation after checking system context and capabilities. */
     public static function execute(int $labid, string $action, string $definition = '', array $nodes = [],
             string $nodeid = '', string $imageid = '', string $title = '', string $description = '',
-            int $featured = -1, int $retired = -1): array {
+            int $featured = -1, int $retired = -1, bool $force = false): array {
         global $USER;
         $params = self::validate_parameters(self::execute_parameters(), compact(
-            'labid', 'action', 'definition', 'nodes', 'nodeid', 'imageid', 'title', 'description', 'featured', 'retired'));
+            'labid', 'action', 'definition', 'nodes', 'nodeid', 'imageid', 'title', 'description', 'featured', 'retired', 'force'));
         ['labid' => $labid, 'action' => $action, 'definition' => $definition, 'nodes' => $nodes,
             'nodeid' => $nodeid, 'imageid' => $imageid, 'title' => $title, 'description' => $description,
-            'featured' => $featured, 'retired' => $retired] = $params;
+            'featured' => $featured, 'retired' => $retired, 'force' => $force] = $params;
         $context = lab_library::context();
         self::validate_context($context);
         require_capability('mod/gns3lab:managelabs', $context);
@@ -117,7 +118,8 @@ class authoring extends external_api {
             if ($session) {
                 $state['session'] = self::session($session);
             }
-            $result = ['state' => $state, 'capturecandidates' => $session->capture_nodes ?? []];
+            $result = ['state' => $state, 'capturecandidates' => array_map(fn($node) => ['name' => (string) $node->name,
+                'status' => (string) $node->status], $session->capture_nodes ?? [])];
             if ($session) {
                 try {
                     $result['capture'] = self::capture($client->capture_state($session->session_id));
@@ -156,7 +158,16 @@ class authoring extends external_api {
             if ($client->validate_lab($def)->lab_def !== $session->lab_def) {
                 throw new \moodle_exception('authoringdefinitionchanged', 'gns3lab');
             }
-            return ['capture' => self::capture($client->capture_images($session->session_id, $nodes))];
+            try {
+                return ['capture' => self::capture($client->capture_images($session->session_id, $nodes, $force))];
+            } catch (manager_exception $e) {
+                if ($e->remotecode !== 'guest_not_stopped') {
+                    throw $e;
+                }
+                return ['capture' => self::capture((object) ['state' => 'failed', 'error' => (object) [
+                    'code' => 'GUEST_NOT_STOPPED', 'retryable' => true, 'nodes' => $e->details->nodes ?? [],
+                ]])];
+            }
         }
         if ($action === 'capturestate' || $action === 'apply') {
             $capture = $client->capture_state($session->session_id);
@@ -196,6 +207,9 @@ class authoring extends external_api {
             $images[] = ['name' => $name, 'image' => $id];
         }
         return ['state' => $capture->state, 'images' => $images,
+            'stage' => $capture->stage ?? '', 'forced' => $capture->forced ?? [],
+            'nodes' => array_map(fn($node) => ['name' => (string) $node->name, 'reason' => (string) $node->reason],
+                $capture->error->nodes ?? []),
             'errorcode' => $capture->error->code ?? '', 'errornode' => $capture->error->node ?? '',
             'retryable' => (bool) ($capture->error->retryable ?? false)];
     }
@@ -210,10 +224,18 @@ class authoring extends external_api {
             'session' => session_data::structure(VALUE_OPTIONAL),
             'state' => $state, 'ticket' => $ticket,
             'version' => new external_value(PARAM_INT, 'Draft version', VALUE_OPTIONAL),
-            'capturecandidates' => new external_multiple_structure(new external_value(PARAM_TEXT, 'Node name'),
-                'Nodes which ran in this session', VALUE_OPTIONAL),
+            'capturecandidates' => new external_multiple_structure(new external_single_structure([
+                'name' => new external_value(PARAM_TEXT, 'Node name'),
+                'status' => new external_value(PARAM_ALPHA, 'Current or last pre-stop status'),
+            ]), 'QEMU nodes which ran in this project', VALUE_OPTIONAL),
             'capture' => new external_single_structure([
                 'state' => new external_value(PARAM_ALPHA, 'running, done or failed'),
+                'stage' => new external_value(PARAM_ALPHA, 'Capture phase', VALUE_DEFAULT, ''),
+                'forced' => new external_multiple_structure(new external_value(PARAM_TEXT, 'Forced node'), 'Forced nodes', VALUE_DEFAULT, []),
+                'nodes' => new external_multiple_structure(new external_single_structure([
+                    'name' => new external_value(PARAM_TEXT, 'Blocking node'),
+                    'reason' => new external_value(PARAM_ALPHANUMEXT, 'Shutdown failure reason'),
+                ]), 'Blocking nodes', VALUE_DEFAULT, []),
                 'images' => new external_multiple_structure(new external_single_structure([
                     'name' => new external_value(PARAM_TEXT, 'Node name'),
                     'image' => new external_value(PARAM_ALPHANUMEXT, 'Image ID'),

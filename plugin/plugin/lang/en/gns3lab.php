@@ -660,3 +660,21 @@ $string['privacy:metadata:gns3labmanager:librarylabid'] = 'The library lab used 
 $string['privacy:metadata:gns3labmanager:imagetitle'] = 'The title chosen by the author for a derived image.';
 $string['privacy:metadata:gns3labmanager:imagedescription'] = 'The description written by the author for a derived image.';
 $string['privacy:metadata:gns3labmanager:imagedisk'] = 'Disk changes explicitly saved by the author as a shared lab image.';
+
+// Guest-consistent image capture.
+$string['authoringquiescing'] = 'Shutting down the selected guests…';
+$string['authoringquiescehint'] = 'Running guests will shut down from inside before capture. If QGA is unavailable, run sync and poweroff in the guest, then retry.';
+$string['authoringblocked'] = 'Some guests could not shut down safely';
+$string['authoringforce'] = 'Save as is';
+$string['authoringretry'] = 'Retry';
+$string['authoringforcewarning'] = 'Saving as is may lose recent changes and leave the filesystem inconsistent. Such images will carry a warning.';
+$string['authoringforcedhint'] = 'Captured without confirmed guest shutdown; recent changes may be missing.';
+$string['authoringreason_GUEST_AGENT_UNAVAILABLE'] = 'Guest agent unavailable; power off the guest manually.';
+$string['authoringreason_GUEST_SHUTDOWN_TIMEOUT'] = 'Guest shutdown timed out.';
+$string['authoringreason_GUEST_SHUTDOWN_UNSUPPORTED'] = 'The slot does not support guest shutdown.';
+$string['authoringreason_SESSION_STOPPED'] = 'The session was stopped while this guest was running. Start it again and save from the running session, or save as is.';
+$string['authoringreason_other'] = 'Guest shutdown could not be confirmed.';
+$string['authoringstatus_started'] = 'running';
+$string['authoringstatus_stopped'] = 'stopped';
+$string['authoringstatus_suspended'] = 'suspended';
+$string['authoringstatus_unknown'] = 'status unknown';

@@ -45,6 +45,7 @@ class image_data {
             'featured' => new external_value(PARAM_BOOL, 'Featured', VALUE_DEFAULT, false),
             'retired' => new external_value(PARAM_BOOL, 'Retired', VALUE_DEFAULT, false),
             'derived' => new external_single_structure([
+                'forced' => new external_value(PARAM_BOOL, 'Captured without confirmed guest shutdown', VALUE_DEFAULT, false),
                 'base' => new external_value(PARAM_ALPHANUMEXT, 'Base ID'),
                 'base_sha256' => new external_value(PARAM_TEXT, 'Base digest'),
                 'sha256' => new external_value(PARAM_TEXT, 'Image digest'),

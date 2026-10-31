@@ -104,4 +104,34 @@ final class authoring_test extends \advanced_testcase {
         }
         $this->assertSame(lab_definition::to_json($changed), lab_library::latest_version($this->labid)->definition);
     }
+
+    /** Preserve the node-specific failure so the editor can offer retry or explicit force. */
+    public function test_stopped_session_error_keeps_a_typed_blocking_node_list(): void {
+        $session = fake_manager::session('stopped');
+        $session['lab_def'] = 'sha256:aaaa';
+        $this->manager->on('GET', '/api/v1/sessions', 200, $session);
+        $this->manager->on('POST', '/api/v1/sessions/s-3f9a1c0d2b4e5f60/capture', 409, [
+            'error' => 'guest_not_stopped', 'message' => 'Start the lab again',
+            'nodes' => [['name' => 'PC1', 'reason' => 'SESSION_STOPPED']],
+        ]);
+        $result = external_api::clean_returnvalue(authoring::execute_returns(), authoring::execute(
+            $this->labid, 'capture', json_encode(fake_manager::lab()), [['name' => 'PC1', 'title' => 'Prepared PC']]));
+        $this->assertSame('GUEST_NOT_STOPPED', $result['capture']['errorcode']);
+        $this->assertSame([['name' => 'PC1', 'reason' => 'SESSION_STOPPED']], $result['capture']['nodes']);
+        $this->assertTrue($result['capture']['retryable']);
+    }
+
+    /** Force is an explicit, server-validated capture parameter. */
+    public function test_explicit_force_is_forwarded_to_manager(): void {
+        $session = fake_manager::session('running');
+        $session['lab_def'] = 'sha256:aaaa';
+        $this->manager->on('GET', '/api/v1/sessions', 200, $session);
+        $this->manager->on('POST', '/api/v1/sessions/s-3f9a1c0d2b4e5f60/capture', 202, [
+            'state' => 'running', 'stage' => 'quiesce', 'error' => null,
+        ]);
+        authoring::execute($this->labid, 'capture', json_encode(fake_manager::lab()),
+            [['name' => 'PC1', 'title' => 'Prepared PC']], force: true);
+        [$request] = $this->manager->requests_to('POST', '/api/v1/sessions/s-3f9a1c0d2b4e5f60/capture');
+        $this->assertTrue($request['body']['force']);
+    }
 }

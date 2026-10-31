@@ -660,3 +660,21 @@ $string['privacy:metadata:gns3labmanager:librarylabid'] = 'Лаба библио
 $string['privacy:metadata:gns3labmanager:imagetitle'] = 'Название производного образа, заданное автором.';
 $string['privacy:metadata:gns3labmanager:imagedescription'] = 'Описание производного образа, заданное автором.';
 $string['privacy:metadata:gns3labmanager:imagedisk'] = 'Изменения диска, явно сохранённые автором как общий образ лабы.';
+
+// Guest-consistent image capture.
+$string['authoringquiescing'] = 'Выключение выбранных гостей…';
+$string['authoringquiescehint'] = 'Перед снятием работающие гости будут выключены изнутри. Если QGA недоступен, выполните sync и poweroff в госте, затем повторите сохранение.';
+$string['authoringblocked'] = 'Не всех гостей удалось штатно выключить';
+$string['authoringforce'] = 'Сохранить как есть';
+$string['authoringretry'] = 'Повторить';
+$string['authoringforcewarning'] = 'При сохранении как есть последние изменения могут потеряться, а файловая система — остаться в несогласованном состоянии. У таких образов будет предупреждение.';
+$string['authoringforcedhint'] = 'Снят без подтверждённого выключения гостя; последние изменения могут отсутствовать.';
+$string['authoringreason_GUEST_AGENT_UNAVAILABLE'] = 'Агент гостя недоступен; выключите гостя вручную.';
+$string['authoringreason_GUEST_SHUTDOWN_TIMEOUT'] = 'Истекло время ожидания выключения гостя.';
+$string['authoringreason_GUEST_SHUTDOWN_UNSUPPORTED'] = 'Слот не поддерживает штатное выключение гостя.';
+$string['authoringreason_SESSION_STOPPED'] = 'Сессия остановлена при работавшем госте. Запустите лабу снова и сохраните из работающей сессии либо сохраните как есть.';
+$string['authoringreason_other'] = 'Выключение гостя не подтверждено.';
+$string['authoringstatus_started'] = 'работает';
+$string['authoringstatus_stopped'] = 'выключена';
+$string['authoringstatus_suspended'] = 'приостановлена';
+$string['authoringstatus_unknown'] = 'статус неизвестен';

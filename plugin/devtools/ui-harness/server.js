@@ -49,7 +49,7 @@ async function manager(method, path, body) {
         ...(body === undefined ? {} : {body: JSON.stringify(body)}),
     });
     const result = await response.json();
-    if (!response.ok) throw Object.assign(new Error(result.message || result.error), {status: response.status});
+    if (!response.ok) throw Object.assign(new Error(result.message || result.error), {status: response.status, body: result});
     return result;
 }
 const exportSession = s => s && ({sessionid: s.session_id, status: s.status, stage: s.stage,
@@ -59,7 +59,7 @@ const exportSession = s => s && ({sessionid: s.session_id, status: s.status, sta
     features: s.status === 'running' ? ['consoles'] : [], nodesstale: false,
     nodes: Object.entries(s.nodes || {}).map(([id, n]) => ({nodeid: id, status: n.status, consoletype: n.console_type})),
 });
-const exportCapture = c => ({state: c.state, errorcode: c.error?.code || '', errornode: c.error?.node || '',
+const exportCapture = c => ({state: c.state, stage: c.stage || '', forced: c.forced || [], nodes: c.error?.nodes || [], errorcode: c.error?.code || '', errornode: c.error?.node || '',
     retryable: c.error?.retryable || false, images: Object.entries(c.images || {}).map(([name, image]) => ({name, image}))});
 async function authoring(args) {
     if (args.action === 'start') {
@@ -101,7 +101,14 @@ async function authoring(args) {
         const ticket = await manager('POST', path + '/console-tickets', {node_id: args.nodeid, readonly: false, issued_for_user_id: 42});
         return {ticket: {ticket: ticket.ticket, gatewayurl: ticket.gateway_url, expiresin: ticket.expires_in, readonly: false}};
     }
-    if (args.action === 'capture') return {capture: exportCapture(await manager('POST', path + '/capture', {nodes: args.nodes}))};
+    if (args.action === 'capture') {
+        try {
+            return {capture: exportCapture(await manager('POST', path + '/capture', {nodes: args.nodes, force: args.force || false}))};
+        } catch (error) {
+            if (error.body?.error !== 'guest_not_stopped') throw error;
+            return {capture: exportCapture({state: 'failed', error: {code: 'GUEST_NOT_STOPPED', retryable: true, nodes: error.body.nodes}})};
+        }
+    }
     if (args.action === 'capturestate' || args.action === 'apply') {
         const capture = await manager('GET', path + '/capture');
         if (args.action === 'apply') {

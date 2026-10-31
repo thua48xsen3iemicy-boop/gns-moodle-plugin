@@ -373,6 +373,7 @@ class Session:
         self.library_lab_id = None
         self.definition = None
         self.capture = None
+        self.node_statuses = {}
         self.site, self.user_id, self.instance_id, self.lab_ref = site, user_id, instance_id, lab_ref
         self.lab_def = lab_def  # sha256:… for a lab from Moodle, then lab_ref is None
         self.key = lab_def or lab_ref  # key in Manager.labs
@@ -423,6 +424,9 @@ class Manager:
     def __init__(self):
         self.labs = load_labs()
         self.sessions: list[Session] = []
+        self.started_nodes = {}
+        self.shutdown_errors = {}
+        self.shutdown_supported = True
         self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
@@ -445,7 +449,15 @@ class Manager:
             return "stopped"
         return lab["statuses"].get(node_id, "started")
 
+    def observe(self, s):
+        if s.mode == 'authoring' and s.status() == 'running':
+            s.node_statuses = {n['name']: self.node_status(self.labs[s.key], n['node_id'])
+                               for n in self.labs[s.key]['doc']['topology']['nodes']}
+            self.started_nodes.setdefault(s.workspace, set()).update(name for name, status in s.node_statuses.items()
+                                                                    if status == 'started')
+
     def summary(self, s):
+        self.observe(s)
         status, stage, progress = s.state()
         message = MESSAGES.get(status, "Лаба не запустилась")
         if status in ("stopping", "stopped") and s.stopped_by_teacher:
@@ -466,9 +478,11 @@ class Manager:
             body["progress"] = progress
         if s.mode:
             body['mode'] = s.mode
-            body['capture_nodes'] = [n['name'] for n in (s.definition or {}).get('nodes', [])
-                                     if next((i for i in IMAGES if i['id'] == n['image']), {}).get('kind') == 'qemu'
-                                     and time.time() >= s.started]
+            body['capture_nodes'] = [{'name': n['name'], 'status': s.node_statuses.get(n['name'], 'unknown')}
+                                     for n in (s.definition or {}).get('nodes', [])
+                                     if n['name'] in self.started_nodes.get(s.workspace, set())
+                                     and next((i for i in IMAGES if i['id'] == n['image']), {}).get('kind') == 'qemu'
+                                     and next((i for i in IMAGES if i['id'] == n['image']), {}).get('capture') is not False]
         return body
 
     def present(self, s):
@@ -672,6 +686,8 @@ async def create_session(request):
     s.definition = body.get('lab')
     m.fail_next = None
     s.workspace = m.workspaces.setdefault((site, user_id, instance_id, s.key), len(m.workspaces) + 1)
+    for node in m.labs[s.key]['doc']['topology']['nodes']:
+        m.stopped_nodes.discard(node['node_id'])
     m.sessions.append(s)
     log.info("session %s: user %s, activity %s, lab %s, %s min, client %s", s.id, user_id, instance_id, s.key,
              max_duration, body.get("client"))
@@ -697,6 +713,7 @@ async def stop_session(request):
     except Unsupported as exc:
         return error(400, "unsupported_field", f"Unsupported field: {exc}")
     if s.status() not in ("stopped", "failed") and s.stop_requested is None:
+        request.app['m'].observe(s)
         s.stop_requested = time.time()
         by = body.get("requested_by_user_id")
         s.stopped_by_teacher = by is not None and by != s.user_id
@@ -716,6 +733,11 @@ async def image_capture(request):
     if session.status() not in ('running', 'stopped'):
         return error(409, 'session_not_running', 'Session must run or be stopped')
     body = await request.json()
+    force = body.get('force', False)
+    if type(force) is not bool:
+        return error(400, 'invalid_request', 'force must be boolean')
+    manager = request.app['m']
+    manager.observe(session)
     selected = body.get('nodes')
     names = {n['name']: n for n in (session.definition or {}).get('nodes', [])}
     if (not isinstance(selected, list) or not 1 <= len(selected) <= 10 or
@@ -725,10 +747,40 @@ async def image_capture(request):
         image = next((i for i in IMAGES if i['id'] == names.get(n.get('name'), {}).get('image')), None)
         if not image or image['kind'] != 'qemu' or image.get('capture') is False:
             return error(422, 'lab_invalid', 'Node cannot be captured')
-    session.capture = {'schema': 'gns3lab.capture/1', 'state': 'running', 'error': None}
-    session.stop_requested = time.time()
+        if n['name'] not in manager.started_nodes.get(session.workspace, set()):
+            return error(422, 'lab_invalid', 'Node never started', problems=[{'code': 'never_started'}])
+    unsafe = [n['name'] for n in selected if session.node_statuses.get(n['name']) != 'stopped'] if session.status() == 'stopped' else []
+    if unsafe and not force:
+        return error(409, 'guest_not_stopped', 'Start the lab again or save as is',
+                     nodes=[{'name': name, 'reason': 'SESSION_STOPPED'} for name in unsafe])
+    session.capture = {'schema': 'gns3lab.capture/1', 'state': 'running', 'stage': 'quiesce', 'error': None}
 
     async def finish():
+        forced = list(unsafe)
+        if session.status() == 'running':
+            await asyncio.sleep(0.15)
+            errors = []
+            ids = {n['name']: n['node_id'] for n in manager.labs[session.key]['doc']['topology']['nodes']}
+            manager.observe(session)
+            for item in selected:
+                name = item['name']
+                if session.node_statuses.get(name) == 'stopped':
+                    continue
+                reason = manager.shutdown_errors.get(name) if manager.shutdown_supported else 'GUEST_SHUTDOWN_UNSUPPORTED'
+                if reason:
+                    errors.append({'name': name, 'reason': reason})
+                else:
+                    manager.stopped_nodes.add(ids[name])
+                    for ws in list(request.app['consoles'].get(ids[name], ())):
+                        await ws.close()
+            manager.observe(session)
+            if errors and not force:
+                session.capture = {'schema': 'gns3lab.capture/1', 'state': 'failed', 'stage': 'quiesce',
+                                   'error': {'code': 'GUEST_NOT_STOPPED', 'retryable': True, 'nodes': errors}}
+                return
+            forced = [item['name'] for item in errors]
+        session.capture['stage'] = 'stopping'
+        session.stop_requested = time.time()
         await asyncio.sleep(float(os.environ.get('MOCK_CAPTURE_DELAY', '3')) + STOPPING_FOR)
         if request.app['m'].capture_fail:
             session.capture = {'schema': 'gns3lab.capture/1', 'state': 'failed',
@@ -743,7 +795,7 @@ async def image_capture(request):
             image = dict(base, id=identity, title=n['title'], featured=False, retired=False,
                          derived={'base': base_id, 'base_sha256': 'sha256:' + 'a' * 64,
                                   'sha256': 'sha256:' + secrets.token_hex(32), 'size': 1048576,
-                                  'author_user_id': session.user_id, 'published_at': iso(time.time()),
+                                  'author_user_id': session.user_id, 'published_at': iso(time.time()), 'forced': n['name'] in forced,
                                   'description': n.get('description', ''),
                                   'source': {'library_lab_id': session.library_lab_id, 'node': n['name']},
                                   'supersedes': parent['id'] if parent.get('derived', {}).get('author_user_id') == session.user_id and parent['derived']['source'] == {'library_lab_id': session.library_lab_id, 'node': n['name']} else None})
@@ -752,7 +804,7 @@ async def image_capture(request):
             staged.append(image)
             result[n['name']] = identity
         IMAGES.extend(staged)
-        session.capture = {'schema': 'gns3lab.capture/1', 'state': 'done', 'images': result, 'error': None}
+        session.capture = {'schema': 'gns3lab.capture/1', 'state': 'done', 'images': result, 'forced': forced, 'error': None}
     task = asyncio.create_task(finish())
     request.app['capture_tasks'].add(task)
     task.add_done_callback(request.app['capture_tasks'].discard)
@@ -762,6 +814,13 @@ async def image_capture(request):
 async def mock_capture_failure(request):
     request.app['m'].capture_fail = request.match_info['mode'] == 'on'
     return web.json_response({'fail': request.app['m'].capture_fail})
+
+
+async def mock_shutdown_failure(request):
+    body = await request.json()
+    request.app['m'].shutdown_errors = body.get('nodes', {})
+    request.app['m'].shutdown_supported = body.get('supported', True)
+    return web.json_response({'nodes': request.app['m'].shutdown_errors})
 
 
 async def image_patch(request):
@@ -1152,6 +1211,10 @@ async def slot_console(request):
             for ch in msg.data:
                 if ch in "\r\n":
                     cmd, line = line.strip(), ""
+                    if cmd == "poweroff":
+                        m.stopped_nodes.add(node_id)
+                        await ws.close()
+                        return ws
                     if cmd == "reload":
                         await ws.close()
                         return ws
@@ -1182,6 +1245,7 @@ def make_apps():
     vnc = {}  # node_id → FakeRfb of the last screen opened on it
     api["m"], api["consoles"], api["vnc"] = manager, consoles, vnc
     api['capture_tasks'] = set()
+    api.router.add_post('/mock/shutdown-fail', mock_shutdown_failure)
     api.router.add_post('/mock/capture-fail/{mode}', mock_capture_failure)
     api.router.add_post('/api/v1/sessions/{sid}/capture', image_capture)
     api.router.add_get('/api/v1/sessions/{sid}/capture', image_capture)

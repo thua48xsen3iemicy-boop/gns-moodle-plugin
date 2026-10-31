@@ -47,9 +47,11 @@ export const init = (root, data, host) => {
     let completedSession = null;
     let poll = null;
     let pendingDefinition = null;
+    let pendingNodes = [];
     const storageKey = 'gns3lab-capture-' + data.userid + '-' + data.labid;
     try {
         pendingDefinition = sessionStorage.getItem(storageKey);
+        pendingNodes = JSON.parse(sessionStorage.getItem(storageKey + '-nodes') || '[]');
     } catch (error) {
         pendingDefinition = null;
     }
@@ -108,8 +110,11 @@ export const init = (root, data, host) => {
         do {
             await new Promise(resolve => setTimeout(resolve, 1500));
             result = (await call('capturestate')).capture;
-            label.textContent = text('authoringcapturing');
+            label.textContent = text(result.stage === 'quiesce' ? 'authoringquiescing' : 'authoringcapturing');
         } while (result.state === 'running');
+        if (result.state === 'failed' && result.errorcode === 'GUEST_NOT_STOPPED') {
+            return result;
+        }
         if (result.state === 'failed') {
             throw new Error(result.errorcode + (result.errornode ? ': ' + result.errornode : ''));
         }
@@ -122,15 +127,72 @@ export const init = (root, data, host) => {
         pendingDefinition = null;
         try {
             sessionStorage.removeItem(storageKey);
+            sessionStorage.removeItem(storageKey + '-nodes');
         } catch (error) {
             // Session storage is optional; the durable capture remains on the manager.
         }
         label.textContent = text('authoringsaved');
+        return null;
+    };
+    const blockedDialog = (failure, expected, nodes) => {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'ed-capture-dialog ed-shutdown-dialog';
+        const heading = document.createElement('h2');
+        heading.textContent = text('authoringblocked');
+        const list = document.createElement('ul');
+        (failure.nodes || []).forEach(node => {
+            const item = document.createElement('li');
+            const key = 'authoringreason_' + node.reason;
+            item.textContent = node.name + ': ' + (data.strings[key] || text('authoringreason_other'));
+            list.append(item);
+        });
+        const warning = document.createElement('p');
+        warning.textContent = text('authoringforcewarning');
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'gbtn'; retry.textContent = text('authoringretry');
+        retry.onclick = () => { dialog.close(); submitCapture(expected, nodes, false).catch(Notification.exception); };
+        const force = document.createElement('button');
+        force.type = 'button'; force.className = 'gbtn danger'; force.textContent = text('authoringforce');
+        force.onclick = () => { dialog.close(); submitCapture(expected, nodes, true).catch(Notification.exception); };
+        const cancel = document.createElement('button');
+        cancel.type = 'button'; cancel.className = 'gbtn'; cancel.textContent = text('authoringcancel');
+        cancel.onclick = () => dialog.close();
+        dialog.append(heading, list, warning, retry, force, cancel);
+        dialog.addEventListener('close', () => dialog.remove());
+        root.append(dialog); dialog.showModal();
+    };
+    const submitCapture = async(expected, nodes, force) => {
+        let blocked = null;
+        await withBusy(async() => {
+            if (host.definition() !== expected) throw new Error(text('authoringdraftconflict'));
+            const response = await call('capture', {nodes, definition: expected, force});
+            if (response.capture.state === 'failed') {
+                blocked = response.capture;
+                return;
+            }
+            pendingDefinition = expected;
+            pendingNodes = nodes;
+            try {
+                sessionStorage.setItem(storageKey, expected);
+                sessionStorage.setItem(storageKey + '-nodes', JSON.stringify(nodes));
+            } catch (error) {
+                // The manager owns the durable capture; storage only aids this tab.
+            }
+            blocked = await waitForCapture(expected);
+        });
+        if (blocked) blockedDialog(blocked, expected, nodes);
+    };
+    const recover = async() => {
+        let blocked;
+        const expected = pendingDefinition || host.definition();
+        await withBusy(async() => { blocked = await waitForCapture(expected); });
+        if (blocked) blockedDialog(blocked, expected, pendingNodes);
     };
     const capture = button('authoringcapture', async() => {
         if (working) {
             return;
         }
+        await refresh();
         // Saving the topology first gives application a precise draft to compare.
         const expected = host.definition();
         const draft = await Ajax.call([{methodname: 'mod_gns3lab_save_lab_draft',
@@ -141,10 +203,11 @@ export const init = (root, data, host) => {
         const heading = document.createElement('h2');
         heading.textContent = text('authoringcapture');
         const note = document.createElement('p');
-        note.textContent = text('authoringsealhint');
+        note.textContent = text('authoringquiescehint') + ' ' + text('authoringsealhint');
         const form = document.createElement('form');
         const fields = [];
-        host.nodes().filter(node => candidates.includes(node.name)).forEach(node => {
+        const statuses = new Map(candidates.map(node => [node.name, node.status]));
+        host.nodes().filter(node => statuses.has(node.name)).forEach(node => {
             const image = host.image(node.image);
             if (!image || image.kind !== 'qemu' || image.capture === false) {
                 return;
@@ -153,7 +216,7 @@ export const init = (root, data, host) => {
             const legend = document.createElement('legend');
             const checked = document.createElement('input');
             checked.type = 'checkbox'; checked.checked = true;
-            legend.append(checked, document.createTextNode(' ' + node.name));
+            legend.append(checked, document.createTextNode(' ' + node.name + ' — ' + text('authoringstatus_' + statuses.get(node.name))));
             const title = document.createElement('input');
             title.type = 'text'; title.required = true; title.maxLength = 100;
             title.value = Array.from(data.labname + ' — ' + node.name).slice(0, 100).join('');
@@ -190,27 +253,18 @@ export const init = (root, data, host) => {
                 return;
             }
             dialog.close();
-            withBusy(async() => {
-                await call('capture', {nodes, definition: expected});
-                pendingDefinition = expected;
-                try {
-                    sessionStorage.setItem(storageKey, expected);
-                } catch (error) {
-                    // Capture itself is durable even if local storage is disabled.
-                }
-                await waitForCapture(expected);
-            }).catch(Notification.exception);
+            submitCapture(expected, nodes, false).catch(Notification.exception);
         };
         dialog.append(heading, note, form);
         dialog.addEventListener('close', () => dialog.remove());
         root.append(dialog); dialog.showModal();
     });
     button('authoringconsoles', () => { window.open(data.authoringurl, '_blank', 'noopener'); });
-    const resume = button('authoringresume', () => withBusy(() => waitForCapture(pendingDefinition || host.definition())));
+    const resume = button('authoringresume', recover);
     resume.title = text('authoringresumehint');
     call('images').then(result => host.catalog(result.images)).catch(Notification.exception);
     refresh().catch(Notification.exception);
     if (pendingDefinition) {
-        withBusy(() => waitForCapture(pendingDefinition)).catch(Notification.exception);
+        recover().catch(Notification.exception);
     }
 };

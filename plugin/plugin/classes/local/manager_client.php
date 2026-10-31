@@ -300,9 +300,9 @@ class manager_client {
     }
 
     /** Starts asynchronous image capture. */
-    public function capture_images(string $sessionid, array $nodes): \stdClass {
+    public function capture_images(string $sessionid, array $nodes, bool $force = false): \stdClass {
         return $this->expect_object($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/capture',
-            ['nodes' => $nodes]));
+            ['nodes' => $nodes, 'force' => $force]));
     }
 
     /** Reads the durable capture result. */

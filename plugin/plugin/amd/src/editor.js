@@ -542,7 +542,7 @@ export const init = (prefix) => {
     const entry = img => `<div class="ed-image-entry" data-search="${esc((img.title + " " + (img.derived?.description || "") + " " + (img.authorname || "")).toLowerCase())}">
       <button class="ed-img" type="button" draggable="${img.retired ? "false" : "true"}" data-image="${img.retired ? "" : esc(img.id)}" title="${esc(img.title)}" ${img.retired ? "disabled" : ""}>
         <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${prefix}-ico-${ICON[img.category] || "server"}"/></svg>
-        <span>${esc(img.title || img.id)}</span></button>
+        <span>${esc(img.title || img.id)}</span>${img.derived?.forced ? `<span data-forced-image="${esc(img.id)}" role="img" aria-label="${esc(str("authoringforcedhint"))}" title="${esc(str("authoringforcedhint"))}">⚠</span>` : ""}</button>
       ${img.derived ? `<small>${esc(img.derived.description || "")} · ${esc(img.derived.base)} · ${esc(img.authorname || "")}</small>
         ${img.derived.author_user_id === D.userid ? `<button type="button" class="gbtn" data-edit-image="${esc(img.id)}">${esc(str("authoringedit"))}</button>` : ""}
         ${D.manageimages ? `<button type="button" class="gbtn" data-feature-image="${esc(img.id)}">${esc(str(img.featured ? "authoringunfeature" : "authoringfeature"))}</button>` : ""}` : ""}
