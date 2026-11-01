@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
-from api.models import ExecTicket, WipeTicket
+from api.models import ExecTicket, WipeTicket, ShutdownTicket
 from api.qga import Priority, QgaError
 
 router = APIRouter(prefix="/v1/labs/{project_id}/nodes", tags=["nodes"])
@@ -107,3 +107,19 @@ async def wipe(request: Request, project_id: UUID, node_id: UUID, ticket: WipeTi
         node_id=str(node_id),
         key=request.headers.get("Idempotency-Key"),
     )
+
+
+@router.post("/{node_id}/shutdown", status_code=202)
+async def shutdown(request: Request, project_id: UUID, node_id: UUID, ticket: ShutdownTicket):
+    lifecycle = get_lifecycle(request)
+    lab = lifecycle.get("lab", str(project_id))
+    if not lab or lab["state"] != "READY":
+        raise HTTPException(409, {"code": "INVALID_TRANSITION", "message": "Shutdown requires a READY laboratory"})
+    node = await call(request, "GET", f"projects/{project_id}/nodes/{node_id}")
+    if node.get("node_type") != "qemu":
+        raise HTTPException(409, {"code": "NOT_SUPPORTED", "message": "Guest shutdown requires a QEMU node"})
+    result = lifecycle.submit_shutdown(str(project_id), str(node_id), ticket.timeout,
+                                       request.headers.get("Idempotency-Key"), request.state.admission)
+    if result.get("replayed") and result.get("status") == "SUCCEEDED" and node.get("status") != "stopped":
+        raise HTTPException(409, {"code": "STALE_IDEMPOTENCY_KEY", "message": "Node was restarted; use a new shutdown key"})
+    return result

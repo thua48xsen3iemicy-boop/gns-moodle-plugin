@@ -1,4 +1,4 @@
-# Lab Node Agent — Proxmox LXC + CephFS
+# Lab Node Agent 1.3.0 — Proxmox LXC + CephFS
 
 Small **privileged helper** for each Proxmox VE cluster node. **mTLS required**. The standard Proxmox API with its limited-permission token should still handle cloning, networks, CPU/RAM, resource discovery and normal cluster orchestration.
 
@@ -357,6 +357,10 @@ Clients must use `code` for logic and treat unknown errors conservatively.
 | HTTP | Code | Meaning |
 |---|---|---|
 | 403 | `VMID_OUT_OF_RANGE`, `NOT_LAB_SLOT`, `PRIVILEGED_CT` | Slot policy rejection |
+| 404 | `CAPTURE_NODE_MISSING` | Project or QEMU node disk missing |
+| 409 | `STUDENT_DIR_BUSY`, `IMAGE_EXISTS` | Student directory attached or capture in progress; immutable output exists |
+| 422 | `CAPTURE_PATH_UNSAFE`, `CAPTURE_BASE_MISMATCH`, `CAPTURE_TOO_LARGE` | Unsafe path, invalid backing/hash, or size limit |
+| 504 | `TIMEOUT` | Capture exceeded its total deadline |
 | 404 | `CT_NOT_ON_NODE` | No CT config on this node; rediscover node |
 | 409 | `SLOT_BUSY`, `NOT_STOPPED` | Conflicting operation/state; re-read state |
 | 409 | `PCT_FAILED` | pct failed; inspect actual CT state |
@@ -397,3 +401,15 @@ restarts in `/var/lib/lab-node-agent`. A timed-out mutating `pct` command quaran
 the slot (`COMMAND_UNCERTAIN`); claims cannot clear it. Do not delete fence files.
 The installer expects the repository's `constraints-tested.txt` beside `agent/`.
 See [upgrade and recovery](../docs/pilot-hardening/README.md).
+
+## Derived QEMU images (1.3.0)
+
+With `LAB_IMAGES_DIR` and `qemu-img` installed, `/capabilities` advertises
+`images_capture: true` and `capture_timeout_seconds`. `LAB_CAPTURE_TIMEOUT` is
+60–3600 seconds (default 900), shared by copying, hashing and all qemu-img calls.
+`POST /images/capture` follows `manager/docs/AGENT_REQUESTS.md` §6. Only this
+agent writes the shared image catalog; its mount in every CT remains read-only.
+The manager reserves the workspace across all nodes, while the agent shares a
+student lock with mount/start and checks current `mp1` of every local CT.
+Publication creates the GNS3 MD5 cache and image with mode 0444 without replacing
+existing files. Completed files are immutable; retirement never deletes them.

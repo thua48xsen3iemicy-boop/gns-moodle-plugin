@@ -6,6 +6,10 @@ This service must be accessible ONLY from the Lab Manager management network.
 from __future__ import annotations
 
 import errno
+import hashlib
+import shutil
+import time
+import uuid
 import json
 import tempfile
 from contextvars import ContextVar
@@ -194,7 +198,7 @@ def require_fence(vmid, request):
 
 app = FastAPI(
     title="Lab Node Agent",
-    version="1.2.1",
+    version="1.3.0",
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -404,6 +408,8 @@ def capabilities():
         "version": app.version,
         "start_budget_seconds": start_budget_seconds(),
         "guest_action_timeout_seconds": GUEST_ACTION_TIMEOUT,
+        "images_capture": IMAGES_DIR is not None and shutil.which("qemu-img") is not None,
+        "capture_timeout_seconds": CAPTURE_TIMEOUT,
     }
 
 
@@ -420,7 +426,7 @@ def status(vmid: VMID):
 def mounts(vmid: VMID, spec: Mounts, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
-    with slot_lock(vmid):
+    with slot_lock(vmid), student_lock(spec.student_key):
         vmid_allowed(vmid)
         require_fence(vmid, request)
         require_stopped(vmid)
@@ -432,7 +438,7 @@ def mounts(vmid: VMID, spec: Mounts, request: Request):
 def start(vmid: VMID, spec: Start, request: Request):
     if not VMID_MIN <= vmid <= VMID_MAX:
         raise api_error(403, "VMID_OUT_OF_RANGE", "VMID outside allowed lab range")
-    with slot_lock(vmid):
+    with slot_lock(vmid), student_lock(spec.student_key):
         vmid_allowed(vmid)
         require_fence(vmid, request)
         require_stopped(vmid)
@@ -570,3 +576,294 @@ def size(vmid: VMID, spec: Size, request: Request):
         require_stopped(vmid)
         run_cmd([PCT, "set", str(vmid), "--cores", str(spec.cores), "--memory", str(spec.memory_mb)], timeout=40)
         return {"vmid": vmid, **spec.model_dump()}
+
+
+# Capture shares the student lock with mount/start, so its source cannot become writable
+# between the CT configuration check and publication. The manager also reserves the
+# workspace across nodes for the entire multi-node capture.
+@contextmanager
+def student_lock(key):
+    LOCK_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open(LOCK_DIR / f"student-{key}.lock", "a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise api_error(409, "STUDENT_DIR_BUSY", "Student directory has an active operation") from None
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def capture_timeout():
+    try:
+        value = int(os.environ.get("LAB_CAPTURE_TIMEOUT", "900"))
+        if 60 <= value <= 3600:
+            return value
+    except ValueError:
+        pass
+    raise SystemExit("LAB_CAPTURE_TIMEOUT must be 60-3600 seconds")
+
+
+CAPTURE_TIMEOUT = capture_timeout()
+
+
+class Capture(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    student_key: Key
+    project_id: str
+    node_name: str
+    parent_file: str
+    base_file: str
+    base_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    image_file: str
+    max_bytes: int = Field(ge=1, le=2**63 - 1)
+
+    @field_validator("student_key")
+    @classmethod
+    def key_component(cls, value):
+        return Mounts.strict_key(value)
+
+    @field_validator("project_id")
+    @classmethod
+    def project_uuid(cls, value):
+        if str(uuid.UUID(value)) != value:
+            raise ValueError("Expected a canonical UUID")
+        return value
+
+    @field_validator("node_name")
+    @classmethod
+    def node_component(cls, value):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", value):
+            raise ValueError("Invalid node name")
+        return value
+
+    @field_validator("parent_file", "base_file", "image_file", "base_sha256")
+    @classmethod
+    def file_component(cls, value, info):
+        pattern = (r"sha256:[0-9a-f]{64}" if info.field_name == "base_sha256" else
+                   r"d-[0-9a-f]{12}\.qcow2" if info.field_name == "image_file" else
+                   r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.qcow2")
+        if not re.fullmatch(pattern, value):
+            raise ValueError("Invalid image file name or digest")
+        return value
+
+
+@contextmanager
+def capture_file(root, parts):
+    """Pin every component with openat/O_NOFOLLOW, including guest-owned directories."""
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for index, part in enumerate(parts):
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if index != len(parts) - 1:
+                flags |= os.O_DIRECTORY
+            child = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise api_error(422, "CAPTURE_PATH_UNSAFE", "Capture source must be a regular file")
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def capture_idle(student):
+    # Parse current CT configuration with the existing parser, including CTs outside
+    # our VMID range: capture must not read a disk that any local CT can change.
+    for path in CONF_DIR.glob("*.conf"):
+        if not path.stem.isdecimal():
+            continue
+        current = conf_sections(int(path.stem))[None]
+        source = current.get("mp1", "").split(",", 1)[0]
+        if source and Path(source).resolve() == student.resolve():
+            raise api_error(409, "STUDENT_DIR_BUSY", "Student directory is still assigned to a CT")
+
+
+def capture_remaining(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise api_error(504, "TIMEOUT", "Image capture timed out")
+    return remaining
+
+
+def capture_qemu(args, deadline, fds=()):
+    try:
+        proc = subprocess.run([shutil.which("qemu-img") or "qemu-img", *args],
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=capture_remaining(deadline), pass_fds=fds, check=False)
+    except subprocess.TimeoutExpired:
+        raise api_error(504, "TIMEOUT", "Image capture timed out") from None
+    if proc.returncode:
+        raise api_error(422, "CAPTURE_BASE_MISMATCH", "qemu-img rejected the disk or backing chain")
+    return proc.stdout
+
+
+def capture_info(path, deadline, fds=()):
+    info = json.loads(capture_qemu(["info", "-U", "--output=json", str(path)], deadline, fds))
+    if info.get("format") != "qcow2" or "data-file" in json.dumps(info.get("format-specific", {})):
+        raise api_error(422, "CAPTURE_BASE_MISMATCH", "Expected qcow2 without an external data file")
+    return info
+
+
+def capture_hash(fd, algorithm, deadline):
+    digest = hashlib.new(algorithm)
+    os.lseek(fd, 0, os.SEEK_SET)
+    while chunk := os.read(fd, 1024 * 1024):
+        capture_remaining(deadline)
+        digest.update(chunk)
+    os.lseek(fd, 0, os.SEEK_SET)
+    return digest.hexdigest()
+
+
+def cleanup_capture_parts():
+    if IMAGES_DIR is None:
+        return
+    directory = CEPH_ROOT / IMAGES_DIR / "QEMU"
+    if not directory.exists():
+        return
+    validate_no_symlinks(directory)
+    for path in directory.glob(".d-*.qcow2*.part"):
+        if path.is_symlink() or time.time() - path.stat().st_mtime <= CAPTURE_TIMEOUT:
+            continue
+        # An active operation holds this lock, even if a long-running filesystem
+        # syscall has exceeded its deadline. Never unlink another worker's file.
+        image = path.name[1:].split(".qcow2", 1)[0]
+        try:
+            with student_lock("capture-" + image):
+                path.unlink(missing_ok=True)
+        except HTTPException:
+            continue
+
+
+@app.on_event("startup")
+def capture_startup():
+    cleanup_capture_parts()
+
+
+@contextmanager
+def capture_cleanup(owned):
+    try:
+        yield
+    finally:
+        for path in owned:
+            path.unlink(missing_ok=True)
+
+
+def capture_project(student_key, project_id):
+    root = os.open(CEPH_ROOT / STUDENTS_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in (student_key, project_id):
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+            os.close(root)
+            root = child
+        names = [name for name in os.listdir(root) if name.endswith(".gns3")]
+        if len(names) != 1:
+            raise api_error(404, "CAPTURE_NODE_MISSING", "Expected one project definition")
+        fd = os.open(names[0], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode) or os.fstat(fd).st_size > 8 * 1024 * 1024:
+                raise api_error(422, "CAPTURE_PATH_UNSAFE", "Invalid project definition")
+            return json.loads(os.read(fd, 8 * 1024 * 1024))
+        finally:
+            os.close(fd)
+    finally:
+        os.close(root)
+
+
+@app.post("/images/capture")
+def capture_image(spec: Capture):
+    if not capabilities()["images_capture"]:
+        raise api_error(503, "AGENT_CONFIG_INVALID", "Configure LAB_IMAGES_DIR and install qemu-img")
+    deadline = time.monotonic() + CAPTURE_TIMEOUT
+    directory = CEPH_ROOT / IMAGES_DIR / "QEMU"
+    student = CEPH_ROOT / STUDENTS_DIR / spec.student_key
+    temp = directory / ("." + spec.image_file + ".part")
+    md5temp = directory / ("." + spec.image_file + ".md5sum.part")
+    target = directory / spec.image_file
+    sidecar = directory / (spec.image_file + ".md5sum")
+    owned = []
+    try:
+        validate_cephfs()
+        validate_no_symlinks(CEPH_ROOT / STUDENTS_DIR)
+        validate_no_symlinks(directory)
+        cleanup_capture_parts()
+        with student_lock(spec.student_key), student_lock("capture-" + spec.image_file[:-6]), capture_cleanup(owned):
+            capture_idle(student)
+            if target.exists() or target.is_symlink() or sidecar.exists() or sidecar.is_symlink():
+                raise api_error(409, "IMAGE_EXISTS", "Image file already exists")
+            # Enumerate via pinned directory FD; opening the selected JSON is nofollow too.
+            project = capture_project(spec.student_key, spec.project_id)
+            nodes = project.get("topology", {}).get("nodes", [])
+            matching = [n for n in nodes if n.get("name") == spec.node_name and n.get("node_type") == "qemu"]
+            if len(matching) != 1:
+                raise api_error(404, "CAPTURE_NODE_MISSING", "QEMU node not found in project")
+            node_id = str(uuid.UUID(matching[0]["node_id"]))
+            with capture_file(directory, [spec.base_file]) as base_fd:
+                if capture_hash(base_fd, "sha256", deadline) != spec.base_sha256[7:]:
+                    raise api_error(422, "CAPTURE_BASE_MISMATCH", "Base SHA-256 does not match")
+            base = capture_info(directory / spec.base_file, deadline)
+            if base.get("backing-filename"):
+                raise api_error(422, "CAPTURE_BASE_MISMATCH", "Base must not itself have a backing image")
+            if spec.parent_file != spec.base_file:
+                if not (directory / spec.parent_file).exists():
+                    raise api_error(422, "CAPTURE_BASE_MISMATCH", "Expected parent is missing")
+                with capture_file(directory, [spec.parent_file]):
+                    parent = capture_info(directory / spec.parent_file, deadline)
+                if parent.get("backing-filename") != spec.base_file:
+                    raise api_error(422, "CAPTURE_BASE_MISMATCH", "Parent does not point to base")
+            parts = [spec.student_key, spec.project_id, "project-files", "qemu", node_id, "hda_disk.qcow2"]
+            with capture_file(CEPH_ROOT / STUDENTS_DIR, parts) as disk_fd:
+                info = capture_info(f"/proc/self/fd/{disk_fd}", deadline, (disk_fd,))
+                if info.get("backing-filename") != "/opt/gns3/images/QEMU/" + spec.parent_file:
+                    raise api_error(422, "CAPTURE_BASE_MISMATCH", "Node backing does not match expected parent")
+                if os.fstat(disk_fd).st_size > spec.max_bytes:
+                    raise api_error(422, "CAPTURE_TOO_LARGE", "Node disk exceeds capture limit")
+                out_fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                owned.append(temp)
+                with os.fdopen(out_fd, "wb") as output:
+                    while chunk := os.read(disk_fd, 1024 * 1024):
+                        capture_remaining(deadline)
+                        output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+            capture_qemu(["rebase", "-u", "-f", "qcow2", "-F", "qcow2", "-b", spec.parent_file, str(temp)], deadline)
+            if spec.parent_file != spec.base_file:
+                capture_qemu(["rebase", "-f", "qcow2", "-F", "qcow2", "-b", spec.base_file, str(temp)], deadline)
+            capture_qemu(["check", "-f", "qcow2", str(temp)], deadline)
+            final_info = capture_info(temp, deadline)
+            if final_info.get("backing-filename") != spec.base_file:
+                raise api_error(422, "CAPTURE_BASE_MISMATCH", "Final backing does not match base")
+            size = temp.stat().st_size
+            if size > spec.max_bytes:
+                raise api_error(422, "CAPTURE_TOO_LARGE", "Rebased image exceeds capture limit")
+            with capture_file(directory, [temp.name]) as fd:
+                sha = capture_hash(fd, "sha256", deadline)
+                md5 = capture_hash(fd, "md5", deadline)
+                os.fsync(fd)
+            with open(md5temp, "x", encoding="ascii") as output:
+                owned.append(md5temp)
+                output.write(md5)  # GNS3 checksum cache contains only the hexadecimal digest.
+                output.flush()
+                os.fsync(output.fileno())
+            temp.chmod(0o444)
+            md5temp.chmod(0o444)
+            os.link(md5temp, sidecar)
+            os.link(temp, target)  # Publication cannot replace an existing immutable image.
+            dir_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+            return {"image_file": spec.image_file, "size": size, "virtual_size": final_info["virtual-size"],
+                    "sha256": "sha256:" + sha, "md5": md5, "backing": spec.base_file}
+    except FileExistsError:
+        raise api_error(409, "IMAGE_EXISTS", "Image or pending capture already exists") from None
+    except FileNotFoundError:
+        raise api_error(404, "CAPTURE_NODE_MISSING", "Project, node disk or backing image is missing") from None
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise api_error(422, "CAPTURE_PATH_UNSAFE", "Capture path contains a symlink") from None
+        raise api_error(503, "STORAGE_UNAVAILABLE", "Image storage operation failed") from None
+    except (ValueError, KeyError, TypeError):
+        raise api_error(422, "CAPTURE_BASE_MISMATCH", "Malformed project or disk metadata") from None

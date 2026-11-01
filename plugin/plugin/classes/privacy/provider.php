@@ -58,6 +58,10 @@ class provider implements
             'userid' => 'privacy:metadata:gns3labmanager:userid',
             'courseid' => 'privacy:metadata:gns3labmanager:courseid',
             'instanceid' => 'privacy:metadata:gns3labmanager:instanceid',
+            'librarylabid' => 'privacy:metadata:gns3labmanager:librarylabid',
+            'imagetitle' => 'privacy:metadata:gns3labmanager:imagetitle',
+            'imagedescription' => 'privacy:metadata:gns3labmanager:imagedescription',
+            'imagedisk' => 'privacy:metadata:gns3labmanager:imagedisk',
         ], 'privacy:metadata:gns3labmanager');
         $collection->add_database_table('gns3lab_labs', [
             'name' => 'privacy:metadata:gns3lab_labs:name',

@@ -225,9 +225,29 @@ class lab_library {
      *
      * @param int $labid lab id
      * @param array $def clean definition
+     * @param string|null $expecteddefinition compare the current draft before applying captured images
      * @return \stdClass the draft
      */
-    public static function save_draft(int $labid, array $def): \stdClass {
+    public static function save_draft(int $labid, array $def, ?string $expecteddefinition = null): \stdClass {
+        $lock = \core\lock\lock_config::get_lock_factory('mod_gns3lab_library')->get_lock('lab-' . $labid, 10);
+        if (!$lock) {
+            throw new \moodle_exception('authoringdraftconflict', 'gns3lab');
+        }
+        try {
+            if ($expecteddefinition !== null) {
+                $current = self::latest_version($labid);
+                if (!$current || $current->status !== self::DRAFT || $current->definition !== $expecteddefinition) {
+                    throw new \moodle_exception('authoringdraftconflict', 'gns3lab');
+                }
+            }
+            return self::write_draft($labid, $def);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** Writes a draft while the library lock is held. */
+    private static function write_draft(int $labid, array $def): \stdClass {
         global $DB, $USER;
 
         $now = time();
@@ -266,11 +286,24 @@ class lab_library {
      * @return \stdClass the published version
      */
     public static function publish(int $labid, array $def): \stdClass {
+        $lock = \core\lock\lock_config::get_lock_factory('mod_gns3lab_library')->get_lock('lab-' . $labid, 10);
+        if (!$lock) {
+            throw new \moodle_exception('authoringdraftconflict', 'gns3lab');
+        }
+        try {
+            return self::write_published($labid, $def);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** Publishes while holding the same lock as draft saves and capture application. */
+    private static function write_published(int $labid, array $def): \stdClass {
         global $DB;
 
         $lab = self::get_lab($labid);
         $def['title'] = lab_definition::title($lab->name);
-        $draft = self::save_draft($lab->id, $def);
+        $draft = self::write_draft($lab->id, $def);
         $result = \core\di::get(manager_client::class)->validate_lab($def);
 
         $last = self::last_published($lab->id);

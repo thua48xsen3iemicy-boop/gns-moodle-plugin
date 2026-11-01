@@ -210,6 +210,13 @@ define([], function() {
     };
 
     const handlers = {
+        mod_gns3lab_authoring: async args => {
+            const response = await fetch('/authoring-api', {method: 'POST',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify(args)});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || result.error);
+            return result;
+        },
         mod_gns3lab_get_course_overview: courseOverview,
         mod_gns3lab_get_state: async args => {
             if (cfg.course && args.userid) {

@@ -38,8 +38,105 @@ const SLOT_URL = process.env.HARNESS_SLOT_URL || 'ws://127.0.0.1:8091';
 const SLOT_TOKEN = process.env.HARNESS_SLOT_TOKEN || 'dev-console-token';
 const stats = {screens: 0, opened: 0};
 
-const server = http.createServer((req, res) => {
+// This is only the harness's Moodle stand-in. Production capability and draft
+// checks live in classes/external/authoring.php and are not exercised by this bridge.
+const MOCK_URL = process.env.HARNESS_MOCK_URL || 'http://127.0.0.1:18090';
+let draft = null;
+async function manager(method, path, body) {
+    const response = await fetch(MOCK_URL + '/api/v1' + path, {method,
+        headers: {'Authorization': 'Bearer ' + (process.env.HARNESS_MOCK_SECRET || 'dev-secret'),
+            'X-Moodle-Site': 'https://moodle.example.edu', 'Content-Type': 'application/json'},
+        ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw Object.assign(new Error(result.message || result.error), {status: response.status, body: result});
+    return result;
+}
+const exportSession = s => s && ({sessionid: s.session_id, status: s.status, stage: s.stage,
+    statusmessage: s.status_message, progress: s.progress ?? -1, errorcode: s.error?.code || '',
+    errorretryable: s.error?.retryable || false, startedat: Date.parse(s.started_at) / 1000 || 0,
+    expiresat: Date.parse(s.expires_at) / 1000 || 0, topology: s.topology ? JSON.stringify(s.topology) : '',
+    features: s.status === 'running' ? ['consoles'] : [], nodesstale: false,
+    nodes: Object.entries(s.nodes || {}).map(([id, n]) => ({nodeid: id, status: n.status, consoletype: n.console_type})),
+});
+const exportCapture = c => ({state: c.state, stage: c.stage || '', forced: c.forced || [], nodes: c.error?.nodes || [], errorcode: c.error?.code || '', errornode: c.error?.node || '',
+    retryable: c.error?.retryable || false, images: Object.entries(c.images || {}).map(([name, image]) => ({name, image}))});
+async function authoring(args) {
+    if (args.action === 'start') {
+        draft = JSON.parse(args.definition);
+        const s = await manager('POST', '/sessions', {user_id: 42, library_lab_id: args.labid,
+            options: {mode: 'authoring'}, lab: draft});
+        return {session: exportSession(s), version: 1};
+    }
+    if (args.action === 'images' || args.action === 'patch') {
+        if (args.action === 'patch') {
+            const patch = {};
+            for (const key of ['title', 'description', 'featured', 'retired']) {
+                if (key in args) patch[key] = ['featured', 'retired'].includes(key) ? !!args[key] : args[key];
+            }
+            await manager('PATCH', '/images/' + encodeURIComponent(args.imageid), patch);
+        }
+        const result = await manager('GET', '/images');
+        return {images: result.images.map(i => ({...i, authorname: i.derived ? 'Author ' + i.derived.author_user_id : ''}))};
+    }
+    let s;
+    try {
+        s = await manager('GET', '/sessions?user_id=42&library_lab_id=' + args.labid);
+    } catch (error) {
+        if (error.status !== 404) throw error;
+    }
+    if (args.action === 'state') {
+        let capture;
+        if (s) {
+            try { capture = exportCapture(await manager('GET', '/sessions/' + s.session_id + '/capture')); }
+            catch (error) { if (error.status !== 404) throw error; }
+        }
+        return {...(capture ? {capture} : {}), state: {canuse: true, readonly: false, managerconfigured: true, labready: true, resume: true,
+            ...(s ? {session: exportSession(s)} : {})}, capturecandidates: s?.capture_nodes || []};
+    }
+    if (!s) throw new Error('No authoring session');
+    const path = '/sessions/' + s.session_id;
+    if (args.action === 'stop') return {session: exportSession(await manager('POST', path + '/stop'))};
+    if (args.action === 'ticket') {
+        const ticket = await manager('POST', path + '/console-tickets', {node_id: args.nodeid, readonly: false, issued_for_user_id: 42});
+        return {ticket: {ticket: ticket.ticket, gatewayurl: ticket.gateway_url, expiresin: ticket.expires_in, readonly: false}};
+    }
+    if (args.action === 'capture') {
+        try {
+            return {capture: exportCapture(await manager('POST', path + '/capture', {nodes: args.nodes, force: args.force || false}))};
+        } catch (error) {
+            if (error.body?.error !== 'guest_not_stopped') throw error;
+            return {capture: exportCapture({state: 'failed', error: {code: 'GUEST_NOT_STOPPED', retryable: true, nodes: error.body.nodes}})};
+        }
+    }
+    if (args.action === 'capturestate' || args.action === 'apply') {
+        const capture = await manager('GET', path + '/capture');
+        if (args.action === 'apply') {
+            if (capture.state !== 'done') throw new Error('Capture is not complete');
+            draft = JSON.parse(args.definition);
+            for (const node of draft.nodes) node.image = capture.images[node.name] || node.image;
+            return {capture: exportCapture(capture), version: 1, ...(await authoring({...args, action: 'images'}))};
+        }
+        return {capture: exportCapture(capture)};
+    }
+    throw new Error('Unknown authoring action');
+}
+
+const server = http.createServer(async(req, res) => {
     const url = new URL(req.url, 'http://x');
+    if (url.pathname === '/authoring-api' && req.method === 'POST') {
+        try {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const args = JSON.parse(Buffer.concat(chunks));
+            const result = await authoring(args);
+            res.writeHead(200, {'Content-Type': 'application/json'}).end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(error.status || 400, {'Content-Type': 'application/json'})
+                .end(JSON.stringify({message: error.message}));
+        }
+        return;
+    }
     if (url.pathname === '/gw/stats') {
         res.writeHead(200, {'Content-Type': 'application/json'}).end(JSON.stringify(stats));
         return;

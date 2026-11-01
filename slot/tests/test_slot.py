@@ -401,6 +401,7 @@ def test_monitor_detects_runtime_node_failure(mock_server, monkeypatch):
         ]
         == "SUCCEEDED"
     )
+    nodes[pid][0]["node_type"] = "vpcs"
     nodes[pid][0]["status"] = "stopped"
     for _ in range(200):
         status = client.get(f"/v1/labs/{pid}/status", headers=HEADERS).json()

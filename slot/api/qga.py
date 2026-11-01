@@ -323,6 +323,12 @@ class _Channel:
     async def _exchange(self, command, args):
         self._writer.write(encode(command, args))
         await self._writer.drain()
+        if command == "guest-shutdown":
+            # QGA deliberately sends no success response for guest-shutdown.
+            # Drop the channel so a late error/EOF cannot poison the next RPC;
+            # only GNS3 reporting stopped confirms successful powerdown.
+            self._drop()
+            return {}
         while True:
             line = await self._reader.readline()
             if not line:
