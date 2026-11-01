@@ -194,11 +194,15 @@ async def test_lost_agent_response_fails_safely_and_can_retry(tmp_path, dsn):
         assert len(env.agent.captured_images) == 2
 
 
-async def test_poweroff_candidate_and_history_survive_resume(tmp_path, dsn):
+async def test_shutdown_candidate_and_history_survive_resume(tmp_path, dsn):
     async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
         sid = (await start(env)).json()['session_id']
         await env.run()
-        env.slots[201].stopped_nodes.add('PC0')
+        from lab_manager.ownership import command_scope
+        row = await env.services.store.session(sid)
+        with command_scope(env.orch.epoch, 2 * row['slot_generation']):
+            await env.orch._slot(row).shutdown(str(row['project_id']), env.slots[201].node_ids[str(row['project_id'])]['PC0'],
+                                               120, 'history-shutdown')
         state = (await env.client.get(f'/api/v1/sessions/{sid}')).json()
         # The initial cached snapshot can be at most three seconds old; capture always refreshes.
         env.orch._live_cache.clear()
@@ -213,7 +217,7 @@ async def test_poweroff_candidate_and_history_survive_resume(tmp_path, dsn):
         assert (await env.client.get(f'/api/v1/sessions/{nextsid}')).json()['capture_nodes'] == [{'name': 'PC0', 'status': 'started'}]
 
 
-async def test_partial_guest_failure_keeps_session_running_then_manual_poweroff_retries(tmp_path, dsn):
+async def test_partial_guest_failure_keeps_session_running_then_shutdown_retries(tmp_path, dsn):
     async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
         sid = (await start(env, lab(2))).json()['session_id']
         await env.run()
@@ -228,12 +232,43 @@ async def test_partial_guest_failure_keeps_session_running_then_manual_poweroff_
         assert (await env.services.store.session(sid))['status'] == 'running'
         assert not env.agent.captured_images
         assert env.slots[201].stopped_nodes == {'PC0'}
-        env.slots[201].stopped_nodes.add('PC1')  # poweroff from the console
+        del env.slots[201].shutdown_errors['PC1']  # Guest agent is available on retry.
         assert (await capture(env, sid, 2)).status_code == 202
         await env.run()
         row = await env.services.derived.get(sid)
         assert row['state'] == 'done' and row['forced'] == []
         assert all(not i.derived['forced'] for i in (await env.services.derived.catalog('main')).values() if i.derived)
+
+
+async def test_quiesce_records_successful_shutdowns_before_stopping_session(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env, lab(2))).json()['session_id']
+        await env.run()
+        assert (await capture(env, sid, 2)).status_code == 202
+        await env.services.derived.step(sid)
+        session = await env.services.store.session(sid)
+        slot = env.slots[201]
+        project = slot.labs[str(session['project_id'])]
+        assert (await env.orch._slot(session).lab_status(str(session['project_id'])))['state'] == 'READY'
+        assert project['state'] == 'READY'
+        assert project['shutdown_nodes'] == {'PC0', 'PC1'}
+        assert slot.stopped_nodes == {'PC0', 'PC1'}
+        assert session['status'] == 'running' and session['stop_requested']
+        assert not env.agent.captured_images
+        await env.run()
+        assert (await env.services.derived.get(sid))['state'] == 'done'
+        assert (await env.services.derived.get(sid))['forced'] == []
+
+
+async def test_manual_poweroff_is_a_slot_lab_failure_in_authoring(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, images=catalog(), vmids=(201,)) as env:
+        sid = (await start(env)).json()['session_id']
+        await env.run()
+        env.slots[201].stopped_nodes.add('PC0')
+        env.orch._health_checked.clear()
+        await env.run()
+        assert (await env.services.store.session(sid))['error']['code'] == 'SLOT_LAB_FAILED'
+        assert not env.agent.captured_images
 
 
 async def test_force_marks_only_guests_that_failed_shutdown(tmp_path, dsn):

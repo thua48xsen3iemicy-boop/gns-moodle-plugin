@@ -444,6 +444,7 @@ class FakeSlot:
             code = self.shutdown_errors.get(name)
             if not code:
                 self.stopped_nodes.add(name)
+                self.labs[pid].setdefault('shutdown_nodes', set()).add(name)
             oid = str(uuid.uuid4())
             op = {"operation_id": oid, "project_id": pid, "action": "shutdown", "status": "FAILED" if code else "SUCCEEDED",
                   "error": {"code": code} if code else None}
@@ -470,7 +471,15 @@ class FakeSlot:
             lab = self.labs.get(m.group(1))
             if not lab:
                 return self._json(404, {"detail": "Unknown managed laboratory"})
-            return self._json(200, {"project_id": lab["project_id"], "state": lab["state"], "error": None})
+            if lab['state'] == 'READY':
+                permitted = lab.setdefault('shutdown_nodes', set())
+                permitted.intersection_update(self.stopped_nodes)
+                names = {n['name'] for n in lab['ticket']['nodes']}
+                if self.stopped_nodes.intersection(names) - permitted:
+                    lab['state'] = 'FAILED'
+            return self._json(200, {"project_id": lab["project_id"], "state": lab["state"],
+                                    "error": {"code": "RuntimeError", "message": "Required node stopped or missing"}
+                                    if lab['state'] == 'FAILED' else None})
         if m and m.group(2) == "topology":
             lab = self.labs[m.group(1)]
             ids = self.node_ids[m.group(1)]
@@ -500,6 +509,7 @@ class FakeSlot:
                     else:
                         op["status"] = "SUCCEEDED"
                         lab["state"] = "STOPPED" if op["action"] == "stop" else "READY"
+                        lab['shutdown_nodes'] = set()
                         if op['action'] != 'stop':
                             self.stopped_nodes.difference_update(n['name'] for n in lab['ticket']['nodes'])
             body = self._present(op)
