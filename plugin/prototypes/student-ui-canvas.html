@@ -94,22 +94,22 @@ button{font-family:inherit}
 #svg:focus{outline:none}
 .dots{fill:var(--grid)}
 .dtext{font-family:var(--display)}
-.wire{stroke:var(--wire);stroke-width:2;fill:none;stroke-linecap:round}
+.wire{stroke:var(--wire);stroke-width:2;fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .link{cursor:pointer}
 .link:focus{outline:none}
-.hit{stroke:transparent;stroke-width:calc(18px * var(--inv,1));fill:none;pointer-events:stroke}
+.hit{stroke:transparent;stroke-width:18;fill:none;pointer-events:stroke;vector-effect:non-scaling-stroke}
 .link.down .wire{stroke:var(--bad);stroke-dasharray:5 5}
-.link.sel .wire,.link:focus-visible .wire{stroke:var(--accent);stroke-width:calc(3.5px * min(1, var(--inv,1) * 1.6))}
+.link.sel .wire,.link:focus-visible .wire{stroke:var(--accent);stroke-width:3.5}
 .link.sel.down .wire{stroke:var(--bad)}
 .link.sel .l1,.link.sel .l2{opacity:1;visibility:visible}
 .link.sel .plabel,.link.sel .pip{fill:var(--fg);font-weight:600}
 .link.suspended .wire{stroke-dasharray:2 6;opacity:.6}
 .filt{fill:var(--canvas);stroke:var(--warn);stroke-width:1.6}
 .filt-t{font:600 8px var(--mono);fill:var(--warn);text-anchor:middle}
-.pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5}
+.pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .pdot.down{fill:var(--bad)}
-.plabel{font:500 9px var(--mono);font-size:clamp(calc(9.5px * var(--inv,1)),9px,calc(12px * var(--inv,1)));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
-.pip{font:500 7.5px var(--mono);font-size:clamp(calc(9px * var(--inv,1)),7.5px,calc(11.5px * var(--inv,1)));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.plabel{font:500 9px var(--mono);font-size:calc(11px * var(--inv,1));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.pip{font:500 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .node{cursor:pointer;-webkit-touch-callout:none}
 .node:focus{outline:none}
 .halo{fill:transparent;stroke:transparent;stroke-width:2}
@@ -325,13 +325,25 @@ body{background:var(--canvas)}
 .wrap{background:radial-gradient(ellipse at 46% 40%,#193341 0%,#10212d 58%,#0d1c27 100%)}
 .dots{fill:#315260;opacity:.55}
 .wire{stroke:#557e8e;stroke-width:2.3}
+.duplex{display:none;pointer-events:none}
+[data-factlayer="l1"] .duplex{display:inline}
+[data-factlayer="l1"] .physical-wire{display:none}
+.duplex .wire{stroke-width:1.4}
+.link.sel .duplex .wire,.link:focus-visible .duplex .wire{stroke-width:2}
+.duplex-arrow{fill:none;stroke:#9ac8d2;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.link.sel .duplex-arrow,.link:focus-visible .duplex-arrow{stroke:var(--accent)}
+.link.down .duplex-arrow{stroke:var(--bad)}
+.link.suspended .duplex-arrow{opacity:.5}
+.port-direction{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:#9ac8d2;text-anchor:middle;
+  paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+#svg[data-factlayer]:not([data-factlayer="l1"]) .port-direction{visibility:hidden;opacity:0}
 .node .halo{stroke-width:2.3}
 .node:hover .halo{stroke:var(--accent);fill:rgb(87 223 207 / .08)}
 .node .if{filter:drop-shadow(0 5px 9px rgb(0 0 0 / .3))}
 .nname{letter-spacing:.03em}
-[data-factlayer="l1"] .pip,[data-factlayer="l1"] .nsub,[data-factlayer="l1"] .nadj,
-[data-factlayer="l2"] .pip,[data-factlayer="l2"] .nadj,
-[data-factlayer="l4"] .pip,[data-factlayer="l4"] .nsub,[data-factlayer="l4"] .nadj{visibility:hidden;opacity:0}
+#svg[data-factlayer="l1"] .pip,[data-factlayer="l1"] .nsub,[data-factlayer="l1"] .nadj,
+#svg[data-factlayer="l2"] .pip,[data-factlayer="l2"] .nadj,
+#svg[data-factlayer="l4"] .pip,[data-factlayer="l4"] .nsub,[data-factlayer="l4"] .nadj{visibility:hidden;opacity:0}
 [data-factlayer="l2"] .link[data-vlan="10"] .wire{stroke:#66dcb5}
 [data-factlayer="l2"] .link[data-vlan="20"] .wire{stroke:#e5b971}
 [data-factlayer="l2"] .link[data-vlan="trunk"] .wire{stroke:#98aaf5}
@@ -358,8 +370,8 @@ body{background:var(--canvas)}
 .l2-endpoint .nname{font-size:15px}
 .l2-path{cursor:pointer}
 .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
-.l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:3;stroke-linecap:round}
-.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:5}
+.l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:2.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:3.5}
 .link:hover .wire,.l2-path:hover .stroke{animation:linkHoverPulse 1.8s ease-in-out infinite}
 @keyframes linkHoverPulse{0%,100%{stroke-opacity:1}50%{stroke-opacity:.25}}
 @media(prefers-reduced-motion:reduce){
@@ -367,7 +379,7 @@ body{background:var(--canvas)}
 }
 .l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
 .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
-  font:600 10px var(--mono);text-anchor:middle;pointer-events:none}
+  font:600 10px var(--mono);font-size:calc(10px * var(--inv,1));text-anchor:middle;pointer-events:none;vector-effect:non-scaling-stroke}
 .l2-path.down .caption{fill:#e49c97}
 .l2-path.problem .stroke{stroke:#ff927d;stroke-width:4;stroke-dasharray:6 5}
 .l2-path.problem .caption{fill:#ffb5a5}
@@ -418,6 +430,47 @@ body{background:var(--canvas)}
 .details{display:none !important}
 @media(max-width:760px){.bar{padding-block:9px}.ttl h1{font-size:17px}.zoom{bottom:10px}}
 .mob .hint{display:none}
+.auto-label{pointer-events:none}
+.auto-label.label-hidden{display:none}
+.auto-label .nsub{font-size:clamp(calc(9px * var(--inv,1)),8px,calc(12px * var(--inv,1)))}
+.auto-label .nadj{font-size:clamp(calc(8.5px * var(--inv,1)),7px,calc(11px * var(--inv,1)))}
+.label-lead{stroke:#6c929e;stroke-width:1;stroke-dasharray:2 3;opacity:.65;pointer-events:none}
+.object-card,.tasks-panel{box-sizing:border-box;background:#142c39;color:var(--fg);border:1px solid #54838a;
+  border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
+.object-card{height:100%;display:flex;flex-direction:column}
+.object-card header,.tasks-panel header{padding:18px 20px 12px;display:flex;justify-content:space-between;gap:12px}
+.object-card header > div,.tasks-panel header > div{min-width:0;overflow-wrap:anywhere}
+.object-card h2,.tasks-panel h2{font:600 25px/1.2 var(--display);margin:5px 0}
+.object-card p,.tasks-panel p{margin:4px 0;color:var(--muted)}
+.object-card .kicker,.tasks-panel .kicker{font:600 10px var(--mono);letter-spacing:.1em;color:var(--accent)}
+.object-card .ib,.tasks-panel .ib{width:36px;height:36px}
+.object-tabs{display:flex;gap:6px;margin:0 20px 12px;flex:none}
+.object-tabs button{flex:1;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#203d49;color:var(--muted);cursor:pointer;font:600 13px var(--mono)}
+.object-tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.object-tabs button:focus-visible,.object-card button:focus-visible,.tasks-panel button:focus-visible,.tasks-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.object-content{padding:0 20px 18px;overflow:auto;min-height:0;overscroll-behavior:contain;user-select:text;-webkit-user-select:text}
+.object-content table{table-layout:fixed;width:100%;border-collapse:collapse;font:12px/1.5 var(--mono)}
+.object-content th{color:var(--muted);font-size:10px;letter-spacing:.04em;text-align:left}
+.object-content th,.object-content td{padding:9px 8px 9px 0;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.object-content td.down{color:var(--bad)}
+.object-content h3{font:600 13px var(--body);margin:16px 0 8px}
+.object-content .card-foot{font-size:12px;margin-top:14px}
+.object-content .card-empty{padding:18px 0}
+.object-content .mac-toggle{margin-bottom:10px}
+.tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:#203d49;border-color:#54838a;border-radius:10px;box-shadow:var(--shadow)}
+.tasks-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+.task-count{font:600 11px var(--mono);background:#102633;border-radius:5px;padding:4px 6px}
+.tasks-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;display:flex;flex-direction:column}
+.tasks-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
+.tasks-progress{width:100%;height:5px;accent-color:var(--accent);margin:12px 0}
+.task-item{padding:15px 0;border-top:1px solid var(--line)}
+.task-item label{display:flex;align-items:flex-start;gap:10px;font-weight:600;cursor:pointer}
+.task-item input{width:18px;height:18px;accent-color:var(--accent);flex:none;margin:2px 0}
+.task-item.done label span{text-decoration:line-through;color:var(--muted)}
+.task-item p{font-size:12px;margin:8px 0 10px 28px}
+.task-targets{display:flex;gap:6px;flex-wrap:wrap;margin-left:28px}
+.task-targets button{font:500 11px var(--mono);cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:#203d49;color:var(--accent)}
+@media(max-width:760px){.tasks-toggle{top:auto;bottom:60px;right:12px}.tasks-panel{top:12px;max-height:calc(100% - 76px)}.object-card header{padding:14px 16px 10px}.object-tabs{margin-inline:16px}.object-content{padding-inline:16px}}
 @media(prefers-reduced-motion:reduce){#canvasUi .info-card{filter:none}}
 </style>
 
@@ -465,6 +518,7 @@ body{background:var(--canvas)}
           <g id="lyrNodes"></g>
           <g id="lyrCards"></g>
           <g id="lyrL2" class="l2-scene"></g>
+          <g id="lyrLabelLeads" aria-hidden="true"></g>
         </g>
         <g id="canvasUi" aria-label="Слои и сведения на схеме">
           <g id="canvasHud"></g>
@@ -478,6 +532,11 @@ body{background:var(--canvas)}
       <div class="chip" id="chip" role="status" hidden></div>
       <div class="dhint" id="dhint" hidden></div>
       <aside class="details" id="details" aria-label="Сведения об узле" hidden></aside>
+      <button class="btn tasks-toggle" id="tasksToggle" type="button" aria-expanded="false" aria-controls="tasksPanel">Задания <span class="task-count" id="taskCount">0/4</span></button>
+      <aside class="tasks-panel" id="tasksPanel" aria-labelledby="tasksTitle" hidden>
+        <header><div><span class="kicker">ПРАКТИКА НА ТОПОЛОГИИ</span><h2 id="tasksTitle">Задания</h2><p>Учебный пример · отмечайте выполненные шаги сами.</p></div><button class="ib" id="tasksClose" type="button" aria-label="Закрыть задания">×</button></header>
+        <div class="tasks-body" id="tasksBody"></div>
+      </aside>
       <div class="zoom" role="group" aria-label="Масштаб">
         <button type="button" id="zoomOut" aria-label="Отдалить">−</button>
         <output id="lodOut"><span id="lodName">Схема</span><span class="lodbar" id="lodBar"><i></i><i></i><i></i><i></i></span></output>
@@ -661,26 +720,56 @@ function renderLinks(){
     const sw = [ia, ib].find(i => i && i.switchport);
     if (sw) g.dataset.vlan = sw.switchport.mode === "trunk" ? "trunk" : String(sw.switchport.vlan);
     el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "hit" }, g);
-    el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "wire" }, g);
+    el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "wire physical-wire" }, g);
+    const duplex = el("g", { class: "duplex", "aria-hidden": "true" }, g);
+    const lanes = [el("line", { class: "wire" }, duplex), el("line", { class: "wire" }, duplex)];
+    const arrows = [el("path", { class: "duplex-arrow" }, duplex), el("path", { class: "duplex-arrow" }, duplex)];
+    el("title", {}, g).textContent = `${a.node.name} TX → ${b.node.name} RX; ${b.node.name} TX → ${a.node.name} RX. Схема направлений, не индикатор трафика.`;
+    l.screenGeometry = { duplex, lanes, arrows, dots: [] };
     if (sw) el("text", { x: l.cx, y: l.cy - 8, class: "layer-vlan" }, g).textContent = sw.switchport.mode === "trunk" ? "TRUNK" : "VLAN " + sw.switchport.vlan;
     if (l.filters && Object.keys(l.filters).length) {
-      const mx = (a.node.cx + b.node.cx) / 2, my = (a.node.cy + b.node.cy) / 2;
       const f = el("g", { class: "l1" }, g);
-      el("circle", { cx: mx, cy: my, r: 8, class: "filt" }, f);
-      el("text", { x: mx, y: my + 2.8, class: "filt-t" }, f).textContent = "ms";
+      l.screenGeometry.filter = f;
+      el("circle", { r: 8, class: "filt" }, f);
+      el("text", { y: 2.8, class: "filt-t" }, f).textContent = "ms";
       el("title", {}, f).textContent = "Фильтр на линке: " + Object.keys(l.filters).join(", ");
     }
     for (const [e, o, ifc] of [[a, b, ia], [b, a, ib]]) {
       const dx = o.node.cx - e.node.cx, dy = o.node.cy - e.node.cy, len = Math.hypot(dx, dy) || 1;
       const ux = dx / len, uy = dy / len;
-      el("circle", { cx: e.node.cx + ux * 31, cy: e.node.cy + uy * 31, r: 3.2, class: "pdot l1" + (ifc && ifc.oper === "down" ? " down" : "") }, g);
+      l.screenGeometry.dots.push(el("circle", { cx: e.node.cx + ux * 31, cy: e.node.cy + uy * 31, r: 3.2, class: "pdot l1" + (ifc && ifc.oper === "down" ? " down" : "") }, g));
       const d = Math.min(58, len * 0.36), px = e.node.cx + ux * d, py = e.node.cy + uy * d;
-      el("text", { x: px, y: py + 3, class: "plabel l1" }, g).textContent = e.label;
-      if (ifc && ifc.ipv4 && ifc.ipv4.length) el("text", { x: px, y: py + 3, dy: "1.35em", class: "pip l2" }, g).textContent = ifc.ipv4[0];
+      const label = el("g", { class: "auto-label", "data-priority": 2 }, g);
+      el("text", { x: px, y: py + 3, class: "plabel l1" }, label).textContent = e.label;
+      const direction = Math.round(Math.atan2(uy, ux) / (Math.PI / 4) + 8) % 8;
+      const compass = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"];
+      el("text", { x: px, y: py + 3, dy: "1.5em", class: "port-direction l1" }, label).textContent = `TX ${compass[direction]} · RX ${compass[(direction + 4) % 8]}`;
+      if (ifc && ifc.ipv4 && ifc.ipv4.length) el("text", { x: px, y: py + 3, dy: "1.35em", class: "pip l2" }, label).textContent = ifc.ipv4[0];
     }
   }
   if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
   if (l2Model) renderCanvasL2();
+  updateLinkScreenGeometry();
+  scheduleLabels();
+}
+function updateLinkScreenGeometry(){
+  const inv = 1 / view.k;
+  links.forEach(l => {
+    const geometry = l.screenGeometry; if (!geometry) return;
+    const [a, b] = l.ends, dx = b.node.cx - a.node.cx, dy = b.node.cy - a.node.cy;
+    const len = Math.hypot(dx, dy), half = Math.max(0, len / 2 - Math.min(31, len / 4));
+    geometry.duplex.setAttribute("transform", `translate(${l.cx} ${l.cy}) rotate(${Math.atan2(dy, dx) * 180 / Math.PI})`);
+    geometry.lanes.forEach((line, i) => {
+      const y = (i === 0 ? -3 : 3) * inv;
+      line.setAttribute("x1", -half); line.setAttribute("x2", half);
+      line.setAttribute("y1", y); line.setAttribute("y2", y);
+      const sign = i === 0 ? 1 : -1, x = sign * half * .35;
+      geometry.arrows[i].setAttribute("d", `M${x - sign * 5 * inv} ${y - 3 * inv} L${x} ${y} L${x - sign * 5 * inv} ${y + 3 * inv}`);
+      geometry.arrows[i].style.display = half * 2 * view.k < 28 ? "none" : "";
+    });
+    geometry.dots.forEach(dot => dot.setAttribute("r", 3.2 * inv));
+    if (geometry.filter) geometry.filter.setAttribute("transform", `translate(${l.cx} ${l.cy}) scale(${inv})`);
+  });
 }
 function renderNodeName(g, n, y){
   const label = el("text", { y, class: "nname" }, g);
@@ -695,19 +784,21 @@ function renderNodes(){
     n.g = g;
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -22, y: -22, width: 44, height: 44, class: "ico" }, g);
-    renderNodeName(g, n, 25);
+    const label = el("g", { class: "auto-label", "data-priority": 0 }, g);
+    renderNodeName(label, n, 25);
     const sub = subtitle(n);
-    if (sub) el("text", { y: 25, dy: "1.9em", class: "nsub l2" }, g).textContent = sub;
+    if (sub) el("text", { y: 25, dy: "1.9em", class: "nsub l2" }, label).textContent = sub;
     const adj = n.facts && n.facts.adjacencies;
     if (adj && adj.length) {
       const full = adj.filter(x => x.state === "full").length;
-      el("text", { y: 25, dy: "3.6em", class: "nadj l2" + (full < adj.length ? " warn" : "") }, g).textContent = `OSPF ${full}/${adj.length} FULL`;
+      el("text", { y: 25, dy: "3.6em", class: "nadj l2" + (full < adj.length ? " warn" : "") }, label).textContent = `OSPF ${full}/${adj.length} FULL`;
     }
     const bd = el("g", { class: "cbadge", transform: "translate(-22 -21)" }, g);
     el("rect", { x: -10, y: -7.5, width: 20, height: 15, rx: 3.5 }, bd);
     el("text", { y: 3 }, bd).textContent = ">_";
     updateBadge(n);
   }
+  scheduleLabels();
 }
 function setNodeStatus(n, st){
   n.status = st;
@@ -724,6 +815,7 @@ function applyView(){
   vp.setAttribute("transform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
   $("dots").setAttribute("patternTransform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
   svg.style.setProperty("--inv", (1 / view.k).toFixed(4));
+  updateLinkScreenGeometry();
   const nl = lodOf(view.k);
   if (nl !== lod) {
     lod = nl; svg.dataset.lod = nl;
@@ -733,6 +825,7 @@ function applyView(){
   }
   positionOverlays();
   positionCanvasCard();
+  scheduleLabels();
 }
 const toScreen = (x, y) => ({ x: view.tx + view.k * x, y: view.ty + view.k * y });
 function bounds(){
@@ -2093,7 +2186,8 @@ function renderCanvasL2(){
     const n = vs[0].orig, x0 = Math.min(...vs.map(v => v.cx)) - 66, x1 = Math.max(...vs.map(v => v.cx)) + 66;
     const g = el("g", { class: "l2-chassis" }, zones);
     el("rect", { x: x0, y: n.cy - 51, width: x1 - x0, height: 102, rx: 16 }, g);
-    el("text", { x: x0 + 11, y: n.cy - 60 }, g).textContent = `${n.name} · один корпус / ${vs.length} VLAN`;
+    const label = el("g", { class: "auto-label", "data-priority": 1 }, g);
+    el("text", { x: x0 + 11, y: n.cy - 60 }, label).textContent = `${n.name} · один корпус / ${vs.length} VLAN`;
   });
   l2Model.segments.forEach(s => {
     const [a, b] = s.link.ends, pa = l2Model.virtuals.get(s.va) || a.node, pb = l2Model.virtuals.get(s.vb) || b.node;
@@ -2109,7 +2203,8 @@ function renderCanvasL2(){
     el("path", { d: path, class: "stroke" }, g);
     const label = s.mismatch ? `native VLAN ${s.va.split("|")[2]} ↔ ${s.vb.split("|")[2]} !` : s.blocked ? `VLAN ${s.vlan} не проходит !` : s.vlan == null ? "p2p" : s.unknown ? `VLAN ${s.vlan} · нет фактов` :
       s.aname.includes(".") ? `${s.aname} · ${s.vlan}` : s.bname.includes(".") ? `${s.bname} · ${s.vlan}` : `VLAN ${s.vlan}`;
-    el("text", { x: mx, y: my - 7, class: "caption" }, g).textContent = label;
+    const caption = el("g", { class: "auto-label", "data-priority": s.blocked || s.mismatch ? 1 : 3 }, g);
+    el("text", { x: mx, y: my - 7, class: "caption" }, caption).textContent = label;
     s.g = g;
   });
   nodes.filter(n => n.cat !== "switch").forEach(n => {
@@ -2117,7 +2212,8 @@ function renderCanvasL2(){
       "data-id": n.id, role: "button", tabindex: "0", "aria-label": `${n.name}, ${CAT[n.cat]}` }, devices);
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -19, y: -19, width: 38, height: 38, class: "ico" }, g);
-    renderNodeName(g, n, 23);
+    const label = el("g", { class: "auto-label", "data-priority": 0 }, g);
+    renderNodeName(label, n, 23);
     n.l2g = g;
   });
   l2Model.virtuals.forEach(v => {
@@ -2134,6 +2230,7 @@ function renderCanvasL2(){
   if (old && old.virtual) insight.pinned = l2Model.virtuals.get(old.id) || null;
   if (old && old.virtualLink) insight.pinned = l2Model.segments.find(s => s.id === old.id) || null;
   if (insight && insight.layer === "l2") renderCanvasCard();
+  scheduleLabels();
 }
 
 // This switchable scenario is local to the prototype and never changes the real lab.
@@ -2164,9 +2261,9 @@ function toggleFaultDemo(){
 }
 
 const canvasUi = $("canvasUi"), canvasHud = $("canvasHud"), canvasCard = $("canvasCard");
-const insight = { layer: "l1", pinned: null, panel: "ports" };
+const insight = { layer: "l1", cardLayer: "l1", pinned: null, panel: "ports" };
 const layerHelp = {
-  l1: "Физика · состояние линков и портов",
+  l1: "Физика · TX — передача, RX — приём",
   l2: "Каждый VLAN коммутатора — отдельный L2-узел",
   l3: "Сеть · IP-адреса и соседства",
   l4: "Транспорт · источник фактов пока пуст"
@@ -2191,8 +2288,8 @@ function renderCanvasHud(){
   const w = Math.max(220, Math.min(370, wrap.clientWidth - 24)), x = 14;
   el("rect", { x, y: 14, width: w, height: insight.layer === "l2" ? 188 : 100, rx: 17, class: "hud-bg" }, canvasHud);
   uiText(canvasHud, "hud-kicker", x + 15, 36, "ТОПОЛОГИЯ / ФАКТЫ");
-  uiText(canvasHud, "hud-meta", x + w - (w < 340 ? 62 : 116), 36,
-    w < 340 ? `${nodes.length} / ${links.length}` : `${nodes.length} УЗЛОВ · ${links.length} ЛИНКОВ`);
+  uiText(canvasHud, "hud-meta", x + w - 15, 36,
+    w < 340 ? `${nodes.length} / ${links.length}` : `${nodes.length} УЗЛОВ · ${links.length} ЛИНКОВ`).setAttribute("text-anchor", "end");
   const bw = (w - 38) / 4;
   ["l1", "l2", "l3", "l4"].forEach((layer, i) => {
     const b = el("g", { class: "layer-button" + (insight.layer === layer ? " active" : ""),
@@ -2233,31 +2330,37 @@ function setFactLayer(layer){
   const crossingL2 = layer !== insight.layer && (layer === "l2" || insight.layer === "l2");
   if (crossingL2) { closeInsight(); select(null); selectLink(null); }
   insight.layer = layer;
-  insight.panel = "ports";
   svg.dataset.factlayer = layer;
   renderCanvasHud(); renderCanvasCard(); positionCanvasCard();
+  scheduleLabels();
 }
 function pinInsight(item, panel){
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
   insight.pinned = item; insight.panel = panel;
+  insight.cardLayer = panel === "mac" || item.virtual || item.virtualLink ? "l2" : insight.layer === "l4" ? "l1" : insight.layer;
+  closeTasks(false);
   if (item.virtual || item.virtualLink) {
     select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
   } else if (item.isLink) selectLink(item); else select(item);
+  $("chip").hidden = true;
   renderCanvasCard();
 }
 function closeInsight(){
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
   insight.pinned = null; insight.cardShape = null; canvasCard.textContent = "";
+  scheduleLabels();
 }
 function factCardData(item){
-  const layer = insight.layer;
+  const layer = insight.cardLayer;
+  if (item.virtual && layer !== "l2") item = item.orig;
+  if (item.virtualLink && layer !== "l2") item = item.link;
   if (item.virtual) {
     if (insight.panel === "mac") {
       const table = item.orig.facts && item.orig.facts.mac_table;
       return { kind: table ? "L2 / ТАБЛИЦА КОММУТАЦИИ" : "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ",
         title: item.orig.name, sub: `Выбран VLAN ${item.vlan}`,
         heads: ["VLAN", "MAC", "ПОРТ"],
-        rows: table ? (table.entries || []).filter(e => Number(e.vlan) === item.vlan).slice(0, 6)
+        rows: table ? (table.entries || []).filter(e => Number(e.vlan) === item.vlan)
           .map(e => [e.vlan, e.mac, e.iface]) : (exampleMac[item.orig.name] || []).filter(r => Number(r[0]) === item.vlan),
         empty: table ? "В этом VLAN нет выученных MAC." : "Пример MAC-записей для VLAN не задан.",
         foot: table ? table.truncated ? "Таблица неполная: коллектор прервал чтение." : "Выученные адреса из снимка фактов." :
@@ -2267,7 +2370,7 @@ function factCardData(item){
     return { kind: "L2 / ШИРОКОВЕЩАТЕЛЬНЫЙ ДОМЕН", title: item.name,
       sub: d ? `${d.id} · VLAN ${d.vlans.join(" + ")} · ${people.length} участника` : "Нет активных участников",
       heads: ["УЗЕЛ", "ИНТЕРФЕЙС", "IPV4"],
-      rows: people.slice(0, 6).map(m => [m.node.name, m.iface.name, (m.iface.ipv4 || []).join(" ") || "—"]),
+      rows: people.map(m => [m.node.name, m.iface.name, (m.iface.ipv4 || []).join(" ") || "—"]),
       empty: "Этот VLAN сейчас ни с кем не связан.",
       foot: d && d.vlans.length > 1 ? "Внимание: разные VLAN склеены одним L2-доменом." :
         "Связь рассчитана по тегам, портам и состоянию линков." };
@@ -2288,6 +2391,7 @@ function factCardData(item){
       sub: item.suspend ? "Соединение приостановлено" : item.down ? "Нет связи" : "Соединение работает" };
     if (layer === "l1") return { ...base, heads: ["УЗЕЛ", "ПОРТ", "СОСТОЯНИЕ"],
       rows: [[a.node.name, a.label, ia ? ia.oper || "—" : "нет фактов"], [b.node.name, b.label, ib ? ib.oper || "—" : "нет фактов"]],
+      directions: [[`${a.node.name} ${a.label}`, `${b.node.name} ${b.label}`], [`${b.node.name} ${b.label}`, `${a.node.name} ${a.label}`]],
       foot: item.suspend ? "Трафик по этому линку приостановлен." : Object.keys(item.filters).length ? "Фильтр: " + Object.keys(item.filters).join(", ") : "Нажмите на узел, чтобы открыть его сведения." };
     if (layer === "l2") return { ...base, heads: ["УЗЕЛ", "ПОРТ", "РЕЖИМ"],
       rows: [[a.node.name, a.label, endAddr(ia)], [b.node.name, b.label, endAddr(ib)]], foot: "VLAN взяты из фактов интерфейсов." };
@@ -2303,87 +2407,242 @@ function factCardData(item){
     const table = f.mac_table;
     return { ...base, kind: table ? "L2 / ТАБЛИЦА КОММУТАЦИИ" : "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ",
       heads: ["VLAN", "MAC", "ПОРТ"],
-      rows: table ? (table.entries || []).slice(0, 6).map(e => [e.vlan, e.mac, e.iface]) : exampleMac[item.name] || [],
+      rows: table ? (table.entries || []).map(e => [e.vlan, e.mac, e.iface]) : exampleMac[item.name] || [],
       empty: table ? "Коммутатор ещё не выучил MAC-адреса." : "Пример MAC-записей для этого узла не задан.",
       foot: table ? table.truncated ? "Таблица неполная: коллектор прервал чтение." : "Выученные адреса из снимка фактов." :
         "Учебные записи: в снимке фактов MAC-таблицы нет." };
   }
   if (layer === "l1") return { ...base, heads: ["ПОРТ", "АДМИН", "ЛИНК"],
-    rows: ints.filter(i => i.port).slice(0, 6).map(i => [i.name, i.admin || "—", i.oper || "—"]),
+    rows: ints.filter(i => i.port).map(i => [i.name, i.admin || "—", i.oper || "—"]),
     empty: "Нет данных о физических портах.", foot: "Состояния получены из снимка фактов." };
   if (layer === "l2") return { ...base, heads: ["ПОРТ", "РЕЖИМ", "VLAN"],
-    rows: ints.filter(i => i.switchport).slice(0, 6).map(i => [i.name, i.switchport.mode,
-      i.switchport.mode === "access" ? i.switchport.vlan : Array.isArray(i.switchport.allowed) ? i.switchport.allowed.join(", ") : "все"]),
-    empty: "Для этого узла L2-фактов нет.", foot: item.cat === "switch" ? "Второе ушко откроет учебный пример MAC-таблицы." : "Показаны только известные VLAN и порты." };
+    rows: ints.filter(i => i.switchport || i.dot1q != null || i.vlan != null).map(i => [i.name,
+      i.switchport ? i.switchport.mode : i.dot1q != null ? "802.1Q" : "SVI",
+      i.switchport ? i.switchport.mode === "access" ? i.switchport.vlan : Array.isArray(i.switchport.allowed) ? i.switchport.allowed.join(", ") : "все" : i.dot1q == null ? i.vlan : i.dot1q]),
+    empty: "Для этого узла L2-фактов нет.", foot: "Показаны только известные VLAN и порты." };
   if (layer === "l3") return { ...base, heads: ["ИНТЕРФЕЙС", "IPV4", "СОСТОЯНИЕ"],
-    rows: ints.filter(i => i.ipv4 && i.ipv4.length).slice(0, 6).map(i => [i.name, i.ipv4.join(" "), i.oper || "—"]),
+    rows: ints.filter(i => i.ipv4 && i.ipv4.length).map(i => [i.name, i.ipv4.join(" "), i.oper || "—"]),
     empty: "IP-адресов в снимке нет.", foot: f.router_id ? `Router ID ${f.router_id} · маршруты не получены` : "Маршруты в снимке не представлены." };
   return { ...base, heads: [], rows: [], empty: "Нет данных о TCP/UDP-сессиях и сервисах.",
     foot: "L4 появится, когда источник фактов начнёт их отдавать." };
 }
+function cardTable(heads, rows){
+  return `<table><thead><tr>${heads.map(h => `<th scope="col">${esc(h)}</th>`).join("")}</tr></thead><tbody>`
+    + rows.map(row => `<tr>${row.map(v => `<td${v === "down" ? ' class="down"' : ""}>${esc(v == null ? "—" : v)}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
+}
 function renderCanvasCard(){
+  const hadFocus = canvasCard.contains(document.activeElement);
   canvasCard.textContent = "";
   const item = insight.pinned; if (!item) return;
   const data = factCardData(item), rows = data.rows || [];
-  const w = Math.max(220, Math.min(372, wrap.clientWidth - 20));
-  const footLines = [];
-  if (data.foot) {
-    const limit = Math.max(22, Math.floor((w - 34) / 6.1));
-    data.foot.split(/\s+/).forEach(word => {
-      const last = footLines.length - 1;
-      if (last < 0 || (footLines[last] + " " + word).length > limit) footLines.push(word);
-      else footLines[last] += " " + word;
-    });
-  }
-  const h = (rows.length ? 148 + rows.length * 25 : 174) + (footLines.length ? 15 * footLines.length + 13 : 8);
+  const w = Math.min(560, Math.max(1, wrap.clientWidth - 24));
+  const compact = wrap.clientWidth < 760;
+  const h = Math.max(1, compact ? Math.min(520, wrap.clientHeight * .6, wrap.clientHeight - 128) : Math.min(520, wrap.clientHeight - 24));
   const lead = el("line", { class: "card-lead" }, canvasCard);
   const anchor = el("circle", { r: 5, class: "card-anchor" }, canvasCard);
-  const card = el("g", { class: "info-card", role: "group", "aria-label": `${data.kind}: ${data.title}` }, canvasCard);
-  el("rect", { class: "body", width: w, height: h, rx: 17 }, card);
-  uiText(card, "ey", 17, 28, data.kind);
-  uiText(card, "title", 17, 61, clipCell(data.title, 26));
-  uiText(card, "minor", 17, 81, data.sub);
-  el("line", { class: "top-rule", x1: 17, x2: w - 17, y1: 96, y2: 96 }, card);
-  if (insight.pinned) {
-    const close = el("g", { class: "close-card", role: "button", tabindex: "0", "aria-label": "Закрыть карточку" }, card);
-    el("rect", { x: w - 40, y: 15, width: 27, height: 27, rx: 7 }, close);
-    uiText(close, "", w - 26.5, 29, "×");
-    close.addEventListener("click", e => { e.stopPropagation(); closeInsight(); select(null); selectLink(null); });
-    close.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); closeInsight(); } });
-  } else card.style.pointerEvents = "none";
-  const xs = [17, Math.round(w * .37), Math.round(w * .68)];
-  if (rows.length) {
-    data.heads.forEach((v, i) => uiText(card, "colhead", xs[i], 119, v));
-    rows.forEach((row, r) => {
-      const y = 143 + r * 25;
-      el("line", { class: "row-rule", x1: 17, x2: w - 17, y1: y + 7, y2: y + 7 }, card);
-      row.forEach((v, i) => {
-        const available = (i < 2 ? xs[i + 1] - xs[i] : w - 17 - xs[i]) - 8;
-        uiText(card, "cell" + (v === "down" ? " down" : ""), xs[i], y, clipCell(v, Math.max(5, Math.floor(available / 6.5))));
-      });
-    });
-  } else uiText(card, "empty", 17, 139, data.empty || "Нет данных для этого слоя.");
-  footLines.forEach((line, i) => uiText(card, "minor", 17, h - 17 - (footLines.length - 1 - i) * 15, line));
+  const card = el("g", { class: "info-card" }, canvasCard);
+  const foreign = el("foreignObject", { width: w, height: h }, card);
+  const html = document.createElementNS("http://www.w3.org/1999/xhtml", "section");
+  html.setAttribute("class", "object-card");
+  html.setAttribute("aria-label", `Сведения: ${data.title}`);
+  foreign.appendChild(html);
+  const device = item.virtual ? item.orig : item.isLink || item.virtualLink ? null : item;
+  const switchMac = insight.cardLayer === "l2" && device && device.cat === "switch";
+  const adj = insight.cardLayer === "l3" && device && device.facts ? device.facts.adjacencies || [] : [];
+  html.innerHTML = `<header><div><span class="kicker">${esc(data.kind)}</span><h2>${esc(data.title)}</h2><p>${esc(data.sub)}</p></div>`
+    + `<button class="ib" type="button" data-close aria-label="Закрыть карточку">×</button></header>`
+    + `<div class="object-tabs" role="tablist" aria-label="Уровень фактов объекта">${["l1", "l2", "l3"].map(layer =>
+      `<button type="button" role="tab" id="object-tab-${layer}" data-layer="${layer}" aria-controls="object-facts" aria-selected="${insight.cardLayer === layer}" tabindex="${insight.cardLayer === layer ? 0 : -1}">${layer.toUpperCase()}</button>`).join("")}</div>`
+    + `<div class="object-content" id="object-facts" role="tabpanel" aria-labelledby="object-tab-${insight.cardLayer}" tabindex="0">`
+    + (switchMac ? `<button class="btn mac-toggle" type="button" aria-pressed="${insight.panel === "mac"}">${insight.panel === "mac" ? "Показать порты и VLAN" : "Открыть MAC-таблицу"}</button>` : "")
+    + (rows.length ? cardTable(data.heads, rows) : `<p class="card-empty">${esc(data.empty || "Нет данных для этого слоя.")}</p>`)
+    + (data.directions ? `<h3>Два направления соединения</h3>${cardTable(["ПЕРЕДАЧА · TX", "ПРИЁМ · RX"], data.directions)}<p class="card-foot">Стрелки показывают направления. Данных об объёме и скорости трафика в снимке нет.</p>` : "")
+    + (adj.length ? `<h3>Соседи OSPF</h3>${cardTable(["ROUTER ID", "ПОРТ", "AREA", "СОСТОЯНИЕ"], adj.map(a => [a.peer_router_id, a.iface, a.area, a.state]))}` : "")
+    + `<p class="card-foot">${esc(data.foot || "")}</p></div>`;
+  html.querySelector("[data-close]").onclick = () => { closeInsight(); select(null); selectLink(null); svg.focus(); };
+  const tabs = [...html.querySelectorAll("[data-layer]")];
+  const changeTab = layer => { insight.cardLayer = layer; insight.panel = "ports"; renderCanvasCard(); canvasCard.querySelector(`[data-layer="${layer}"]`).focus(); };
+  tabs.forEach((tab, i) => {
+    tab.onclick = () => changeTab(tab.dataset.layer);
+    tab.onkeydown = e => {
+      const next = e.key === "ArrowRight" ? (i + 1) % tabs.length : e.key === "ArrowLeft" ? (i + tabs.length - 1) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+      if (next >= 0) { e.preventDefault(); e.stopPropagation(); changeTab(tabs[next].dataset.layer); }
+    };
+  });
+  const mac = html.querySelector(".mac-toggle");
+  if (mac) mac.onclick = () => { insight.panel = insight.panel === "mac" ? "ports" : "mac"; renderCanvasCard(); canvasCard.querySelector(".mac-toggle").focus(); };
+  // Keep keyboard interaction inside the card out of topology shortcuts.
+  html.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Escape") { closeInsight(); svg.focus(); }
+  });
   insight.cardShape = { item, w, h, card, lead, anchor };
   positionCanvasCard();
+  if (hadFocus) canvasCard.querySelector(`[data-layer="${insight.cardLayer}"]`).focus();
+  scheduleLabels();
 }
 function positionCanvasCard(){
   const c = insight.cardShape, item = insight.pinned;
   if (!c || c.item !== item || !item) return;
   const p = toScreen(item.cx, item.cy), ww = wrap.clientWidth, wh = wrap.clientHeight;
-  const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : p.x - c.w / 2;
-  const x = clamp(rawX, 10, Math.max(10, ww - c.w - 10));
-  const vertical = ww < 600;
-  const wantedY = vertical ? p.y + c.h + 72 < wh ? p.y + 62 : p.y - c.h - 62 : p.y - 54;
-  const y = clamp(wantedY, 120, Math.max(120, wh - c.h - 12));
+  const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : ww - c.w - 12;
+  const x = clamp(rawX, 12, Math.max(12, ww - c.w - 12));
+  const hudBottom = insight.layer === "l2" ? 214 : 126;
+  const minY = ww < 760 ? 12 : x < 396 ? hudBottom : 66;
+  const bottom = ww < 760 ? 112 : 12;
+  const y = clamp(ww < 760 ? wh - c.h - bottom : p.y - 80, Math.min(minY, wh - c.h - bottom), Math.max(12, wh - c.h - bottom));
   c.card.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
   c.lead.setAttribute("x1", p.x); c.lead.setAttribute("y1", p.y);
   c.lead.setAttribute("x2", clamp(p.x, x, x + c.w)); c.lead.setAttribute("y2", clamp(p.y, y, y + c.h));
   c.anchor.setAttribute("cx", p.x); c.anchor.setAttribute("cy", p.y);
 }
+
 document.addEventListener("keydown", e => {
   if (e.altKey && /^[1-4]$/.test(e.key)) setFactLayer("l" + e.key);
 });
+
+/* Prototype assignment examples; completion is a local student checklist. */
+const demoTasks = [
+  { id: "physical", title: "Проверить физические соединения", layer: "l1", targets: ["R1", "R2", "R3"],
+    text: "Сопоставьте порты на схеме с интерфейсами маршрутизаторов. Проверьте admin и link на обоих концах соединений." },
+  { id: "vlan", title: "Исследовать VLAN и транки", layer: "l2", targets: ["SW1", "SW2"],
+    text: "Найдите access-порты, разрешённые VLAN транков и границы широковещательных доменов. Сравните их с MAC-таблицей." },
+  { id: "ospf", title: "Проверить адресацию и соседства OSPF", layer: "l3", targets: ["R1", "R2", "R3"],
+    text: "Сопоставьте адреса интерфейсов и Router ID. Проверьте соседей и состояние FULL в карточке L3 или консоли." },
+  { id: "hosts", title: "Проверить связность хостов", layer: "l3", targets: ["PC1", "PC2", "PC3"],
+    text: "Проверьте адрес и шлюз каждого хоста, затем выполните ping в консоли. Если хост недоступен, начните с его состояния и линка." }
+];
+const taskStorageKey = "tasks.v1." + GNS3.project_id;
+const savedTasks = store.get(taskStorageKey, []);
+const completedTasks = new Set(Array.isArray(savedTasks) ? savedTasks.filter(id => demoTasks.some(t => t.id === id)) : []);
+function updateTaskProgress(){
+  $("taskCount").textContent = `${completedTasks.size}/${demoTasks.length}`;
+  $("tasksToggle").setAttribute("aria-label", `Задания: выполнено ${completedTasks.size} из ${demoTasks.length}`);
+  const progress = $("tasksBody").querySelector("progress");
+  if (progress) { progress.value = completedTasks.size; progress.textContent = $("taskCount").textContent; }
+  store.set(taskStorageKey, [...completedTasks]);
+}
+function closeTasks(restoreFocus){
+  const wasOpen = !$("tasksPanel").hidden;
+  $("tasksPanel").hidden = true;
+  $("tasksToggle").setAttribute("aria-expanded", "false");
+  if (restoreFocus && wasOpen) $("tasksToggle").focus();
+  scheduleLabels();
+}
+function focusTaskTarget(task, name){
+  const n = nodes.find(node => node.name === name); if (!n) return;
+  closeTasks(false);
+  setFactLayer(task.layer);
+  pinInsight(n, "ports");
+  const k = Math.max(1.4, view.k), w = wrap.clientWidth, h = wrap.clientHeight;
+  const x = mobile ? w / 2 : Math.max(100, (w - insight.cardShape.w - 48) / 2);
+  const y = mobile ? Math.max(66, (h - insight.cardShape.h) / 2) : h / 2;
+  animateTo({ k, tx: x - k * n.cx, ty: y - k * n.cy });
+  canvasCard.querySelector(`[data-layer="${task.layer}"]`).focus();
+}
+function openTasks(){
+  closeInsight(); closeRadial(); select(null); selectLink(null);
+  const body = $("tasksBody"); body.textContent = "";
+  const progress = hel("progress", "tasks-progress", body);
+  progress.max = demoTasks.length; progress.setAttribute("aria-label", "Выполненные задания");
+  demoTasks.forEach((task, i) => {
+    const row = hel("section", "task-item" + (completedTasks.has(task.id) ? " done" : ""), body);
+    const label = hel("label", "", row), input = hel("input", "", label);
+    input.type = "checkbox"; input.checked = completedTasks.has(task.id);
+    hel("span", "", label).textContent = `${i + 1}. ${task.title}`;
+    input.onchange = () => {
+      if (input.checked) completedTasks.add(task.id); else completedTasks.delete(task.id);
+      row.classList.toggle("done", input.checked); updateTaskProgress();
+    };
+    hel("p", "", row).textContent = task.text;
+    const targets = hel("div", "task-targets", row);
+    task.targets.forEach(name => {
+      const b = hel("button", "", targets); b.type = "button"; b.textContent = `${name} · ${task.layer.toUpperCase()}`;
+      b.setAttribute("aria-label", `Показать ${name} для задания ${i + 1}`);
+      b.onclick = () => focusTaskTarget(task, name);
+    });
+  });
+  updateTaskProgress();
+  $("tasksPanel").hidden = false; $("tasksToggle").setAttribute("aria-expanded", "true");
+  $("tasksClose").focus(); scheduleLabels();
+}
+$("tasksToggle").onclick = () => $("tasksPanel").hidden ? openTasks() : closeTasks(true);
+$("tasksClose").onclick = () => closeTasks(true);
+$("tasksPanel").addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); closeTasks(true); } });
+updateTaskProgress();
+
+/* Place measured labels in screen pixels so zoom and font changes keep the same gap. */
+let labelFrame = null;
+function scheduleLabels(){
+  if (labelFrame != null) return;
+  labelFrame = requestAnimationFrame(() => { labelFrame = null; layoutLabels(); });
+}
+function layoutLabels(){
+  const labels = [...vp.querySelectorAll(".auto-label")], root = svg.getBoundingClientRect();
+  const visible = element => {
+    if (getComputedStyle(element).visibility !== "visible") return false;
+    for (let e = element; e && e !== svg; e = e.parentElement) {
+      const style = getComputedStyle(e);
+      if (style.display === "none" || Number(style.opacity) === 0) return false;
+    }
+    return true;
+  };
+  const box = element => {
+    const r = element.getBoundingClientRect();
+    return { x: r.left - root.left, y: r.top - root.top, w: r.width, h: r.height };
+  };
+  const intersects = (a, b) => a.x < b.x + b.w + 3 && a.x + a.w + 3 > b.x && a.y < b.y + b.h + 3 && a.y + a.h + 3 > b.y;
+  const occupied = [];
+  // Reset all labels in one pass before measuring any of them.
+  labels.forEach(g => { g.classList.remove("label-hidden"); g.removeAttribute("transform"); });
+  // Stack node facts below the measured name, including at the smallest zoom.
+  labels.forEach(g => {
+    const name = g.querySelector(".nname"); if (!name || !visible(name)) return;
+    const r = name.getBBox();
+    let y = r.y + r.height + 4 / view.k;
+    g.querySelectorAll(".nsub,.nadj").forEach(t => {
+      if (!visible(t)) return;
+      t.setAttribute("dy", "0"); t.setAttribute("y", y);
+      y += t.getBBox().height + 4 / view.k;
+    });
+  });
+  $("lyrLabelLeads").textContent = "";
+  vp.querySelectorAll(".node .ico,.l2-virtual > rect,#lyrDraw text,.card").forEach(e => {
+    if (visible(e)) { const r = box(e); if (r.w && r.h) occupied.push(r); }
+  });
+  [canvasHud, canvasCard.querySelector("foreignObject"), $("tasksToggle"), !$("tasksPanel").hidden && $("tasksPanel"), wrap.querySelector(".zoom")].forEach(e => {
+    if (e) { const r = box(e); if (r.w && r.h) occupied.push(r); }
+  });
+  const measured = labels.map(g => {
+    const texts = [...g.querySelectorAll("text")].filter(visible);
+    if (!texts.length) return null;
+    const boxes = texts.map(box), x = Math.min(...boxes.map(b => b.x)), y = Math.min(...boxes.map(b => b.y));
+    const r = { x, y, w: Math.max(...boxes.map(b => b.x + b.w)) - x, h: Math.max(...boxes.map(b => b.y + b.h)) - y };
+    const priority = Number(g.dataset.priority) - (g.closest(".sel") ? 1 : 0);
+    return { g, r, priority };
+  }).filter(Boolean).sort((a, b) => a.priority - b.priority);
+  measured.forEach(({ g, r, priority }) => {
+    if (r.x + r.w < 0 || r.y + r.h < 0 || r.x > root.width || r.y > root.height) return;
+    const offsets = [[0, 0]];
+    for (const d of [14, 28, 44, 64, 88]) {
+      offsets.push([0, -d], [0, d], [-d, 0], [d, 0], [-d, -d], [d, -d], [-d, d], [d, d]);
+      if (priority > 1 && d >= 44) break;
+    }
+    const offset = offsets.find(([dx, dy]) => {
+      const candidate = { ...r, x: r.x + dx, y: r.y + dy };
+      return candidate.x >= 5 && candidate.y >= 5 && candidate.x + candidate.w <= root.width - 5 && candidate.y + candidate.h <= root.height - 5 && !occupied.some(b => intersects(candidate, b));
+    });
+    if (!offset) { g.classList.add("label-hidden"); return; }
+    const [dx, dy] = offset;
+    g.setAttribute("transform", `translate(${dx / view.k} ${dy / view.k})`);
+    occupied.push({ ...r, x: r.x + dx, y: r.y + dy });
+    if (Math.hypot(dx, dy) >= 14) {
+      const x = r.x + r.w / 2, y = r.y + r.h / 2;
+      el("line", { class: "label-lead", x1: (x - view.tx) / view.k, y1: (y - view.ty) / view.k,
+        x2: (x + dx - view.tx) / view.k, y2: (y + dy - view.ty) / view.k, "vector-effect": "non-scaling-stroke" }, $("lyrLabelLeads"));
+    }
+  });
+}
 
 /* ---------------- start ---------------- */
 $("labTitle").textContent = GNS3.name;
@@ -2391,5 +2650,8 @@ renderDrawings(); renderLinks(); renderNodes(); renderCanvasL2();
 renderCanvasHud(); setFactLayer(insight.layer);
 fontsReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
 layout();
+fontsReady.then(scheduleLabels);
+if (document.fonts) document.fonts.addEventListener("loadingdone", scheduleLabels);
+svg.addEventListener("transitionend", scheduleLabels);
 requestAnimationFrame(() => { Object.assign(view, fitTarget()); applyView(); lastSize = { w: wrap.clientWidth, h: wrap.clientHeight }; });
 </script>
