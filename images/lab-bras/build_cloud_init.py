@@ -39,6 +39,8 @@ def render(*, user, password, wan="ens18", access="ens19", pool="10.254.0.0/24",
         raise ValueError("Provide an absolute path to accel-pppd")
     gateway = subnet.network_address + 1
     first, last = subnet.network_address + 2, subnet.broadcast_address - 1
+    # Accel-PPP accepts CIDRs or x.x.x.x-y, not two full IPv4 endpoints.
+    ranges = "\n".join(str(block) for block in ipaddress.summarize_address_range(first, last))
     secrets = f"{quoted(user)} * {quoted(password)} *\n"
     config = f"""[modules]
 log_file
@@ -69,7 +71,7 @@ chap-secrets=/etc/ppp/lab-bras-secrets
 
 [ip-pool]
 gw-ip-address={gateway}
-{first}-{last}
+{ranges}
 
 [dns]
 dns1={dns[0]}

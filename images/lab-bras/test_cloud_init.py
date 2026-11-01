@@ -1,6 +1,7 @@
 """Offline checks; no guest services or networking are started."""
 
 import json
+import ipaddress
 from pathlib import Path
 import stat
 import subprocess
@@ -31,7 +32,10 @@ class CloudInitTests(unittest.TestCase):
         self.assertFalse(network["ethernets"]["enp7s0"]["dhcp4"])
         files = {item["path"]: item["content"] for item in cloud["write_files"]}
         self.assertIn("gw-ip-address=172.20.0.1", files["/etc/accel-ppp.conf"])
-        self.assertIn("172.20.0.2-172.20.0.254", files["/etc/accel-ppp.conf"])
+        section = files["/etc/accel-ppp.conf"].split("[ip-pool]\n", 1)[1].split("\n\n", 1)[0]
+        addresses = {str(address) for line in section.splitlines() if "=" not in line
+                     for address in ipaddress.IPv4Network(line)}
+        self.assertEqual(addresses, {f"172.20.0.{n}" for n in range(2, 255)})
         self.assertIn('oifname "enp6s0" ip saddr 172.20.0.0/24 masquerade', files["/etc/lab-bras.nft"])
         self.assertNotIn("flush ruleset", files["/etc/lab-bras.nft"])
 
