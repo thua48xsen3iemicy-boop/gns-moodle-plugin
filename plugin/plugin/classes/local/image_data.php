@@ -28,7 +28,7 @@ class image_data {
             'default' => new external_value(PARAM_INT, 'Default'),
             'min' => new external_value(PARAM_INT, 'Minimum'),
             'max' => new external_value(PARAM_INT, 'Maximum'),
-        ], 'Resource range', VALUE_DEFAULT, null);
+        ], 'Resource range, null if the image has none (VPCS)', VALUE_DEFAULT, null, NULL_ALLOWED);
         return new external_multiple_structure(new external_single_structure([
             'id' => new external_value(PARAM_ALPHANUMEXT, 'Image ID'),
             'title' => new external_value(PARAM_TEXT, 'Title'),
