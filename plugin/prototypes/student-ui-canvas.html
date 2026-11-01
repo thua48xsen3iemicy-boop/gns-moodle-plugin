@@ -108,6 +108,7 @@ button{font-family:inherit}
 .filt-t{font:600 8px var(--mono);fill:var(--warn);text-anchor:middle}
 .pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .pdot.down{fill:var(--bad)}
+.pdot.unknown{fill:var(--off)}
 .plabel{font:500 9px var(--mono);font-size:calc(11px * var(--inv,1));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .pip{font:500 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .node{cursor:pointer;-webkit-touch-callout:none}
@@ -355,6 +356,27 @@ body{background:var(--canvas)}
 [data-factlayer="l2"] #lyrDraw,[data-factlayer="l2"] #lyrLinks,
 [data-factlayer="l2"] #lyrNodes,[data-factlayer="l2"] #lyrCards{opacity:0;visibility:hidden;pointer-events:none}
 [data-factlayer="l2"] .l2-scene{display:inline;opacity:1;visibility:visible;pointer-events:auto}
+.l3-scene{display:none}
+[data-factlayer="l3"] #lyrLinks{opacity:.18;pointer-events:none}
+[data-factlayer="l3"] #lyrLinks .auto-label,[data-factlayer="l3"] #lyrLinks .pdot{display:none}
+[data-factlayer="l3"] .l3-scene{display:inline}
+.subnet-edge{stroke:#547c90;stroke-width:1.5;vector-effect:non-scaling-stroke;fill:none}
+.subnet-edge.down{stroke:var(--bad);stroke-dasharray:4 5}
+.subnet-object{cursor:pointer}
+.subnet-object rect{fill:#193e50;stroke:#73c7ed;stroke-width:1.4;vector-effect:non-scaling-stroke}
+.subnet-object.warn rect{stroke:var(--warn)}
+.subnet-object.sel rect,.subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
+.subnet-object text{fill:#e3f7fc;font:500 11px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.subnet-object:focus{outline:none}
+.link.unknown .wire{stroke:var(--off);stroke-dasharray:3 6}
+.link.unknown .pdot{fill:var(--off)}
+.link.unknown .duplex-arrow{stroke:var(--off)}
+.node.silhouette .ico{display:none}
+.node.silhouette .halo{stroke:var(--muted);stroke-dasharray:4 5;fill:#19303c}
+.node.silhouette .nname{fill:var(--muted)}
+.node.silhouette .sdot{display:none}
+#svg[data-source="stale"] #vp,#svg[data-source="error"] #vp{opacity:.58}
+.node.collection-error .halo{stroke:var(--warn);stroke-dasharray:3 4}
 .l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:1.3;stroke-dasharray:7 5}
 .l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em}
 .l2-virtual{cursor:pointer}
@@ -367,7 +389,7 @@ body{background:var(--canvas)}
 .l2-virtual:focus{outline:none}
 .l2-endpoint .halo{stroke:#527886}
 .l2-endpoint .if{fill:#2b5261}
-.l2-endpoint .nname{font-size:15px}
+.l2-endpoint .nname{font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)))}
 .l2-path{cursor:pointer}
 .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
 .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:2.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
@@ -458,6 +480,39 @@ body{background:var(--canvas)}
 .object-content .card-empty{padding:18px 0}
 .object-content .mac-toggle{margin-bottom:10px}
 .tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:#203d49;border-color:#54838a;border-radius:10px;box-shadow:var(--shadow)}
+.canvas-actions{position:absolute;right:14px;top:14px;z-index:5;display:flex;gap:8px}
+.canvas-actions .tasks-toggle{position:static;box-shadow:none}
+.canvas-actions .btn{height:40px;background:#203d49;border-color:#54838a;border-radius:10px}
+.canvas-actions .btn[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
+.canvas-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;
+  display:flex;flex-direction:column;background:#142c39;border:1px solid #54838a;border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
+.canvas-panel header{display:flex;align-items:flex-start;justify-content:space-between;padding:18px 20px 12px;gap:12px}
+.canvas-panel h2{margin:0;font:600 24px var(--display)}
+.canvas-panel p{color:var(--muted);margin:6px 0}
+.panel-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
+.panel-body label{display:block;margin:14px 0 5px;color:var(--muted)}
+.panel-body select{width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--line);border-radius:7px;background:#203d49;color:var(--fg);font:13px var(--body)}
+.panel-body .check-label{display:flex;align-items:center;gap:8px}
+.panel-body input{accent-color:var(--accent)}
+.panel-tabs{display:flex;gap:6px;margin:10px 0 14px}
+.panel-tabs button{flex:1;height:34px;border:1px solid var(--line);border-radius:7px;background:#203d49;color:var(--muted);cursor:pointer}
+.panel-tabs button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.overview-row,.issue-row{display:block;width:100%;padding:12px 0;text-align:left;color:var(--fg);background:transparent;border:0;border-top:1px solid var(--line);font:13px/1.45 var(--body);cursor:pointer}
+.overview-row small,.issue-row small{display:block;color:var(--muted);margin-top:3px}
+.issue-row.bad{border-left:3px solid var(--bad);padding-left:10px}
+.issue-row.warn{border-left:3px solid var(--warn);padding-left:10px}
+.overview-row:hover,.issue-row:hover{color:var(--accent)}
+.overview-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:4px 0 10px}
+.fact-status{position:absolute;left:14px;top:124px;z-index:4;max-width:calc(100% - 28px);background:#102633;border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--muted);font:11px/1.4 var(--body);display:flex;align-items:center;gap:8px}
+.fact-status[data-state="stale"],.fact-status[data-state="error"]{border-color:var(--warn);color:var(--warn)}
+.fact-status button{color:var(--accent);font:inherit;background:transparent;border:0;cursor:pointer;padding:2px}
+.object-content .fact-banner{padding:9px 10px;border:1px solid var(--line);border-radius:7px;margin:0 0 12px;font-size:12px}
+.object-content .fact-banner.warn{border-color:var(--warn);color:var(--warn)}
+.object-content .object-links{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.object-content .object-links button{border:1px solid var(--line);border-radius:6px;background:#203d49;color:var(--accent);padding:7px 9px;font:11px var(--mono);cursor:pointer}
+.object-content .inspect-output{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.5 var(--mono);color:var(--term-fg);padding:10px;background:var(--term-bg);border-radius:7px}
+.object-content .section-label{margin-top:18px;font-weight:600}
+.empty-surface{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:2;width:min(360px,calc(100% - 40px));padding:18px;border:1px dashed var(--line);border-radius:12px;background:#102633;color:var(--muted);text-align:center;font:13px/1.6 var(--body);pointer-events:none}
 .tasks-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
 .task-count{font:600 11px var(--mono);background:#102633;border-radius:5px;padding:4px 6px}
 .tasks-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;display:flex;flex-direction:column}
@@ -470,7 +525,7 @@ body{background:var(--canvas)}
 .task-item p{font-size:12px;margin:8px 0 10px 28px}
 .task-targets{display:flex;gap:6px;flex-wrap:wrap;margin-left:28px}
 .task-targets button{font:500 11px var(--mono);cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:#203d49;color:var(--accent)}
-@media(max-width:760px){.tasks-toggle{top:auto;bottom:60px;right:12px}.tasks-panel{top:12px;max-height:calc(100% - 76px)}.object-card header{padding:14px 16px 10px}.object-tabs{margin-inline:16px}.object-content{padding-inline:16px}}
+@media(max-width:760px){.canvas-actions{top:auto;bottom:60px;right:12px;gap:5px}.canvas-actions .btn{padding-inline:9px;font-size:12px}.canvas-panel,.tasks-panel{top:12px;max-height:calc(100% - 126px)}.object-card header{padding:14px 16px 10px}.object-tabs{margin-inline:16px}.object-content{padding-inline:16px}.fact-status{top:124px;font-size:10px}.canvas-actions .task-count{padding:3px}}
 @media(prefers-reduced-motion:reduce){#canvasUi .info-card{filter:none}}
 </style>
 
@@ -518,6 +573,7 @@ body{background:var(--canvas)}
           <g id="lyrNodes"></g>
           <g id="lyrCards"></g>
           <g id="lyrL2" class="l2-scene"></g>
+          <g id="lyrL3" class="l3-scene"></g>
           <g id="lyrLabelLeads" aria-hidden="true"></g>
         </g>
         <g id="canvasUi" aria-label="Слои и сведения на схеме">
@@ -532,7 +588,29 @@ body{background:var(--canvas)}
       <div class="chip" id="chip" role="status" hidden></div>
       <div class="dhint" id="dhint" hidden></div>
       <aside class="details" id="details" aria-label="Сведения об узле" hidden></aside>
-      <button class="btn tasks-toggle" id="tasksToggle" type="button" aria-expanded="false" aria-controls="tasksPanel">Задания <span class="task-count" id="taskCount">0/4</span></button>
+      <div class="canvas-actions" id="canvasActions">
+        <button class="btn" id="overviewToggle" type="button" aria-expanded="false" aria-controls="overviewPanel">Обзор <span class="task-count" id="issueCount">0</span></button>
+        <button class="btn tasks-toggle" id="tasksToggle" type="button" aria-expanded="false" aria-controls="tasksPanel">Задания <span class="task-count" id="taskCount">0/4</span></button>
+        <button class="btn" id="demoToggle" type="button" aria-expanded="false" aria-controls="demoPanel">Режимы</button>
+      </div>
+      <div class="fact-status" id="factStatus" role="status"><span id="factStatusText"></span><button type="button" id="refreshFacts">Обновить</button></div>
+      <div class="empty-surface" id="emptySurface" hidden></div>
+      <aside class="canvas-panel" id="overviewPanel" aria-labelledby="overviewTitle" hidden>
+        <header><div><h2 id="overviewTitle">Обзор слоя</h2><p id="overviewLead"></p></div><button class="ib" type="button" id="overviewClose" aria-label="Закрыть обзор">×</button></header>
+        <div class="panel-body" id="overviewBody"></div>
+      </aside>
+      <aside class="canvas-panel" id="demoPanel" aria-labelledby="demoTitle" hidden>
+        <header><div><h2 id="demoTitle">Режимы прототипа</h2><p>Локальные примеры состояний рабочего интерфейса.</p></div><button class="ib" type="button" id="demoClose" aria-label="Закрыть режимы">×</button></header>
+        <div class="panel-body">
+          <label for="viewMode">Представление студента</label><select id="viewMode"><option value="live">Все сведения</option><option value="seen">Только увиденное в консоли</option><option value="fog">Исследование топологии</option></select>
+          <label for="sourceState">Состояние фактов</label><select id="sourceState"><option value="fresh">Свежий снимок</option><option value="stale">Снимок устарел</option><option value="error">Ошибка сбора у SW1</option><option value="none">Факты ещё не получены</option></select>
+          <label for="demoScenario">Конфигурация</label><select id="demoScenario"><option value="base">Исходная топология</option><option value="faults">Ошибки VLAN и адресации</option></select>
+          <label for="macState">MAC-таблица</label><select id="macState"><option value="learned">Пример выученных записей</option><option value="empty">Получена, но пуста</option><option value="missing">Не получена</option><option value="truncated">Получена частично</option></select>
+          <label class="check-label"><input id="teacherView" type="checkbox"> Посмотреть полную схему как преподаватель</label>
+          <p>Преподаватель видит полную схему. Маска раскрытия студента сохраняется отдельно.</p>
+          <button class="btn" id="resetExploration" type="button">Начать исследование заново</button>
+        </div>
+      </aside>
       <aside class="tasks-panel" id="tasksPanel" aria-labelledby="tasksTitle" hidden>
         <header><div><span class="kicker">ПРАКТИКА НА ТОПОЛОГИИ</span><h2 id="tasksTitle">Задания</h2><p>Учебный пример · отмечайте выполненные шаги сами.</p></div><button class="ib" id="tasksClose" type="button" aria-label="Закрыть задания">×</button></header>
         <div class="tasks-body" id="tasksBody"></div>
@@ -571,10 +649,10 @@ body{background:var(--canvas)}
       <div class="lvls">
         <div><b>Схема</b>Узлы, линки, статусы. Значок <code>&gt;_</code> — консоль открыта.</div>
         <div><b>Подписи</b>Порты на линках, точки состояния портов.</div>
-        <div><b>Адреса</b>IP на портах, router-id, соседи OSPF, превью консоли.</div>
+        <div><b>Адреса</b>Подсети, адреса интерфейсов и переходы к связанным объектам.</div>
         <div><b>Консоли</b>Подробное превью. На телефоне — вход в консоль.</div>
       </div>
-      <p class="dnote">Кнопки L1–L4 переключают факты. L2 перестраивает схему: каждый VLAN коммутатора становится отдельным узлом, а широковещательные домены выводятся из работающих портов и тегов. Одинаковые номера VLAN без физической связи остаются разными доменами. OSPF area относится к L3 и сама по себе не объединяет VLAN.</p>
+      <p class="dnote">Кнопки L1–L4 переключают факты. L2 перестраивает схему: каждый VLAN коммутатора становится отдельным узлом, а широковещательные домены выводятся из работающих портов и тегов. Одинаковые номера VLAN без физической связи остаются разными доменами. Обзор показывает объекты и проблемы текущего слоя. L4 оставлен для следующего этапа.</p>
       <div class="cols">
         <div><h3>Телефон</h3><dl>
           <dt>Удержать узел</dt><dd>Колесо действий. Не отпуская, ведите к действию и отпустите. Отпустили сразу — колесо остаётся, выберите действие тапом.</dd>
@@ -599,6 +677,7 @@ body{background:var(--canvas)}
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script src="student-ui-canvas-core.js"></script>
 <script>
 "use strict";
 /* Demo data: fixtures/ospf-multi-area.gns3, .facts.json and .live.json */
@@ -632,7 +711,7 @@ function buzz(){ try { if (navigator.vibrate) navigator.vibrate(12); } catch (e)
 const T = GNS3.topology;
 function cat(n){
   const s = n.symbol.toLowerCase();
-  if (LIVE.guests && LIVE.guests[n.node_id]) return "hypervisor";
+  if (LIVE.guests && LIVE.guests[n.id || n.node_id]) return "hypervisor";
   if (n.type === "cloud" || n.type === "nat") return "cloud";
   if (n.type === "ethernet_switch" || n.type === "ethernet_hub" || /switch|hub/.test(s)) return "switch";
   if (/router/.test(s)) return "router";
@@ -664,8 +743,7 @@ function ifaceAt(n, adapter, port){
 }
 const ipOnly = a => String(a).split("/")[0];
 function subtitle(n){
-  const f = n.facts; if (!f) return "";
-  if (f.router_id) return "RID " + f.router_id;
+  const f = canvasFacts(n); if (!f) return "";
   const i = (f.interfaces || []).find(x => x.ipv4 && x.ipv4.length);
   if (i) return i.ipv4[0];
   if (f.vlans) return "VLAN " + f.vlans.map(v => v.id).join(", ");
@@ -702,19 +780,23 @@ function sanitizeDrawing(src){
 const svg = $("svg"), vp = $("vp"), wrap = $("wrap"), stage = $("stage");
 const L = { draw: $("lyrDraw"), links: $("lyrLinks"), nodes: $("lyrNodes"), cards: $("lyrCards") };
 function renderDrawings(){
+  L.draw.textContent = "";
+  if (canvasState.effectiveMode === "fog") return;
   for (const d of T.drawings || []) {
     const g = sanitizeDrawing(d.svg); if (!g) continue;
     g.setAttribute("transform", `translate(${+d.x} ${+d.y})` + (d.rotation ? ` rotate(${+d.rotation})` : ""));
+    g.querySelectorAll("text").forEach(t => { t.textContent = t.textContent.replace("Area 0 · backbone", "Магистраль").replace("Area 1 · VLAN 10", "Сегмент · VLAN 10").replace("Area 2 · DMZ, VLAN 20", "DMZ · VLAN 20"); });
     L.draw.appendChild(g);
   }
 }
 function renderLinks(){
   L.links.textContent = "";
-  for (const l of links) {
+  for (const l of visibleLinks()) {
     const [a, b] = l.ends;
-    const ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
-    const down = l.down = !!((ia && ia.oper === "down") || (ib && ib.oper === "down"));
-    const g = el("g", { class: "link" + (l.suspend ? " suspended" : "") + (down ? " down" : "") + (selectedLink === l ? " sel" : ""),
+    const ia = canvasIfaceAt(a.node, a.adapter, a.port), ib = canvasIfaceAt(b.node, b.adapter, b.port);
+    const state = canvasLinkState(l);
+    const down = l.down = state.down;
+    const g = el("g", { class: "link" + (l.suspend ? " suspended" : "") + (down ? " down" : state.unknown ? " unknown" : "") + (selectedLink === l ? " sel" : ""),
       "data-id": l.id, tabindex: "0", role: "button", "aria-label": "Соединение " + l.name }, L.links);
     l.g = g;
     const sw = [ia, ib].find(i => i && i.switchport);
@@ -724,7 +806,7 @@ function renderLinks(){
     const duplex = el("g", { class: "duplex", "aria-hidden": "true" }, g);
     const lanes = [el("line", { class: "wire" }, duplex), el("line", { class: "wire" }, duplex)];
     const arrows = [el("path", { class: "duplex-arrow" }, duplex), el("path", { class: "duplex-arrow" }, duplex)];
-    el("title", {}, g).textContent = `${a.node.name} TX → ${b.node.name} RX; ${b.node.name} TX → ${a.node.name} RX. Схема направлений, не индикатор трафика.`;
+    el("title", {}, g).textContent = `${state.unknown ? "Состояние неизвестно. " : ""}${a.node.name} TX → ${b.node.name} RX; ${b.node.name} TX → ${a.node.name} RX. Схема направлений, не индикатор трафика.`;
     l.screenGeometry = { duplex, lanes, arrows, dots: [] };
     if (sw) el("text", { x: l.cx, y: l.cy - 8, class: "layer-vlan" }, g).textContent = sw.switchport.mode === "trunk" ? "TRUNK" : "VLAN " + sw.switchport.vlan;
     if (l.filters && Object.keys(l.filters).length) {
@@ -737,8 +819,10 @@ function renderLinks(){
     for (const [e, o, ifc] of [[a, b, ia], [b, a, ib]]) {
       const dx = o.node.cx - e.node.cx, dy = o.node.cy - e.node.cy, len = Math.hypot(dx, dy) || 1;
       const ux = dx / len, uy = dy / len;
-      l.screenGeometry.dots.push(el("circle", { cx: e.node.cx + ux * 31, cy: e.node.cy + uy * 31, r: 3.2, class: "pdot l1" + (ifc && ifc.oper === "down" ? " down" : "") }, g));
+      const portState = canvasPortState(e);
+      l.screenGeometry.dots.push(el("circle", { cx: e.node.cx + ux * 31, cy: e.node.cy + uy * 31, r: 3.2, class: "pdot l1" + (portState.down ? " down" : portState.unknown ? " unknown" : "") }, g));
       const d = Math.min(58, len * 0.36), px = e.node.cx + ux * d, py = e.node.cy + uy * d;
+      if (!canvasEndShown(e)) continue;
       const label = el("g", { class: "auto-label", "data-priority": 2 }, g);
       el("text", { x: px, y: py + 3, class: "plabel l1" }, label).textContent = e.label;
       const direction = Math.round(Math.atan2(uy, ux) / (Math.PI / 4) + 8) % 8;
@@ -748,7 +832,6 @@ function renderLinks(){
     }
   }
   if (selectedLink && selectedLink.g) L.links.appendChild(selectedLink.g);
-  if (l2Model) renderCanvasL2();
   updateLinkScreenGeometry();
   scheduleLabels();
 }
@@ -774,13 +857,14 @@ function updateLinkScreenGeometry(){
 function renderNodeName(g, n, y){
   const label = el("text", { y, class: "nname" }, g);
   el("tspan", { class: "sdot", "aria-hidden": "true" }, label).textContent = "● ";
-  el("tspan", {}, label).textContent = n.name;
+  el("tspan", {}, label).textContent = displayName(n);
 }
 function renderNodes(){
   L.nodes.textContent = "";
-  for (const n of nodes) {
-    const g = el("g", { class: "node st-" + n.status, transform: `translate(${n.cx} ${n.cy})`, "data-id": n.id, tabindex: "0", role: "button",
-      "aria-label": `${n.name}, ${CAT[n.cat].toLowerCase()}, ${STATUS[n.status]}` }, L.nodes);
+  for (const n of visibleNodes()) {
+    const silhouette = nodeState(n) === "silhouette";
+    const g = el("g", { class: "node st-" + (silhouette ? "unknown" : n.status) + (silhouette ? " silhouette" : "") + (canvasFacts(n)?.error ? " collection-error" : ""), transform: `translate(${n.cx} ${n.cy})`, "data-id": n.id, tabindex: "0", role: "button",
+      "aria-label": silhouette ? "Неисследованное устройство" : `${n.name}, ${CAT[n.cat].toLowerCase()}, ${STATUS[n.status]}` }, L.nodes);
     n.g = g;
     el("circle", { r: 31, class: "halo" }, g);
     el("use", { href: "#ico-" + n.cat, x: -22, y: -22, width: 44, height: 44, class: "ico" }, g);
@@ -788,16 +872,12 @@ function renderNodes(){
     renderNodeName(label, n, 25);
     const sub = subtitle(n);
     if (sub) el("text", { y: 25, dy: "1.9em", class: "nsub l2" }, label).textContent = sub;
-    const adj = n.facts && n.facts.adjacencies;
-    if (adj && adj.length) {
-      const full = adj.filter(x => x.state === "full").length;
-      el("text", { y: 25, dy: "3.6em", class: "nadj l2" + (full < adj.length ? " warn" : "") }, label).textContent = `OSPF ${full}/${adj.length} FULL`;
-    }
     const bd = el("g", { class: "cbadge", transform: "translate(-22 -21)" }, g);
     el("rect", { x: -10, y: -7.5, width: 20, height: 15, rx: 3.5 }, bd);
     el("text", { y: 3 }, bd).textContent = ">_";
     updateBadge(n);
   }
+  applyExplorationVisibility();
   scheduleLabels();
 }
 function setNodeStatus(n, st){
@@ -816,6 +896,7 @@ function applyView(){
   $("dots").setAttribute("patternTransform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
   svg.style.setProperty("--inv", (1 / view.k).toFixed(4));
   updateLinkScreenGeometry();
+  updateCanvasScreenGeometry();
   const nl = lodOf(view.k);
   if (nl !== lod) {
     lod = nl; svg.dataset.lod = nl;
@@ -830,8 +911,8 @@ function applyView(){
 const toScreen = (x, y) => ({ x: view.tx + view.k * x, y: view.ty + view.k * y });
 function bounds(){
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const n of nodes) { x0 = Math.min(x0, n.cx - 40); y0 = Math.min(y0, n.cy - 36); x1 = Math.max(x1, n.cx + 40); y1 = Math.max(y1, n.cy + 52); }
-  for (const d of T.drawings || []) {
+  for (const n of visibleNodes()) { x0 = Math.min(x0, n.cx - 40); y0 = Math.min(y0, n.cy - 36); x1 = Math.max(x1, n.cx + 40); y1 = Math.max(y1, n.cy + 52); }
+  for (const d of canvasState.effectiveMode === "fog" ? [] : T.drawings || []) {
     const w = +((d.svg.match(/width="(\d+)/) || [])[1] || 0), hh = +((d.svg.match(/height="(\d+)/) || [])[1] || 0);
     x0 = Math.min(x0, d.x); y0 = Math.min(y0, d.y); x1 = Math.max(x1, d.x + w); y1 = Math.max(y1, d.y + hh);
   }
@@ -869,7 +950,7 @@ function zoomToNode(n, k, anchorY){
 }
 function nodeNear(sx, sy, maxPx){
   let best = null, bd = maxPx;
-  for (const n of nodes) { const p = toScreen(n.cx, n.cy), d = Math.hypot(p.x - sx, p.y - sy); if (d < bd) { bd = d; best = n; } }
+  for (const n of visibleNodes()) { const p = toScreen(n.cx, n.cy), d = Math.hypot(p.x - sx, p.y - sy); if (d < bd) { bd = d; best = n; } }
   return best;
 }
 
@@ -973,6 +1054,8 @@ function onTap(e, g){
   const now = performance.now(), p = relPt(e);
   const dbl = lastTap && now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30;
   lastTap = dbl ? null : { t: now, x: p.x, y: p.y };
+  const subnet = g.target.closest && g.target.closest(".subnet-object");
+  if (subnet) { pinInsight(canvasState.subnets.find(s => s.key === subnet.dataset.subnet), "ports"); return; }
   const virtual = g.target.closest && g.target.closest(".l2-virtual");
   if (virtual) {
     const item = l2Model.virtuals.get(virtual.dataset.virtual);
@@ -1013,12 +1096,15 @@ function select(n){
   selected = n;
   const chip = $("chip");
   if (!n) { chip.hidden = true; return; }
-  n.g.classList.add("sel");
+  if (n.g) n.g.classList.add("sel");
   if (n.l2g) n.l2g.classList.add("sel");
-  chip.innerHTML = `<b>${esc(n.name)}</b> <span>· ${esc(CAT[n.cat].toLowerCase())} · ${esc(STATUS[n.status])} · ${mobile ? "удерживайте для действий" : "правый клик — действия"}</span>`;
+  chip.innerHTML = `<b>${esc(displayName(n))}</b> <span>${nodeState(n) === "silhouette" ? "· ещё не исследовано" : "· " + esc(CAT[n.cat].toLowerCase()) + " · " + esc(STATUS[n.status])}</span>`;
   chip.hidden = false; clearTimeout(chipT); chipT = setTimeout(() => { chip.hidden = true; }, 3800);
 }
 svg.addEventListener("keydown", e => {
+  if (e.target.closest && e.target.closest("#canvasUi")) return;
+  const subnet = e.target.closest && e.target.closest(".subnet-object");
+  if (subnet && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pinInsight(canvasState.subnets.find(s => s.key === subnet.dataset.subnet), "ports"); return; }
   const virtual = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-virtual");
   const segment = document.activeElement && document.activeElement.closest && document.activeElement.closest(".l2-path");
   if ((e.key === "Enter" || e.key === " ") && (virtual || segment)) {
@@ -1062,7 +1148,7 @@ function updateDiveCandidate(mid){
   const n = 44 * view.k >= DIVE_PX ? nodeNear(mid.x, mid.y, 44 * view.k) : null;
   diveCand = n && canConsole(n) ? n : null;
   const h = $("dhint");
-  if (diveCand && !(diving && active === diveCand.id)) { h.textContent = `Отпустите — консоль ${diveCand.name}`; h.hidden = false; }
+  if (diveCand && !(diving && active === diveCand.id)) { h.textContent = `Отпустите — консоль ${displayName(diveCand)}`; h.hidden = false; }
   else h.hidden = true;
 }
 function finishPinch(){
@@ -1077,33 +1163,15 @@ function finishPinch(){
 const radial = { el: $("radial"), node: null, tracking: false, pid: null, kind: null, items: [], hi: -1, at: null, moved: false };
 const R0 = 34, R1 = 108;
 function linkActions(l){
-  const a = [{ id: "linfo", label: "Сведения", full: "Сведения о соединении", icon: "info" },
-    { id: "lzoom", label: "Ближе", full: "Приблизить соединение", icon: "zoom" },
-    l.suspend ? { id: "resume", label: "Включить", full: "Возобновить соединение", icon: "play" }
-              : { id: "suspend", label: "Пауза", full: "Приостановить соединение", icon: "pause" }];
-  l.ends.forEach((e, i) => {
-    if (e.node.console === "none") return;
-    const why = !canConsole(e.node) ? (e.node.console !== "telnet" ? "VNC-консоль прототип не показывает" : `${e.node.name} ${STATUS[e.node.status]}`) : "";
-    a.push({ id: i ? "conb" : "cona", label: e.node.name, full: `Консоль ${e.node.name}`, icon: "term", off: !!why, why });
-  });
-  return a;
+  return [{ id: "linfo", label: "Сведения", full: "Сведения о соединении", icon: "info" },
+    { id: "lzoom", label: "Ближе", full: "Приблизить соединение", icon: "zoom" }];
 }
 function actionsFor(n){
   if (n.isLink) return linkActions(n);
-  const a = [], con = cons.get(n.id);
-  if (n.console !== "none") {
-    const why = n.console !== "telnet" ? "VNC-консоль прототип не показывает" : n.status !== "started" ? `${n.name} ${STATUS[n.status]}` : "";
-    a.push({ id: "console", label: "Консоль", full: con ? "Перейти к консоли" : "Открыть консоль", icon: "term", off: !!why, why });
-  }
-  a.push({ id: "info", label: "Сведения", full: "Сведения об узле", icon: "info" });
-  a.push({ id: "zoom", label: "Ближе", full: "Приблизить узел", icon: "zoom" });
-  if (!["nat", "cloud", "ethernet_switch", "ethernet_hub"].includes(n.type)) {
-    if (n.status === "started") {
-      a.push({ id: "reload", label: "Рестарт", full: "Перезагрузить узел", icon: "reload" });
-      a.push({ id: "stop", label: "Стоп", full: "Остановить узел", icon: "power", danger: true });
-    } else a.push({ id: "start", label: "Пуск", full: "Запустить узел", icon: "play" });
-  }
-  if (con) a.push({ id: "close", label: "Закрыть", full: "Закрыть консоль", icon: "close" });
+  const a = [{ id: "info", label: "Сведения", full: "Сведения об узле", icon: "info" },
+    { id: "zoom", label: "Ближе", full: "Приблизить узел", icon: "zoom" }];
+  if (n.console === "telnet") a.unshift({ id: "console", label: "Консоль", full: "Открыть консоль", icon: "term", off: canvasState.teacher || n.status !== "started", why: canvasState.teacher ? "Режим просмотра" : STATUS[n.status] });
+  if (cons.has(n.id)) a.push({ id: "close", label: "Закрыть", full: "Закрыть консоль", icon: "close" });
   return a;
 }
 function wedgePath(a0, a1){
@@ -1136,7 +1204,7 @@ function openRadial(n, at, pid, kind){
     g.addEventListener("pointerleave", () => { if (!radial.tracking) setHi(-1); });
   });
   el("circle", { cx: 118, cy: 118, r: R0 - 5, class: "hub" }, s);
-  el("text", { x: 118, y: 119, class: "hubt" }, s).textContent = n.isLink ? "линк" : n.name;
+  el("text", { x: 118, y: 119, class: "hubt" }, s).textContent = n.isLink ? "линк" : displayName(n);
   radial.cap = hel("div", "rcap", box); radial.cap.hidden = true;
   positionRadial();
   if (!radial.tracking) setTimeout(() => { const w = box.querySelector(".wedge:not(.off)"); if (w && kind === "key") { w.setAttribute("tabindex", "0"); } }, 0);
@@ -1222,27 +1290,7 @@ function setPower(n, st){
 }
 
 /* ---------------- details ---------------- */
-function showDetails(n){
-  return pinInsight(n, "ports");
-  selectLink(null); revealAbove(n.cx, n.cy);
-  const d = $("details"), f = n.facts || {};
-  const ifs = (f.interfaces || []).map(i => `<tr><td class="m">${esc(i.name)}</td><td class="m">${esc((i.ipv4 || []).join(" ") || (i.switchport ? (i.switchport.mode === "access" ? "VLAN " + i.switchport.vlan : "trunk") : "—"))}</td>`
-    + `<td class="${i.oper === "down" ? "dn" : ""}">${i.admin === "down" ? "выкл." : esc(i.oper || "—")}</td><td class="m">${i.ospf ? "area " + esc(i.ospf.area) : ""}</td></tr>`).join("");
-  const adj = (f.adjacencies || []).map(a => `<tr><td class="m">${esc(a.peer_router_id)}</td><td class="m">${esc(a.iface)}</td><td class="m">${esc(a.area)}</td><td>${esc(a.state)}</td></tr>`).join("");
-  const g = LIVE.guests && LIVE.guests[n.id];
-  const guests = g ? g.items.map(v => `<tr><td class="m">${esc(v.vmid)}</td><td>${esc(v.name)}</td><td class="m">${esc(v.type)}</td><td>${esc(v.status)}</td></tr>`).join("") : "";
-  d.innerHTML = `<div class="dh"><div><h2>${esc(n.name)}</h2><p class="dsub"><span>${esc(CAT[n.cat])}</span><span class="st ${esc(n.status)}">${esc(STATUS[n.status])}</span>`
-    + `${f.router_id ? `<span>RID ${esc(f.router_id)}</span>` : ""}</p></div><button class="ib" type="button" data-close aria-label="Закрыть">${ICON_X}</button></div>`
-    + (ifs ? `<p class="eyebrow">Интерфейсы</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Порт</th><th>Адрес</th><th>Сост.</th><th>OSPF</th></tr></thead><tbody>${ifs}</tbody></table></div>` : "")
-    + (adj ? `<p class="eyebrow">Соседи OSPF</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Router ID</th><th>Порт</th><th>Area</th><th>Сост.</th></tr></thead><tbody>${adj}</tbody></table></div>` : "")
-    + (guests ? `<p class="eyebrow">Гости Proxmox</p><div class="tblwrap"><table class="tbl"><thead><tr><th>ID</th><th>Имя</th><th>Тип</th><th>Сост.</th></tr></thead><tbody>${guests}</tbody></table></div>` : "")
-    + (!ifs && !adj && !guests ? `<p class="dnote">Нет данных об устройстве: узел ${esc(STATUS[n.status])}.</p>` : "")
-    + (canConsole(n) ? `<div class="dacts"><button class="btn" type="button" data-con>${cons.has(n.id) ? "Перейти к консоли" : "Открыть консоль"}</button></div>` : "");
-  delete d.dataset.link;
-  d.hidden = false;
-  d.querySelector("[data-close]").onclick = hideDetails;
-  const b = d.querySelector("[data-con]"); if (b) b.onclick = () => { hideDetails(); openConsole(n); };
-}
+function showDetails(n){ pinInsight(n, "ports"); }
 const FILTERS = {
   delay: v => `задержка ${v[0]} мс` + (v[1] ? ` ± ${v[1]} мс` : ""),
   packet_loss: v => `потеря ${v[0]} % пакетов`,
@@ -1261,36 +1309,7 @@ function revealAbove(x, y){
   const r = wrap.getBoundingClientRect(), p = toScreen(x, y), want = r.height * 0.24;
   if (Math.abs(p.y - want) > 30 || p.x < 20 || p.x > r.width - 20) animateTo({ k: view.k, tx: view.tx + (r.width / 2 - p.x), ty: view.ty + (want - p.y) }, 300);
 }
-function showLinkDetails(l){
-  return pinInsight(l, "ports");
-  selectLink(l); revealAbove(l.cx, l.cy);
-  const d = $("details"), [a, b] = l.ends, ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
-  const state = l.suspend ? ["suspended", "приостановлено"] : l.down ? ["stopped", "нет связи"] : ["started", "работает"];
-  let net = "", area = "";
-  if (ia && ib && ia.ipv4 && ib.ipv4) {
-    const [ipa, len] = ia.ipv4[0].split("/"), ipb = ipOnly(ib.ipv4[0]), m = maskOf(+len);
-    if (((ip2n(ipa) & m) >>> 0) === ((ip2n(ipb) & m) >>> 0)) net = `${n2ip((ip2n(ipa) & m) >>> 0)}/${len}`;
-  }
-  if (ia && ib && ia.ospf && ib.ospf) area = ia.ospf.area === ib.ospf.area ? ia.ospf.area : `${ia.ospf.area} / ${ib.ospf.area}`;
-  const why = l.suspend ? "Соединение приостановлено: кадры по нему не проходят." : l.down
-    ? `Порт выключен: ${[[a, ia], [b, ib]].filter(([, i]) => i && i.oper === "down").map(([e, i]) => `${e.node.name} ${e.label}${i.admin === "down" ? " (shutdown)" : ""}`).join(", ")}.` : "";
-  const row = (e, i) => `<tr><td><span class="st ${esc(e.node.status)}" title="${esc(STATUS[e.node.status])}"></span> ${esc(e.node.name)}</td><td class="m">${esc(e.label)}</td>`
-    + `<td class="m">${esc(endAddr(i))}</td><td class="${i && i.oper === "down" ? "dn" : ""}">${!i ? "—" : i.admin === "down" ? "выкл." : esc(i.oper || "—")}</td></tr>`;
-  const filters = Object.entries(l.filters || {}).map(([k, v]) => FILTERS[k] ? FILTERS[k](v) : k);
-  const btns = l.ends.filter(e => canConsole(e.node)).map(e => `<button class="btn" type="button" data-con="${esc(e.node.id)}">Консоль ${esc(e.node.name)}</button>`).join("");
-  d.innerHTML = `<div class="dh"><div><h2>${esc(a.node.name)} — ${esc(b.node.name)}</h2><p class="dsub"><span>Соединение · Ethernet</span><span class="st ${state[0]}">${state[1]}</span></p></div>`
-    + `<button class="ib" type="button" data-close aria-label="Закрыть">${ICON_X}</button></div>`
-    + (why ? `<p class="dnote">${esc(why)}</p>` : "")
-    + `<p class="eyebrow">Концы</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Узел</th><th>Порт</th><th>Адрес</th><th>Сост.</th></tr></thead><tbody>${row(a, ia)}${row(b, ib)}</tbody></table></div>`
-    + (net || area ? `<p class="eyebrow">Сеть</p><div class="tblwrap"><table class="tbl"><tbody>${net ? `<tr><td>Подсеть</td><td class="m">${esc(net)}</td></tr>` : ""}${area ? `<tr><td>OSPF area</td><td class="m">${esc(area)}</td></tr>` : ""}</tbody></table></div>` : "")
-    + (filters.length ? `<p class="eyebrow">Фильтры на линке</p><p class="dnote" style="margin-top:0">${filters.map(esc).join("<br>")}</p>` : "")
-    + `<div class="dacts">${btns}<button class="btn" type="button" data-susp>${l.suspend ? "Возобновить" : "Приостановить"}</button></div>`;
-  d.dataset.link = l.id;
-  d.hidden = false;
-  d.querySelector("[data-close]").onclick = hideDetails;
-  d.querySelector("[data-susp]").onclick = () => setSuspend(l, !l.suspend);
-  d.querySelectorAll("[data-con]").forEach(btn => btn.onclick = () => { hideDetails(); openConsole(byId.get(btn.dataset.con)); });
-}
+function showLinkDetails(l){ pinInsight(l, "ports"); }
 function hideDetails(){ $("details").hidden = true; delete $("details").dataset.link; selectLink(null); closeInsight(); }
 
 /* ---------------- device simulators (demo only: the plugin talks to the console gateway) ---------------- */
@@ -1416,6 +1435,7 @@ class Sim {
     this.hpos = this.hist.length;
     const out = cmd ? this.exec(cmd) : "";
     if (out === Sim.PENDING) return;
+    recordConsoleResult(this.n, this.kind, cmd, out || "");
     if (out) this.w(out.replace(/\n/g, "\r\n") + "\r\n");
     this.w(this.prompt());
   }
@@ -1608,7 +1628,6 @@ const PRE = "\x15\r\x1aenable\r";
 const SNIPS = [
   { l: "show ip int brief", s: PRE + "show ip interface brief\r", kind: "ios" },
   { l: "Поднять Gi0/1", s: PRE + "configure terminal\rinterface GigabitEthernet0/1\rip address 10.0.12.1 255.255.255.252\rno shutdown\rend\r", kind: "ios", only: "R1" },
-  { l: "OSPF area 0", s: PRE + "configure terminal\rrouter ospf 1\rrouter-id 1.1.1.1\rnetwork 10.0.12.0 0.0.0.3 area 0\rnetwork 1.1.1.1 0.0.0.0 area 0\rend\r", kind: "ios", only: "R1" },
   { l: "show ip ospf neighbor", s: PRE + "show ip ospf neighbor\r", kind: "ios" },
   { l: "ping 2.2.2.2", s: PRE + "ping 2.2.2.2\r", kind: "ios", only: "R1" },
   { l: "ping 1.1.1.1", s: PRE + "ping 1.1.1.1\r", kind: "ios", only: "R2" },
@@ -1651,7 +1670,7 @@ class Con {
       });
     });
   }
-  send(d){ this.sim.input(d); this.activity("in"); }
+  send(d){ if (canvasState.teacher) { toast("Режим просмотра: ввод недоступен"); return; } this.sim.input(d); this.activity("in"); }
   out(s){
     this.raw += s; if (this.raw.length > 200000) this.raw = this.raw.slice(-150000);
     if (this.term) this.term.write(s);
@@ -1737,9 +1756,11 @@ function updateBadge(n){
   n.g.classList.toggle("minimized", !!(c && c.min));
 }
 async function openConsole(n){
-  if (!n) return;
+  if (!n || nodeState(n) === "hidden") return;
+  if (canvasState.teacher) { toast("Преподаватель: просмотр сведений без ввода в консоль"); return; }
   if (n.console !== "telnet") { toast(n.console === "none" ? `У ${n.name} нет консоли` : "VNC-консоль прототип не показывает"); return; }
-  if (n.status !== "started") { toast(`${n.name} ${STATUS[n.status]}. Запустите его из колеса действий`); return; }
+  if (n.status !== "started") { toast(`${displayName(n)} ${STATUS[n.status]}. Консоль сейчас недоступна`); return; }
+  revealConsoleNode(n);
   if (fontsReady) await fontsReady;
   let c = cons.get(n.id);
   if (!c) { c = new Con(n); cons.set(n.id, c); c.sim.boot(); }
@@ -2036,7 +2057,7 @@ let faultDemo = null;
 
 // A wire has on-the-wire tags; a switch maps them to its own local VLAN ID.
 function l2Wire(end){
-  const n = end.node, i = ifaceAt(n, end.adapter, end.port), f = n.facts;
+  const n = end.node, i = canvasIfaceAt(n, end.adapter, end.port), f = canvasFacts(n);
   if (!i || !f) return null;
   const sp = i.switchport;
   if (sp && sp.mode === "access") return {
@@ -2078,12 +2099,12 @@ function deriveCanvasL2(){
     if (!switchVlans.has(id)) switchVlans.set(id, new Set());
     switchVlans.get(id).add(Number(vlan));
   };
-  nodes.forEach(n => (n.facts && n.facts.interfaces || []).forEach(i => {
+  visibleNodes().forEach(n => (canvasFacts(n)?.interfaces || []).forEach(i => {
     if (n.status === "started" && i.kind === "svi" && i.vlan != null && i.admin !== "down") {
       const v = `S|${n.id}|${Number(i.vlan)}`; addMember(v, n, i); noteSwitch(v);
     }
   }));
-  links.forEach(l => {
+  visibleLinks().forEach(l => {
     const [a, b] = l.ends, wa = l2Wire(a), wb = l2Wire(b);
     const active = !l.suspend && a.node.status === "started" && b.node.status === "started" &&
       [wa, wb].every(w => w && w.iface.admin !== "down" && w.iface.oper !== "down");
@@ -2099,7 +2120,7 @@ function deriveCanvasL2(){
       return;
     }
     const candidates = new Set([...wa.tags, ...wb.tags]);
-    if (wa.any && wb.any) [a.node, b.node].forEach(n => (n.facts && n.facts.interfaces || []).forEach(i => {
+    if (wa.any && wb.any) [a.node, b.node].forEach(n => (canvasFacts(n)?.interfaces || []).forEach(i => {
       if (i.switchport && i.switchport.vlan != null) candidates.add(Number(i.switchport.vlan));
       if (i.kind === "svi" && i.vlan != null) candidates.add(Number(i.vlan));
     }));
@@ -2132,8 +2153,8 @@ function deriveCanvasL2(){
       segments.push(s);
       if (!active) return;
       join(va, vb);
-      if (va.startsWith("E|")) addMember(va, a.node, (a.node.facts.interfaces || []).find(i => i.name === s.aname) || wa.iface);
-      if (vb.startsWith("E|")) addMember(vb, b.node, (b.node.facts.interfaces || []).find(i => i.name === s.bname) || wb.iface);
+      if (va.startsWith("E|")) addMember(va, a.node, (canvasFacts(a.node)?.interfaces || []).find(i => i.name === s.aname) || wa.iface);
+      if (vb.startsWith("E|")) addMember(vb, b.node, (canvasFacts(b.node)?.interfaces || []).find(i => i.name === s.bname) || wb.iface);
     });
   });
   const components = new Map();
@@ -2207,7 +2228,7 @@ function renderCanvasL2(){
     el("text", { x: mx, y: my - 7, class: "caption" }, caption).textContent = label;
     s.g = g;
   });
-  nodes.filter(n => n.cat !== "switch").forEach(n => {
+  visibleNodes().filter(n => n.cat !== "switch").forEach(n => {
     const g = el("g", { class: "node l2-endpoint st-" + n.status, transform: `translate(${n.cx} ${n.cy})`,
       "data-id": n.id, role: "button", tabindex: "0", "aria-label": `${n.name}, ${CAT[n.cat]}` }, devices);
     el("circle", { r: 31, class: "halo" }, g);
@@ -2229,6 +2250,7 @@ function renderCanvasL2(){
   });
   if (old && old.virtual) insight.pinned = l2Model.virtuals.get(old.id) || null;
   if (old && old.virtualLink) insight.pinned = l2Model.segments.find(s => s.id === old.id) || null;
+  applyExplorationVisibility();
   if (insight && insight.layer === "l2") renderCanvasCard();
   scheduleLabels();
 }
@@ -2265,8 +2287,8 @@ const insight = { layer: "l1", cardLayer: "l1", pinned: null, panel: "ports" };
 const layerHelp = {
   l1: "Физика · TX — передача, RX — приём",
   l2: "Каждый VLAN коммутатора — отдельный L2-узел",
-  l3: "Сеть · IP-адреса и соседства",
-  l4: "Транспорт · источник фактов пока пуст"
+  l3: "IP-подсети · адреса, участники и диагностика",
+  l4: "L4 · место для следующего уровня"
 };
 // The facts fixture has no forwarding database. These rows are an explicit UI example.
 const exampleMac = {
@@ -2286,10 +2308,10 @@ canvasUi.addEventListener("wheel", e => e.stopPropagation());
 function renderCanvasHud(){
   canvasHud.textContent = "";
   const w = Math.max(220, Math.min(370, wrap.clientWidth - 24)), x = 14;
-  el("rect", { x, y: 14, width: w, height: insight.layer === "l2" ? 188 : 100, rx: 17, class: "hud-bg" }, canvasHud);
+  el("rect", { x, y: 14, width: w, height: 100, rx: 17, class: "hud-bg" }, canvasHud);
   uiText(canvasHud, "hud-kicker", x + 15, 36, "ТОПОЛОГИЯ / ФАКТЫ");
   uiText(canvasHud, "hud-meta", x + w - 15, 36,
-    w < 340 ? `${nodes.length} / ${links.length}` : `${nodes.length} УЗЛОВ · ${links.length} ЛИНКОВ`).setAttribute("text-anchor", "end");
+    w < 340 ? `${visibleNodes().length} / ${visibleLinks().length}` : `${visibleNodes().length} УЗЛОВ · ${visibleLinks().length} ЛИНКОВ`).setAttribute("text-anchor", "end");
   const bw = (w - 38) / 4;
   ["l1", "l2", "l3", "l4"].forEach((layer, i) => {
     const b = el("g", { class: "layer-button" + (insight.layer === layer ? " active" : ""),
@@ -2301,45 +2323,24 @@ function renderCanvasHud(){
     b.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFactLayer(layer); } });
   });
   uiText(canvasHud, "hud-note", x + 15, 95, layerHelp[insight.layer]);
-  if (insight.layer === "l2") {
-    uiText(canvasHud, "hud-note", x + 15, 115, "Пунктирная рамка = один корпус, не L2-связь");
-    const vs = [...l2Model.virtuals.values()], tabW = (w - 36 - (vs.length - 1) * 4) / vs.length;
-    vs.forEach((v, i) => {
-      const tab = el("g", { class: "domain-jump", tabindex: "0", role: "button",
-        "aria-label": `Приблизить ${v.name}, домен ${v.domain ? v.domain.id : "неизвестен"}` }, canvasHud);
-      tab.style.setProperty("--vlan-color", l2Color(v.vlan));
-      const tx = x + 15 + i * (tabW + 4);
-      el("rect", { x: tx, y: 126, width: tabW, height: 27, rx: 7 }, tab);
-      uiText(tab, "", tx + tabW / 2, 139.5, `${v.orig.name}:${v.vlan}`);
-      tab.addEventListener("click", e => { e.stopPropagation(); zoomToNode(v, mobile ? 1.25 : Math.max(view.k, 1.4)); });
-      tab.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault(); zoomToNode(v, mobile ? 1.25 : Math.max(view.k, 1.4));
-      } });
-    });
-    const toggle = el("g", { class: "domain-jump", tabindex: "0", role: "button",
-      "aria-label": faultDemo ? "Вернуть исходную конфигурацию" : "Показать учебные ошибки транка",
-      "aria-pressed": String(!!faultDemo) }, canvasHud);
-    toggle.style.setProperty("--vlan-color", faultDemo ? "#ffad8e" : "#78b0bd");
-    el("rect", { x: x + 15, y: 162, width: w - 30, height: 27, rx: 7 }, toggle);
-    uiText(toggle, "", x + w / 2, 175.5, faultDemo ? "ДЕМО: ОШИБКИ · ВЕРНУТЬ ИСХОДНУЮ" : "ПОКАЗАТЬ УЧЕБНЫЕ ОШИБКИ ТРАНКА");
-    toggle.addEventListener("click", e => { e.stopPropagation(); toggleFaultDemo(); });
-    toggle.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFaultDemo(); } });
-  }
 }
+
 function setFactLayer(layer){
   const crossingL2 = layer !== insight.layer && (layer === "l2" || insight.layer === "l2");
   if (crossingL2) { closeInsight(); select(null); selectLink(null); }
   insight.layer = layer;
   svg.dataset.factlayer = layer;
   renderCanvasHud(); renderCanvasCard(); positionCanvasCard();
+  updateCanvasChrome(); renderOverview();
   scheduleLabels();
 }
 function pinInsight(item, panel){
   if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
   insight.pinned = item; insight.panel = panel;
-  insight.cardLayer = panel === "mac" || item.virtual || item.virtualLink ? "l2" : insight.layer === "l4" ? "l1" : insight.layer;
+  insight.cardLayer = item.subnet ? "l3" : item.domainObject || panel === "mac" || item.virtual || item.virtualLink ? "l2" : insight.layer === "l4" ? "l1" : insight.layer;
   closeTasks(false);
-  if (item.virtual || item.virtualLink) {
+  closeCanvasPanels();
+  if (item.virtual || item.virtualLink || item.subnet || item.domainObject) {
     select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
   } else if (item.isLink) selectLink(item); else select(item);
   $("chip").hidden = true;
@@ -2350,82 +2351,7 @@ function closeInsight(){
   insight.pinned = null; insight.cardShape = null; canvasCard.textContent = "";
   scheduleLabels();
 }
-function factCardData(item){
-  const layer = insight.cardLayer;
-  if (item.virtual && layer !== "l2") item = item.orig;
-  if (item.virtualLink && layer !== "l2") item = item.link;
-  if (item.virtual) {
-    if (insight.panel === "mac") {
-      const table = item.orig.facts && item.orig.facts.mac_table;
-      return { kind: table ? "L2 / ТАБЛИЦА КОММУТАЦИИ" : "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ",
-        title: item.orig.name, sub: `Выбран VLAN ${item.vlan}`,
-        heads: ["VLAN", "MAC", "ПОРТ"],
-        rows: table ? (table.entries || []).filter(e => Number(e.vlan) === item.vlan)
-          .map(e => [e.vlan, e.mac, e.iface]) : (exampleMac[item.orig.name] || []).filter(r => Number(r[0]) === item.vlan),
-        empty: table ? "В этом VLAN нет выученных MAC." : "Пример MAC-записей для VLAN не задан.",
-        foot: table ? table.truncated ? "Таблица неполная: коллектор прервал чтение." : "Выученные адреса из снимка фактов." :
-          "Учебные записи: в снимке фактов MAC-таблицы нет." };
-    }
-    const d = item.domain, people = d ? d.members : [];
-    return { kind: "L2 / ШИРОКОВЕЩАТЕЛЬНЫЙ ДОМЕН", title: item.name,
-      sub: d ? `${d.id} · VLAN ${d.vlans.join(" + ")} · ${people.length} участника` : "Нет активных участников",
-      heads: ["УЗЕЛ", "ИНТЕРФЕЙС", "IPV4"],
-      rows: people.map(m => [m.node.name, m.iface.name, (m.iface.ipv4 || []).join(" ") || "—"]),
-      empty: "Этот VLAN сейчас ни с кем не связан.",
-      foot: d && d.vlans.length > 1 ? "Внимание: разные VLAN склеены одним L2-доменом." :
-        "Связь рассчитана по тегам, портам и состоянию линков." };
-  }
-  if (item.virtualLink) {
-    const [a, b] = item.link.ends;
-    return { kind: "L2 / ЛОГИЧЕСКОЕ СОЕДИНЕНИЕ", title: `${a.node.name} ↔ ${b.node.name}`,
-      sub: item.mismatch ? "Ошибка native VLAN · домены объединены" : `${item.domain ? item.domain.id + " · " : ""}${item.vlan == null ? "без VLAN" : "VLAN " + item.vlan} · ${item.active ? "проходит" : "не проходит"}`,
-      heads: ["УЗЕЛ", "ИНТЕРФЕЙС", "ТЕГ"],
-      rows: [[a.node.name, item.aname, item.tag === "u" ? "без тега" : item.tag],
-        [b.node.name, item.bname, item.tag === "u" ? "без тега" : item.tag]],
-      foot: item.reason || (item.unknown ? "Нет фактов о втором конце; домен не установлен." :
-        item.active ? "Оба конца принимают этот кадр на проводе." : "Линк или один из портов не работает.") };
-  }
-  if (item.isLink) {
-    const [a, b] = item.ends, ia = ifaceAt(a.node, a.adapter, a.port), ib = ifaceAt(b.node, b.adapter, b.port);
-    const base = { kind: `${layer.toUpperCase()} / СОЕДИНЕНИЕ`, title: a.node.name + " ↔ " + b.node.name,
-      sub: item.suspend ? "Соединение приостановлено" : item.down ? "Нет связи" : "Соединение работает" };
-    if (layer === "l1") return { ...base, heads: ["УЗЕЛ", "ПОРТ", "СОСТОЯНИЕ"],
-      rows: [[a.node.name, a.label, ia ? ia.oper || "—" : "нет фактов"], [b.node.name, b.label, ib ? ib.oper || "—" : "нет фактов"]],
-      directions: [[`${a.node.name} ${a.label}`, `${b.node.name} ${b.label}`], [`${b.node.name} ${b.label}`, `${a.node.name} ${a.label}`]],
-      foot: item.suspend ? "Трафик по этому линку приостановлен." : Object.keys(item.filters).length ? "Фильтр: " + Object.keys(item.filters).join(", ") : "Нажмите на узел, чтобы открыть его сведения." };
-    if (layer === "l2") return { ...base, heads: ["УЗЕЛ", "ПОРТ", "РЕЖИМ"],
-      rows: [[a.node.name, a.label, endAddr(ia)], [b.node.name, b.label, endAddr(ib)]], foot: "VLAN взяты из фактов интерфейсов." };
-    if (layer === "l3") return { ...base, heads: ["УЗЕЛ", "ПОРТ", "IPV4"],
-      rows: [[a.node.name, a.label, ia && ia.ipv4 ? ia.ipv4.join(" ") : "—"],
-        [b.node.name, b.label, ib && ib.ipv4 ? ib.ipv4.join(" ") : "—"]], foot: "Маршруты в текущем снимке отсутствуют." };
-    return { ...base, heads: [], rows: [], empty: "Нет фактов L4 для этого соединения.", foot: "Нужен источник транспортной телеметрии." };
-  }
-  const f = item.facts || {}, ints = f.interfaces || [];
-  const base = { kind: `${layer.toUpperCase()} / ${CAT[item.cat].toUpperCase()}`, title: item.name,
-    sub: `${STATUS[item.status]} · ${ints.length} интерфейсов` };
-  if (insight.panel === "mac" && item.cat === "switch") {
-    const table = f.mac_table;
-    return { ...base, kind: table ? "L2 / ТАБЛИЦА КОММУТАЦИИ" : "ПРИМЕР / ТАБЛИЦА КОММУТАЦИИ",
-      heads: ["VLAN", "MAC", "ПОРТ"],
-      rows: table ? (table.entries || []).map(e => [e.vlan, e.mac, e.iface]) : exampleMac[item.name] || [],
-      empty: table ? "Коммутатор ещё не выучил MAC-адреса." : "Пример MAC-записей для этого узла не задан.",
-      foot: table ? table.truncated ? "Таблица неполная: коллектор прервал чтение." : "Выученные адреса из снимка фактов." :
-        "Учебные записи: в снимке фактов MAC-таблицы нет." };
-  }
-  if (layer === "l1") return { ...base, heads: ["ПОРТ", "АДМИН", "ЛИНК"],
-    rows: ints.filter(i => i.port).map(i => [i.name, i.admin || "—", i.oper || "—"]),
-    empty: "Нет данных о физических портах.", foot: "Состояния получены из снимка фактов." };
-  if (layer === "l2") return { ...base, heads: ["ПОРТ", "РЕЖИМ", "VLAN"],
-    rows: ints.filter(i => i.switchport || i.dot1q != null || i.vlan != null).map(i => [i.name,
-      i.switchport ? i.switchport.mode : i.dot1q != null ? "802.1Q" : "SVI",
-      i.switchport ? i.switchport.mode === "access" ? i.switchport.vlan : Array.isArray(i.switchport.allowed) ? i.switchport.allowed.join(", ") : "все" : i.dot1q == null ? i.vlan : i.dot1q]),
-    empty: "Для этого узла L2-фактов нет.", foot: "Показаны только известные VLAN и порты." };
-  if (layer === "l3") return { ...base, heads: ["ИНТЕРФЕЙС", "IPV4", "СОСТОЯНИЕ"],
-    rows: ints.filter(i => i.ipv4 && i.ipv4.length).map(i => [i.name, i.ipv4.join(" "), i.oper || "—"]),
-    empty: "IP-адресов в снимке нет.", foot: f.router_id ? `Router ID ${f.router_id} · маршруты не получены` : "Маршруты в снимке не представлены." };
-  return { ...base, heads: [], rows: [], empty: "Нет данных о TCP/UDP-сессиях и сервисах.",
-    foot: "L4 появится, когда источник фактов начнёт их отдавать." };
-}
+function factCardData(item){ return buildObjectCard(item); }
 function cardTable(heads, rows){
   return `<table><thead><tr>${heads.map(h => `<th scope="col">${esc(h)}</th>`).join("")}</tr></thead><tbody>`
     + rows.map(row => `<tr>${row.map(v => `<td${v === "down" ? ' class="down"' : ""}>${esc(v == null ? "—" : v)}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
@@ -2446,20 +2372,22 @@ function renderCanvasCard(){
   html.setAttribute("class", "object-card");
   html.setAttribute("aria-label", `Сведения: ${data.title}`);
   foreign.appendChild(html);
-  const device = item.virtual ? item.orig : item.isLink || item.virtualLink ? null : item;
+  const device = item.virtual ? item.orig : item.isLink || item.virtualLink || item.subnet || item.domainObject ? null : item;
   const switchMac = insight.cardLayer === "l2" && device && device.cat === "switch";
-  const adj = insight.cardLayer === "l3" && device && device.facts ? device.facts.adjacencies || [] : [];
+
   html.innerHTML = `<header><div><span class="kicker">${esc(data.kind)}</span><h2>${esc(data.title)}</h2><p>${esc(data.sub)}</p></div>`
     + `<button class="ib" type="button" data-close aria-label="Закрыть карточку">×</button></header>`
-    + `<div class="object-tabs" role="tablist" aria-label="Уровень фактов объекта">${["l1", "l2", "l3"].map(layer =>
+    + `<div class="object-tabs" role="tablist" aria-label="Уровень фактов объекта">${(item.subnet ? ["l3"] : item.domainObject ? ["l2"] : ["l1", "l2", "l3"]).map(layer =>
       `<button type="button" role="tab" id="object-tab-${layer}" data-layer="${layer}" aria-controls="object-facts" aria-selected="${insight.cardLayer === layer}" tabindex="${insight.cardLayer === layer ? 0 : -1}">${layer.toUpperCase()}</button>`).join("")}</div>`
     + `<div class="object-content" id="object-facts" role="tabpanel" aria-labelledby="object-tab-${insight.cardLayer}" tabindex="0">`
-    + (switchMac ? `<button class="btn mac-toggle" type="button" aria-pressed="${insight.panel === "mac"}">${insight.panel === "mac" ? "Показать порты и VLAN" : "Открыть MAC-таблицу"}</button>` : "")
+    + factBannerHTML(device)
+    + (switchMac && canvasGroupOpen(device, "l2") ? `<button class="btn mac-toggle" type="button" aria-pressed="${insight.panel === "mac"}">${insight.panel === "mac" ? "Показать порты и VLAN" : "Открыть MAC-таблицу"}</button>` : "")
     + (rows.length ? cardTable(data.heads, rows) : `<p class="card-empty">${esc(data.empty || "Нет данных для этого слоя.")}</p>`)
     + (data.directions ? `<h3>Два направления соединения</h3>${cardTable(["ПЕРЕДАЧА · TX", "ПРИЁМ · RX"], data.directions)}<p class="card-foot">Стрелки показывают направления. Данных об объёме и скорости трафика в снимке нет.</p>` : "")
-    + (adj.length ? `<h3>Соседи OSPF</h3>${cardTable(["ROUTER ID", "ПОРТ", "AREA", "СОСТОЯНИЕ"], adj.map(a => [a.peer_router_id, a.iface, a.area, a.state]))}` : "")
+    + renderObjectExtras(item, data)
     + `<p class="card-foot">${esc(data.foot || "")}</p></div>`;
   html.querySelector("[data-close]").onclick = () => { closeInsight(); select(null); selectLink(null); svg.focus(); };
+  bindObjectExtras(html, item);
   const tabs = [...html.querySelectorAll("[data-layer]")];
   const changeTab = layer => { insight.cardLayer = layer; insight.panel = "ports"; renderCanvasCard(); canvasCard.querySelector(`[data-layer="${layer}"]`).focus(); };
   tabs.forEach((tab, i) => {
@@ -2478,7 +2406,7 @@ function renderCanvasCard(){
   });
   insight.cardShape = { item, w, h, card, lead, anchor };
   positionCanvasCard();
-  if (hadFocus) canvasCard.querySelector(`[data-layer="${insight.cardLayer}"]`).focus();
+  if (hadFocus && document.activeElement === document.body) canvasCard.querySelector(`[data-layer="${insight.cardLayer}"]`).focus();
   scheduleLabels();
 }
 function positionCanvasCard(){
@@ -2487,7 +2415,7 @@ function positionCanvasCard(){
   const p = toScreen(item.cx, item.cy), ww = wrap.clientWidth, wh = wrap.clientHeight;
   const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : ww - c.w - 12;
   const x = clamp(rawX, 12, Math.max(12, ww - c.w - 12));
-  const hudBottom = insight.layer === "l2" ? 214 : 126;
+  const hudBottom = 174;
   const minY = ww < 760 ? 12 : x < 396 ? hudBottom : 66;
   const bottom = ww < 760 ? 112 : 12;
   const y = clamp(ww < 760 ? wh - c.h - bottom : p.y - 80, Math.min(minY, wh - c.h - bottom), Math.max(12, wh - c.h - bottom));
@@ -2507,8 +2435,8 @@ const demoTasks = [
     text: "Сопоставьте порты на схеме с интерфейсами маршрутизаторов. Проверьте admin и link на обоих концах соединений." },
   { id: "vlan", title: "Исследовать VLAN и транки", layer: "l2", targets: ["SW1", "SW2"],
     text: "Найдите access-порты, разрешённые VLAN транков и границы широковещательных доменов. Сравните их с MAC-таблицей." },
-  { id: "ospf", title: "Проверить адресацию и соседства OSPF", layer: "l3", targets: ["R1", "R2", "R3"],
-    text: "Сопоставьте адреса интерфейсов и Router ID. Проверьте соседей и состояние FULL в карточке L3 или консоли." },
+  { id: "ospf", title: "Проверить адресацию и подсети", layer: "l3", targets: ["R1", "R2", "R3"],
+    text: "Сопоставьте адреса и маски интерфейсов. Найдите подсети на L3, проверьте их участников и сообщения о конфликтах." },
   { id: "hosts", title: "Проверить связность хостов", layer: "l3", targets: ["PC1", "PC2", "PC3"],
     text: "Проверьте адрес и шлюз каждого хоста, затем выполните ping в консоли. Если хост недоступен, начните с его состояния и линка." }
 ];
@@ -2541,7 +2469,7 @@ function focusTaskTarget(task, name){
   canvasCard.querySelector(`[data-layer="${task.layer}"]`).focus();
 }
 function openTasks(){
-  closeInsight(); closeRadial(); select(null); selectLink(null);
+  closeInsight(); closeCanvasPanels(); closeRadial(); select(null); selectLink(null);
   const body = $("tasksBody"); body.textContent = "";
   const progress = hel("progress", "tasks-progress", body);
   progress.max = demoTasks.length; progress.setAttribute("aria-label", "Выполненные задания");
@@ -2556,7 +2484,7 @@ function openTasks(){
     };
     hel("p", "", row).textContent = task.text;
     const targets = hel("div", "task-targets", row);
-    task.targets.forEach(name => {
+    task.targets.filter(name => { const n = nodes.find(n => n.name === name); return n && ["open", "known"].includes(nodeState(n)); }).forEach(name => {
       const b = hel("button", "", targets); b.type = "button"; b.textContent = `${name} · ${task.layer.toUpperCase()}`;
       b.setAttribute("aria-label", `Показать ${name} для задания ${i + 1}`);
       b.onclick = () => focusTaskTarget(task, name);
@@ -2607,10 +2535,10 @@ function layoutLabels(){
     });
   });
   $("lyrLabelLeads").textContent = "";
-  vp.querySelectorAll(".node .ico,.l2-virtual > rect,#lyrDraw text,.card").forEach(e => {
+  vp.querySelectorAll(".node .ico,.l2-virtual > rect,.subnet-object rect,#lyrDraw text,.card").forEach(e => {
     if (visible(e)) { const r = box(e); if (r.w && r.h) occupied.push(r); }
   });
-  [canvasHud, canvasCard.querySelector("foreignObject"), $("tasksToggle"), !$("tasksPanel").hidden && $("tasksPanel"), wrap.querySelector(".zoom")].forEach(e => {
+  [canvasHud, canvasCard.querySelector("foreignObject"), $("canvasActions"), $("factStatus"), ...["tasksPanel", "overviewPanel", "demoPanel"].filter(id => !$(id).hidden).map($), wrap.querySelector(".zoom")].forEach(e => {
     if (e) { const r = box(e); if (r.w && r.h) occupied.push(r); }
   });
   const measured = labels.map(g => {
@@ -2644,10 +2572,13 @@ function layoutLabels(){
   });
 }
 
+</script>
+<script src="student-ui-canvas-workbench.js"></script>
+<script>
 /* ---------------- start ---------------- */
-$("labTitle").textContent = GNS3.name;
-renderDrawings(); renderLinks(); renderNodes(); renderCanvasL2();
-renderCanvasHud(); setFactLayer(insight.layer);
+$("labTitle").textContent = "Лаба 4 · VLAN и IP-подсети";
+initializeCanvasState();
+refreshPrototypeScene();
 fontsReady = document.fonts ? Promise.race([document.fonts.load('14px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve();
 layout();
 fontsReady.then(scheduleLabels);

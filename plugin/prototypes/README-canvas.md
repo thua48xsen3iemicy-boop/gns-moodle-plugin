@@ -1,0 +1,42 @@
+# Student canvas prototype
+
+Open `student-ui-canvas.html` together with its two sibling JavaScript files.
+For a local HTTP preview, run from `plugin/`:
+
+```sh
+python3 -m http.server 18765 --bind 127.0.0.1
+```
+
+Visit `http://127.0.0.1:18765/prototypes/student-ui-canvas.html`.
+The topology, collection states, console output and assignments are local examples.
+There is no Moodle or manager connection. xterm and fonts use the existing CDN links;
+the inspection-command buttons also work without xterm.
+
+The canvas has L1/L2/L3 and a reserved L4 tab. OSPF has no canvas view in this iteration.
+Use **Обзор** for the layer's objects and findings, **Задания** for the local checklist,
+and **Режимы** for fresh/stale/missing/failed collection, VLAN/IP faults, MAC table
+states, the student `live`/`seen`/`fog` views and the teacher preview.
+In exploration mode, inspect the initial silhouette and run an inspection command
+from its card or its simulated console. The local discovery mask survives reloads.
+
+`student-ui-canvas-workbench.js` adapts the canvas to the production data models.
+`student-ui-canvas-core.js` is generated from the plugin's **unchanged** pure modules
+`model.js`, `facts.js`, `consolefacts.js` and `reveal.js`. It preserves their licenses
+and avoids a separate implementation of subnet diagnostics or discovery rules.
+After changes to those modules, rebuild and check the snapshot:
+
+```sh
+python3 devtools/build_canvas_core.py
+python3 devtools/build_canvas_core.py --check
+```
+
+The browser regression check uses Python Playwright with Chromium. From `plugin/`:
+
+```sh
+python3 devtools/check_canvas_prototype.py
+```
+
+Set `CHROMIUM_BIN` to override `/usr/bin/chromium`. The check serves the files on a
+temporary local port and blocks external resources. It checks shared-model subnet
+diagnostics, navigation, masks, console-derived facts, collection and MAC states,
+teacher preview, reserved L4, responsive cards and fixed-size link markers.
