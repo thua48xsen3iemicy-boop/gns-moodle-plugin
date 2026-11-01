@@ -121,6 +121,20 @@ final class authoring_test extends \advanced_testcase {
         $this->assertTrue($result['capture']['retryable']);
     }
 
+    /** An image without resource ranges (VPCS) reaches the browser as nulls, not as a response error. */
+    public function test_images_without_resource_ranges_pass_response_validation(): void {
+        $vpcs = ['id' => 'vpcs', 'title' => 'VPCS', 'kind' => 'vpcs', 'category' => 'host',
+            'symbol' => ':/symbols/vpcs_guest.svg', 'console_type' => 'telnet', 'ram_mb' => null, 'cpus' => null,
+            'adapters' => null, 'port_name' => 'Ethernet{port}', 'ports_per_adapter' => 1, 'preconfig' => true,
+            'capture' => false];
+        $this->manager->on('GET', '/api/v1/images', 200, ['images' => [$vpcs, fake_manager::image()]]);
+        $result = external_api::clean_returnvalue(authoring::execute_returns(),
+            authoring::execute($this->labid, 'images'));
+        $this->assertSame(['vpcs', 'cisco-iou-l3'], array_column($result['images'], 'id'));
+        $this->assertNull($result['images'][0]['ram_mb']);
+        $this->assertNull($result['images'][1]['cpus']);
+    }
+
     /** Force is an explicit, server-validated capture parameter. */
     public function test_explicit_force_is_forwarded_to_manager(): void {
         $session = fake_manager::session('running');
