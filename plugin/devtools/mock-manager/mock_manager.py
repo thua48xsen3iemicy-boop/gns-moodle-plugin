@@ -1213,6 +1213,12 @@ async def slot_console(request):
                     cmd, line = line.strip(), ""
                     if cmd == "poweroff":
                         m.stopped_nodes.add(node_id)
+                        for session in m.sessions:
+                            if session.status() == 'running' and any(
+                                n['node_id'] == node_id for n in m.labs[session.key]['doc']['topology']['nodes']
+                            ):
+                                session.fail = {'code': 'SLOT_LAB_FAILED', 'retryable': True,
+                                                'message': 'Required node stopped or missing'}
                         await ws.close()
                         return ws
                     if cmd == "reload":
