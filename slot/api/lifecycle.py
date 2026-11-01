@@ -257,6 +257,8 @@ class Lifecycle:
                 f"Invalid lifecycle transition: {lab.get('state')} -> {state}"
             )
         lab.update(state=state, stage=stage, **values)
+        if state in ("DEPLOYING", "STOPPED"):
+            lab["shutdown_nodes"] = []
         self.save("lab", lab["project_id"], lab)
         if state != "READY" and hasattr(self, "l1"):
             self.l1.reset()
@@ -428,6 +430,8 @@ class Lifecycle:
         previous_state = lab.get("state", "FAILED")
         lab["generation"] = lab.get("generation", 0) + 1
         lab.update(state=next_state, stage=action, error=None, updated_at=time.time())
+        if next_state == "DEPLOYING":
+            lab["shutdown_nodes"] = []
         op = {
             "operation_id": str(uuid4()),
             "project_id": pid,
@@ -480,6 +484,7 @@ class Lifecycle:
         lab = self.get("lab", pid)
         if not lab or lab["state"] != "READY":
             raise HTTPException(409, {"code": "INVALID_TRANSITION", "message": "Shutdown requires a READY laboratory"})
+        lab["shutdown_nodes"] = sorted(set(lab.get("shutdown_nodes", [])) - {node_id})
         lab["generation"] = lab.get("generation", 0) + 1
         self.save("lab", pid, lab)  # Invalidate a monitor snapshot taken before admission.
         op = {"operation_id": str(uuid4()), "project_id": pid, "node_id": node_id,
@@ -527,6 +532,8 @@ class Lifecycle:
             lab = self.get("lab", pid)
             if lab:
                 lab["generation"] = lab.get("generation", 0) + 1
+                if op["status"] == "SUCCEEDED":
+                    lab["shutdown_nodes"] = sorted(set(lab.get("shutdown_nodes", [])) | {node_id})
                 if node:
                     lab["nodes"] = [node if n.get("node_id") == node_id else n for n in lab.get("nodes", [])]
                 self.save("lab", pid, lab)
@@ -815,14 +822,18 @@ class Lifecycle:
                     nodes = uplink.visible_nodes(
                         lab["ticket"], await self.api("GET", f"projects/{lab['project_id']}/nodes")
                     )
+                    shutdown_nodes = set(lab.get("shutdown_nodes", []))
                     if {n["name"] for n in nodes} != {
                         n["name"] for n in lab["ticket"]["nodes"]
-                    } or any(n.get("status") != "started" and n.get("node_type") != "qemu" for n in nodes):
+                    } or any(n.get("status") != "started" and not (
+                        n.get("node_type") == "qemu" and n.get("status") == "stopped"
+                        and n["node_id"] in shutdown_nodes
+                    ) for n in nodes):
                         raise RuntimeError("Required node stopped or missing")
                     specs = {s["name"]: s for s in lab["ticket"]["nodes"]}
                     for node in nodes:
-                        if node.get("node_type") == "qemu" and node.get("status") != "started":
-                            continue  # A guest may power itself off; its disk remains usable.
+                        if node.get("status") == "stopped":
+                            continue  # Only a successful shutdown operation permits this state.
                         await self.provision(lab, node, specs[node["name"]], False)
                     # A request may have started an operation while checks were awaiting IO.
                     current = self.get("lab", lab["project_id"])
@@ -830,6 +841,9 @@ class Lifecycle:
                         "generation"
                     ) == lab.get("generation"):
                         lab["nodes"] = nodes
+                        lab["shutdown_nodes"] = sorted(shutdown_nodes - {
+                            n["node_id"] for n in nodes if n.get("status") == "started"
+                        })
                         self.save("lab", lab["project_id"], lab)
                 except Exception as exc:  # noqa: BLE001 - persist failures at the background-task boundary.
                     current = self.get("lab", lab["project_id"])

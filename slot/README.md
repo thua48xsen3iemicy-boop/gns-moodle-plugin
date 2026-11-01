@@ -1,4 +1,4 @@
-# Lab Slot — 0.14.0
+# Lab Slot — 0.14.1
 
 **Новый обязательный протокол:** до изменяющих запросов менеджер вызывает
 `POST /v1/fence` с `{epoch,generation}`; команды содержат `X-Lab-Epoch` и
@@ -758,5 +758,9 @@ its result is `stopped`, or `GUEST_AGENT_UNAVAILABLE` / `GUEST_SHUTDOWN_TIMEOUT`
 Only QEMU is accepted; an already stopped guest needs no QGA. No forced node stop
 is performed on failure. Concurrent node shutdowns retain command admission and fencing.
 QGA has no successful reply for guest-shutdown: the broker drops its channel after
-sending, and GNS3 status confirms powerdown. A powered-off QEMU guest remains part
-of a READY lab, without provisioning checks until it is started again.
+sending, and GNS3 status confirms powerdown. Only a QEMU guest recorded after a
+successful shutdown operation may remain stopped in a READY lab; provisioning
+skips that guest. Any other stopped node fails the lab, including manual poweroff
+in student and authoring sessions. The persisted lab record stores shutdown_nodes;
+DEPLOYING (deploy/resume), STOPPED, or observing the node started clears its permission.
+While a shutdown operation is RUNNING the monitor waits for its outcome.
