@@ -13,6 +13,7 @@ MAX_LAN = 15  # one /24 of 198.18.0.0/15 per port, 198.18.<N>.0/24
 LAN_PREFIX = 24
 RUN = "/run/lab-uplink"
 CREDENTIALS = "/etc/lab-uplink/pppoe.options"
+ROUTING = "/etc/lab-uplink/routing.json"
 RESOLV = "/etc/ppp/resolv.conf"  # written by pppd with usepeerdns
 
 
@@ -103,10 +104,27 @@ def dnsmasq(ports):
     return "\n".join(lines) + "\n"
 
 
-def nftables(ports):
-    """NAT into ppp0; forwarding only LAN -> ppp0 and replies; the node itself answers DHCP and DNS in the LAN."""
+def routed_ports(numbers):
+    """Validate an optional group of mutually reachable LAN adapter numbers."""
+    if not isinstance(numbers, (list, tuple)) or any(type(n) is not int or not 1 <= n <= MAX_LAN for n in numbers):
+        raise ValueError(f"Routed LAN ports must be integer adapter numbers from 1 to {MAX_LAN}")
+    if len(numbers) != len(set(numbers)) or len(numbers) == 1:
+        raise ValueError("Select at least two distinct routed LAN ports, or none for isolation")
+    return sorted(numbers)
+
+
+def nftables(ports, routed_lan_ports=()):
+    """NAT into ppp0; optionally route between selected LANs without NAT."""
     _, lan = split(ports)
+    selected = routed_ports(routed_lan_ports)
+    if selected and selected[-1] > len(lan):
+        raise ValueError("A routed LAN port is missing: increase the node's Ethernet adapter count")
     names = ", ".join(f'"{p.name}"' for p in lan) or '"none"'  # an empty set literal is not valid nft
+    routing_rule = ""
+    if selected:
+        for number in selected:
+            destinations = ", ".join(f'"{lan[n - 1].name}"' for n in selected if n != number)
+            routing_rule += f'\t\tiifname "{lan[number - 1].name}" oifname {{ {destinations} }} accept\n'
     return f"""# Generated at boot by lab-uplink-setup
 flush ruleset
 table inet lab_uplink {{
@@ -127,7 +145,7 @@ table inet lab_uplink {{
 		iifname "{PPP}" tcp flags syn tcp option maxseg size set rt mtu
 		ct state established,related accept
 		iifname @lan oifname "{PPP}" accept
-	}}
+{routing_rule}	}}
 	chain output {{
 		type filter hook output priority 0; policy accept;
 	}}

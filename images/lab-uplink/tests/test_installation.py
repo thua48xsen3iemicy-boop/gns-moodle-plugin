@@ -1,6 +1,7 @@
 """Install into a temporary root; never invoke the real systemctl."""
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,22 @@ def test_prepare_installs_files_and_writes_private_credentials(tmp_path):
 def test_prepare_needs_credentials(tmp_path):
     _, result = prepare(tmp_path)
     assert result.returncode != 0 and "--pppoe-user" in result.stderr
+
+
+@pytest.mark.parametrize("selected", [[], ["--routed-lan-ports", "2", "1"]])
+def test_prepare_persists_routing_policy(tmp_path, selected):
+    root, result = prepare(tmp_path, "--pppoe-user", "lab", "--pppoe-password", "example", *selected)
+    assert result.returncode == 0, result.stderr
+    policy = root / "etc/lab-uplink/routing.json"
+    assert json.loads(policy.read_text()) == {"routed_lan_ports": [1, 2] if selected else []}
+    assert policy.stat().st_mode & 0o777 == 0o600
+
+
+def test_prepare_invalid_routing_does_not_install_files(tmp_path):
+    root, result = prepare(tmp_path, "--pppoe-user", "lab", "--pppoe-password", "example",
+                           "--routed-lan-ports", "0", "2")
+    assert result.returncode != 0
+    assert not root.exists()
 
 
 def test_prepare_refuses_a_multiline_password(tmp_path):

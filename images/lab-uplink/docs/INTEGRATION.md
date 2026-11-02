@@ -9,3 +9,7 @@ This image is an independent component; it changes no Slot, Manager or Plugin co
   offer the `uplink` feature (CONTRACTS 7).
 * Install: `install/lab-uplink-filter` keeps slots from seeing each other in the shared VLAN.
 * Nothing in the guest is queried by the slot: no collector reads this node.
+* Optional LAN routing is an image-local build setting (`--routed-lan-ports`), persisted in
+  `/etc/lab-uplink/routing.json`. Slot and Manager do not inject this policy. Use a separate image
+  variant for each policy and provide all selected adapters. Adapter 0 remains the PPPoE port;
+  routing between selected LAN adapters does not traverse the BRAS and does not use NAT.
