@@ -336,9 +336,9 @@ body{background:var(--canvas)}
 .link.sel .duplex-arrow,.link:focus-visible .duplex-arrow{stroke:var(--accent)}
 .link.down .duplex-arrow{stroke:var(--bad)}
 .link.suspended .duplex-arrow{opacity:.5}
-.port-direction{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:#9ac8d2;text-anchor:middle;
-  paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-#svg[data-factlayer]:not([data-factlayer="l1"]) .port-direction{visibility:hidden;opacity:0}
+.duplex-label{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:#b5d9df;text-anchor:middle;dominant-baseline:middle;
+  paint-order:stroke;stroke:var(--canvas);stroke-width:2.5px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.duplex-label-lead{stroke:#6c929e;stroke-width:.7;fill:none;vector-effect:non-scaling-stroke}
 .node .halo{stroke-width:var(--node-ring,1px)}
 .node:hover .halo{stroke:var(--accent);fill:rgb(87 223 207 / .04)}
 .node .if{filter:drop-shadow(0 5px 9px rgb(0 0 0 / .3))}
@@ -821,10 +821,20 @@ function renderLinks(){
     el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "hit" }, g);
     el("line", { x1: a.node.cx, y1: a.node.cy, x2: b.node.cx, y2: b.node.cy, class: "wire physical-wire" }, g);
     const duplex = el("g", { class: "duplex", "aria-hidden": "true" }, g);
-    const lanes = [el("line", { class: "wire" }, duplex), el("line", { class: "wire" }, duplex)];
-    const arrows = [el("path", { class: "duplex-arrow" }, duplex), el("path", { class: "duplex-arrow" }, duplex)];
-    el("title", {}, g).textContent = `${state.unknown ? "Состояние неизвестно. " : ""}${a.node.name} TX → ${b.node.name} RX; ${b.node.name} TX → ${a.node.name} RX. Схема направлений, не индикатор трафика.`;
-    l.screenGeometry = { duplex, lanes, arrows, dots: [] };
+    const directions = linkDirections(l).map(d => {
+      const line = el("line", {class: "wire", "data-tx-node": d.from.node.id, "data-rx-node": d.to.node.id}, duplex);
+      const arrow = el("path", {class: "duplex-arrow"}, duplex);
+      const labels = [[d.from, "TX"], [d.to, "RX"]].filter(([end]) => canvasEndShown(end)).map(([end, role]) => {
+        const group = el("g", {class: "duplex-end", "data-node": end.node.id, "data-role": role}, duplex);
+        const lead = el("line", {class: "duplex-label-lead"}, group);
+        const text = el("text", {class: "duplex-label"}, group); text.textContent = role;
+        return {end, role, group, lead, text};
+      });
+      return {...d, line, arrow, labels};
+    });
+    el("title", {}, g).textContent = (state.unknown ? "Состояние неизвестно. " : "")
+      + directions.map(d => `${d.from.node.name} TX → ${d.to.node.name} RX`).join("; ") + ". Схема направлений, не индикатор трафика.";
+    l.screenGeometry = {duplex, directions, lanes: directions.map(d => d.line), arrows: directions.map(d => d.arrow), dots: []};
     if (sw) el("text", { x: l.cx, y: l.cy - 8, class: "layer-vlan" }, g).textContent = sw.switchport.mode === "trunk" ? "TRUNK" : "VLAN " + sw.switchport.vlan;
     if (l.filters && Object.keys(l.filters).length) {
       const f = el("g", { class: "l1" }, g);
@@ -842,9 +852,6 @@ function renderLinks(){
       if (!canvasEndShown(e)) continue;
       const label = el("g", { class: "auto-label", "data-priority": 2 }, g);
       el("text", { x: px, y: py + 3, class: "plabel l1" }, label).textContent = e.label;
-      const direction = Math.round(Math.atan2(uy, ux) / (Math.PI / 4) + 8) % 8;
-      const compass = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"];
-      el("text", { x: px, y: py + 3, dy: "1.5em", class: "port-direction l1" }, label).textContent = `TX ${compass[direction]} · RX ${compass[(direction + 4) % 8]}`;
       if (ifc && ifc.ipv4 && ifc.ipv4.length) el("text", { x: px, y: py + 3, dy: "1.35em", class: "pip l2" }, label).textContent = ifc.ipv4[0];
     }
   }
@@ -852,20 +859,38 @@ function renderLinks(){
   updateLinkScreenGeometry();
   scheduleLabels();
 }
+// Each rail has exactly one transmitter and the other endpoint's receiver.
+function linkDirections(l){
+  const [a, b] = l.ends;
+  return [{from: a, to: b, sign: 1}, {from: b, to: a, sign: -1}];
+}
 function updateLinkScreenGeometry(){
   const inv = 1 / view.k;
   links.forEach(l => {
     const geometry = l.screenGeometry; if (!geometry) return;
     const [a, b] = l.ends, dx = b.node.cx - a.node.cx, dy = b.node.cy - a.node.cy;
     const len = Math.hypot(dx, dy), half = Math.max(0, len / 2 - Math.min(31, len / 4));
-    geometry.duplex.setAttribute("transform", `translate(${l.cx} ${l.cy}) rotate(${Math.atan2(dy, dx) * 180 / Math.PI})`);
-    geometry.lanes.forEach((line, i) => {
-      const y = (i === 0 ? -3 : 3) * inv;
-      line.setAttribute("x1", -half); line.setAttribute("x2", half);
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    geometry.duplex.setAttribute("transform", `translate(${l.cx} ${l.cy}) rotate(${angle})`);
+    geometry.directions.forEach(({line, arrow, labels, sign}) => {
+      const y = -sign * 3 * inv;
+      line.setAttribute("x1", -sign * half); line.setAttribute("x2", sign * half);
       line.setAttribute("y1", y); line.setAttribute("y2", y);
-      const sign = i === 0 ? 1 : -1, x = sign * half * .35;
-      geometry.arrows[i].setAttribute("d", `M${x - sign * 5 * inv} ${y - 3 * inv} L${x} ${y} L${x - sign * 5 * inv} ${y + 3 * inv}`);
-      geometry.arrows[i].style.display = half * 2 * view.k < 28 ? "none" : "";
+      const x = sign * half * .35;
+      arrow.setAttribute("d", `M${x - sign * 5 * inv} ${y - 3 * inv} L${x} ${y} L${x - sign * 5 * inv} ${y + 3 * inv}`);
+      arrow.style.display = half * 2 * view.k < 28 ? "none" : "";
+      labels.forEach(label => {
+        const atA = label.end === a;
+        const inset = Math.min(24 * inv, Math.max(0, half - 12 * inv));
+        const lx = (atA ? -1 : 1) * (half - inset);
+        const ly = -sign * 13 * inv;
+        label.group.style.display = half * 2 * view.k >= 44 && (lodOf(view.k) >= 1 || selectedLink === l) ? "" : "none";
+        label.lead.setAttribute("x1", lx); label.lead.setAttribute("x2", lx);
+        label.lead.setAttribute("y1", y); label.lead.setAttribute("y2", ly + sign * 5 * inv);
+        label.text.setAttribute("x", lx); label.text.setAttribute("y", ly);
+        // Keep role labels readable without detaching them from their actual rail.
+        label.text.setAttribute("transform", `rotate(${-angle} ${lx} ${ly})`);
+      });
     });
     geometry.dots.forEach(dot => dot.setAttribute("r", 3.2 * inv));
     if (geometry.filter) geometry.filter.setAttribute("transform", `translate(${l.cx} ${l.cy}) scale(${inv})`);
@@ -2581,7 +2606,7 @@ function layoutLabels(){
     });
   });
   $("lyrLabelLeads").textContent = "";
-  vp.querySelectorAll(".node .ico,.l2-virtual > rect,.subnet-object rect,#lyrDraw text,.card").forEach(e => {
+  vp.querySelectorAll(".node .ico,.l2-virtual > rect,.subnet-object rect,#lyrDraw text,.card,.duplex-label").forEach(e => {
     if (visible(e)) { const r = box(e); if (r.w && r.h) occupied.push(r); }
   });
   [canvasHud, canvasCard.querySelector("foreignObject"), $("canvasActions"), $("factStatus"), ...["tasksPanel", "overviewPanel", "demoPanel"].filter(id => !$(id).hidden).map($), wrap.querySelector(".zoom")].forEach(e => {

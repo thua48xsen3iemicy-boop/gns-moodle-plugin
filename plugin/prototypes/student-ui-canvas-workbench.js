@@ -367,7 +367,7 @@ function buildObjectCard(item){
     const state = canvasLinkState(item), [a, b] = item.ends, ia = canvasIfaceAt(a.node, a.adapter, a.port), ib = canvasIfaceAt(b.node, b.adapter, b.port);
     const base = {kind: `${layer.toUpperCase()} / СОЕДИНЕНИЕ`, title: `${a.node.name} ↔ ${b.node.name}`, sub: state.unknown ? "Состояние неизвестно" : state.down ? "Соединение не работает" : "Соединение работает", related: item.ends.map(e => ({kind: "node", id: e.node.id, label: e.node.name})), foot: state.why.join("; ") || "Сведения получены из учебного снимка."};
     const port = e => canvasEndShown(e) ? e.label : "?";
-    if (layer === "l1") return {...base, heads: ["УЗЕЛ", "ПОРТ", "СОСТОЯНИЕ"], rows: [[a.node.name, port(a), ia?.oper || "неизвестно"], [b.node.name, port(b), ib?.oper || "неизвестно"]], directions: [[`${a.node.name} ${port(a)}`, `${b.node.name} ${port(b)}`], [`${b.node.name} ${port(b)}`, `${a.node.name} ${port(a)}`]]};
+    if (layer === "l1") return {...base, heads: ["УЗЕЛ", "ПОРТ", "СОСТОЯНИЕ"], rows: [[a.node.name, port(a), ia?.oper || "неизвестно"], [b.node.name, port(b), ib?.oper || "неизвестно"]], directions: linkDirections(item).map(d => [`${d.from.node.name} ${port(d.from)}`, `${d.to.node.name} ${port(d.to)}`])};
     if (layer === "l2") return {...base, heads: ["УЗЕЛ", "ПОРТ", "НАСТРОЙКА"], rows: [[a.node.name, port(a), switchportText(ia)], [b.node.name, port(b), switchportText(ib)]]};
     return {...base, heads: ["УЗЕЛ", "ПОРТ", "IPV4"], rows: [[a.node.name, port(a), (ia?.ipv4 || []).join(", ") || "—"], [b.node.name, port(b), (ib?.ipv4 || []).join(", ") || "—"]]};
   }

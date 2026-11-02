@@ -28,6 +28,14 @@ and its connection highlight in place. Click the background or press Escape to
 clear the selection. Node rings become finer at overview zoom and stay bounded
 when zooming in; subnet borders and highlighted edges use lightweight strokes.
 
+On L1, each physical connection has two directed rails: TX at one endpoint joins
+RX at the other, and the return rail joins the opposite TX/RX pair. Endpoint roles
+are attached to their own rail with short leaders. Their text stays horizontal
+on horizontal, vertical and diagonal links. Interface names use the collision
+layout around those fixed role labels. At overview zoom or on a short rail,
+role labels are suppressed rather than detached from their connection; the link
+card still lists both transmitter/receiver pairs.
+
 `student-ui-canvas-workbench.js` adapts the canvas to the production data models.
 `student-ui-canvas-core.js` is generated from the plugin's **unchanged** pure modules
 `model.js`, `facts.js`, `consolefacts.js` and `reveal.js`. It preserves their licenses

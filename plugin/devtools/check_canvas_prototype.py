@@ -18,6 +18,57 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
+def check_duplex_directions(page):
+    result = page.evaluate("""() => {
+      closeInsight(); setFactLayer('l1');
+      const link=links.find(l=>l.id==='l-02'), ends=link.ends;
+      const saved={cx:link.cx,cy:link.cy,view:{...view},points:ends.map(e=>({node:e.node,cx:e.node.cx,cy:e.node.cy}))};
+      const failures=[]; let cases=0;
+      const point=(element,x,y)=>new DOMPoint(x,y).matrixTransform(element.getScreenCTM());
+      const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+      try {
+        for(const reversed of [false,true]) for(const angle of [0,37,90,143,180,-37,-90,-143]) for(const zoom of [1,2.5]){
+          link.ends=reversed?[ends[1],ends[0]]:ends;
+          const [a,b]=link.ends, rad=angle*Math.PI/180;
+          a.node.cx=0;a.node.cy=0;b.node.cx=220*Math.cos(rad);b.node.cy=220*Math.sin(rad);
+          link.cx=(a.node.cx+b.node.cx)/2;link.cy=(a.node.cy+b.node.cy)/2;
+          Object.assign(view,{k:zoom,tx:wrap.clientWidth/2-zoom*link.cx,ty:wrap.clientHeight/2-zoom*link.cy});
+          renderLinks();applyView();cases++;
+          const key=`${angle}deg / ${zoom}x / reversed=${reversed}`;
+          link.screenGeometry.directions.forEach((d,index)=>{
+            const source=index===0?a:b, target=index===0?b:a, line=d.line;
+            const start=point(line,line.x1.baseVal.value,line.y1.baseVal.value), end=point(line,line.x2.baseVal.value,line.y2.baseVal.value);
+            const sourcePoint=toScreen(source.node.cx,source.node.cy), targetPoint=toScreen(target.node.cx,target.node.cy);
+            if(distance(start,sourcePoint)>=distance(start,targetPoint)||distance(end,targetPoint)>=distance(end,sourcePoint)) failures.push(key+': rail joins wrong endpoints');
+            if(line.dataset.txNode!==source.node.id||line.dataset.rxNode!==target.node.id) failures.push(key+': incorrect TX/RX endpoint mapping');
+            if(d.labels.length!==2||d.labels.filter(l=>l.text.textContent==='TX').length!==1||d.labels.filter(l=>l.text.textContent==='RX').length!==1) failures.push(key+': missing complementary rail labels');
+            const arrow=d.arrow, length=arrow.getTotalLength(), p0=arrow.getPointAtLength(0), p1=arrow.getPointAtLength(length), tip=arrow.getPointAtLength(length/2);
+            const tail=point(arrow,(p0.x+p1.x)/2,(p0.y+p1.y)/2), head=point(arrow,tip.x,tip.y);
+            if((head.x-tail.x)*(end.x-start.x)+(head.y-tail.y)*(end.y-start.y)<=0) failures.push(key+': arrow points toward TX');
+            const u={x:Math.cos(rad),y:Math.sin(rad)}, normal={x:-u.y,y:u.x}, origin=toScreen(link.cx,link.cy);
+            const railSide=(start.x-origin.x)*normal.x+(start.y-origin.y)*normal.y;
+            d.labels.forEach(label=>{
+              const text=label.text, matrix=text.getScreenCTM(), position=point(text,text.x.baseVal[0].value,text.y.baseVal[0].value);
+              const expected=label.role==='TX'?source:target;
+              const own=toScreen(expected.node.cx,expected.node.cy), other=label.role==='TX'?targetPoint:sourcePoint;
+              if(label.group.dataset.node!==expected.node.id||distance(position,own)>=distance(position,other)) failures.push(key+': label is near the wrong endpoint');
+              const labelSide=(position.x-origin.x)*normal.x+(position.y-origin.y)*normal.y;
+              if(labelSide*railSide<=0) failures.push(key+': label is attached to the opposite rail');
+              if(Math.abs(matrix.b)>.001||Math.abs(matrix.c)>.001||matrix.a<=0||matrix.d<=0) failures.push(key+': text is rotated or upside down');
+            });
+          });
+        }
+      } finally {
+        link.ends=ends;link.cx=saved.cx;link.cy=saved.cy;
+        saved.points.forEach(p=>{p.node.cx=p.cx;p.node.cy=p.cy});
+        Object.assign(view,saved.view);refreshPrototypeScene();applyView();
+      }
+      return {cases,failures};
+    }""")
+    assert result["cases"] == 32
+    assert not result["failures"], result["failures"]
+
+
 def check(page):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -196,8 +247,9 @@ def check(page):
     page.evaluate('closeInsight(); setFactLayer("l3"); pinInsight(canvasState.subnets[0],"ports"); hideInsight()')
     subnet_border = page.locator('.subnet-object.connection-primary rect')
     assert float(subnet_border.evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")) <= 1.5
+    check_duplex_directions(page)
     assert not errors, errors
-    print("Canvas prototype: connection/subnet selection, diagnostics/navigation, collection/MAC states, discovery persistence, console facts, teacher/seen views, L4, responsive cards and fixed markers passed")
+    print("Canvas prototype: TX/RX geometry (32 angle/zoom/endpoint-order cases), connection/subnet selection, diagnostics/navigation, collection/MAC states, discovery persistence, console facts, teacher/seen views, L4, responsive cards and fixed markers passed")
 
 
 if __name__ == "__main__":
