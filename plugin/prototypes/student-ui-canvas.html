@@ -99,7 +99,7 @@ button{font-family:inherit}
 .link:focus{outline:none}
 .hit{stroke:transparent;stroke-width:18;fill:none;pointer-events:stroke;vector-effect:non-scaling-stroke}
 .link.down .wire{stroke:var(--bad);stroke-dasharray:5 5}
-.link.sel .wire,.link:focus-visible .wire{stroke:var(--accent);stroke-width:3.5}
+.link.sel .wire,.link:focus-visible .wire{stroke:var(--accent);stroke-width:2.2}
 .link.sel.down .wire{stroke:var(--bad)}
 .link.sel .l1,.link.sel .l2{opacity:1;visibility:visible}
 .link.sel .plabel,.link.sel .pip{fill:var(--fg);font-weight:600}
@@ -113,8 +113,8 @@ button{font-family:inherit}
 .pip{font:500 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .node{cursor:pointer;-webkit-touch-callout:none}
 .node:focus{outline:none}
-.halo{fill:transparent;stroke:transparent;stroke-width:2}
-.node.sel .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 12%,transparent)}
+.halo{fill:transparent;stroke:transparent;stroke-width:var(--node-ring,1px);vector-effect:non-scaling-stroke}
+.node.sel .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 7%,transparent)}
 .node:focus-visible .halo{stroke:var(--accent);stroke-dasharray:3 3}
 .if{fill:var(--ico)}
 .ig{fill:none;stroke:var(--ico-glyph);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
@@ -325,12 +325,13 @@ body{background:var(--canvas)}
 .bar .seg button[aria-pressed="true"]{background:#295c62;color:#d9fff7}
 .wrap{background:radial-gradient(ellipse at 46% 40%,#193341 0%,#10212d 58%,#0d1c27 100%)}
 .dots{fill:#315260;opacity:.55}
+.drawing rect,.drawing ellipse,.drawing circle,.drawing line{stroke-width:1;vector-effect:non-scaling-stroke}
 .wire{stroke:#557e8e;stroke-width:2.3}
 .duplex{display:none;pointer-events:none}
 [data-factlayer="l1"] .duplex{display:inline}
 [data-factlayer="l1"] .physical-wire{display:none}
 .duplex .wire{stroke-width:1.4}
-.link.sel .duplex .wire,.link:focus-visible .duplex .wire{stroke-width:2}
+.link.sel .duplex .wire,.link:focus-visible .duplex .wire{stroke-width:1.6}
 .duplex-arrow{fill:none;stroke:#9ac8d2;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .link.sel .duplex-arrow,.link:focus-visible .duplex-arrow{stroke:var(--accent)}
 .link.down .duplex-arrow{stroke:var(--bad)}
@@ -338,8 +339,8 @@ body{background:var(--canvas)}
 .port-direction{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:#9ac8d2;text-anchor:middle;
   paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 #svg[data-factlayer]:not([data-factlayer="l1"]) .port-direction{visibility:hidden;opacity:0}
-.node .halo{stroke-width:2.3}
-.node:hover .halo{stroke:var(--accent);fill:rgb(87 223 207 / .08)}
+.node .halo{stroke-width:var(--node-ring,1px)}
+.node:hover .halo{stroke:var(--accent);fill:rgb(87 223 207 / .04)}
 .node .if{filter:drop-shadow(0 5px 9px rgb(0 0 0 / .3))}
 .nname{letter-spacing:.03em}
 #svg[data-factlayer="l1"] .pip,[data-factlayer="l1"] .nsub,[data-factlayer="l1"] .nadj,
@@ -360,30 +361,30 @@ body{background:var(--canvas)}
 [data-factlayer="l3"] #lyrLinks{opacity:.18;pointer-events:none}
 [data-factlayer="l3"] #lyrLinks .auto-label,[data-factlayer="l3"] #lyrLinks .pdot{display:none}
 [data-factlayer="l3"] .l3-scene{display:inline}
-.subnet-edge{stroke:#547c90;stroke-width:1.5;vector-effect:non-scaling-stroke;fill:none}
+.subnet-edge{stroke:#547c90;stroke-width:1.1;vector-effect:non-scaling-stroke;fill:none}
 .subnet-edge.down{stroke:var(--bad);stroke-dasharray:4 5}
 .subnet-object{cursor:pointer}
-.subnet-object rect{fill:#193e50;stroke:#73c7ed;stroke-width:1.4;vector-effect:non-scaling-stroke}
+.subnet-object rect{fill:#193e50;stroke:#73c7ed;stroke-width:1;vector-effect:non-scaling-stroke}
 .subnet-object.warn rect{stroke:var(--warn)}
-.subnet-object.sel rect,.subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
+.subnet-object.sel rect,.subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:1.4}
 .subnet-object text{fill:#e3f7fc;font:500 11px var(--mono);text-anchor:middle;dominant-baseline:middle}
 .subnet-object:focus{outline:none}
 #vp .connection-dim{opacity:.2}
 #svg[data-connection-focus="true"] #lyrDraw{opacity:.35}
 #svg[data-connection-focus="true"] #lyrLabelLeads{opacity:.35}
-#vp .node.connection-related .halo{stroke:var(--accent);fill:rgb(87 223 207 / .06);stroke-width:1.6;vector-effect:non-scaling-stroke}
-#vp .node.connection-primary .halo{stroke-width:3;fill:rgb(87 223 207 / .16)}
+#vp .node.connection-related .halo{stroke:var(--accent);fill:rgb(87 223 207 / .03);stroke-width:var(--node-ring,1px)}
+#vp .node.connection-primary .halo{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:rgb(87 223 207 / .08)}
 #vp .link.connection-related:not(.down):not(.unknown) .wire{stroke:var(--accent)}
-#vp .link.connection-related .wire{stroke-width:3.2}
-#vp .link.connection-related .duplex .wire{stroke-width:2}
+#vp .link.connection-related .wire{stroke-width:2.2}
+#vp .link.connection-related .duplex .wire{stroke-width:1.6}
 #vp .link.connection-related:not(.down):not(.unknown) .duplex-arrow{stroke:var(--accent)}
-#vp .l2-path.connection-related .stroke{stroke-width:3.5}
-#vp .l2-virtual.connection-related > rect{stroke-width:2.5;vector-effect:non-scaling-stroke}
-#vp .l2-virtual.connection-primary > rect{stroke-width:3.5}
-#vp .subnet-edge.connection-related{stroke-width:2.8}
+#vp .l2-path.connection-related .stroke{stroke-width:2.4}
+#vp .l2-virtual.connection-related > rect{stroke-width:calc(var(--node-ring,1px) * 1.15)}
+#vp .l2-virtual.connection-primary > rect{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:#224b59}
+#vp .subnet-edge.connection-related{stroke-width:1.7}
 #vp .subnet-edge.connection-related:not(.down){stroke:var(--accent)}
-#vp .subnet-object.connection-related:not(.warn) rect{stroke:var(--accent);stroke-width:2}
-#vp .subnet-object.connection-primary rect{stroke-width:3;filter:drop-shadow(0 0 4px rgb(87 223 207 / .35))}
+#vp .subnet-object.connection-related:not(.warn) rect{stroke:var(--accent);stroke-width:1.2}
+#vp .subnet-object.connection-primary rect{stroke-width:1.5}
 .link.unknown .wire{stroke:var(--off);stroke-dasharray:3 6}
 .link.unknown .pdot{fill:var(--off)}
 .link.unknown .duplex-arrow{stroke:var(--off)}
@@ -393,12 +394,12 @@ body{background:var(--canvas)}
 .node.silhouette .sdot{display:none}
 #svg[data-source="stale"] #vp,#svg[data-source="error"] #vp{opacity:.58}
 .node.collection-error .halo{stroke:var(--warn);stroke-dasharray:3 4}
-.l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:1.3;stroke-dasharray:7 5}
+.l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:.8;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
 .l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em}
 .l2-virtual{cursor:pointer}
-.l2-virtual rect{fill:#173747;stroke:var(--vlan-color,#79d8c6);stroke-width:2;filter:drop-shadow(0 7px 13px rgb(0 0 0 / .22))}
-.l2-virtual:hover rect,.l2-virtual.sel rect{fill:#224b59;stroke-width:3}
-.l2-virtual.mixed > rect{stroke:#ffbc69;stroke-width:3}
+.l2-virtual rect{fill:#173747;stroke:var(--vlan-color,#79d8c6);stroke-width:var(--node-ring,1px);vector-effect:non-scaling-stroke;filter:drop-shadow(0 7px 13px rgb(0 0 0 / .22))}
+.l2-virtual:hover rect,.l2-virtual.sel rect{fill:#224b59;stroke-width:calc(var(--node-ring,1px) * 1.2)}
+.l2-virtual.mixed > rect{stroke:#ffbc69;stroke-width:calc(var(--node-ring,1px) * 1.4)}
 .l2-virtual .vmark{fill:var(--vlan-color,#79d8c6)}
 .l2-virtual .vtitle{fill:#f2fafa;font:600 15px var(--display)}
 .l2-virtual .vsub{fill:#a6c3c9;font:500 10px var(--mono)}
@@ -408,8 +409,8 @@ body{background:var(--canvas)}
 .l2-endpoint .nname{font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)))}
 .l2-path{cursor:pointer}
 .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
-.l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:2.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:3.5}
+.l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:1.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.l2-path:focus-visible .stroke,.l2-path.sel .stroke{stroke-width:2.4}
 .link:hover .wire,.l2-path:hover .stroke{animation:linkHoverPulse 1.8s ease-in-out infinite}
 @keyframes linkHoverPulse{0%,100%{stroke-opacity:1}50%{stroke-opacity:.25}}
 @media(prefers-reduced-motion:reduce){
@@ -419,9 +420,9 @@ body{background:var(--canvas)}
 .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
   font:600 10px var(--mono);font-size:calc(10px * var(--inv,1));text-anchor:middle;pointer-events:none;vector-effect:non-scaling-stroke}
 .l2-path.down .caption{fill:#e49c97}
-.l2-path.problem .stroke{stroke:#ff927d;stroke-width:4;stroke-dasharray:6 5}
+.l2-path.problem .stroke{stroke:#ff927d;stroke-width:2.6;stroke-dasharray:6 5}
 .l2-path.problem .caption{fill:#ffb5a5}
-.l2-path.mismatch .stroke{stroke:#ffbc69;stroke-width:4;stroke-dasharray:9 4}
+.l2-path.mismatch .stroke{stroke:#ffbc69;stroke-width:2.6;stroke-dasharray:9 4}
 .l2-path.mismatch .caption{fill:#ffd29a}
 .l2-p2p .stroke{stroke:#637e8b;stroke-width:1.8}
 .l2-p2p .caption{fill:#91aeb8}
@@ -911,6 +912,7 @@ function applyView(){
   vp.setAttribute("transform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
   $("dots").setAttribute("patternTransform", `translate(${view.tx} ${view.ty}) scale(${view.k})`);
   svg.style.setProperty("--inv", (1 / view.k).toFixed(4));
+  svg.style.setProperty("--node-ring", `${clamp(view.k, .5, 1.1)}px`);
   updateLinkScreenGeometry();
   updateCanvasScreenGeometry();
   const nl = lodOf(view.k);
@@ -2362,19 +2364,22 @@ function pinInsight(item, panel){
   closeTasks(false);
   closeCanvasPanels();
   if (item.virtual || item.virtualLink || item.subnet || item.domainObject) {
-    select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
+    select(null); selectLink(null);
   } else if (item.isLink) { select(null); selectLink(item); } else select(item);
   $("chip").hidden = true;
   canvasState.connectionTarget = item;
   applyConnectionHighlight();
   renderCanvasCard();
 }
-function closeInsight(){
-  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink || insight.pinned.subnet)) insight.pinned.g.classList.remove("sel");
+function hideInsight(){
   insight.pinned = null; insight.cardShape = null; canvasCard.textContent = "";
-  canvasState.connectionTarget = null;
-  applyConnectionHighlight();
+  // The card is a view of the selection, not the lifetime of the selection itself.
   scheduleLabels();
+}
+function closeInsight(){
+  hideInsight();
+  vp.querySelectorAll(".l2-virtual.sel,.l2-path.sel,.subnet-object.sel").forEach(g => g.classList.remove("sel"));
+  select(null); selectLink(null);
 }
 function factCardData(item){ return buildObjectCard(item); }
 function cardTable(heads, rows){
@@ -2411,7 +2416,7 @@ function renderCanvasCard(){
     + (data.directions ? `<h3>Два направления соединения</h3>${cardTable(["ПЕРЕДАЧА · TX", "ПРИЁМ · RX"], data.directions)}<p class="card-foot">Стрелки показывают направления. Данных об объёме и скорости трафика в снимке нет.</p>` : "")
     + renderObjectExtras(item, data)
     + `<p class="card-foot">${esc(data.foot || "")}</p></div>`;
-  html.querySelector("[data-close]").onclick = () => { closeInsight(); select(null); selectLink(null); svg.focus(); };
+  html.querySelector("[data-close]").onclick = () => { hideInsight(); svg.focus(); };
   bindObjectExtras(html, item);
   const tabs = [...html.querySelectorAll("[data-layer]")];
   const changeTab = layer => { insight.cardLayer = layer; insight.panel = "ports"; renderCanvasCard(); canvasCard.querySelector(`[data-layer="${layer}"]`).focus(); };

@@ -26,7 +26,7 @@ def check(page):
     page.goto(URL, wait_until="domcontentloaded")
     page.wait_for_function("window.CanvasPrototype && canvasState.result")
 
-    # Pointer selection traces physical neighbours; closing or clicking the canvas resets it.
+    # Closing details keeps the chosen device and its connections selected.
     page.locator('#lyrNodes .node').filter(has=page.locator('.nname', has_text="SW1")).locator('.ico').click()
     assert page.evaluate("visibleNodes().filter(n=>n.g.classList.contains('connection-related')).map(n=>n.name).sort()") == ["PC1", "PC2", "R2", "SW1"]
     assert page.locator("#lyrLinks > .connection-related").count() == 3
@@ -36,6 +36,12 @@ def check(page):
     page.evaluate('pinInsight(nodes.find(n=>n.name==="SW2"),"ports")')
     assert page.locator("#lyrLinks .link.down .physical-wire").first.evaluate("g=>getComputedStyle(g).stroke") == fault_colour
     page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".object-card").count() == 0
+    assert page.locator("#lyrLinks > .connection-related").count() == 4
+    page.evaluate("refreshPrototypeScene()")
+    assert page.locator(".object-card").count() == 0
+    assert page.locator("#lyrLinks > .connection-related").count() == 4
+    page.locator('#bg').click(position={"x": 8, "y": 250})
     assert page.locator("#vp .connection-related,#vp .connection-dim").count() == 0
 
     # L3 selection marks the subnet and every participant, including all member edges.
@@ -45,10 +51,18 @@ def check(page):
     assert page.locator(".subnet-object.connection-primary").count() == 1
     assert page.locator(".subnet-edge.connection-related").count() == 3
     assert page.locator("#lyrL3 .auto-label.connection-related").count() == 3
+    page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".object-card").count() == 0
+    assert page.locator(".subnet-object.connection-primary").count() == 1
     page.evaluate("refreshPrototypeScene()")
     assert page.locator(".subnet-edge.connection-related").count() == 3
+    assert page.locator(".object-card").count() == 0
+    page.locator('[data-subnet="10.0.12.0/30"] rect').click()
+    assert page.locator(".subnet-object.connection-primary").count() == 1
+    assert page.locator(".subnet-edge.connection-related").count() == 2
+    assert page.locator('[data-subnet="10.1.10.0/24"]').evaluate("g=>g.classList.contains('connection-dim') && !g.classList.contains('sel')")
     page.locator("#svg").press("Escape")
-    assert page.locator("#vp .connection-related,#vp .connection-dim").count() == 0
+    assert page.locator("#vp .connection-related,#vp .connection-dim,.subnet-object.sel").count() == 0
 
     # Node selection on L3 traces its shared subnets, and survives changing its card tab.
     page.evaluate('setFactLayer("l1"); pinInsight(nodes.find(n=>n.name==="PC1"),"ports"); setFactLayer("l3")')
@@ -57,14 +71,22 @@ def check(page):
     page.get_by_role("tab", name="L2", exact=True).click()
     assert page.locator(".subnet-edge.connection-related").count() == 3
     page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".subnet-edge.connection-related").count() == 3
 
     # VLAN selection stays within its L2 domain rather than highlighting the whole chassis.
     page.evaluate('setFactLayer("l2")')
     page.locator('.l2-virtual').filter(has=page.locator('.vtitle', has_text="VLAN 10")).click()
     assert page.evaluate("[...l2Model.virtuals.values()].filter(v=>v.g.classList.contains('connection-related')).map(v=>v.vlan)") == [10]
     assert page.evaluate("l2Model.segments.filter(s=>s.g.classList.contains('connection-related')).every(s=>s.vlan===10)")
+    page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".l2-virtual.connection-primary").count() == 1
     page.locator('#bg').click(position={"x": 8, "y": 250})
-    assert page.locator("#vp .connection-related,#vp .connection-dim").count() == 0
+    assert page.locator("#vp .connection-related,#vp .connection-dim,.l2-virtual.sel").count() == 0
+
+    # Escape from inside an open card remains an explicit selection reset.
+    page.evaluate('setFactLayer("l1"); pinInsight(nodes.find(n=>n.name==="SW1"),"ports")')
+    page.get_by_role("tab", name="L1", exact=True).press("Escape")
+    assert page.locator(".object-card,#vp .connection-related,#vp .connection-primary,.node.sel").count() == 0
 
     # L3 and issue navigation use the production calculations.
     page.evaluate('setFactLayer("l3")')
@@ -151,9 +173,29 @@ def check(page):
         page.wait_for_timeout(400)
         assert page.evaluate("""() => { const a=wrap.getBoundingClientRect(), b=canvasCard.querySelector('foreignObject').getBoundingClientRect(); return b.left>=a.left && b.right<=a.right && b.top>=a.top && b.bottom<=a.bottom; }""")
     page.evaluate("closeInsight()")
-    for zoom in [0.8, 1.4, 3, 6]:
+    # Adaptive contours stay thin at overview zoom, with a bounded screen width up close.
+    page.evaluate('pinInsight(nodes.find(n=>n.name==="R2"),"ports"); hideInsight()')
+    widths = []
+    for zoom in [0.22, 0.4, 0.8, 1.4, 3, 6]:
         page.evaluate('(k)=>{view.k=k; applyView()}', zoom)
         assert abs(page.evaluate('links[0].screenGeometry.dots[0].getBoundingClientRect().width') - 6.4) < 0.01
+        ring = page.locator('#lyrNodes .connection-primary .halo')
+        assert ring.evaluate("g=>getComputedStyle(g).vectorEffect") == "non-scaling-stroke"
+        widths.append(float(ring.evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")))
+    assert widths[0] <= 0.7 and max(widths) <= 1.5 and widths[0] < widths[-1]
+    assert widths == sorted(widths)
+    page.evaluate("closeInsight()")
+    hover_widths = []
+    for zoom in [0.4, 3]:
+        page.evaluate('(k)=>{const n=nodes.find(n=>n.name==="R2");Object.assign(view,{k,tx:wrap.clientWidth/2-k*n.cx,ty:wrap.clientHeight/2-k*n.cy});applyView()}', zoom)
+        hovered = page.locator('#lyrNodes .node').filter(has=page.locator('.nname', has_text="R2"))
+        hovered.locator('.ico').hover()
+        assert hovered.evaluate("g=>g.matches(':hover')")
+        hover_widths.append(float(hovered.locator('.halo').evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")))
+    assert hover_widths[0] <= 0.5 and hover_widths[-1] <= 1.1
+    page.evaluate('closeInsight(); setFactLayer("l3"); pinInsight(canvasState.subnets[0],"ports"); hideInsight()')
+    subnet_border = page.locator('.subnet-object.connection-primary rect')
+    assert float(subnet_border.evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")) <= 1.5
     assert not errors, errors
     print("Canvas prototype: connection/subnet selection, diagnostics/navigation, collection/MAC states, discovery persistence, console facts, teacher/seen views, L4, responsive cards and fixed markers passed")
 

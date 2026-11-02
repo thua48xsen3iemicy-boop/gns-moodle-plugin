@@ -23,8 +23,10 @@ Selecting a device highlights its connections and neighbours on the current laye
 On L2, a selected VLAN traces its broadcast domain. On L3, selecting a subnet
 highlights all its member devices and interface edges; selecting a device traces
 its subnets and their peers. Unrelated objects are dimmed, while fault colours and
-the discovery mask are preserved. Click the background, press Escape, or close
-the object card to clear the connection highlight.
+the discovery mask are preserved. Closing the object card leaves the selection
+and its connection highlight in place. Click the background or press Escape to
+clear the selection. Node rings become finer at overview zoom and stay bounded
+when zooming in; subnet borders and highlighted edges use lightweight strokes.
 
 `student-ui-canvas-workbench.js` adapts the canvas to the production data models.
 `student-ui-canvas-core.js` is generated from the plugin's **unchanged** pure modules
