@@ -368,6 +368,22 @@ body{background:var(--canvas)}
 .subnet-object.sel rect,.subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
 .subnet-object text{fill:#e3f7fc;font:500 11px var(--mono);text-anchor:middle;dominant-baseline:middle}
 .subnet-object:focus{outline:none}
+#vp .connection-dim{opacity:.2}
+#svg[data-connection-focus="true"] #lyrDraw{opacity:.35}
+#svg[data-connection-focus="true"] #lyrLabelLeads{opacity:.35}
+#vp .node.connection-related .halo{stroke:var(--accent);fill:rgb(87 223 207 / .06);stroke-width:1.6;vector-effect:non-scaling-stroke}
+#vp .node.connection-primary .halo{stroke-width:3;fill:rgb(87 223 207 / .16)}
+#vp .link.connection-related:not(.down):not(.unknown) .wire{stroke:var(--accent)}
+#vp .link.connection-related .wire{stroke-width:3.2}
+#vp .link.connection-related .duplex .wire{stroke-width:2}
+#vp .link.connection-related:not(.down):not(.unknown) .duplex-arrow{stroke:var(--accent)}
+#vp .l2-path.connection-related .stroke{stroke-width:3.5}
+#vp .l2-virtual.connection-related > rect{stroke-width:2.5;vector-effect:non-scaling-stroke}
+#vp .l2-virtual.connection-primary > rect{stroke-width:3.5}
+#vp .subnet-edge.connection-related{stroke-width:2.8}
+#vp .subnet-edge.connection-related:not(.down){stroke:var(--accent)}
+#vp .subnet-object.connection-related:not(.warn) rect{stroke:var(--accent);stroke-width:2}
+#vp .subnet-object.connection-primary rect{stroke-width:3;filter:drop-shadow(0 0 4px rgb(87 223 207 / .35))}
 .link.unknown .wire{stroke:var(--off);stroke-dasharray:3 6}
 .link.unknown .pdot{fill:var(--off)}
 .link.unknown .duplex-arrow{stroke:var(--off)}
@@ -1094,6 +1110,8 @@ function select(n){
   if (selected && selected.g) selected.g.classList.remove("sel");
   if (selected && selected.l2g) selected.l2g.classList.remove("sel");
   selected = n;
+  canvasState.connectionTarget = n;
+  applyConnectionHighlight();
   const chip = $("chip");
   if (!n) { chip.hidden = true; return; }
   if (n.g) n.g.classList.add("sel");
@@ -1130,6 +1148,8 @@ function selectLink(l){
   if (selectedLink && selectedLink.g) selectedLink.g.classList.remove("sel");
   selectedLink = l || null;
   if (l && l.g) { l.g.classList.add("sel"); L.links.appendChild(l.g); }
+  canvasState.connectionTarget = l || null;
+  applyConnectionHighlight();
 }
 function zoomToLink(l){
   const r = wrap.getBoundingClientRect(), [a, b] = l.ends;
@@ -2205,7 +2225,7 @@ function renderCanvasL2(){
   });
   groups.forEach(vs => {
     const n = vs[0].orig, x0 = Math.min(...vs.map(v => v.cx)) - 66, x1 = Math.max(...vs.map(v => v.cx)) + 66;
-    const g = el("g", { class: "l2-chassis" }, zones);
+    const g = el("g", { class: "l2-chassis", "data-node": n.id }, zones);
     el("rect", { x: x0, y: n.cy - 51, width: x1 - x0, height: 102, rx: 16 }, g);
     const label = el("g", { class: "auto-label", "data-priority": 1 }, g);
     el("text", { x: x0 + 11, y: n.cy - 60 }, label).textContent = `${n.name} · один корпус / ${vs.length} VLAN`;
@@ -2332,23 +2352,28 @@ function setFactLayer(layer){
   svg.dataset.factlayer = layer;
   renderCanvasHud(); renderCanvasCard(); positionCanvasCard();
   updateCanvasChrome(); renderOverview();
+  applyConnectionHighlight();
   scheduleLabels();
 }
 function pinInsight(item, panel){
-  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
+  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink || insight.pinned.subnet)) insight.pinned.g.classList.remove("sel");
   insight.pinned = item; insight.panel = panel;
   insight.cardLayer = item.subnet ? "l3" : item.domainObject || panel === "mac" || item.virtual || item.virtualLink ? "l2" : insight.layer === "l4" ? "l1" : insight.layer;
   closeTasks(false);
   closeCanvasPanels();
   if (item.virtual || item.virtualLink || item.subnet || item.domainObject) {
     select(null); selectLink(null); if (item.g) item.g.classList.add("sel");
-  } else if (item.isLink) selectLink(item); else select(item);
+  } else if (item.isLink) { select(null); selectLink(item); } else select(item);
   $("chip").hidden = true;
+  canvasState.connectionTarget = item;
+  applyConnectionHighlight();
   renderCanvasCard();
 }
 function closeInsight(){
-  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink)) insight.pinned.g.classList.remove("sel");
+  if (insight.pinned && insight.pinned.g && (insight.pinned.virtual || insight.pinned.virtualLink || insight.pinned.subnet)) insight.pinned.g.classList.remove("sel");
   insight.pinned = null; insight.cardShape = null; canvasCard.textContent = "";
+  canvasState.connectionTarget = null;
+  applyConnectionHighlight();
   scheduleLabels();
 }
 function factCardData(item){ return buildObjectCard(item); }
@@ -2414,11 +2439,27 @@ function positionCanvasCard(){
   if (!c || c.item !== item || !item) return;
   const p = toScreen(item.cx, item.cy), ww = wrap.clientWidth, wh = wrap.clientHeight;
   const rawX = p.x + c.w + 76 < ww ? p.x + 74 : p.x - c.w - 74 > 4 ? p.x - c.w - 74 : ww - c.w - 12;
-  const x = clamp(rawX, 12, Math.max(12, ww - c.w - 12));
+  let x = clamp(rawX, 12, Math.max(12, ww - c.w - 12));
   const hudBottom = 174;
   const minY = ww < 760 ? 12 : x < 396 ? hudBottom : 66;
   const bottom = ww < 760 ? 112 : 12;
   const y = clamp(ww < 760 ? wh - c.h - bottom : p.y - 80, Math.min(minY, wh - c.h - bottom), Math.max(12, wh - c.h - bottom));
+  if (ww >= 760 && svg.dataset.connectionFocus === "true") {
+    const root = wrap.getBoundingClientRect();
+    const selector = insight.layer === "l2" ? "#lyrL2 .node.connection-related .ico,#lyrL2 .l2-virtual.connection-related > rect"
+      : "#lyrNodes .node.connection-related .ico" + (insight.layer === "l3" ? ",#lyrL3 .subnet-object.connection-related rect" : "");
+    const boxes = [...vp.querySelectorAll(selector)].map(g => {
+      const r = g.getBoundingClientRect();
+      return {x: r.left-root.left-12, y: r.top-root.top-8, w: r.width+24, h: r.height+36};
+    }).filter(b => b.x+b.w > 0 && b.x < ww && b.y+b.h > 0 && b.y < wh);
+    const overlap = candidate => boxes.reduce((score, b) => {
+      const width = Math.max(0, Math.min(candidate+c.w, b.x+b.w)-Math.max(candidate, b.x));
+      const height = Math.max(0, Math.min(y+c.h, b.y+b.h)-Math.max(y, b.y));
+      return score + (width && height ? 1000000 + width*height : 0);
+    }, candidate < 396 && y < hudBottom ? 25000000 : 0);
+    // Prefer a canvas edge when the floating card would cover a highlighted neighbour.
+    x = [x, Math.max(12, ww-c.w-12), 12].reduce((best, candidate) => overlap(candidate) < overlap(best) ? candidate : best);
+  }
   c.card.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
   c.lead.setAttribute("x1", p.x); c.lead.setAttribute("y1", p.y);
   c.lead.setAttribute("x2", clamp(p.x, x, x + c.w)); c.lead.setAttribute("y2", clamp(p.y, y, y + c.h));
@@ -2546,7 +2587,7 @@ function layoutLabels(){
     if (!texts.length) return null;
     const boxes = texts.map(box), x = Math.min(...boxes.map(b => b.x)), y = Math.min(...boxes.map(b => b.y));
     const r = { x, y, w: Math.max(...boxes.map(b => b.x + b.w)) - x, h: Math.max(...boxes.map(b => b.y + b.h)) - y };
-    const priority = Number(g.dataset.priority) - (g.closest(".sel") ? 1 : 0);
+    const priority = Number(g.dataset.priority) - (g.closest(".sel,.connection-primary") ? 20 : g.closest(".connection-related") ? 10 : 0);
     return { g, r, priority };
   }).filter(Boolean).sort((a, b) => a.priority - b.priority);
   measured.forEach(({ g, r, priority }) => {

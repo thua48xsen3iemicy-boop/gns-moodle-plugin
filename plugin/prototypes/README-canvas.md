@@ -19,6 +19,13 @@ states, the student `live`/`seen`/`fog` views and the teacher preview.
 In exploration mode, inspect the initial silhouette and run an inspection command
 from its card or its simulated console. The local discovery mask survives reloads.
 
+Selecting a device highlights its connections and neighbours on the current layer.
+On L2, a selected VLAN traces its broadcast domain. On L3, selecting a subnet
+highlights all its member devices and interface edges; selecting a device traces
+its subnets and their peers. Unrelated objects are dimmed, while fault colours and
+the discovery mask are preserved. Click the background, press Escape, or close
+the object card to clear the connection highlight.
+
 `student-ui-canvas-workbench.js` adapts the canvas to the production data models.
 `student-ui-canvas-core.js` is generated from the plugin's **unchanged** pure modules
 `model.js`, `facts.js`, `consolefacts.js` and `reveal.js`. It preserves their licenses
