@@ -2,7 +2,8 @@
 const canvasState = {
   mode: "live", effectiveMode: "live", teacher: false, source: "fresh", mac: "learned", scenario: "base",
   at: Date.now(), base: null, draw: null, view: null, doc: null, result: null, subnets: [],
-  mask: CanvasCore.reveal.emptyMask(), seen: new Map(), overviewTab: "objects", output: new Map(), scenarioBackup: null
+  mask: CanvasCore.reveal.emptyMask(), seen: new Map(), overviewTab: "objects", output: new Map(), scenarioBackup: null,
+  connectionTarget: null
 };
 const explorationKey = "exploration.v1." + GNS3.project_id;
 function initializeCanvasState(){
@@ -122,7 +123,91 @@ function refreshPrototypeScene(){
   if (pinned?.subnet) insight.pinned = canvasState.subnets.find(s => s.key === pinned.key) || null;
   if (pinned?.domainObject) insight.pinned = domainObject(pinned.id);
   renderCanvasHud(); renderCanvasCard(); updateCanvasChrome(); renderOverview();
-  applyExplorationVisibility(); updateCanvasScreenGeometry(); refreshCards(); scheduleLabels();
+  applyExplorationVisibility(); updateCanvasScreenGeometry(); applyConnectionHighlight(); refreshCards(); scheduleLabels();
+}
+/* Selection follows only the graph that the current student view has uncovered. */
+function connectionScope(item, layer){
+  if (!item || layer === "l4") return null;
+  const scope = {nodes: new Set(), links: new Set(), subnets: new Set(), virtuals: new Set(), segments: new Set()};
+  const shownNodes = new Set(visibleNodes().map(n => n.id)), shownLinks = visibleLinks();
+  const seed = new Set();
+  let subnet = null, domain = null, virtual = null, segment = null, link = null;
+  if (item.subnet) {
+    subnet = canvasState.subnets.find(s => s.key === item.key);
+    subnet?.members.forEach(m => seed.add(m.nodeId));
+  } else if (item.domainObject) {
+    domain = canvasState.result?.der.l2.domains.find(d => d.id === item.id);
+    domain?.members.forEach(m => seed.add(m.nodeId));
+  } else if (item.virtual) {
+    virtual = l2Model?.virtuals.get(item.id);
+    if (virtual) seed.add(virtual.orig.id);
+  } else if (item.virtualLink) {
+    segment = l2Model?.segments.find(s => s.id === item.id);
+    segment?.link.ends.forEach(e => seed.add(e.node.id));
+  } else if (item.isLink) {
+    link = shownLinks.find(l => l.id === item.id);
+    link?.ends.forEach(e => seed.add(e.node.id));
+  } else if (shownNodes.has(item.id)) seed.add(item.id);
+  if (!seed.size) return null;
+  seed.forEach(id => { if (shownNodes.has(id)) scope.nodes.add(id); });
+  if (layer === "l3") {
+    canvasState.subnets.filter(s => subnet ? s.key === subnet.key : s.members.some(m => seed.has(m.nodeId))).forEach(s => {
+      scope.subnets.add(s.key);
+      s.members.forEach(m => scope.nodes.add(m.nodeId));
+    });
+  } else if (layer === "l2") {
+    const model = l2Model;
+    if (!model) return null;
+    if (virtual) scope.virtuals.add(virtual.id);
+    if (!virtual && !segment && !domain && !link) model.virtuals.forEach(v => { if (seed.has(v.orig.id)) scope.virtuals.add(v.id); });
+    const domainMembers = new Set((domain?.members || []).map(m => `${m.nodeId}|${m.iface.name}`));
+    model.segments.forEach(s => {
+      const related = segment ? s.id === segment.id
+        : virtual ? s.va === virtual.id || s.vb === virtual.id || (!!virtual.domain && s.domain === virtual.domain)
+        : domain ? s.domain?.members.some(m => domainMembers.has(`${m.node.id}|${m.iface.name}`))
+        : link ? s.link.id === link.id : s.link.ends.some(e => seed.has(e.node.id));
+      if (!related) return;
+      scope.segments.add(s.id); scope.links.add(s.link.id);
+      s.link.ends.forEach(e => scope.nodes.add(e.node.id));
+      [s.va, s.vb].forEach(id => { if (model.virtuals.has(id)) scope.virtuals.add(id); });
+    });
+  } else {
+    const logicalLinks = new Set(domain?.links || []);
+    subnet?.members.forEach(m => m.dom?.links.forEach(id => logicalLinks.add(id)));
+    shownLinks.forEach(l => {
+      const related = link ? l.id === link.id : subnet || domain ? logicalLinks.has(l.id) || l.ends.every(e => seed.has(e.node.id)) : l.ends.some(e => seed.has(e.node.id));
+      if (!related) return;
+      scope.links.add(l.id); l.ends.forEach(e => scope.nodes.add(e.node.id));
+    });
+  }
+  return scope;
+}
+function applyConnectionHighlight(){
+  vp.querySelectorAll(".connection-related,.connection-dim,.connection-primary").forEach(g => g.classList.remove("connection-related", "connection-dim", "connection-primary"));
+  const item = canvasState.connectionTarget, scope = connectionScope(item, insight.layer);
+  svg.dataset.connectionFocus = scope ? "true" : "false";
+  if (!scope) { scheduleLabels(); return; }
+  const primaryNode = !item.subnet && !item.domainObject && !item.virtual && !item.virtualLink && !item.isLink ? item.id : null;
+  const mark = (g, related, primary = false) => {
+    if (!g || !g.isConnected) return;
+    g.classList.add(related ? "connection-related" : "connection-dim");
+    if (primary) g.classList.add("connection-primary");
+  };
+  visibleNodes().forEach(n => {
+    mark(n.g, scope.nodes.has(n.id), primaryNode === n.id);
+    mark(n.l2g, scope.nodes.has(n.id), primaryNode === n.id);
+  });
+  visibleLinks().forEach(l => mark(l.g, scope.links.has(l.id), !!item.isLink && l.id === item.id));
+  l2Model?.virtuals.forEach(v => mark(v.g, scope.virtuals.has(v.id), item.virtual ? v.id === item.id : v.orig.id === primaryNode));
+  l2Model?.segments.forEach(s => mark(s.g, scope.segments.has(s.id), !!item.virtualLink && s.id === item.id));
+  $("lyrL2").querySelectorAll(".l2-chassis").forEach(g => mark(g, scope.nodes.has(g.dataset.node)));
+  canvasState.subnets.forEach(s => {
+    const related = scope.subnets.has(s.key);
+    mark(s.g, related, !!item.subnet && s.key === item.key);
+    s.edges.forEach(edge => { mark(edge.line, related); mark(edge.label.parentNode, related); });
+  });
+  positionCanvasCard();
+  scheduleLabels();
 }
 function applyExplorationVisibility(){
   nodes.forEach(n => {
@@ -282,7 +367,7 @@ function buildObjectCard(item){
     const state = canvasLinkState(item), [a, b] = item.ends, ia = canvasIfaceAt(a.node, a.adapter, a.port), ib = canvasIfaceAt(b.node, b.adapter, b.port);
     const base = {kind: `${layer.toUpperCase()} / СОЕДИНЕНИЕ`, title: `${a.node.name} ↔ ${b.node.name}`, sub: state.unknown ? "Состояние неизвестно" : state.down ? "Соединение не работает" : "Соединение работает", related: item.ends.map(e => ({kind: "node", id: e.node.id, label: e.node.name})), foot: state.why.join("; ") || "Сведения получены из учебного снимка."};
     const port = e => canvasEndShown(e) ? e.label : "?";
-    if (layer === "l1") return {...base, heads: ["УЗЕЛ", "ПОРТ", "СОСТОЯНИЕ"], rows: [[a.node.name, port(a), ia?.oper || "неизвестно"], [b.node.name, port(b), ib?.oper || "неизвестно"]], directions: [[`${a.node.name} ${port(a)}`, `${b.node.name} ${port(b)}`], [`${b.node.name} ${port(b)}`, `${a.node.name} ${port(a)}`]]};
+    if (layer === "l1") return {...base, heads: ["УЗЕЛ", "ПОРТ", "СОСТОЯНИЕ"], rows: [[a.node.name, port(a), ia?.oper || "неизвестно"], [b.node.name, port(b), ib?.oper || "неизвестно"]], directions: linkDirections(item).map(d => [`${d.from.node.name} ${port(d.from)}`, `${d.to.node.name} ${port(d.to)}`])};
     if (layer === "l2") return {...base, heads: ["УЗЕЛ", "ПОРТ", "НАСТРОЙКА"], rows: [[a.node.name, port(a), switchportText(ia)], [b.node.name, port(b), switchportText(ib)]]};
     return {...base, heads: ["УЗЕЛ", "ПОРТ", "IPV4"], rows: [[a.node.name, port(a), (ia?.ipv4 || []).join(", ") || "—"], [b.node.name, port(b), (ib?.ipv4 || []).join(", ") || "—"]]};
   }

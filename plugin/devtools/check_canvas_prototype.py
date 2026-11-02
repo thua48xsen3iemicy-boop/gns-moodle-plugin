@@ -18,6 +18,57 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
+def check_duplex_directions(page):
+    result = page.evaluate("""() => {
+      closeInsight(); setFactLayer('l1');
+      const link=links.find(l=>l.id==='l-02'), ends=link.ends;
+      const saved={cx:link.cx,cy:link.cy,view:{...view},points:ends.map(e=>({node:e.node,cx:e.node.cx,cy:e.node.cy}))};
+      const failures=[]; let cases=0;
+      const point=(element,x,y)=>new DOMPoint(x,y).matrixTransform(element.getScreenCTM());
+      const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+      try {
+        for(const reversed of [false,true]) for(const angle of [0,37,90,143,180,-37,-90,-143]) for(const zoom of [1,2.5]){
+          link.ends=reversed?[ends[1],ends[0]]:ends;
+          const [a,b]=link.ends, rad=angle*Math.PI/180;
+          a.node.cx=0;a.node.cy=0;b.node.cx=220*Math.cos(rad);b.node.cy=220*Math.sin(rad);
+          link.cx=(a.node.cx+b.node.cx)/2;link.cy=(a.node.cy+b.node.cy)/2;
+          Object.assign(view,{k:zoom,tx:wrap.clientWidth/2-zoom*link.cx,ty:wrap.clientHeight/2-zoom*link.cy});
+          renderLinks();applyView();cases++;
+          const key=`${angle}deg / ${zoom}x / reversed=${reversed}`;
+          link.screenGeometry.directions.forEach((d,index)=>{
+            const source=index===0?a:b, target=index===0?b:a, line=d.line;
+            const start=point(line,line.x1.baseVal.value,line.y1.baseVal.value), end=point(line,line.x2.baseVal.value,line.y2.baseVal.value);
+            const sourcePoint=toScreen(source.node.cx,source.node.cy), targetPoint=toScreen(target.node.cx,target.node.cy);
+            if(distance(start,sourcePoint)>=distance(start,targetPoint)||distance(end,targetPoint)>=distance(end,sourcePoint)) failures.push(key+': rail joins wrong endpoints');
+            if(line.dataset.txNode!==source.node.id||line.dataset.rxNode!==target.node.id) failures.push(key+': incorrect TX/RX endpoint mapping');
+            if(d.labels.length!==2||d.labels.filter(l=>l.text.textContent==='TX').length!==1||d.labels.filter(l=>l.text.textContent==='RX').length!==1) failures.push(key+': missing complementary rail labels');
+            const arrow=d.arrow, length=arrow.getTotalLength(), p0=arrow.getPointAtLength(0), p1=arrow.getPointAtLength(length), tip=arrow.getPointAtLength(length/2);
+            const tail=point(arrow,(p0.x+p1.x)/2,(p0.y+p1.y)/2), head=point(arrow,tip.x,tip.y);
+            if((head.x-tail.x)*(end.x-start.x)+(head.y-tail.y)*(end.y-start.y)<=0) failures.push(key+': arrow points toward TX');
+            const u={x:Math.cos(rad),y:Math.sin(rad)}, normal={x:-u.y,y:u.x}, origin=toScreen(link.cx,link.cy);
+            const railSide=(start.x-origin.x)*normal.x+(start.y-origin.y)*normal.y;
+            d.labels.forEach(label=>{
+              const text=label.text, matrix=text.getScreenCTM(), position=point(text,text.x.baseVal[0].value,text.y.baseVal[0].value);
+              const expected=label.role==='TX'?source:target;
+              const own=toScreen(expected.node.cx,expected.node.cy), other=label.role==='TX'?targetPoint:sourcePoint;
+              if(label.group.dataset.node!==expected.node.id||distance(position,own)>=distance(position,other)) failures.push(key+': label is near the wrong endpoint');
+              const labelSide=(position.x-origin.x)*normal.x+(position.y-origin.y)*normal.y;
+              if(labelSide*railSide<=0) failures.push(key+': label is attached to the opposite rail');
+              if(Math.abs(matrix.b)>.001||Math.abs(matrix.c)>.001||matrix.a<=0||matrix.d<=0) failures.push(key+': text is rotated or upside down');
+            });
+          });
+        }
+      } finally {
+        link.ends=ends;link.cx=saved.cx;link.cy=saved.cy;
+        saved.points.forEach(p=>{p.node.cx=p.cx;p.node.cy=p.cy});
+        Object.assign(view,saved.view);refreshPrototypeScene();applyView();
+      }
+      return {cases,failures};
+    }""")
+    assert result["cases"] == 32
+    assert not result["failures"], result["failures"]
+
+
 def check(page):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -25,6 +76,68 @@ def check(page):
     page.set_default_timeout(5000)
     page.goto(URL, wait_until="domcontentloaded")
     page.wait_for_function("window.CanvasPrototype && canvasState.result")
+
+    # Closing details keeps the chosen device and its connections selected.
+    page.locator('#lyrNodes .node').filter(has=page.locator('.nname', has_text="SW1")).locator('.ico').click()
+    assert page.evaluate("visibleNodes().filter(n=>n.g.classList.contains('connection-related')).map(n=>n.name).sort()") == ["PC1", "PC2", "R2", "SW1"]
+    assert page.locator("#lyrLinks > .connection-related").count() == 3
+    assert page.evaluate("nodes.find(n=>n.name==='R3').g.classList.contains('connection-dim')")
+    assert page.evaluate("""() => { const card=canvasCard.querySelector('foreignObject').getBoundingClientRect(); return [...document.querySelectorAll('#lyrNodes .connection-related .ico')].every(g=>{const r=g.getBoundingClientRect();return r.right<=card.left || r.left>=card.right || r.bottom<=card.top || r.top>=card.bottom;}); }""")
+    fault_colour = page.locator("#lyrLinks .link.down .physical-wire").first.evaluate("g=>getComputedStyle(g).stroke")
+    page.evaluate('pinInsight(nodes.find(n=>n.name==="SW2"),"ports")')
+    assert page.locator("#lyrLinks .link.down .physical-wire").first.evaluate("g=>getComputedStyle(g).stroke") == fault_colour
+    page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".object-card").count() == 0
+    assert page.locator("#lyrLinks > .connection-related").count() == 4
+    page.evaluate("refreshPrototypeScene()")
+    assert page.locator(".object-card").count() == 0
+    assert page.locator("#lyrLinks > .connection-related").count() == 4
+    page.locator('#bg').click(position={"x": 8, "y": 250})
+    assert page.locator("#vp .connection-related,#vp .connection-dim").count() == 0
+
+    # L3 selection marks the subnet and every participant, including all member edges.
+    page.evaluate('setFactLayer("l3")')
+    page.locator('[data-subnet="10.1.10.0/24"] rect').click()
+    assert page.evaluate("visibleNodes().filter(n=>n.g.classList.contains('connection-related')).map(n=>n.name).sort()") == ["PC1", "PC2", "R2"]
+    assert page.locator(".subnet-object.connection-primary").count() == 1
+    assert page.locator(".subnet-edge.connection-related").count() == 3
+    assert page.locator("#lyrL3 .auto-label.connection-related").count() == 3
+    page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".object-card").count() == 0
+    assert page.locator(".subnet-object.connection-primary").count() == 1
+    page.evaluate("refreshPrototypeScene()")
+    assert page.locator(".subnet-edge.connection-related").count() == 3
+    assert page.locator(".object-card").count() == 0
+    page.locator('[data-subnet="10.0.12.0/30"] rect').click()
+    assert page.locator(".subnet-object.connection-primary").count() == 1
+    assert page.locator(".subnet-edge.connection-related").count() == 2
+    assert page.locator('[data-subnet="10.1.10.0/24"]').evaluate("g=>g.classList.contains('connection-dim') && !g.classList.contains('sel')")
+    page.locator("#svg").press("Escape")
+    assert page.locator("#vp .connection-related,#vp .connection-dim,.subnet-object.sel").count() == 0
+
+    # Node selection on L3 traces its shared subnets, and survives changing its card tab.
+    page.evaluate('setFactLayer("l1"); pinInsight(nodes.find(n=>n.name==="PC1"),"ports"); setFactLayer("l3")')
+    assert page.locator(".subnet-object.connection-related").count() == 1
+    assert page.evaluate("visibleNodes().filter(n=>n.g.classList.contains('connection-related')).map(n=>n.name).sort()") == ["PC1", "PC2", "R2"]
+    page.get_by_role("tab", name="L2", exact=True).click()
+    assert page.locator(".subnet-edge.connection-related").count() == 3
+    page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".subnet-edge.connection-related").count() == 3
+
+    # VLAN selection stays within its L2 domain rather than highlighting the whole chassis.
+    page.evaluate('setFactLayer("l2")')
+    page.locator('.l2-virtual').filter(has=page.locator('.vtitle', has_text="VLAN 10")).click()
+    assert page.evaluate("[...l2Model.virtuals.values()].filter(v=>v.g.classList.contains('connection-related')).map(v=>v.vlan)") == [10]
+    assert page.evaluate("l2Model.segments.filter(s=>s.g.classList.contains('connection-related')).every(s=>s.vlan===10)")
+    page.get_by_role("button", name="Закрыть карточку").click()
+    assert page.locator(".l2-virtual.connection-primary").count() == 1
+    page.locator('#bg').click(position={"x": 8, "y": 250})
+    assert page.locator("#vp .connection-related,#vp .connection-dim,.l2-virtual.sel").count() == 0
+
+    # Escape from inside an open card remains an explicit selection reset.
+    page.evaluate('setFactLayer("l1"); pinInsight(nodes.find(n=>n.name==="SW1"),"ports")')
+    page.get_by_role("tab", name="L1", exact=True).press("Escape")
+    assert page.locator(".object-card,#vp .connection-related,#vp .connection-primary,.node.sel").count() == 0
 
     # L3 and issue navigation use the production calculations.
     page.evaluate('setFactLayer("l3")')
@@ -69,6 +182,10 @@ def check(page):
     assert page.evaluate("visibleNodes().length") == 1
     assert page.evaluate("visibleLinks().length") == 0
     assert page.locator("#lyrDraw text").count() == 0
+    page.evaluate('pinInsight(nodes.find(n=>n.name==="R1"),"ports")')
+    assert page.locator("#lyrNodes .connection-related").count() == 1
+    assert page.locator("#lyrLinks .connection-related").count() == 0
+    page.evaluate("closeInsight()")
     page.evaluate('setFactLayer("l2")')
     assert page.evaluate("l2Model.virtuals.size") == 0
     page.evaluate('setFactLayer("l1"); pinInsight(nodes.find(n=>n.name==="R1"),"ports")')
@@ -107,11 +224,32 @@ def check(page):
         page.wait_for_timeout(400)
         assert page.evaluate("""() => { const a=wrap.getBoundingClientRect(), b=canvasCard.querySelector('foreignObject').getBoundingClientRect(); return b.left>=a.left && b.right<=a.right && b.top>=a.top && b.bottom<=a.bottom; }""")
     page.evaluate("closeInsight()")
-    for zoom in [0.8, 1.4, 3, 6]:
+    # Adaptive contours stay thin at overview zoom, with a bounded screen width up close.
+    page.evaluate('pinInsight(nodes.find(n=>n.name==="R2"),"ports"); hideInsight()')
+    widths = []
+    for zoom in [0.22, 0.4, 0.8, 1.4, 3, 6]:
         page.evaluate('(k)=>{view.k=k; applyView()}', zoom)
         assert abs(page.evaluate('links[0].screenGeometry.dots[0].getBoundingClientRect().width') - 6.4) < 0.01
+        ring = page.locator('#lyrNodes .connection-primary .halo')
+        assert ring.evaluate("g=>getComputedStyle(g).vectorEffect") == "non-scaling-stroke"
+        widths.append(float(ring.evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")))
+    assert widths[0] <= 0.7 and max(widths) <= 1.5 and widths[0] < widths[-1]
+    assert widths == sorted(widths)
+    page.evaluate("closeInsight()")
+    hover_widths = []
+    for zoom in [0.4, 3]:
+        page.evaluate('(k)=>{const n=nodes.find(n=>n.name==="R2");Object.assign(view,{k,tx:wrap.clientWidth/2-k*n.cx,ty:wrap.clientHeight/2-k*n.cy});applyView()}', zoom)
+        hovered = page.locator('#lyrNodes .node').filter(has=page.locator('.nname', has_text="R2"))
+        hovered.locator('.ico').hover()
+        assert hovered.evaluate("g=>g.matches(':hover')")
+        hover_widths.append(float(hovered.locator('.halo').evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")))
+    assert hover_widths[0] <= 0.5 and hover_widths[-1] <= 1.1
+    page.evaluate('closeInsight(); setFactLayer("l3"); pinInsight(canvasState.subnets[0],"ports"); hideInsight()')
+    subnet_border = page.locator('.subnet-object.connection-primary rect')
+    assert float(subnet_border.evaluate("g=>getComputedStyle(g).strokeWidth").removesuffix("px")) <= 1.5
+    check_duplex_directions(page)
     assert not errors, errors
-    print("Canvas prototype: subnet diagnostics/navigation, collection/MAC states, discovery persistence, console facts, teacher/seen views, L4, responsive cards and fixed markers passed")
+    print("Canvas prototype: TX/RX geometry (32 angle/zoom/endpoint-order cases), connection/subnet selection, diagnostics/navigation, collection/MAC states, discovery persistence, console facts, teacher/seen views, L4, responsive cards and fixed markers passed")
 
 
 if __name__ == "__main__":
