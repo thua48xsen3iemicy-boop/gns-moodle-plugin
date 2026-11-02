@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the component into a dedicated guest during image preparation; never touches live networking.
 
-    install_guest.py prepare  [--root /] --pppoe-user USER --pppoe-password PASSWORD
+    install_guest.py prepare  [--root /] --pppoe-user USER --pppoe-password PASSWORD [--routed-lan-ports 1 2]
     install_guest.py activate [--root /]
 
 prepare copies the files and writes the PPPoE credentials (root, 0600). activate enables the units and masks
@@ -10,6 +10,7 @@ the output.
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -17,6 +18,9 @@ import sys
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SOURCE))
+from uplink_net import config
+
 UNITS = ("lab-uplink-setup.service", "lab-uplink-nft.service", "lab-uplink-pppoe.service", "lab-uplink-dnsmasq.service")
 MASKED = ("ifupdown-pre.service", "networking.service", "NetworkManager.service", "systemd-networkd-wait-online.service",
           "dhcpcd.service", "isc-dhcp-client.service")
@@ -35,8 +39,9 @@ def quote(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def prepare(root, user, password, source=SOURCE):
+def prepare(root, user, password, source=SOURCE, routed_lan_ports=()):
     credentials = f"user {quote(user)}\npassword {quote(password)}\n"
+    selected = config.routed_ports(routed_lan_ports)
     for path in (source / "uplink_net").glob("*.py"):
         install(path, root / "opt/lab-uplink/uplink_net" / path.name)
     for unit in UNITS:
@@ -49,6 +54,9 @@ def prepare(root, user, password, source=SOURCE):
     with os.fdopen(fd, "w") as f:
         f.write(credentials)
     target.chmod(0o600)
+    routing = root / config.ROUTING.lstrip("/")
+    routing.write_text(json.dumps({"routed_lan_ports": selected}) + "\n")
+    routing.chmod(0o600)
     print("Prepared lab-uplink. Credentials are in", target)
     print("Next: verify QGA and the console, then run activate and shut the guest down.")
 
@@ -71,12 +79,14 @@ def main(argv=None):
     parser.add_argument("--root", type=Path, default=Path("/"))
     parser.add_argument("--pppoe-user")
     parser.add_argument("--pppoe-password")
+    parser.add_argument("--routed-lan-ports", nargs="+", type=int, default=[], metavar="N",
+                        help="Mutually reachable LAN adapters, e.g. 1 2; omitted means LAN isolation")
     args = parser.parse_args(argv)
     try:
         if args.action == "prepare":
             if not args.pppoe_user or not args.pppoe_password:
                 parser.error("prepare needs --pppoe-user and --pppoe-password")
-            prepare(args.root, args.pppoe_user, args.pppoe_password)
+            prepare(args.root, args.pppoe_user, args.pppoe_password, routed_lan_ports=args.routed_lan_ports)
         else:
             activate(args.root)
     except (RuntimeError, ValueError, subprocess.CalledProcessError) as exc:

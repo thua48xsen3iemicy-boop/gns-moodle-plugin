@@ -1,4 +1,4 @@
-# Lab uplink guest image 0.1.0
+# Lab uplink guest image 0.2.0
 
 The "Internet" node of a lab: its first adapter goes to the outside through a PPPoE client, the other
 adapters are LAN ports that give the lab's routers an address, a default gateway and DNS, and NAT their
@@ -36,7 +36,8 @@ dnsmasq.conf, nftables.nft}`. Then `lab-uplink-nft`, `lab-uplink-pppoe` and `lab
   User and password come from `/etc/lab-uplink/pppoe.options` (root, 0600), written by the image build. If the
   server is not there yet, pppd keeps trying.
 * **dnsmasq**: DHCP on the LAN ports only; DNS forwards to the servers PPPoE hands out (`/etc/ppp/resolv.conf`).
-* **nftables**: masquerade into `ppp0`; forwarding only LAN → `ppp0` and the replies; LAN ↔ LAN is dropped; the node
+* **nftables**: masquerade into `ppp0`; forwarding LAN → `ppp0` and the replies; LAN ↔ LAN is dropped unless explicitly
+  enabled for selected adapters (see below); the node
   itself answers the LAN with DHCP and DNS only (everything else to it is dropped); TCP MSS is clamped to the path MTU
   (`rt mtu`: PPPoE 1492 against the routers' 1500).
 * sysctl: `ip_forward=1`, IPv6 off.
@@ -66,13 +67,50 @@ The credentials are the same for every lab at this stage: isolation comes from t
 (`install/lab-uplink-filter`) and the BRAS, not from the password. Per-slot credentials are a later step. The
 repository holds only `ppp/pppoe.options.example` with placeholders.
 
+## An external SSH host in a lab
+
+To model a host elsewhere on the Internet, use at least three Ethernet adapters:
+
+```text
+adapter 0: PPPoE to the BRAS
+adapter 1: 198.18.1.1/24 ─ student router WAN, e.g. 198.18.1.100
+adapter 2: 198.18.2.1/24 ─ external Linux host, e.g. 198.18.2.100
+```
+
+During preparation of a separate image variant, select the LAN adapters that may route to each other:
+
+```sh
+python3 tools/install_guest.py prepare --pppoe-user USER --pppoe-password PASSWORD --routed-lan-ports 1 2
+```
+
+The selected adapters form one group: each can initiate connections to every other adapter in the group,
+for all IP protocols and ports. Other LAN adapters remain isolated from that group and from each other.
+This is routing between separate subnets, not bridging. There is no NAT between LANs; NAT still applies
+only on exit through `ppp0`. The external host can therefore SSH to `198.18.1.100` using its default
+gateway `198.18.2.1`. Configure SSH and the firewall on the student router as required by the exercise.
+For SSH to a device behind that router, the student must also configure port forwarding or appropriate
+routes. The cloud router itself continues to accept only DHCP and DNS from the LAN.
+
+The installer saves the group in `/etc/lab-uplink/routing.json` (adapter numbers, not interface names):
+
+```json
+{"routed_lan_ports": [1, 2]}
+```
+
+Omitting the option writes an empty group and retains the original isolation. An older image without
+the file also retains isolation. At boot, an invalid policy or a missing selected adapter fails setup;
+an image selecting adapters 1 and 2 requires at least three Ethernet adapters including adapter 0.
+After changing the file during image preparation, reboot the guest to regenerate and load its firewall.
+The policy is part of the image: Manager and Slot do not inject it per lab. Register separate image
+variants for different policies. No changes to the BRAS or the Slot/Manager contracts are needed.
+
 ## Use in a lab
 
 Put the image into the image catalog (`manager/examples/images.json`, id `lab-uplink`, `console_type: none`: nobody gets
 a console), add a node with it to the lab and set `uplink_port: 0`. Do not link that port: the slot connects it to its
 `eth1`. Link the routers to adapters 1…N. A router on an adapter that sets `ip address dhcp` gets
 `198.18.N.x/24`, the default gateway `198.18.N.1` and DNS `198.18.N.1`. Different LAN ports are different networks
-and do not reach each other.
+and do not reach each other unless included in the routed group above.
 
 ## Tests
 
@@ -81,6 +119,10 @@ PYTHONPATH=images/lab-uplink python3 -m pytest -q -p no:cacheprovider images/lab
 ```
 
 They check the generated `dnsmasq`, `nftables` (also with `nft -c` when the environment allows it), `pppd` and networkd
-files for 1 and 4 LAN ports, the discovery of cards in a fake `/sys/class/net`, and the installer in a temporary root.
+files for 1 and 4 LAN ports, selected LAN routing without NAT or extra guest services, malformed and missing
+routing policies, the discovery of cards in a fake `/sys/class/net`, and the installer in a temporary root.
 There is **no end-to-end test**: the development environment has no `ip`, `pppd` or `pppoe-server`; check on a stand
 (`docs/lab-uplink/TASK.md`, the owner's list).
+For the routed variant, also verify SSH from adapter 2 to the router on adapter 1, that its source
+address stays `198.18.2.x`, and that an unselected adapter cannot reach either selected LAN. Disconnect
+PPPoE and confirm that routing between selected LANs still works. Then check Internet access and a reboot.

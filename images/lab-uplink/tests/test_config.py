@@ -1,6 +1,7 @@
 """Generated configuration for 1 and 4 LAN ports (no guest, no privileges)."""
 
 import shutil
+import json
 import subprocess
 
 import pytest
@@ -93,11 +94,37 @@ def test_nftables_one_card_has_an_empty_lan():
     assert 'elements = { "none" }' in text
 
 
+def test_only_selected_lans_can_initiate_connections_to_each_other():
+    text = config.nftables(ports(5), [3, 1])
+    forward = text.split("chain forward")[1].split("chain output")[0]
+    routed_rules = [line.strip() for line in forward.splitlines() if "oifname {" in line]
+    assert routed_rules == ['iifname "ens4" oifname { "ens6" } accept',
+                            'iifname "ens6" oifname { "ens4" } accept']
+    assert text.count("masquerade") == 1
+    assert 'oifname "ppp0" masquerade' in text  # no NAT between LANs
+    assert text.split("chain input")[1].split("chain forward")[0] == (
+        config.nftables(ports(5)).split("chain input")[1].split("chain forward")[0])
+
+
+@pytest.mark.parametrize("selected", [[1], [1, 1], [0, 2], [1, 16], [True, 2], "1 2", None])
+def test_invalid_routing_policy_is_rejected(selected):
+    with pytest.raises(ValueError):
+        config.nftables(ports(5), selected)
+
+
+def test_missing_selected_adapter_is_rejected():
+    with pytest.raises(ValueError, match="missing"):
+        config.nftables(ports(2), [1, 2])
+
+
 @pytest.mark.skipif(shutil.which("nft") is None, reason="nft is not installed")
 @pytest.mark.parametrize("count", [1, 2, 5])
-def test_nftables_syntax_if_the_kernel_allows_a_check(count, tmp_path):
+@pytest.mark.parametrize("routed", [False, True])
+def test_nftables_syntax_if_the_kernel_allows_a_check(count, routed, tmp_path):
+    if routed and count < 3:
+        pytest.skip("routing needs two LAN ports")
     path = tmp_path / "rules.nft"
-    path.write_text(config.nftables(ports(count)))
+    path.write_text(config.nftables(ports(count), [1, 2] if routed else []))
     result = subprocess.run(["nft", "-c", "-f", str(path)], capture_output=True, text=True)
     if "Operation not permitted" in result.stderr or "Operation not supported" in result.stderr:
         pytest.skip("this environment cannot check nftables rules")
@@ -135,3 +162,28 @@ def test_setup_with_one_card_has_no_dnsmasq_config(tmp_path):
     (run / "dnsmasq.conf").write_text("stale")
     setup.main(fake_sys_net(tmp_path, [("ens3", 1, MACS[0], True)]), run, tmp_path / "networkd")
     assert not (run / "dnsmasq.conf").exists()
+
+
+def test_setup_loads_routing_policy(tmp_path):
+    policy = tmp_path / "routing.json"
+    policy.write_text(json.dumps({"routed_lan_ports": [1, 2]}))
+    cards = [(f"ens{3+n}", 1, MACS[n], True) for n in range(3)]
+    run = tmp_path / "run"
+    setup.main(fake_sys_net(tmp_path, cards), run, tmp_path / "networkd", policy)
+    assert 'iifname "ens4" oifname { "ens5" } accept' in (run / "nftables.nft").read_text()
+
+
+def test_missing_policy_preserves_isolation(tmp_path):
+    assert setup.read_routing(tmp_path / "absent.json") == []
+
+
+@pytest.mark.parametrize("contents", ['{', '[]', '{}', '{"routed_lan_ports": [1]}',
+                                      '{"routed_lan_ports": [1, 2], "typo": true}'])
+def test_invalid_policy_fails_before_generating_files(tmp_path, contents):
+    policy = tmp_path / "routing.json"
+    policy.write_text(contents)
+    run, networkd = tmp_path / "run", tmp_path / "networkd"
+    cards = [(f"ens{3+n}", 1, MACS[n], True) for n in range(3)]
+    with pytest.raises(ValueError):
+        setup.main(fake_sys_net(tmp_path, cards), run, networkd, policy)
+    assert not run.exists() and not networkd.exists()
