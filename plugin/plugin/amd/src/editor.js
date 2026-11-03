@@ -110,6 +110,19 @@ export const init = (prefix) => {
 
   /* ---------- модель ---------- */
   const imageOf = n => images.get(n.image) || null;
+  const uplinkOf = n => {
+    const img = imageOf(n);
+    return img && Number.isInteger(img.uplink_port) ? img.uplink_port
+      : (Number.isInteger(n.uplink_port) ? n.uplink_port : null);
+  };
+  const adapterOffset = n => uplinkOf(n) === null ? 0 : 1;
+  // Restore the image's reserved port when opening older drafts without this node field.
+  st.lab.nodes.forEach(n => {
+    const uplink = uplinkOf(n);
+    if (uplink !== null) {
+      n.uplink_port = uplink;
+    }
+  });
   const range = (n, key) => {
     const img = imageOf(n);
     return img && img[key] && typeof img[key] === "object" ? img[key] : null;
@@ -129,6 +142,9 @@ export const init = (prefix) => {
   const portsOf = n => {
     const out = [];
     for (let a = 0; a < Math.min(adaptersOf(n), 64); a++) {
+      if (a === uplinkOf(n)) {
+        continue;
+      }
       for (let p = 0; p < Math.min(perAdapter(n), 64); p++) {
         out.push({adapter: a, port: p});
       }
@@ -149,7 +165,7 @@ export const init = (prefix) => {
     });
   };
   const nextName = img => {
-    const base = PREFIX[img.category] || "N";
+    const base = Number.isInteger(img.uplink_port) ? "ISP" : (PREFIX[img.category] || "N");
     for (let i = 1; ; i++) {
       if (!byName(base + i)) {
         return base + i;
@@ -203,6 +219,9 @@ export const init = (prefix) => {
       if (img.adapters && typeof img.adapters === "object") {
         /* число адаптеров определяет порты и линки: храним его, а не полагаемся на умолчание образа */
         n.adapters = img.adapters.default;
+      }
+      if (Number.isInteger(img.uplink_port)) {
+        n.uplink_port = img.uplink_port;
       }
       st.lab.nodes.push(n);
       st.sel = {kind: "node", i: st.lab.nodes.length - 1};
@@ -450,7 +469,7 @@ export const init = (prefix) => {
         + (imageOf(n) ? "" : " unknown") + role + pickable;
       const g = el("g", {class: cls, "data-node": i, role: "button", "aria-label": n.name}, lyr.nodes);
       el("rect", {class: "halo", x: cx - 31, y: cy - 31, width: 62, height: 62, rx: 12}, g);
-      el("use", {href: `#${prefix}-ico-${ICON[category(n)] || "server"}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
+      el("use", {href: `#${prefix}-ico-${adapterOffset(n) ? "cloud" : ICON[category(n)] || "server"}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
       /* имя — над подписями портов, как во вьюере */
       const t = el("text", {class: "nname", x: cx, y: cy + 42, "text-anchor": "middle", "data-node": i}, lyr.names);
       t.textContent = n.name;
@@ -541,7 +560,7 @@ export const init = (prefix) => {
     const visible = list.filter(i => !i.retired && !superseded.has(i.id));
     const entry = img => `<div class="ed-image-entry" data-search="${esc((img.title + " " + (img.derived?.description || "") + " " + (img.authorname || "")).toLowerCase())}">
       <button class="ed-img" type="button" draggable="${img.retired ? "false" : "true"}" data-image="${img.retired ? "" : esc(img.id)}" title="${esc(img.title)}" ${img.retired ? "disabled" : ""}>
-        <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${prefix}-ico-${ICON[img.category] || "server"}"/></svg>
+        <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${prefix}-ico-${Number.isInteger(img.uplink_port) ? "cloud" : ICON[img.category] || "server"}"/></svg>
         <span>${esc(img.title || img.id)}</span>${img.derived?.forced ? `<span data-forced-image="${esc(img.id)}" role="img" aria-label="${esc(str("authoringforcedhint"))}" title="${esc(str("authoringforcedhint"))}">⚠</span>` : ""}</button>
       ${img.derived ? `<small>${esc(img.derived.description || "")} · ${esc(img.derived.base)} · ${esc(img.authorname || "")}</small>
         ${img.derived.author_user_id === D.userid ? `<button type="button" class="gbtn" data-edit-image="${esc(img.id)}">${esc(str("authoringedit"))}</button>` : ""}
@@ -695,10 +714,11 @@ export const init = (prefix) => {
     if (!r) {
       return "";
     }
-    const v = Number.isInteger(n[key]) ? n[key] : "";
+    const offset = key === "adapters" ? adapterOffset(n) : 0;
+    const v = Number.isInteger(n[key]) ? n[key] - offset : "";
     return `<label class="ed-field"><span>${esc(label)}</span>
-      <input type="number" class="form-control form-control-sm" data-field="${key}" min="${+r.min}" max="${+r.max}"
-        step="1" value="${v}" placeholder="${+r.default}"><small>${+r.min}…${+r.max}</small></label>`;
+      <input type="number" class="form-control form-control-sm" data-field="${key}" min="${r.min - offset}" max="${r.max - offset}"
+        step="1" value="${v}" placeholder="${r.default - offset}"><small>${r.min - offset}…${r.max - offset}</small></label>`;
   };
 
   const nodeHTML = i => {
@@ -717,7 +737,7 @@ export const init = (prefix) => {
       <label class="ed-field"><span>${esc(str("ed_name"))}</span>
         <input type="text" class="form-control form-control-sm" data-field="name" value="${esc(n.name)}" maxlength="80"
           autocomplete="off" spellcheck="false"></label>
-      ${numberField(n, "adapters", str("ed_adapters"))}
+      ${numberField(n, "adapters", str(adapterOffset(n) ? "ed_ports" : "ed_adapters"))}
       ${numberField(n, "ram_mb", str("ed_ram"))}
       ${numberField(n, "cpus", str("ed_cpus"))}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
@@ -1137,6 +1157,11 @@ export const init = (prefix) => {
     }
     if (s.kind === "link" && t.dataset.end) {
       const [a, p] = t.value.split("/").map(Number);
+      const node = byName(st.lab.links[s.i][t.dataset.end].node);
+      if (!freePorts(node, s.i).some(port => port.adapter === a && port.port === p)) {
+        render();
+        return;
+      }
       change(() => {
         Object.assign(st.lab.links[s.i][t.dataset.end], {adapter: a, port: p});
       });
@@ -1174,10 +1199,11 @@ export const init = (prefix) => {
       return;
     }
     const r = range(n, field), raw = t.value.trim();
-    const v = raw === "" ? null : Number(raw);
+    const offset = field === "adapters" ? adapterOffset(n) : 0;
+    const v = raw === "" ? null : Number(raw) + offset;
     if (v !== null && (!Number.isInteger(v) || v < r.min || v > r.max)) {
-      fieldError(str("ed_range", `${r.min}…${r.max}`));
-      t.value = Number.isInteger(n[field]) ? n[field] : "";
+      fieldError(str("ed_range", `${r.min - offset}…${r.max - offset}`));
+      t.value = Number.isInteger(n[field]) ? n[field] - offset : "";
       return;
     }
     if (field === "adapters") {
@@ -1187,7 +1213,7 @@ export const init = (prefix) => {
           .some(m => m.node === n.name && m.adapter >= count));
       if (busy) {
         fieldError(str("ed_adaptersinuse"));
-        t.value = Number.isInteger(n.adapters) ? n.adapters : "";
+        t.value = Number.isInteger(n.adapters) ? n.adapters - offset : "";
         return;
       }
     }

@@ -170,6 +170,8 @@ const image = (id, title, kind, category, extra = {}) => ({
     ports_per_adapter: kind === 'iou' ? 4 : 1, preconfig: false, ...extra,
 });
 const EDITOR_IMAGES = [
+    image('lab-uplink', 'ISP', 'qemu', 'router', {uplink_port: 0, console_type: 'none', capture: false,
+        adapters: {default: 3, min: 3, max: 16}}),
     image('debian12', 'Debian 12', 'qemu', 'host', {preconfig: true}),
     image('vpcs', 'VPCS', 'vpcs', 'host', {preconfig: true, adapters: null, port_name: 'Ethernet0'}),
     image('linux-switch', 'Linux Switch', 'qemu', 'switch', {adapters: {default: 8, min: 1, max: 16}, console_type: 'none'}),
@@ -259,6 +261,11 @@ function editorPage(lang, def, constructor, extra = {}) {
 }
 for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `editor.${lang}.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, true), 'live', '', EDITOR_INIT));
+    const oldIsp = {format: 'gns3lab.lab/1', nodes: [
+        {name: 'OLD_ISP', image: 'lab-uplink', x: 0, y: 0, adapters: 3},
+    ], links: []};
+    fs.writeFileSync(path.join(dist, `editor.${lang}.isp.html`),
+        shell(lang, '', editorPage(lang, oldIsp, true), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.plain.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, false), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.segments.html`),
         shell(lang, '', editorPage(lang, EDITOR_SEGMENTED, true), 'live', '', EDITOR_INIT));

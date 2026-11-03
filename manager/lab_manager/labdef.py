@@ -184,12 +184,14 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
                     problem(f"{path}.{key}", "out_of_range", f"{bounds.min}..{bounds.max}")
                 else:
                     out[key] = value
-        if "uplink_port" in node and image is not None:
+        if image is not None and ("uplink_port" in node or image.uplink_port is not None):
             # The outer port of the "Internet" node (CONTRACTS 4.2): QEMU only, and nothing is linked to it.
-            value = node["uplink_port"]
+            value = node.get("uplink_port", image.uplink_port)
             adapters = effective({**node, **out}, image)["adapters"] if image.kind == "qemu" else 0
             if image.kind != "qemu":
                 problem(f"{path}.uplink_port", "unknown_field", f"{image.id} is not a qemu image")
+            elif image.uplink_port is not None and value != image.uplink_port:
+                problem(f"{path}.uplink_port", "out_of_range", f"image reserves adapter {image.uplink_port}")
             elif not is_int(value) or not 0 <= value < adapters:
                 problem(f"{path}.uplink_port", "out_of_range", f"0..{adapters - 1}")
             elif uplinks:
@@ -250,6 +252,8 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
             node = by_name[name]
             image = images[node["image"]]
             adapters = effective(node, image)["adapters"]
+            if "uplink_port" in node and (adapter, port) == (node["uplink_port"], 0):
+                return "adapter is reserved for the image's external connection"
             if is_int(adapter) and is_int(port) and 0 <= adapter < adapters and 0 <= port < PORTS_PER_ADAPTER[image.kind]:
                 return None
             return f"adapter 0..{adapters - 1}, port 0..{PORTS_PER_ADAPTER[image.kind] - 1}"

@@ -79,6 +79,7 @@ class Image(Strict):
     cpus: Range | None = None
     adapters: Range | None = None
     capture: bool | None = None
+    uplink_port: int | None = Field(default=None, strict=True, ge=0, le=15)
     sha256: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     derived: dict | None = None
     featured: bool = False
@@ -106,6 +107,12 @@ class Image(Strict):
             raise ValueError("net_config is for qemu only")
         if self.console_type == "vnc" and self.kind != "qemu":
             raise ValueError("console_type vnc is for qemu only")  # CONTRACTS 2.6
+        if self.uplink_port is not None:
+            if self.kind != "qemu" or self.uplink_port != 0 or self.adapters.min < 2:
+                raise ValueError("ISP images need qemu, uplink_port 0 and at least two adapters")
+            if self.console_type != "none" or self.net_config is not None or self.capture is True:
+                raise ValueError("ISP images have no console, network preconfiguration or capture")
+            self.capture = False
         if self.slot.cli_prompt is not None:
             try:
                 pattern = re.compile(self.slot.cli_prompt.encode())
@@ -135,6 +142,7 @@ class Image(Strict):
             "port_name": PORT_NAMES[self.kind], "ports_per_adapter": PORTS_PER_ADAPTER[self.kind],
             "preconfig": self.preconfig,
             "capture": self.kind == "qemu" if self.capture is None else self.capture,
+            **({"uplink_port": self.uplink_port} if self.uplink_port is not None else {}),
             **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }
 

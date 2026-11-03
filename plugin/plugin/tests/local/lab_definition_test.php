@@ -28,6 +28,18 @@ use mod_gns3lab\tests\fake_manager;
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\lab_definition::class)]
 final class lab_definition_test extends \basic_testcase {
+    public function test_keeps_reserved_adapter_zero_when_saving(): void {
+        $raw = ['nodes' => [['name' => 'ISP1', 'image' => 'lab-uplink', 'x' => 0, 'y' => 0,
+            'adapters' => 3, 'uplink_port' => 0]], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'ISP');
+        $this->assertSame(0, $def['nodes'][0]['uplink_port']);
+        $image = (object) ['id' => 'lab-uplink', 'kind' => 'qemu', 'uplink_port' => 0,
+            'ports_per_adapter' => 1, 'port_name' => 'Ethernet{adapter}'];
+        $topology = lab_definition::to_topology($def, [$image]);
+        $ports = $topology->topology->nodes[0]['ports'];
+        $this->assertSame([1, 2], array_column($ports, 'adapter_number'));
+    }
+
     public function test_keeps_known_fields_and_sets_the_title(): void {
         $raw = fake_manager::lab();
         $raw['title'] = 'From the browser';

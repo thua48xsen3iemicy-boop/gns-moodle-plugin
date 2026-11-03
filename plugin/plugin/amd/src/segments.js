@@ -310,7 +310,11 @@ export const previewDocument = (lab, images) => {
         const image = images.get(n.image) || null;
         const adapters = Number.isInteger(n.adapters) ? n.adapters : (image && image.adapters ? image.adapters.default : 1);
         const per = Math.max(1, (image && image.ports_per_adapter) || 1), ports = [];
+        const uplink = image && Number.isInteger(image.uplink_port) ? image.uplink_port : n.uplink_port;
         for (let a = 0; a < Math.min(adapters, 64); a++) {
+            if (a === uplink) {
+                continue;
+            }
             for (let p = 0; p < Math.min(per, 64); p++) {
                 const name = portText(image, a, p);
                 ports.push({adapter_number: a, port_number: p, name,
