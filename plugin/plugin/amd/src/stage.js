@@ -45,6 +45,7 @@ import {buildModel, clamp, esc, fmtFilters} from 'mod_gns3lab/model';
 import {svgEl as el, store, fill} from 'mod_gns3lab/dom';
 import {acolor, derive, endIf, endState, hostPart, vcolor} from 'mod_gns3lab/facts';
 import {drawModel, layerModel} from 'mod_gns3lab/reveal';
+import {CanvasView} from 'mod_gns3lab/canvasview';
 
 const KMIN = 0.22, KMAX = 6;
 
@@ -52,9 +53,9 @@ const KMIN = 0.22, KMAX = 6;
 const DIVE_PX = 140;
 
 /** On which layers an object can be seen; selecting it from a list switches to the first one. */
-const LAYER_OF = {subnet: ['l3'], vlan: ['l2'], adj: ['rt'], link: ['l1', 'l2']};
+const LAYER_OF = {subnet: ['l3'], vlan: ['l2'], adj: ['rt'], link: ['l1', 'l2'], switchvlan: ['l2']};
 
-const LAYERS = ['l1', 'l2', 'l3', 'rt'];
+const LAYERS = ['l1', 'l2', 'l3', 'l4'];
 
 const OK_EL = new Set(['rect', 'ellipse', 'circle', 'line', 'text']);
 const OK_AT = new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'x1', 'y1', 'x2', 'y2', 'fill', 'fill-opacity',
@@ -229,6 +230,7 @@ export class Stage {
         this.hintT = null;
         this.lastSize = null;
         this.needFit = false;
+        this.canvas = new CanvasView(this);
         this.bindControls();
         this.bindGestures();
         this.bindKeys();
@@ -419,10 +421,10 @@ export class Stage {
     /**
      * Switches the layer.
      *
-     * @param {string} layer l1, l2, l3 or rt
+     * @param {string} layer l1, l2, l3 or the reserved l4
      */
     setLayer(layer) {
-        if (!LAYERS.includes(layer) || (layer !== 'l1' && !this.der) || layer === this.layer) return;
+        if (!LAYERS.includes(layer) || (!['l1', 'l4'].includes(layer) && !this.der) || layer === this.layer) return;
         this.layer = layer;
         this.syncLayerUI();
         const s = this.sel;
@@ -470,6 +472,7 @@ export class Stage {
         seg.classList.toggle('stale', !!meta.stale);
         if (meta.stale) seg.title = this.s('ui_facts_stale_mark');
         else seg.removeAttribute('title');
+        this.canvas.view();
     }
 
     /**
@@ -501,10 +504,10 @@ export class Stage {
         const seg = this.r('layerSeg');
         if (!seg) return;
         const has = !!this.der;
-        seg.hidden = !has;
+        seg.hidden = false;
         seg.querySelectorAll('button').forEach(b => {
             b.setAttribute('aria-pressed', String(b.dataset.layer === this.layer));
-            b.disabled = b.dataset.layer !== 'l1' && !has;
+            b.disabled = !['l1', 'l4'].includes(b.dataset.layer) && !has;
         });
         const fs = this.r('factsSel');
         if (fs) {
@@ -520,6 +523,8 @@ export class Stage {
         const m = this.model;
         if (!m) return;
         for (const k in this.L) this.L[k].textContent = '';
+        this.canvas.reset();
+        if (this.sel && this.sel.kind === 'switchvlan' && (!this.canvas.l2 || !this.canvas.l2.virtuals.has(this.sel.id))) this.sel = null;
         const b = {x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity};
         this.grow = (x0, y0, x1, y1) => {
             b.x0 = Math.min(b.x0, x0);
@@ -530,10 +535,12 @@ export class Stage {
         this.renderDrawings();
         const geo = linkGeometry(m), L = this.layer, D = this.der;
         if (L === 'l3' || L === 'rt') geo.forEach(g => el('line', {class: 'wire ghost', x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by}, this.L.links));
-        else m.links.forEach(l => (L === 'l2' && D ? this.drawLinkL2(l, geo.get(l.id)) : this.drawLink(l, geo.get(l.id))));
+        else if (L !== 'l2' && L !== 'l4') m.links.forEach(l => this.drawLink(l, geo.get(l.id)));
+        if (L === 'l2' && D) this.canvas.renderL2();
         if (L === 'l3' && D) this.drawL3();
         if (L === 'rt' && D) this.drawRT();
-        this.renderNodes();
+        if (L !== 'l4') this.renderNodes();
+        this.canvas.prepareLabels();
         this.bounds = isFinite(b.x0) ? {x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0} : {x: -200, y: -150, w: 400, h: 300};
         this.applySel();
         this.view.k = this.view.k || 1;
@@ -583,6 +590,7 @@ export class Stage {
         el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'hit'}, G);
         el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'wire'}, G);
         if (unknown) el('title', {}, G).textContent = this.s('ui_l1_unknown');
+        this.canvas.duplex(l, g, G);
         const fl = fmtFilters(l.filters);
         if (fl.length) {
             const mx = (g.ax + g.bx) / 2, my = (g.ay + g.by) / 2, f = el('g', {class: 'l1'}, G);
@@ -640,7 +648,7 @@ export class Stage {
         const m = this.model, S = this.der.l3;
         S.subnets.forEach(s => s.members.forEach(mb => {
             const N = m.nodes.get(mb.nodeId);
-            const G = el('g', {class: 'edge dimmable' + (mb.down ? ' down' : '') + (mb.dup ? ' dup' : ''), 'data-subnet': s.key}, this.L.links);
+            const G = el('g', {class: 'edge dimmable' + (mb.down ? ' down' : '') + (mb.dup ? ' dup' : ''), 'data-subnet': s.key, 'data-member': mb.nodeId}, this.L.links);
             el('line', {class: 'hit', x1: N.cx, y1: N.cy, x2: s.x, y2: s.y}, G);
             el('line', {class: 'wire', x1: N.cx, y1: N.cy, x2: s.x, y2: s.y}, G);
             const dx = s.x - N.cx, dy = s.y - N.cy, len = Math.hypot(dx, dy) || 1, d = Math.min(dy / len > 0.5 ? 66 : 50, len * 0.5);
@@ -668,7 +676,6 @@ export class Stage {
     subtitle(n) {
         const f = this.fx && this.fx.nodes.get(n.id);
         if (!f) return '';
-        if (f.rid) return 'RID ' + f.rid;
         const i = (f.ifs || []).find(x => x.ipv4 && x.ipv4.length);
         if (i) return i.ipv4[0];
         if (f.vlans && f.vlans.length) return 'VLAN ' + f.vlans.map(v => v.id).join(', ');
@@ -678,6 +685,8 @@ export class Stage {
     renderNodes() {
         const L = this.layer, D = this.der;
         this.model.nodes.forEach(n => {
+            n.g = null;
+            if (this.canvas.l2 && this.canvas.l2.switches.has(n.id)) return;
             // A silhouette is a place with a console: no name, no kind, no state, no facts.
             const sil = n.state === 'silhouette';
             const st = sil ? null : this.nodeStatus(n);
@@ -701,7 +710,7 @@ export class Stage {
             const f = this.fx && this.fx.nodes.get(n.id);
             const sub = this.subtitle(n);
             if (sub) el('text', {y: 25, dy: '1.9em', class: 'nsub l2'}, g).textContent = sub;
-            if (f && f.adj && f.adj.length) {
+            if (L === 'rt' && f && f.adj && f.adj.length) {
                 const full = f.adj.filter(x => x.state === 'full').length;
                 el('text', {y: 25, dy: '3.6em', class: 'nadj l2' + (full < f.adj.length ? ' warn' : '')}, g).textContent = `OSPF ${full}/${f.adj.length} FULL`;
             }
@@ -805,6 +814,7 @@ export class Stage {
             this.cards.forEach((_, id) => this.scheduleCard(id));
             this.call('lodChanged', nl);
         }
+        this.canvas.view();
         this.call('viewChanged');
     }
 
@@ -938,48 +948,7 @@ export class Stage {
     }
 
     applySel() {
-        const s = this.sel, m = this.model, D = this.der, svg = this.svg;
-        const dim = !!s && (this.layer !== 'l1' || ['subnet', 'vlan', 'adj'].includes(s.kind));
-        svg.classList.toggle('has-sel', dim);
-        svg.querySelectorAll('.on,.sel').forEach(e => e.classList.remove('on', 'sel'));
-        if (!s) return;
-        const mark = (attr, idv, cls) => svg.querySelectorAll(`[${attr}="${CSS.escape(idv)}"]`).forEach(e => e.classList.add(...cls));
-        if (s.kind === 'node') {
-            mark('data-node', s.id, ['on', 'sel']);
-            if (!dim) return;
-            if (this.layer === 'l3' && D) D.l3.subnets.forEach(x => { if (x.members.some(mb => mb.nodeId === s.id)) mark('data-subnet', x.key, ['on']); });
-            else if (this.layer === 'rt' && D) D.rt.edges.forEach(e => { if (e.a === s.id || e.b === s.id) { mark('data-adj', e.id, ['on']); mark('data-node', e.a === s.id ? e.b : e.a, ['on']); } });
-            else m.links.forEach(l => {
-                if (l.a.nodeId === s.id || l.b.nodeId === s.id) {
-                    mark('data-link', l.id, ['on']);
-                    mark('data-node', l.a.nodeId === s.id ? l.b.nodeId : l.a.nodeId, ['on']);
-                }
-            });
-        } else if (s.kind === 'subnet' && D) {
-            const x = D.l3.subnets.find(v => v.key === s.id);
-            if (!x) return;
-            mark('data-subnet', x.key, ['on', 'sel']);
-            x.members.forEach(mb => mark('data-node', mb.nodeId, ['on']));
-        } else if (s.kind === 'vlan' && D) {
-            const d = D.l2.domains.find(v => v.id === s.id);
-            if (!d) return;
-            d.links.forEach(idv => mark('data-link', idv, ['on', 'sel']));
-            d.nodes.forEach(idv => mark('data-node', idv, ['on']));
-        } else if (s.kind === 'adj' && D) {
-            const e = D.rt.edges.find(v => v.id === s.id);
-            if (!e) return;
-            mark('data-adj', e.id, ['on', 'sel']);
-            mark('data-node', e.a, ['on']);
-            mark('data-node', e.b, ['on']);
-        } else if (s.kind === 'link') {
-            const l = m.links.find(x => x.id === s.id);
-            if (!l) return;
-            mark('data-link', l.id, ['on', 'sel']);
-            mark('data-node', l.a.nodeId, ['on']);
-            mark('data-node', l.b.nodeId, ['on']);
-            const g = this.L.links.querySelector(`.link[data-link="${CSS.escape(l.id)}"]`);
-            if (g) this.L.links.appendChild(g);
-        }
+        this.canvas.select();
     }
 
     /** Hint under the finger: what the selected node is and how to open its actions. */
@@ -1074,6 +1043,11 @@ export class Stage {
     /* ---------------- gestures ---------------- */
 
     targetOf(t) {
+        const virtual = t.closest && t.closest('[data-virtual]');
+        if (virtual && this.canvas.l2) {
+            const v = this.canvas.l2.virtuals.get(virtual.dataset.virtual);
+            if (v) return v.orig;
+        }
         const n = t.closest && t.closest('.node');
         if (n) return this.model.nodes.get(n.dataset.node);
         const l = t.closest && t.closest('.link[data-link]');
@@ -1233,6 +1207,18 @@ export class Stage {
         const dbl = this.lastTap && now - this.lastTap.t < 320 && Math.hypot(p.x - this.lastTap.x, p.y - this.lastTap.y) < 30;
         this.lastTap = dbl ? null : {t: now, x: p.x, y: p.y};
         const t = g.target, near = sel => t.closest && t.closest(sel);
+        const virtual = near('[data-virtual]');
+        if (virtual) {
+            const v = this.canvas.l2 && this.canvas.l2.virtuals.get(virtual.dataset.virtual);
+            if (dbl && !this.mobile && v && this.call('canConsole', v.orig)) {
+                this.call('closeOverlays');
+                this.call('console', v.orig);
+                return;
+            }
+            this.select({kind: 'switchvlan', id: virtual.dataset.virtual});
+            this.call('details', this.sel);
+            return;
+        }
         const badge = near('.cbadge'), nodeEl = near('.node'), cardEl = near('.card');
         const m = this.model;
         if (cardEl) {
@@ -1253,6 +1239,7 @@ export class Stage {
             }
             this.call('closeOverlays');
             this.select({kind: 'node', id: n.id});
+            this.call('details', this.sel);
             return;
         }
         const sub = near('[data-subnet]'), adj = near('[data-adj]'), linkEl = near('[data-link]');
@@ -1309,7 +1296,13 @@ export class Stage {
             const node = nodeEl ? this.model.nodes.get(nodeEl.dataset.node) : null;
             const link = linkEl ? this.model.links.find(x => x.id === linkEl.dataset.link) : null;
             const cur = node || (link && {isLink: true, link, id: link.id}) || (this.sel && this.sel.kind === 'node' ? this.model.nodes.get(this.sel.id) : null);
-            if (e.key === 'Enter' && link) {
+            const semantic = ae && ae.closest && ae.closest('[data-virtual],[data-subnet]');
+            if ((e.key === 'Enter' || e.key === ' ') && semantic) {
+                e.preventDefault();
+                this.select(semantic.hasAttribute('data-virtual') ? {kind: 'switchvlan', id: semantic.dataset.virtual}
+                    : {kind: 'subnet', id: semantic.dataset.subnet});
+                this.call('details', this.sel);
+            } else if (e.key === 'Enter' && link) {
                 e.preventDefault();
                 this.select({kind: 'link', id: link.id});
                 this.call('details', this.sel);

@@ -678,3 +678,19 @@ $string['authoringstatus_started'] = 'работает';
 $string['authoringstatus_stopped'] = 'выключена';
 $string['authoringstatus_suspended'] = 'приостановлена';
 $string['authoringstatus_unknown'] = 'статус неизвестен';
+
+// Student topology Canvas.
+$string['ui_canvas_title'] = 'Канвас топологии';
+$string['ui_canvas_l4'] = 'L4 — место для будущего представления.';
+$string['ui_canvas_duplex'] = 'Каждый TX соединён с RX другого конца. Стрелки показывают направления, а не текущий трафик.';
+$string['ui_canvas_chassis'] = 'один корпус, отдельные VLAN';
+$string['ui_canvas_blocked'] = 'не проходит';
+$string['ui_canvas_unknown'] = 'нет фактов';
+$string['ui_canvas_disconnected'] = 'нет активного домена';
+$string['ui_canvas_objects'] = 'объектов';
+$string['ui_canvas_card_layers'] = 'Факты объекта по слоям';
+$string['ui_canvas_interface'] = 'Интерфейс';
+$string['ui_canvas_admin'] = 'Административно';
+$string['ui_canvas_oper'] = 'Рабочее состояние';
+$string['ui_assignments'] = 'Задания';
+$string['ui_assignments_empty'] = 'Преподаватель ещё не добавил инструкции в описание этой активности.';

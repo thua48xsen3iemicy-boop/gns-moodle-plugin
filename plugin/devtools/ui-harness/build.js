@@ -103,6 +103,9 @@ function page(lang, extra = {}) {
     const view = {
         uniqid: 'u1',
         labname: lang === 'ru' ? 'Лаба 4 · OSPF multi-area' : 'Lab 4 · OSPF multi-area',
+        assignmenthtml: lang === 'ru'
+            ? '<p>Проверьте связность узлов топологии.</p><ol><li>Исследуйте порты.</li><li>Проверьте VLAN и адреса.</li></ol>'
+            : '<p>Check connectivity between topology nodes.</p><ol><li>Explore the ports.</li><li>Check VLANs and addresses.</li></ol>',
         backurl: '#back',
         isdemo: true,
         previewerror: false,

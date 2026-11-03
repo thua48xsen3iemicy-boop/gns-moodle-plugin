@@ -51,6 +51,7 @@ import {Seat, STRING_KEYS as SEAT_KEYS, reportRefusal, tabId} from 'mod_gns3lab/
 import {Session, STRING_KEYS as SESSION_KEYS} from 'mod_gns3lab/session';
 import {Stage} from 'mod_gns3lab/stage';
 import {STRING_KEYS as VNC_KEYS} from 'mod_gns3lab/vnc';
+import {STRING_KEYS as CANVAS_KEYS} from 'mod_gns3lab/canvasview';
 import {Wheel} from 'mod_gns3lab/wheel';
 
 const CATEGORIES = ['router', 'switch', 'pc', 'server', 'cloud', 'firewall', 'hypervisor'];
@@ -76,6 +77,7 @@ const FACT_ERRORS = ['unreachable', 'timeout', 'stopped', 'unsupported', 'failed
 
 /** Language strings of the interface; the texts of the layers and of the details tables are in the modules. */
 const UI_KEYS = [
+    ...CANVAS_KEYS,
     'ui_lod0', 'ui_lod1', 'ui_lod2', 'ui_lod3', 'ui_st_started', 'ui_st_stopped', 'ui_st_suspended',
     ...CATEGORIES.map(c => 'ui_cat_' + c),
     'ui_chip_touch', 'ui_chip_mouse', 'ui_hint_touch', 'ui_hint_mouse', 'ui_link_aria', 'ui_filter_on', 'ui_port_unlinked',
@@ -238,7 +240,7 @@ class LabPage {
     hookStage() {
         const stage = this.stage, consoles = this.consoles, details = this.details, wheel = this.wheel;
         stage.hooks = {
-            details: sel => details.show(sel),
+            details: sel => { if (this.hideAssignments) this.hideAssignments(); details.show(sel); },
             console: n => this.openConsole(n),
             nodeAction: n => {
                 if (this.canConsole(n)) {
@@ -251,12 +253,13 @@ class LabPage {
             canConsole: n => this.canConsole(n),
             diveCandidate: n => consoles.diveCandidate(n),
             diveRelease: n => consoles.diveRelease(n),
-            closeOverlays: () => details.hide(),
+            closeOverlays: () => { details.hide(); if (this.hideAssignments) this.hideAssignments(); },
             viewChanged: () => {
                 if (wheel.node && !wheel.tracking) {
                     wheel.position();
                 }
                 consoles.drawLinks();
+                details.position();
             },
             layerChanged: () => details.refresh(),
             mobileChanged: mobile => {
@@ -291,7 +294,34 @@ class LabPage {
                 help.hidden = true;
             }
         });
-        region('overview').onclick = () => this.details.toggleSummary();
+        const assignments = region('assignments'), open = region('assignmentsOpen'), close = region('assignmentsClose');
+        const hideAssignments = () => {
+            if (!assignments) return;
+            assignments.hidden = true;
+            open.setAttribute('aria-expanded', 'false');
+            this.stage.canvas.scheduleLabels();
+        };
+        this.hideAssignments = hideAssignments;
+        if (open && assignments) {
+            open.onclick = () => {
+                const show = assignments.hidden;
+                this.details.hide();
+                assignments.hidden = !show;
+                open.setAttribute('aria-expanded', String(show));
+                if (show) close.focus();
+                this.stage.canvas.scheduleLabels();
+            };
+            close.onclick = () => { hideAssignments(); open.focus(); };
+            assignments.addEventListener('keydown', e => {
+                if (e.key === 'Escape') { e.stopPropagation(); hideAssignments(); open.focus(); }
+            });
+        }
+        region('overview').onclick = () => { hideAssignments(); this.details.toggleSummary(); };
+        const refresh = region('canvasRefresh');
+        if (refresh) refresh.onclick = async() => {
+            refresh.disabled = true;
+            try { await this.refreshFacts(); } finally { refresh.disabled = false; }
+        };
     }
 
     /**

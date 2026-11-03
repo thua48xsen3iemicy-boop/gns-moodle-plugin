@@ -104,6 +104,8 @@ class viewer implements renderable, templatable {
 
         return [
             'labname' => $labname,
+            'assignmenthtml' => trim($this->instance->intro ?? '') !== ''
+                ? format_module_intro('gns3lab', $this->instance, $this->cm->id) : '',
             'backurl' => $back->out(false),
             'observing' => $this->observed !== null,
             'studentname' => $this->observed ? fullname($this->observed) : '',
