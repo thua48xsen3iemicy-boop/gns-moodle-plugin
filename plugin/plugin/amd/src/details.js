@@ -83,6 +83,7 @@ export class Details {
         if (!this.sel || !this.stage.model) { this.hideCard(); return; }
         const data = objectData(this.stage, this.sel, this.layer, this.panel);
         if (!data) { this.hideCard(); return; }
+        this.stage.r('chip').hidden = true;
         const focusInside = this.el.contains(document.activeElement);
         this.el.textContent = '';
         const lead = el('line', {class: 'card-lead'}, this.el), anchor = el('circle', {r: 5, class: 'card-anchor'}, this.el);

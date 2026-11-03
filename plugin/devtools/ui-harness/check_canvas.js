@@ -98,6 +98,7 @@ async function captureStage(page) {
         await page.locator('[data-card-layer="l3"]').click();
         assert.equal(await page.locator('[data-layer="l1"]').getAttribute('aria-pressed'), 'true');
         assert.match(await page.locator('.object-card').innerText(), /10\.1\.99\./);
+        assert.equal(await page.locator('[data-region="chip"]').isHidden(), true);
         await prototypeParity(browser, page);
         await page.locator('.object-card [data-act="close"]').click();
         assert.equal(await page.locator('.node.sel').getAttribute('data-node'), selection.node);
@@ -111,6 +112,17 @@ async function captureStage(page) {
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('[data-region="assignments"]').isHidden(), true);
         console.log('PASS  activity assignments open on the canvas and close with Escape');
+
+        await page.evaluate(() => {
+            const s = window.canvasStage, l = s.model.links.find(l => s.model.nodes.get(l.a.nodeId).name === 'R2' || s.model.nodes.get(l.b.nodeId).name === 'R2');
+            s.select({kind: 'link', id: l.id}); s.call('details', s.sel);
+        });
+        await page.locator('[data-layer="l3"]').click();
+        assert.equal(await page.evaluate(() => window.canvasStage.sel?.kind), 'link');
+        assert.ok(await page.locator('.subnet-object.on').count() > 0);
+        assert.equal(await page.locator('[data-card-layer="l1"]').getAttribute('aria-selected'), 'true');
+        await page.locator('.object-card [data-act="close"]').click();
+        console.log('PASS  physical link selection and its independent card survive a switch to L3');
 
         await page.locator('[data-layer="l2"]').click();
         const l2 = await page.evaluate(() => {
@@ -191,6 +203,10 @@ async function captureStage(page) {
         assert.equal(await page.locator('[data-card-layer]').count(), 1);
         await page.locator('.object-card [data-act="close"]').click();
         assert.equal(await page.locator('.node.on').count(), l3.members.length);
+        await page.locator('[data-layer="l1"]').click();
+        assert.equal(await page.evaluate(() => window.canvasStage.sel?.kind), 'subnet');
+        assert.ok(await page.locator('.link.on').count() > 0);
+        await page.locator('[data-layer="l3"]').click();
         await page.evaluate(() => {
             const s = window.canvasStage, n = [...s.model.nodes.values()].find(n => n.name === 'PC1');
             s.call('console', n);

@@ -399,8 +399,6 @@ export class Stage {
         }
         this.layer = layer;
         this.syncLayerUI();
-        const s = this.sel;
-        if (s && LAYER_OF[s.kind] && !LAYER_OF[s.kind].includes(layer)) this.sel = null;
         this.render();
         this.call('select', this.sel);
         this.call('layerChanged', layer);

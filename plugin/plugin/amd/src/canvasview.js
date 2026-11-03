@@ -333,10 +333,19 @@ export class CanvasView {
         } else if (sel.kind === 'link') { links.add(sel.id); mark('data-link', sel.id, true); }
         else if (sel.kind === 'subnet') { subnets.add(sel.id); mark('data-subnet', sel.id, true); }
         else if (sel.kind === 'vlan' && D) { const d = D.l2.domains.find(d => d.id === sel.id); if (d) domains.add(d); }
+        if (sel.kind === 'link' && s.layer === 'l3' && D) {
+            const link = s.model.links.find(l => l.id === sel.id);
+            if (link) D.l3.subnets.forEach(x => { if (x.members.some(m => [link.a.nodeId, link.b.nodeId].includes(m.nodeId))) subnets.add(x.key); });
+        }
         subnets.forEach(id => {
             const subnet = D && D.l3.subnets.find(x => x.key === id);
             mark('data-subnet', id);
             if (subnet) subnet.members.forEach(m => nodes.add(m.nodeId));
+            if (subnet && s.layer === 'l1') {
+                subnet.members.forEach(m => m.dom?.links.forEach(id => links.add(id)));
+                const members = new Set(subnet.members.map(m => m.nodeId));
+                s.model.links.forEach(l => { if (members.has(l.a.nodeId) && members.has(l.b.nodeId)) links.add(l.id); });
+            }
         });
         domains.forEach(d => {
             d.nodes.forEach(id => nodes.add(id));
