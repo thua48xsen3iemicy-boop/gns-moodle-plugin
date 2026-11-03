@@ -59,7 +59,7 @@ class lab_definition {
     public const TITLE_MAX = 200;
 
     /** Node fields besides name, image, x and y; the lab manager uses the image default for a missing one. */
-    protected const NUMBERS = ['ram_mb', 'cpus', 'adapters'];
+    protected const NUMBERS = ['ram_mb', 'cpus', 'adapters', 'uplink_port'];
 
     /**
      * An empty definition.
@@ -266,7 +266,11 @@ class lab_definition {
             $adapters = (int) ($node['adapters'] ?? $image->adapters->default ?? 1);
             $perport = max(1, (int) ($image->ports_per_adapter ?? 1));
             $ports = [];
+            $uplink = $node['uplink_port'] ?? $image->uplink_port ?? null;
             for ($a = 0; $a < min($adapters, 64); $a++) {
+                if ($a === $uplink) {
+                    continue;
+                }
                 for ($p = 0; $p < min($perport, 64); $p++) {
                     $name = self::port_name($image, $a, $p);
                     $ports[] = ['adapter_number' => $a, 'port_number' => $p, 'name' => $name,

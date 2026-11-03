@@ -72,7 +72,7 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
     fs.mkdirSync(SHOTS, {recursive: true});
     execFileSync(process.execPath, [path.join(__dirname, 'build.js')], {cwd: __dirname, stdio: 'ignore'});
     const server = spawn(process.execPath, [path.join(__dirname, 'server.js'), PORT], {stdio: 'ignore'});
-    const browser = await chromium.launch();
+    const browser = await chromium.launch({executablePath: process.env.CHROMIUM_BIN || undefined});
     try {
         const ready = await until(async() => (await get(`${BASE}/editor.en.html`)) === 200, 10000);
         check('the harness server is up', !!ready);
@@ -88,6 +88,39 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
                 problems.push('console: ' + m.text());
             }
         });
+
+        // ---- ISP reserves its external adapter; the teacher only sees LAN ports.
+        await page.goto(`${BASE}/editor.en.html${MIN}`);
+        await page.locator('[data-image="lab-uplink"]').click();
+        check('ISP is named automatically and exposes two ports, excluding adapter zero',
+            await page.locator('.ed-props h2').innerText() === 'ISP1'
+            && await page.locator('[data-field="adapters"]').inputValue() === '2'
+            && (await texts(page, '.ed-ports td:first-child')).join('|') === 'Ethernet1|Ethernet2');
+        const count = page.locator('[data-field="adapters"]');
+        await count.fill('4');
+        await count.dispatchEvent('change');
+        check('four teacher ports expose adapters 1 through 4',
+            (await page.locator('.ed-ports tr').count()) === 4
+            && !(await texts(page, '.ed-ports tr')).some(t => t.includes('Ethernet0')));
+        await act(page, 'link').click();
+        await tap(page, 5);
+        await tap(page, PC2);
+        check('automatic wiring and link endpoint selectors skip adapter zero',
+            !(await texts(page, '[data-end="a"] option')).some(t => t === 'Ethernet0'));
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.length === 6);
+        const ispDefinition = await saved(page);
+        const isp = ispDefinition.nodes.find(n => n.name === 'ISP1');
+        check('saving preserves the reserved adapter and counts the hidden card internally',
+            isp.uplink_port === 0 && isp.adapters === 5
+            && ispDefinition.links.some(l => l.a.node === 'ISP1' && l.a.adapter === 1));
+        // Reload an old draft without the field: the image metadata restores it.
+        await page.goto(`${BASE}/editor.en.isp.html${MIN}`);
+        await page.locator('.node').waitFor();
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.some(n => n.name === 'OLD_ISP'));
+        check('opening an older ISP draft restores uplink_port',
+            (await saved(page)).nodes.find(n => n.name === 'OLD_ISP').uplink_port === 0);
 
         // ---- a manager without the lab constructor: no segments, no preview
         await page.goto(`${BASE}/editor.en.plain.html${MIN}`);
