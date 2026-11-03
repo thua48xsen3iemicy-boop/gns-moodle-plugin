@@ -41,10 +41,34 @@ def test_a_lab_without_uplink_keeps_its_ticket_and_revision():
     assert lab_revision(ticket) == REVISION_OF_MOODLE_LAB
 
 
-def test_uplink_port_is_part_of_lab_def():
+def test_isp_image_automatically_adds_uplink_to_canonical_definition_and_ticket():
     plain, marked = inet_lab(), inet_lab()
     del plain["nodes"][-1]["uplink_port"]
+    assert check(plain, IMAGES, ALL).lab_def == check(marked, IMAGES, ALL).lab_def
+    assert check(plain, IMAGES, ALL).definition["nodes"][-1]["uplink_port"] == 0
+    assert ticket_of(plain)["nodes"][-1]["uplink_port"] == 0
+
+
+def test_explicit_uplink_on_an_ordinary_qemu_image_still_changes_lab_def():
+    plain, marked = inet_lab(image="debian12"), inet_lab(image="debian12")
+    del plain["nodes"][-1]["uplink_port"]
     assert check(plain, IMAGES, ALL).lab_def != check(marked, IMAGES, ALL).lab_def
+
+
+def test_isp_reserved_port_cannot_be_linked_even_if_node_omits_uplink():
+    lab = inet_lab()
+    del lab["nodes"][-1]["uplink_port"]
+    lab["links"][-1]["b"]["adapter"] = 0
+    assert problems(lab) == [("links[3].b", "uplink_port_in_use")]
+
+
+def test_isp_reserved_port_cannot_be_used_in_a_segment():
+    lab = inet_lab()
+    lab["format"] = "gns3lab.lab/2"
+    lab["segments"] = [{"name": "LAN", "subnet": {"fixed": "192.168.10.0/24"},
+                        "gateway": {"node": "NET", "adapter": 0, "port": 0},
+                        "members": [{"node": "PC2", "adapter": 0, "port": 0}]}]
+    assert ("segments[0].gateway", "bad_port") in problems(lab)
 
 
 @pytest.mark.parametrize("lab,expected", [
@@ -52,7 +76,8 @@ def test_uplink_port_is_part_of_lab_def():
     (inet_lab(uplink_port=-1), [("nodes[4].uplink_port", "out_of_range")]),
     (inet_lab(uplink_port="0"), [("nodes[4].uplink_port", "out_of_range")]),
     (inet_lab(uplink_port=True), [("nodes[4].uplink_port", "out_of_range")]),
-    (inet_lab(uplink_port=1), [("links[3].b", "uplink_port_in_use")]),
+    (inet_lab(uplink_port=1), [("nodes[4].uplink_port", "out_of_range")]),
+    (inet_lab(uplink_port=None), [("nodes[4].uplink_port", "out_of_range")]),
 ])
 def test_invalid_uplink_port(lab, expected):
     assert problems(lab) == expected
@@ -71,9 +96,40 @@ def test_at_most_one_uplink_node():
 
 
 def test_the_default_adapters_of_the_image_bound_the_port():
-    lab = inet_lab(uplink_port=2)
-    del lab["nodes"][-1]["adapters"]  # the image default is 2 adapters
+    lab = inet_lab(image="debian12", uplink_port=2)
+    del lab["nodes"][-1]["adapters"]  # the ordinary image defaults to one adapter
+    lab["links"][-1]["b"]["adapter"] = 0
     assert problems(lab) == [("nodes[4].uplink_port", "out_of_range")]
+
+
+def test_isp_metadata_is_public_and_internal_ports_are_not_preconfigured():
+    public = IMAGES["lab-uplink"].public()
+    assert public["uplink_port"] == 0 and public["title"] == "ISP"
+    assert public["capture"] is False and public["preconfig"] is False
+    assert "uplink_port" not in IMAGES["debian12"].public()
+
+
+@pytest.mark.parametrize("patch", [
+    {"uplink_port": True}, {"uplink_port": "0"}, {"uplink_port": 1}, {"uplink_port": -1},
+    {"kind": "iou", "cpus": None}, {"console_type": "telnet"}, {"net_config": "networkd"},
+    {"capture": True}, {"adapters": {"default": 1, "min": 1, "max": 16}},
+])
+def test_invalid_isp_image_metadata_is_rejected(patch):
+    from lab_manager.images import Image
+
+    raw = IMAGES["lab-uplink"].model_dump() | patch
+    with pytest.raises(ValueError):
+        Image.model_validate(raw)
+
+
+def test_isp_default_disables_capture_without_an_explicit_flag():
+    from lab_manager.images import Image
+
+    raw = IMAGES["lab-uplink"].model_dump()
+    raw.pop("capture")
+    image = Image.model_validate(raw)
+    assert image.capture is False  # Backend capture checks must agree with the public catalog.
+    assert image.public()["capture"] is False
 
 
 # ---- catalog (reference) labs

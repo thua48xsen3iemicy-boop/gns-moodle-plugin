@@ -1,4 +1,4 @@
-# Lab Manager — 0.15.0
+# Lab Manager — 0.15.1
 
 Узел «Интернет»: `uplink_port` узла лабы (`gns3lab.lab/*` и эталонная `ticket.json`) идёт в `NodeSpec` слота, лаба с ним
 запускается только на слотах с `"features": ["uplink"]` в `slots.json` (`slots.json.example`), иначе `409 unsupported_lab`.
