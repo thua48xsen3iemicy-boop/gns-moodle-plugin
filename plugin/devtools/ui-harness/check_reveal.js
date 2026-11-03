@@ -342,6 +342,7 @@ async function newPage(browser, problems, options = {}) {
         const layerButton = seen.locator('[data-layer="l3"]');
         check('seen: the layers are offered', (await layerButton.count()) === 1 && !(await layerButton.isDisabled()));
         await layerButton.click();
+        await seen.locator('[data-card-layer="l3"]').click();
         const before = await seen.locator('[data-region="details"]').innerText();
         check('seen: before any command the addresses of PC1 are not explored', /Not explored yet/.test(before)
             && !/10\.1\.10\./.test(before), JSON.stringify(before.slice(0, 160)));
@@ -354,12 +355,12 @@ async function newPage(browser, problems, options = {}) {
         await seen.locator('[data-layer="l1"]').click();
         await seen.locator('[data-region="overview"]').click();
         await seen.locator(`.rowbtn[data-goto-node="${PC1}"]`).click();
-        await seen.locator('[data-layer="l3"]').click();
+        await seen.locator('[data-card-layer="l3"]').click();
         await sleep(300);
         const after = await seen.locator('[data-region="details"]').innerText();
         check('seen: show ip uncovers the addresses of PC1', /10\.1\.10\.77/.test(after) && !/Not explored yet/.test(after),
             JSON.stringify(after.slice(0, 200)));
-        await seen.locator('[data-layer="l2"]').click();
+        await seen.locator('[data-card-layer="l2"]').click();
         check('seen: ...and only the addresses: L2 of PC1 is still not explored',
             /Not explored yet/.test(await seen.locator('[data-region="details"]').innerText()));
         const sent2 = await until(async() => (await uncovered(seen)).some(i => i.kind === 'group' && i.item === 'l3'), 4000);

@@ -171,7 +171,7 @@ function wireTags(f, i){
   subs.forEach(s => { if (s.dot1q != null && s.admin !== "down") set.add(+s.dot1q); });
   return { sw: false, set, any: false, subs };
 }
-function endVertex(nodeId, i, w, t){
+export function endVertex(nodeId, i, w, t){
   if (w.sw) { const v = w.map(t); return v == null ? null : `S|${nodeId}|${v}`; }
   if (!w.set.has(t)) return null;
   if (t === "u") return `E|${nodeId}|${i.name}`;
@@ -179,7 +179,7 @@ function endVertex(nodeId, i, w, t){
 }
 /* транк всегда может слать native без тега — это не ошибка, если на другом конце его никто не ждёт */
 const sends = (w, t) => w.set.has(t) && !(t === "u" && w.sw && w.sp.mode === "trunk");
-function switchVlans(f){
+export function switchVlans(f){
   const out = new Set(f.vlans.map(v => +v.id));
   (f.ifs || []).forEach(i => {
     const sp = i.switchport;
@@ -262,7 +262,7 @@ function deriveL2(m, fx, l1){
   });
   const domFor = (nodeId, i) => domOf.get(i.kind === "svi" ? `S|${nodeId}|${+i.vlan}` : `E|${nodeId}|${i.name}`) || null;
   const vlanIds = [...new Set([...domains.flatMap(d => d.vlans), ...[...links.values()].flatMap(r => r.vlans)])].sort((a, b) => a - b);
-  return { links, domains, domFor, vlanIds, issues };
+  return { links, domains, domFor, domOf, vlanIds, issues };
 }
 
 function deriveL3(m, fx, l2){

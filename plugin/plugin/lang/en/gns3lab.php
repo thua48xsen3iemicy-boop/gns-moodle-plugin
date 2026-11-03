@@ -678,3 +678,19 @@ $string['authoringstatus_started'] = 'running';
 $string['authoringstatus_stopped'] = 'stopped';
 $string['authoringstatus_suspended'] = 'suspended';
 $string['authoringstatus_unknown'] = 'status unknown';
+
+// Student topology Canvas.
+$string['ui_canvas_title'] = 'Topology canvas';
+$string['ui_canvas_l4'] = 'L4 is reserved for a later update.';
+$string['ui_canvas_duplex'] = 'Each TX connects to the RX at the other end. Arrows show directions, not live traffic.';
+$string['ui_canvas_chassis'] = 'one device, separate VLANs';
+$string['ui_canvas_blocked'] = 'blocked';
+$string['ui_canvas_unknown'] = 'no facts';
+$string['ui_canvas_disconnected'] = 'no active domain';
+$string['ui_canvas_objects'] = 'objects';
+$string['ui_canvas_card_layers'] = 'Object facts by layer';
+$string['ui_canvas_interface'] = 'Interface';
+$string['ui_canvas_admin'] = 'Admin';
+$string['ui_canvas_oper'] = 'Oper';
+$string['ui_assignments'] = 'Assignments';
+$string['ui_assignments_empty'] = 'No instructions have been added to this activity yet.';

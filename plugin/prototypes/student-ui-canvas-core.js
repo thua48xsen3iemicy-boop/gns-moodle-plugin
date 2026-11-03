@@ -463,7 +463,7 @@ function deriveL2(m, fx, l1){
   });
   const domFor = (nodeId, i) => domOf.get(i.kind === "svi" ? `S|${nodeId}|${+i.vlan}` : `E|${nodeId}|${i.name}`) || null;
   const vlanIds = [...new Set([...domains.flatMap(d => d.vlans), ...[...links.values()].flatMap(r => r.vlans)])].sort((a, b) => a - b);
-  return { links, domains, domFor, vlanIds, issues };
+  return { links, domains, domFor, domOf, vlanIds, issues };
 }
 
 function deriveL3(m, fx, l2){
@@ -666,7 +666,7 @@ const derive = (m, factsDoc) => {
   return {fx, der: {l1, l2, l3: deriveL3(m, fx, l2), rt: deriveRT(m, fx, l1, l2)}};
 };
 
-return {ip4, ipStr, cidr, hostPart, v4, endIf, endState, portEnd, macTable, vcolor, acolor, derive};
+return {ip4, ipStr, cidr, hostPart, v4, endIf, endState, portEnd, endVertex, switchVlans, macTable, vcolor, acolor, derive};
 })();
 modules.consolefacts = (() => {
 // This file is part of Moodle - https://moodle.org/

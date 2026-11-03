@@ -30,7 +30,8 @@
 
 import {fill} from 'mod_gns3lab/dom';
 import {esc, fmtFilters, natSort} from 'mod_gns3lab/model';
-import {ipStr, v4, acolor, vcolor, portEnd, macTable} from 'mod_gns3lab/facts';
+import {ipStr, v4, acolor, vcolor, portEnd, macTable, endIf} from 'mod_gns3lab/facts';
+import {linkDirections} from 'mod_gns3lab/canvasmodel';
 
 const GiB = 1024 ** 3, MiB = 1024 ** 2;
 
@@ -62,10 +63,10 @@ const FACT_ERRORS = ["unreachable", "timeout", "stopped", "unsupported", "failed
  * @param {object} host canConsole(node) tells whether a console can be opened now; refreshFacts() asks for new facts
  * @returns {object} builders: summary, node, link, subnet, vlan, adj, issues
  */
-const makeHtml = (stage, strings, host) => {
+const makeHtml = (stage, strings, host, cardLayer = stage.layer) => {
 const st = {
   get model() { return stage.model; }, get der() { return stage.der; }, get fx() { return stage.fx; },
-  get layer() { return stage.layer; }, get statusOn() { return stage.statusKnown; }, get factsKey() { return stage.factsKey; },
+  get layer() { return cardLayer; }, get statusOn() { return stage.statusKnown; }, get factsKey() { return stage.factsKey; },
   get live() { return stage.factsLive; },
 };
 const nodeStatus = n => stage.nodeStatus(n);
@@ -84,7 +85,7 @@ function statusLine(n){
   if (!s) return `<p class="st st-none">${esc(strings.ui_status_nodata)}</p>`;
   return `<p class="st st-${s}">${STATUS_NAME[s] || esc(s)}</p>`;
 }
-const layerIssues = () => { const D = st.der; return !D ? [] : { l1: D.l1.issues, l2: D.l2.issues, l3: D.l3.issues, rt: D.rt.issues }[st.layer]; };
+const layerIssues = () => { const D = st.der; return !D ? [] : { l1: D.l1.issues, l2: D.l2.issues, l3: D.l3.issues, rt: D.rt.issues }[st.layer] || []; };
 const gotoAttr = g => g ? `data-goto-${g.kind}="${esc(g.id)}"` : "";
 function issuesHTML(list, okText){
   if (!list.length) return `<p class="okline">${esc(okText)}</p>`;
@@ -178,7 +179,7 @@ function summaryHTML(){
   return `
     <div><p class="eyebrow">Обзор</p><h2>Состав лабы</h2></div>
     <p class="glead">Нажмите на устройство или линк, чтобы увидеть порты, соседей и параметры. Схема только для просмотра: здесь ничего нельзя сдвинуть или удалить.</p>
-    ${st.der ? `${st.live ? "" : `<p class="glead">Слои L2, L3 и OSPF строятся из того, как устройства реально настроены. Переключите конфиг на «с ошибками», чтобы увидеть, как ошибки выглядят на схеме.</p>`}${factsLine()}<h3>Проблемы L1 <span class="count">${st.der.l1.issues.length}</span></h3>${issuesHTML(st.der.l1.issues, "Все линки работают.")}` : st.live ? factsLine() : ""}
+    ${st.der ? `${st.live ? "" : `<p class="glead">Слои L2, L3 строятся из того, как устройства реально настроены. Переключите конфиг на «с ошибками», чтобы увидеть, как ошибки выглядят на схеме.</p>`}${factsLine()}<h3>Проблемы L1 <span class="count">${st.der.l1.issues.length}</span></h3>${issuesHTML(st.der.l1.issues, "Все линки работают.")}` : st.live ? factsLine() : ""}
     <dl class="kv">${kv}${unknown ? `<dt>${esc(strings.ui_fog_unknown_count)}</dt><dd class="mono">${unknown}</dd>` : ""}<dt>Линки</dt><dd class="mono">${m.links.length}${susp ? ` · ${susp} приост.` : ""}${filt ? ` · ${filt} с фильтрами` : ""}</dd></dl>
     <div class="legend">
       <span><i class="wirekey"></i>линк</span><span><i class="wirekey d"></i>приостановлен</span>
@@ -248,6 +249,7 @@ function nodeHTML(n){
     ${found ? `<p class="glead">${esc(hasConsole ? strings.ui_fog_found_note : strings.ui_fog_found_noconsole)}</p>` : ""}
     ${seenHTML(n)}
     ${ferr}
+    ${st.der && st.layer === "l1" && !found ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
     ${layered && !found ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
     ${macs ? (ferr ? `<div class="fstale">${macs}</div>` : macs) : ""}
     <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
@@ -270,7 +272,13 @@ function linkHTML(l){
       <dt>Состояние</dt><dd>${linkState(l)}</dd>
       ${fl.length ? fl.map(f => `<dt>${f.k}</dt><dd class="mono">${esc(f.v)}</dd>`).join("") : `<dt>Фильтры</dt><dd>нет</dd>`}
     </dl>
+    ${st.layer === "l1" ? `<h3>TX → RX</h3><p class="note">${esc(strings.ui_canvas_duplex)}</p><div class="tblwrap"><table class="ifs"><thead><tr><th>TX →</th><th>→ RX</th></tr></thead><tbody>${linkDirections(l).map(({from, to}) => `<tr><td>${esc(m.nodes.get(from.nodeId).name)} <span class="mono">${esc(portText(from))}</span> TX</td><td>${esc(m.nodes.get(to.nodeId).name)} <span class="mono">${esc(portText(to))}</span> RX</td></tr>`).join("")}</tbody></table></div>` : ""}
     ${st.der && st.layer === "l2" ? linkL2HTML(l) : ""}
+    ${st.layer === "l3" ? [l.a, l.b].map(e => {
+      const f = st.fx && st.fx.nodes.get(e.nodeId), i = endIf(st.fx, e);
+      const interfaces = i ? [i, ...f.subs(i.name)] : [];
+      return `<h3>${esc(m.nodes.get(e.nodeId).name)} · L3</h3>${groupClosed(m.nodes.get(e.nodeId), "l3") ? unexplored() : `<p class="mono">${esc(interfaces.flatMap(i => (i.ipv4 || []).map(ip => i.name + " · " + ip)).join(", ") || "—")}</p>`}`;
+    }).join("") : ""}
     ${linkConsoles(l)}
     <p class="idline">link_id ${esc(l.id)}</p>`;
 }
@@ -320,6 +328,10 @@ function nodeLayerHTML(n){
   if (!f || !f.ifs) return `<p class="note">Фактов об интерфейсах нет${f && NODE_OFF[f.status] ? ` — узел ${NODE_OFF[f.status]}, бэкенд не может его опросить` : ""}.</p>`;
   const nodeIssues = layerIssues().filter(x => x.text.includes(n.name + " ") || (x.go && x.go.kind === "node" && x.go.id === n.id));
   const iss = nodeIssues.length ? issuesHTML(nodeIssues, "") : "";
+  if (L === "l1") {
+    const rows = f.ifs.filter(i => i.kind === "physical").map(i => `<tr><td class="mono">${esc(i.name)}</td><td>${esc(i.admin || "?")}</td><td>${esc(i.oper || "?")}${seenMark(i, "admin", "oper")}</td></tr>`).join("");
+    return `<h3>L1</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>${esc(strings.ui_canvas_interface)}</th><th>${esc(strings.ui_canvas_admin)}</th><th>${esc(strings.ui_canvas_oper)}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
   if (L === "l2") {
     const rows = f.ifs.filter(i => i.kind !== "loopback").map(i => {
       const d = i.switchport ? null : D.l2.domFor(n.id, i);
@@ -383,7 +395,7 @@ function adjHTML(e){
 
 return {
   summary: () => (st.layer === "l2" && st.der ? l2SummaryHTML() : st.layer === "l3" && st.der ? l3SummaryHTML()
-    : st.layer === "rt" && st.der ? rtSummaryHTML() : summaryHTML()),
+    : st.layer === "rt" && st.der ? rtSummaryHTML() : st.layer === "l4" ? `<h2>L4</h2><p class="glead">${esc(strings.ui_canvas_l4)}</p>` : summaryHTML()),
   node: nodeHTML, link: linkHTML, subnet: subnetHTML, vlan: vlanHTML, adj: adjHTML,
   issues: () => layerIssues().length,
   layerName: () => LAYER_NAME[st.layer],
@@ -406,6 +418,7 @@ export class Details {
         this.strings = strings;
         this.host = host;
         this.sel = null;
+        this.layer = 'l1';
         this.close = document.createElement('button');
         this.close.type = 'button';
         this.close.className = 'x';
@@ -416,7 +429,20 @@ export class Details {
         this.body.className = 'dcontent';
         el.append(this.close, this.body);
         el.addEventListener('click', e => this.clicked(e));
+        new ResizeObserver(() => this.position()).observe(el);
         el.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { e.stopPropagation(); this.hide(); this.stage.select(null); this.stage.svg.focus(); return; }
+            const tab = e.target.closest('[data-card-layer]');
+            if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault();
+                const layers = [...this.body.querySelectorAll('[data-card-layer]')].map(b => b.dataset.cardLayer);
+                const index = layers.indexOf(this.layer);
+                this.layer = layers[e.key === 'Home' ? 0 : e.key === 'End' ? layers.length - 1
+                    : (index + (e.key === 'ArrowRight' ? 1 : layers.length - 1)) % layers.length];
+                this.render();
+                this.body.querySelector(`[data-card-layer="${this.layer}"]`).focus();
+                return;
+            }
             const t = e.target.closest && e.target.closest('tr[data-goto-link]');
             if (t && (e.key === 'Enter' || e.key === ' ')) {
                 e.preventDefault();
@@ -441,6 +467,8 @@ export class Details {
      */
     show(sel) {
         this.sel = sel;
+        this.layer = sel && ['subnet', 'vlan', 'switchvlan'].includes(sel.kind)
+            ? (sel.kind === 'subnet' ? 'l3' : 'l2') : ['l1', 'l2', 'l3'].includes(this.stage.layer) ? this.stage.layer : 'l1';
         this.render();
     }
 
@@ -459,7 +487,6 @@ export class Details {
         if (this.visible && !this.sel) {
             this.hide();
         } else {
-            this.stage.select(null);
             this.showSummary();
         }
     }
@@ -467,6 +494,8 @@ export class Details {
     hide() {
         this.el.hidden = true;
         this.sel = null;
+        if (this.lead) this.lead.style.display = 'none';
+        this.stage.canvas.scheduleLabels();
     }
 
     /**
@@ -483,14 +512,17 @@ export class Details {
         if (!m) {
             return;
         }
-        const h = makeHtml(stage, this.strings, this.host);
+        const h = makeHtml(stage, this.strings, this.host, s ? this.layer : stage.layer);
         let html = null, focus = null;
         if (!s) {
             html = h.summary();
-        } else if (s.kind === 'node') {
-            const n = m.nodes.get(s.id);
+        } else if (s.kind === 'node' || s.kind === 'switchvlan') {
+            const virtual = s.kind === 'switchvlan' && stage.canvas.l2 && stage.canvas.l2.virtuals.get(s.id);
+            const n = virtual ? virtual.orig : m.nodes.get(s.id);
             html = n ? h.node(n) : null;
-            focus = n;
+            if (virtual && html) html = `<p class="canvas-vlan-title">VLAN ${esc(virtual.vlan)}</p>` + html
+                + (this.layer === 'l2' && virtual.domain ? h.vlan(virtual.domain) : '');
+            focus = virtual || n;
         } else if (s.kind === 'subnet') {
             const x = D && D.l3.subnets.find(v => v.key === s.id);
             html = x ? h.subnet(x) : null;
@@ -513,14 +545,54 @@ export class Details {
             this.hide();
             return;
         }
-        this.body.innerHTML = html;
+        const layers = s && s.kind === 'subnet' ? ['l3'] : s && s.kind === 'vlan' ? ['l2'] : ['l1', 'l2', 'l3'];
+        const tabs = s ? `<div class="card-layers" role="tablist" aria-label="${esc(this.strings.ui_canvas_card_layers)}">${layers.map(layer =>
+            `<button type="button" role="tab" data-card-layer="${layer}" aria-selected="${layer === this.layer}" aria-controls="${stage.prefix}-card-content" tabindex="${layer === this.layer ? 0 : -1}">${layer.toUpperCase()}</button>`).join('')}</div>` : '';
+        this.body.innerHTML = tabs + `<div id="${stage.prefix}-card-content"${s ? ' role="tabpanel" tabindex="0"' : ''}>${html}</div>`;
         this.el.hidden = false;
         this.el.dataset.kind = s ? s.kind : 'summary';
+        this.focus = focus;
+        this.position();
         if (focus && focus.cx !== undefined) {
             stage.revealAbove(focus.cx, focus.cy);
         } else if (focus && focus.x !== undefined) {
             stage.revealAbove(focus.x, focus.y);
         }
+    }
+
+    position() {
+        const stage = this.stage;
+        if (!this.visible || !stage.model) return;
+        const bounds = stage.wrap.getBoundingClientRect(), card = this.el.getBoundingClientRect();
+        const focus = this.focus;
+        if (!stage.mobile && bounds.width > 600) {
+            const pad = 14, top = 66, bottom = Math.max(top, bounds.height - card.height - 64);
+            const right = Math.max(pad, bounds.width - card.width - pad);
+            const choices = [{x: right, y: top}, {x: pad, y: top + 76}, {x: right, y: bottom}, {x: pad, y: bottom}];
+            const related = [...stage.svg.querySelectorAll('.node.on,.l2-virtual.on,.subnet.on')].map(e => e.getBoundingClientRect());
+            const score = p => related.reduce((total, r) => total + Math.max(0, Math.min(p.x + card.width, r.right - bounds.left + 12)
+                - Math.max(p.x, r.left - bounds.left - 12)) * Math.max(0, Math.min(p.y + card.height, r.bottom - bounds.top + 12)
+                - Math.max(p.y, r.top - bounds.top - 12)), 0);
+            const best = choices.sort((a, b) => score(a) - score(b))[0];
+            this.el.style.left = best.x + 'px'; this.el.style.top = best.y + 'px'; this.el.style.right = 'auto';
+        } else {
+            this.el.style.left = ''; this.el.style.top = ''; this.el.style.right = '';
+        }
+        if (!this.lead) {
+            this.lead = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            this.lead.setAttribute('class', 'card-lead');
+            stage.ov.appendChild(this.lead);
+        }
+        const x = focus && (focus.cx ?? focus.x), y = focus && (focus.cy ?? focus.y);
+        this.lead.hidden = !this.sel || x == null || stage.mobile;
+        this.lead.style.display = this.lead.hidden ? 'none' : '';
+        if (!this.lead.hidden) {
+            const p = stage.toScreen(x, y), r = this.el.getBoundingClientRect();
+            const endX = Math.max(r.left - bounds.left, Math.min(p.x, r.right - bounds.left));
+            const endY = Math.max(r.top - bounds.top, Math.min(p.y, r.bottom - bounds.top));
+            Object.entries({x1: p.x, y1: p.y, x2: endX, y2: endY}).forEach(([key, value]) => this.lead.setAttribute(key, value));
+        }
+        stage.canvas.scheduleLabels();
     }
 
     /**
@@ -534,6 +606,13 @@ export class Details {
     }
 
     clicked(e) {
+        const tab = e.target.closest('[data-card-layer]');
+        if (tab) {
+            this.layer = tab.dataset.cardLayer;
+            this.render();
+            this.body.querySelector(`[data-card-layer="${this.layer}"]`).focus();
+            return;
+        }
         const t = e.target.closest('[data-goto-node],[data-goto-link],[data-goto-subnet],[data-goto-vlan],[data-goto-adj],[data-act]');
         if (!t) {
             return;
@@ -553,7 +632,6 @@ export class Details {
             this.host.refreshFacts();
         } else if (t.dataset.act === 'close') {
             this.hide();
-            this.stage.select(null);
         } else if (t.dataset.act === 'console') {
             const id = t.dataset.node || (this.sel && this.sel.kind === 'node' ? this.sel.id : null);
             const n = id && this.stage.model.nodes.get(id);

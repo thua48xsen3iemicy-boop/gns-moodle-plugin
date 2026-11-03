@@ -153,7 +153,7 @@ async function run(page, command, prompt) {
         // ---- the card of the node: when and by which command, and the marks on the fields
         await page.locator('[data-region="overview"]').click();
         await page.locator(`.rowbtn[data-goto-node="${SW1}"]`).click();
-        await page.locator('[data-layer="l2"]').click();
+        await page.locator('[data-card-layer="l2"]').click();
         const details = page.locator('[data-region="details"]');
         const caption = await until(async() => {
             const text = await details.locator('.seenline').innerText();

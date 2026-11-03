@@ -4132,3 +4132,356 @@ body.gns3lab-fullscreen {
     .gns3lab-editor .ed-image-entry .ed-img { white-space: normal; }
     .gns3lab-editor .ed-image-entry { margin-bottom: .3rem; }
 }
+
+/* Student Canvas: Moodle colours, screen sized geometry, and independent object cards. */
+.gns3lab-student.canvas-ui .canvas-hud {
+    top: 16px;
+    left: 16px;
+    bottom: auto;
+    display: grid;
+    gap: 9px;
+    min-width: 220px;
+    padding: 14px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+}
+.gns3lab-student.canvas-ui .canvas-heading {
+    font: 600 14px var(--display);
+}
+.gns3lab-student.canvas-ui .canvas-meta {
+    margin: 0;
+    color: var(--muted);
+    font: 11px var(--mono);
+}
+.gns3lab-student.canvas-ui .canvas-actions {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+    z-index: 6;
+}
+.gns3lab-student.canvas-ui .canvas-facts {
+    position: absolute;
+    top: 153px;
+    left: 16px;
+    display: grid;
+    justify-items: start;
+    gap: 6px;
+    max-width: 245px;
+    color: var(--muted);
+    font-size: 11px;
+}
+.gns3lab-student.canvas-ui .canvas-facts .btn {
+    font-size: 11px;
+    min-height: 28px;
+    padding: 4px 8px;
+}
+.gns3lab-student.canvas-ui .canvas-placeholder {
+    position: absolute;
+    left: 50%;
+    top: 45%;
+    transform: translate(-50%, -50%);
+    color: var(--muted);
+    text-align: center;
+    max-width: 300px;
+}
+.gns3lab-student.canvas-ui .canvas-placeholder b {
+    font: 600 36px var(--mono);
+}
+.gns3lab-student.canvas-ui .details,
+.gns3lab-student.canvas-ui .assignments {
+    box-sizing: border-box;
+    width: min(560px, calc(100% - 32px));
+    top: 66px;
+    max-height: calc(100% - 136px);
+    border-radius: 16px;
+    padding: 20px;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+.gns3lab-student.canvas-ui .details h2 {
+    padding-right: 12px;
+}
+.gns3lab-student.canvas-ui .details .kv dd,
+.gns3lab-student.canvas-ui .details td,
+.gns3lab-student.canvas-ui .details th {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    max-width: none;
+}
+.gns3lab-student.canvas-ui .details .tblwrap {
+    overflow: auto;
+}
+.gns3lab-student.canvas-ui .card-layers {
+    display: flex;
+    gap: 6px;
+    margin: 0 22px 0 0;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+}
+.gns3lab-student.canvas-ui .dcontent > [role="tabpanel"] {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.gns3lab-student.canvas-ui .card-layers button {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--muted);
+    padding: 7px 18px;
+    cursor: pointer;
+    font: 600 12px var(--mono);
+}
+.gns3lab-student.canvas-ui .card-layers button[aria-selected="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+.gns3lab-student.canvas-ui .assignments {
+    position: absolute;
+    z-index: 7;
+    right: 16px;
+    overflow: auto;
+    color: var(--fg);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+}
+.gns3lab-student.canvas-ui .assignments .x {
+    float: right;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 24px;
+    cursor: pointer;
+}
+.gns3lab-student.canvas-ui .assignments h2 {
+    font-size: 20px;
+    margin: 0 0 16px;
+}
+.gns3lab-student.canvas-ui .assignment-content img,
+.gns3lab-student.canvas-ui .assignment-content video {
+    max-width: 100%;
+    height: auto;
+}
+.gns3lab-student.canvas-ui .card-lead,
+.gns3lab-student.canvas-ui .label-lead {
+    stroke: var(--accent);
+    stroke-width: .7px;
+    opacity: .5;
+    pointer-events: none;
+    vector-effect: non-scaling-stroke;
+}
+.gns3lab-student.canvas-ui .label-lead {
+    stroke: var(--muted);
+    opacity: .45;
+}
+.gns3lab-student.canvas-ui .label-hidden {
+    visibility: hidden;
+    pointer-events: none;
+}
+.gns3lab-student.canvas-ui .wire,
+.gns3lab-student.canvas-ui .hit,
+.gns3lab-student.canvas-ui .halo,
+.gns3lab-student.canvas-ui .subnet rect,
+.gns3lab-student.canvas-ui .l2-virtual > rect,
+.gns3lab-student.canvas-ui .l2-chassis rect,
+.gns3lab-student.canvas-ui .duplex-arrow,
+.gns3lab-student.canvas-ui .duplex-label-lead {
+    vector-effect: non-scaling-stroke;
+}
+.gns3lab-student.canvas-ui .hit {
+    stroke-width: 18px;
+}
+.gns3lab-student.canvas-ui .wire,
+.gns3lab-student.canvas-ui .link.sel .wire {
+    stroke-width: 1.4px;
+}
+.gns3lab-student.canvas-ui .physical-wire {
+    opacity: .12;
+}
+.gns3lab-student.canvas-ui .duplex-arrow {
+    stroke: var(--wire);
+    fill: none;
+    stroke-width: 1.2px;
+}
+.gns3lab-student.canvas-ui .duplex-label-lead {
+    stroke: var(--muted);
+    stroke-width: .65px;
+    opacity: .6;
+}
+.gns3lab-student.canvas-ui .duplex-label {
+    fill: var(--muted);
+    font: 600 calc(9px * var(--inv, 1)) var(--mono);
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: calc(3px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .link.on .wire,
+.gns3lab-student.canvas-ui .link.on .duplex-arrow {
+    stroke: var(--accent);
+    stroke-width: 1.6px;
+}
+.gns3lab-student.canvas-ui .link.down .wire,
+.gns3lab-student.canvas-ui .link.suspended .wire,
+.gns3lab-student.canvas-ui .link.down .duplex-arrow,
+.gns3lab-student.canvas-ui .link.suspended .duplex-arrow,
+.gns3lab-student.canvas-ui .link.problem .wire {
+    stroke: var(--bad);
+}
+.gns3lab-student.canvas-ui .link.unknown .wire,
+.gns3lab-student.canvas-ui .link.unknown .duplex-arrow {
+    stroke: var(--muted);
+}
+.gns3lab-student.canvas-ui .plabel {
+    font-size: calc(11px * var(--inv, 1));
+    stroke-width: calc(3px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .pip {
+    font-size: calc(10px * var(--inv, 1));
+    stroke-width: calc(3px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .nname {
+    font-size: calc(13px * var(--inv, 1));
+    stroke-width: calc(3px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .nsub {
+    font-size: calc(10px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .ppill text,
+.gns3lab-student.canvas-ui .subnet text {
+    font-size: 11px;
+}
+.gns3lab-student.canvas-ui .node .halo {
+    stroke-width: var(--ring-width, .7px);
+}
+.gns3lab-student.canvas-ui .node.sel .halo,
+.gns3lab-student.canvas-ui .node:focus-visible .halo {
+    stroke-width: calc(var(--ring-width, .7px) * 1.35);
+}
+.gns3lab-student.canvas-ui .edge .wire {
+    stroke-width: 1.1px;
+}
+.gns3lab-student.canvas-ui .edge.on .wire {
+    stroke-width: 1.7px;
+}
+.gns3lab-student.canvas-ui .subnet rect {
+    stroke-width: 1px;
+    filter: none;
+}
+.gns3lab-student.canvas-ui .subnet.on rect {
+    stroke-width: 1.2px;
+    filter: none;
+}
+.gns3lab-student.canvas-ui .subnet.sel rect {
+    stroke-width: 1.5px;
+}
+.gns3lab-student.canvas-ui .l2-chassis rect {
+    fill: color-mix(in srgb, var(--muted) 4%, transparent);
+    stroke: var(--line);
+    stroke-width: .8px;
+    stroke-dasharray: 4 5;
+}
+.gns3lab-student.canvas-ui .l2-virtual {
+    cursor: pointer;
+    outline: none;
+}
+.gns3lab-student.canvas-ui .l2-virtual > rect {
+    fill: var(--panel);
+    stroke: var(--vlan-color);
+    stroke-width: 1px;
+}
+.gns3lab-student.canvas-ui .l2-virtual.on > rect,
+.gns3lab-student.canvas-ui .l2-virtual:focus-visible > rect {
+    stroke-width: 1.5px;
+    fill: color-mix(in srgb, var(--vlan-color) 12%, var(--panel));
+}
+.gns3lab-student.canvas-ui .vtitle,
+.gns3lab-student.canvas-ui .vsub,
+.gns3lab-student.canvas-ui .caption {
+    fill: var(--fg);
+    font: 600 calc(11px * var(--inv, 1)) var(--mono);
+    text-anchor: middle;
+    paint-order: stroke;
+    stroke: var(--canvas);
+    stroke-width: calc(3px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .vsub {
+    font-size: calc(10px * var(--inv, 1));
+    fill: var(--muted);
+}
+.gns3lab-student.canvas-ui .l2-port {
+    font-weight: 400;
+    font-size: calc(10px * var(--inv, 1));
+}
+.gns3lab-student.canvas-ui .virtual-caption .vtitle {
+    font-size: 13px;
+    stroke-width: 3px;
+}
+.gns3lab-student.canvas-ui .virtual-caption .vsub {
+    font-size: 10px;
+    stroke-width: 3px;
+}
+.gns3lab-student.canvas-ui .l2-path .wire {
+    stroke: var(--vlan-color);
+    stroke-width: 1.8px;
+}
+.gns3lab-student.canvas-ui .l2-path.on .wire {
+    stroke-width: 2.4px;
+}
+.gns3lab-student.canvas-ui .l2-path.down .wire,
+.gns3lab-student.canvas-ui .l2-path.problem .wire {
+    stroke: var(--bad);
+    stroke-dasharray: 5 5;
+}
+.gns3lab-student.canvas-ui .l2-path.unknown .wire {
+    stroke: var(--muted);
+}
+.gns3lab-student.canvas-ui .has-sel .dimmable:not(.on),
+.gns3lab-student.canvas-ui .has-sel .link:not(.on) {
+    opacity: .2;
+}
+.gns3lab-student.canvas-ui .has-sel .on {
+    opacity: 1;
+}
+.gns3lab-student.canvas-ui .canvas-vlan-title {
+    color: var(--accent);
+    font: 600 13px var(--mono);
+}
+.gns3lab-student.canvas-ui.mob .canvas-hud {
+    top: 10px;
+    left: 10px;
+    min-width: 0;
+    padding: 10px;
+    gap: 6px;
+}
+.gns3lab-student.canvas-ui.mob .canvas-heading {
+    font-size: 12px;
+}
+.gns3lab-student.canvas-ui.mob .canvas-actions {
+    top: 10px;
+    right: 10px;
+    flex-direction: column;
+    gap: 6px;
+}
+.gns3lab-student.canvas-ui.mob .canvas-facts {
+    top: 136px;
+    left: 10px;
+    max-width: 180px;
+}
+.gns3lab-student.canvas-ui.mob .details,
+.gns3lab-student.canvas-ui.mob .assignments {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 112px;
+    width: auto;
+    max-height: min(55%, 430px);
+    padding: 16px;
+    border-radius: 16px;
+}
