@@ -50,6 +50,7 @@ import {fill} from 'mod_gns3lab/dom';
 import {Seat, STRING_KEYS as SEAT_KEYS, reportRefusal, tabId} from 'mod_gns3lab/seat';
 import {Session, STRING_KEYS as SESSION_KEYS} from 'mod_gns3lab/session';
 import {Stage} from 'mod_gns3lab/stage';
+import {snippetSet} from 'mod_gns3lab/snippets';
 import {STRING_KEYS as VNC_KEYS} from 'mod_gns3lab/vnc';
 import {STRING_KEYS as CANVAS_KEYS} from 'mod_gns3lab/canvasview';
 import {Wheel} from 'mod_gns3lab/wheel';
@@ -156,6 +157,16 @@ class LabPage {
                 canConsole: n => this.canConsole(n),
                 openConsole: n => this.openConsole(n),
                 refreshFacts: () => this.refreshFacts(),
+                inspections: n => this.userid === 0 && this.canConsole(n) && n.consoleType === 'telnet'
+                    ? snippetSet(n).items.filter(item => item.group === 'inspect').slice(0, n.type === 'vpcs' ? 1 : 2) : [],
+                canInspect: n => this.userid === 0 && this.canConsole(n) && this.consoles.cons.get(n.id)?.conn?.state === 'open',
+                inspect: (n, id) => {
+                    if (this.userid !== 0 || !this.canConsole(n)) return;
+                    const con = this.consoles.cons.get(n.id);
+                    if (!con) { this.toast(fill(this.strings.ui_not_connected, n.name)); return; }
+                    const item = snippetSet(n).items.find(item => item.id === id && item.group === 'inspect');
+                    if (item) con.runSnippet(item.seq);
+                },
             },
         });
         this.consoles = new Consoles(root, {
@@ -306,6 +317,7 @@ class LabPage {
             open.onclick = () => {
                 const show = assignments.hidden;
                 this.details.hide();
+                if (show) this.stage.select(null);
                 assignments.hidden = !show;
                 open.setAttribute('aria-expanded', String(show));
                 if (show) close.focus();
@@ -840,14 +852,11 @@ class LabPage {
     /* ---------------- the action wheel ---------------- */
 
     actionsFor(target) {
-        const s = this.strings, free = id => ({
-            id, label: s.ui_act_free, full: s.ui_act_free_full, icon: 'free', off: true, why: s.ui_act_free_why, free: true,
-        });
+        const s = this.strings;
         if (target.isLink) {
             const items = [
                 {id: 'linfo', label: s.ui_act_info, full: s.ui_act_link_info, icon: 'info'},
                 {id: 'lzoom', label: s.ui_act_zoom, full: s.ui_act_link_zoom, icon: 'zoom'},
-                free('free1'),
             ];
             [target.link.a, target.link.b].forEach((e, i) => {
                 const n = this.stage.model.nodes.get(e.nodeId);
@@ -878,8 +887,6 @@ class LabPage {
         if (open) {
             items.push({id: 'close', label: s.ui_act_close, full: s.ui_act_close_full, icon: 'close'});
         }
-        // Free places: node control (start, stop, restart) is not part of the plugin API yet.
-        items.push(free('free1'), free('free2'));
         return items;
     }
 

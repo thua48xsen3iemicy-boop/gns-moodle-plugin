@@ -14,631 +14,183 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Details card of the student interface: a node, a link, a subnet, an L2 domain, an OSPF adjacency, and the overview
- * of the lab or of the current layer with its findings.
+ * The Canvas prototype's SVG anchored object cards and separate layer overview.
  *
- * The card is a floating panel on a computer and a sheet from the bottom on a phone. The texts of the tables are
- * still Russian literals, as they were in the first viewer; moving them to lang strings is a follow-up.
- *
- * @module     mod_gns3lab/details
- * @copyright  2026 mod_gns3lab contributors
- * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @module mod_gns3lab/details
+ * @copyright 2026 mod_gns3lab contributors
+ * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
-// Straight port of the first viewer; these style rules stay relaxed until the texts move to lang strings.
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
-
-import {fill} from 'mod_gns3lab/dom';
-import {esc, fmtFilters, natSort} from 'mod_gns3lab/model';
-import {ipStr, v4, acolor, vcolor, portEnd, macTable, endIf} from 'mod_gns3lab/facts';
-import {linkDirections} from 'mod_gns3lab/canvasmodel';
-
-const GiB = 1024 ** 3, MiB = 1024 ** 2;
-
-const TYPE_NAME = { qemu: "QEMU VM", iou: "IOU", dynamips: "Dynamips", vpcs: "VPCS", docker: "Docker",
-  ethernet_switch: "Встроенный свитч", ethernet_hub: "Хаб", cloud: "Cloud", nat: "NAT",
-  virtualbox: "VirtualBox", vmware: "VMware", frame_relay_switch: "Frame Relay", atm_switch: "ATM-свитч", traceng: "TraceNG" };
-const fmtMem = b => !b ? "—" : b >= GiB ? (b / GiB).toFixed(1).replace(".", ",") + " ГБ" : Math.round(b / MiB) + " МБ";
-const CAT_NAME = { hypervisor: ["Гипервизор", "Гипервизоры"], router: ["Маршрутизатор", "Маршрутизаторы"], switch: ["Коммутатор", "Коммутаторы"], pc: ["Хост", "Хосты"],
-  server: ["Сервер / VM", "Серверы и VM"], cloud: ["Внешняя сеть", "Внешние сети"], firewall: ["Межсетевой экран", "Межсетевые экраны"] };
-const STATUS_NAME = { started: "Запущено", stopped: "Остановлено", suspended: "Приостановлено" };
-const CONSOLE_NAME = { telnet: "Терминал (telnet → xterm.js)", vnc: "Экран (VNC → noVNC)", spice: "Экран (SPICE)", http: "Веб-интерфейс", https: "Веб-интерфейс", none: "нет" };
-
-const typeName = t => TYPE_NAME[t] || t || "неизвестно";
-const plural = (n, f) => { const a = n % 10, b = n % 100; return f[(a === 1 && b !== 11) ? 0 : (a >= 2 && a <= 4 && (b < 10 || b >= 20)) ? 1 : 2]; };
-const GSTATUS = { running: "работает", stopped: "остановлена", paused: "пауза" };
-const FACTS_NAME = { ok: "конфиг верный", broken: "конфиг с ошибками" };
-const LAYER_NAME = { l1: "L1 · физика", l2: "L2 · VLAN", l3: "L3 · IP", rt: "OSPF" };
-const SEV = { bad: 0, warn: 1, info: 2 };
-const NODE_OFF = { stopped: "остановлен", suspended: "на паузе" };
-/** Codes of a failed collection with an own text (docs/live-state.md §3); any other code gets the general one. */
-const FACT_ERRORS = ["unreachable", "timeout", "stopped", "unsupported", "failed"];
-
-
-/**
- * Builds the HTML of the cards for the current state of the stage.
- *
- * @param {object} stage the stage: model, layers, statuses
- * @param {object} strings language strings
- * @param {object} host canConsole(node) tells whether a console can be opened now; refreshFacts() asks for new facts
- * @returns {object} builders: summary, node, link, subnet, vlan, adj, issues
- */
-const makeHtml = (stage, strings, host, cardLayer = stage.layer) => {
-const st = {
-  get model() { return stage.model; }, get der() { return stage.der; }, get fx() { return stage.fx; },
-  get layer() { return cardLayer; }, get statusOn() { return stage.statusKnown; }, get factsKey() { return stage.factsKey; },
-  get live() { return stage.factsLive; },
-};
-const nodeStatus = n => stage.nodeStatus(n);
-const guestsOf = n => (stage.statusKnown && stage.guests && stage.guests[n.id]) || null;
-const vc = v => vcolor(st.der, v);
-const ac = a => acolor(st.der, a);
-/* buttons of the consoles of both ends of a link */
-const linkConsoles = l => {
-  const btns = [l.a, l.b].map(e => st.model.nodes.get(e.nodeId)).filter(n => n && host.canConsole(n))
-    .map(n => `<button class="gbtn" type="button" data-act="console" data-node="${esc(n.id)}">${esc(strings.ui_console_of.replace("{$a}", n.name))}</button>`).join("");
-  return btns ? `<div class="dacts">${btns}</div>` : "";
-};
-
-function statusLine(n){
-  const s = nodeStatus(n);
-  if (!s) return `<p class="st st-none">${esc(strings.ui_status_nodata)}</p>`;
-  return `<p class="st st-${s}">${STATUS_NAME[s] || esc(s)}</p>`;
-}
-const layerIssues = () => { const D = st.der; return !D ? [] : { l1: D.l1.issues, l2: D.l2.issues, l3: D.l3.issues, rt: D.rt.issues }[st.layer] || []; };
-const gotoAttr = g => g ? `data-goto-${g.kind}="${esc(g.id)}"` : "";
-function issuesHTML(list, okText){
-  if (!list.length) return `<p class="okline">${esc(okText)}</p>`;
-  return `<ul class="issues">${[...list].sort((a, b) => SEV[a.sev] - SEV[b.sev]).map(x =>
-    `<li><button class="issue ${x.sev}" type="button" ${gotoAttr(x.go)}>${esc(x.text)}</button></li>`).join("")}</ul>`;
-}
-/* how long ago, for the time of a collection */
-function ago(ms){
-  const min = Math.floor((Date.now() - ms) / 60000);
-  return min < 1 ? strings.ui_facts_ago_now : fill(strings.ui_facts_ago, min);
-}
-/* seen in the console (docs/live-state.md §8): when and by which command, and a mark on the fields that came from it */
-function seenHTML(n){
-  const f = st.fx && st.fx.nodes.get(n.id), seen = f && f.seen;
-  if (!seen || !seen.at) return "";
-  const time = new Date(seen.at).toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" });
-  return `<p class="idline seenline">${esc(fill(strings.ui_seen_at, time))} <span class="seencmd">(${esc(seen.command)})</span></p>
-    <p class="glead seennote">${esc(strings.ui_seen_note)}</p>`;
-}
-const seenMark = (i, ...fields) => i && Array.isArray(i.seen) && fields.some(x => i.seen.includes(x))
-  ? ` <i class="seenmark" title="${esc(strings.ui_seen_mark)}"></i>` : "";
-/* live facts: when they were collected, whether they are out of date, and the button to collect them now */
-function liveFactsLine(){
-  const doc = stage.liveDoc, meta = stage.factsMeta, btn = host.refreshFacts
-    ? `<button class="gbtn fref" type="button" data-act="refreshfacts">${esc(strings.ui_facts_refresh)}</button>` : "";
-  if (!doc || !doc.rev || !doc.nodes || !Object.keys(doc.nodes).length) return `<p class="idline fnodata">${esc(strings.ui_facts_nodata)}</p>${btn}`;
-  const at = new Date(meta.at || doc.generated_at || NaN), known = !isNaN(at);
-  const text = fill(strings.ui_facts_at, known ? at.toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" }) : "—");
-  const old = meta.stale && known ? ` · <span class="fold">${esc(fill(strings.ui_facts_stale, ago(at.getTime())))}</span>` : "";
-  return `<p class="idline${meta.stale ? " stale" : ""}">${esc(text)}${old}</p>${btn}`;
-}
-/* the last collection of the node failed: why, and how old its facts are */
-function factsErrorHTML(n){
-  const f = st.fx && st.fx.nodes.get(n.id);
-  if (!f || !f.err) return "";
-  const code = String(f.err.code || ""), at = f.at ? Date.parse(f.at) : NaN;
-  const why = FACT_ERRORS.includes(code) ? strings["ui_facts_err_" + code] : strings.ui_facts_err_other;
-  const last = isNaN(at) ? strings.ui_facts_never : fill(strings.ui_facts_last, ago(at));
-  return `<p class="ferr">${esc(why)} ${esc(last)}</p>`;
-}
-function factsLine(){
-  if (st.live) return liveFactsLine();
-  const at = st.fx && st.fx.at ? new Date(st.fx.at) : null;
-  return `<p class="idline">Факты из лабы: ${esc(FACTS_NAME[st.factsKey])}${at && !isNaN(at) ? " · собраны " + at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : ""} · демо</p>`;
-}
-function layerHead(eyebrow, title, lead){
-  const list = layerIssues();
-  return `<div><p class="eyebrow">${esc(eyebrow)}</p><h2>${esc(title)}</h2></div>
-    <p class="glead">${lead}</p>${factsLine()}
-    <h3>Проблемы <span class="count">${list.length}</span></h3>${issuesHTML(list, "Проблем на этом слое не найдено.")}`;
-}
-const nodeName = idv => esc((st.model.nodes.get(idv) || {}).name || "?");
-/* the modes seen and fog: the name of a port is shown only where the interface is uncovered */
-const portText = e => stage.endShown(e) ? e.text : "?";
-/* the group of data a layer shows, and whether the student has not uncovered it on this node yet */
-const LAYER_GROUP = { l1: "l1", l2: "l2", l3: "l3", rt: "routes" };
-const groupClosed = (n, layer) => {
-  const v = stage.reveal, open = v && v.groups.get(n.id);
-  return !!v && !(open && open.has(LAYER_GROUP[layer]));
-};
-const unexplored = () => `<p class="note unexplored">${esc(strings.ui_fog_unexplored)}</p>`;
-function l2SummaryHTML(){
-  const D = st.der.l2, doms = D.domains.filter(d => d.shown).sort((a, b) => (b.vlans.length > 0) - (a.vlans.length > 0) || (a.vlans[0] || 0) - (b.vlans[0] || 0));
-  const rows = doms.map(d => `<li><button class="rowbtn" type="button" data-goto-vlan="${d.id}"><span class="sw" style="background:${d.vlans.length ? vc(d.vlans[0]) : "var(--wire)"}"></span><span>${esc(d.label)} <small>${esc(d.where)}</small></span><small>${d.members.length} ${plural(d.members.length, ["участник", "участника", "участников"])}</small></button></li>`).join("");
-  return layerHead("Слой L2", "VLAN и L2-домены", "Схема построена из настроек портов: access и trunk, разрешённые VLAN, сабинтерфейсы dot1q. Цвет линка — VLAN, который по нему реально проходит; несколько полос — транк. Подпись порта: номер VLAN у access, «T» у транка.") + `
-    <h3>L2-домены <span class="count">${doms.length}</span></h3><ul class="list">${rows}</ul>
-    <div class="legend"><span><i class="wirekey t"></i>транк</span><span><i class="wirekey bad"></i>линк не работает</span><span><i class="wirekey d"></i>ничего не проходит</span></div>`;
-}
-function l3SummaryHTML(){
-  const S = st.der.l3;
-  const rows = S.subnets.map(s => `<li><button class="rowbtn" type="button" data-goto-subnet="${esc(s.key)}"><span class="sw" style="background:${s.issues.length ? "var(--warn)" : "var(--accent)"}"></span><span class="mono">${esc(s.key)}</span><small>${s.members.length} ${plural(s.members.length, ["адрес", "адреса", "адресов"])}</small></button></li>`).join("");
-  return layerHead("Слой L3", "IP-подсети", "Каждая подсеть — отдельный объект; к ней тянутся интерфейсы, у которых в ней адрес, у интерфейса подписан номер хоста. Коммутаторы без адресов приглушены. Подсеть сверяется с L2: все её участники должны быть в одном широковещательном домене.") + `
-    <h3>Подсети <span class="count">${S.subnets.length}</span></h3><ul class="list">${rows}</ul>
-    <div class="legend"><span><i class="wirekey acc"></i>адрес в подсети</span><span><i class="wirekey bad"></i>дубль или интерфейс down</span></div>`;
-}
-function rtSummaryHTML(){
-  const R = st.der.rt, rows = R.edges.map(e => `<li><button class="rowbtn" type="button" data-goto-adj="${esc(e.id)}"><span class="sw" style="background:${e.miss ? "var(--bad)" : ac(e.area)}"></span><span>${nodeName(e.a)} — ${nodeName(e.b)}</span><small>${e.miss ? "нет соседства" : "area " + esc(e.area) + " · " + esc(e.state)}</small></button></li>`).join("");
-  return layerHead("Маршрутизация", "Соседства OSPF", "Рёбра — соседства, которые маршрутизаторы сообщили сами; цвет — area. Красный пунктир — соседство, которое должно было подняться (OSPF на обоих концах одного сегмента), но его нет.") + `
-    <h3>Соседства <span class="count">${R.edges.filter(e => !e.miss).length}</span></h3><ul class="list">${rows}</ul>`;
-}
-function summaryHTML(){
-  const m = st.model, counts = {}, named = [...m.nodes.values()].filter(n => n.state !== "silhouette");
-  const unknown = m.nodes.size - named.length;
-  named.forEach(n => { const c = n.cat; counts[c] = (counts[c] || 0) + 1; });
-  const order = ["router", "switch", "firewall", "hypervisor", "server", "pc", "cloud"];
-  const kv = order.filter(c => counts[c]).map(c => `<dt>${CAT_NAME[c][1]}</dt><dd class="mono">${counts[c]}</dd>`).join("");
-  const nodes = named.sort((a, b) => natSort(a.name, b.name));
-  const rows = nodes.map(n => { const s = nodeStatus(n);
-    return `<li><button class="rowbtn" type="button" data-goto-node="${esc(n.id)}"><span class="sdot ${s || ""}"></span><span>${esc(n.name)}</span><small>${esc(typeName(n.type))}</small></button></li>`; }).join("");
-  const susp = m.links.filter(l => l.suspend).length, filt = m.links.filter(l => fmtFilters(l.filters).length).length;
-  return `
-    <div><p class="eyebrow">Обзор</p><h2>Состав лабы</h2></div>
-    <p class="glead">Нажмите на устройство или линк, чтобы увидеть порты, соседей и параметры. Схема только для просмотра: здесь ничего нельзя сдвинуть или удалить.</p>
-    ${st.der ? `${st.live ? "" : `<p class="glead">Слои L2, L3 строятся из того, как устройства реально настроены. Переключите конфиг на «с ошибками», чтобы увидеть, как ошибки выглядят на схеме.</p>`}${factsLine()}<h3>Проблемы L1 <span class="count">${st.der.l1.issues.length}</span></h3>${issuesHTML(st.der.l1.issues, "Все линки работают.")}` : st.live ? factsLine() : ""}
-    <dl class="kv">${kv}${unknown ? `<dt>${esc(strings.ui_fog_unknown_count)}</dt><dd class="mono">${unknown}</dd>` : ""}<dt>Линки</dt><dd class="mono">${m.links.length}${susp ? ` · ${susp} приост.` : ""}${filt ? ` · ${filt} с фильтрами` : ""}</dd></dl>
-    <div class="legend">
-      <span><i class="wirekey"></i>линк</span><span><i class="wirekey d"></i>приостановлен</span>
-      ${st.statusOn ? `<span><i class="sdot started"></i>запущено</span><span><i class="sdot stopped"></i>остановлено</span><span><i class="sdot suspended"></i>пауза</span>` : ""}
-    </div>
-    <h3>Устройства <span class="count">${nodes.length}</span></h3>
-    <ul class="list">${rows}</ul>`;
-}
-/* a device the student has not explored: no name, no kind, nothing but the way to its console */
-function silhouetteHTML(n){
-  const hasConsole = n.consoleType && n.consoleType !== "none";
-  return `
-    <div class="ph"><div><p class="eyebrow">${esc(strings.ui_fog_unknown)}</p><h2>${esc(n.name)}</h2></div></div>
-    <p class="glead">${esc(strings.ui_fog_unknown_note)}</p>
-    ${hasConsole ? `<div><button class="gbtn primary" type="button" data-act="console" data-node="${esc(n.id)}">${esc(strings.ui_open_console)}</button></div>` : ""}`;
-}
-function nodeHTML(n){
-  if (n.state === "silhouette") return silhouetteHTML(n);
-  const m = st.model, p = n.props || {}, c = n.cat, found = n.state === "known";
-  const kv = [];
-  const image = p.hda_disk_image || p.path || p.image || p.cdrom_image;
-  // A device that was only found by a cable is known by name and kind: what it is made of is not told yet.
-  if (image && !found) kv.push(["Образ", `<span class="mono">${esc(image)}</span>`]);
-  if (p.ram && !found) kv.push(["RAM", `${esc(p.ram)} МБ`]);
-  if (p.cpus && !found) kv.push(["vCPU", esc(p.cpus)]);
-  const ad = p.adapters != null ? p.adapters : p.ethernet_adapters;
-  if (ad != null && !found) kv.push(["Адаптеры", esc(ad) + (p.adapter_type ? ` · <span class="mono">${esc(p.adapter_type)}</span>` : "")]);
-  if (p.options && !found) kv.push(["Опции QEMU", `<span class="mono">${esc(p.options)}</span>`]);
-  if (c === "hypervisor") kv.push(["Вложенная VM", "нужна: <span class=\"mono\">-cpu host</span> и nested KVM на хосте"]);
-  if (n.type === "nat") kv.push(["Назначение", "Выход в сеть хоста через NAT"]);
-  if (n.type === "cloud") kv.push(["Назначение", "Мост на интерфейс хоста"]);
-  kv.push(["Консоль", esc(CONSOLE_NAME[n.consoleType] || n.consoleType || "нет")]);
-
-  const ifs = [];
-  m.links.forEach(l => {
-    const mine = l.a.nodeId === n.id ? l.a : l.b.nodeId === n.id ? l.b : null; if (!mine) return;
-    const other = mine === l.a ? l.b : l.a, peer = m.nodes.get(other.nodeId);
-    ifs.push({ l, port: portText(mine), peer: peer ? peer.name : "?", peerPort: portText(other) });
-  });
-  ifs.sort((a, b) => natSort(a.port, b.port));
-  const ifRows = ifs.map(r => `<tr data-goto-link="${esc(r.l.id)}" tabindex="0"><td class="mono">${esc(r.port)}</td><td>${esc(r.peer)} <span class="mono peer">${esc(r.peerPort)}</span>${r.l.suspend ? ` <span class="count">приост.</span>` : ""}${fmtFilters(r.l.filters).length ? ` <span class="count">фильтр</span>` : ""}</td></tr>`).join("");
-
-  let vlan = "";
-  if (Array.isArray(p.ports_mapping) && p.ports_mapping.length && !stage.reveal) {
-    vlan = `<h3>Порты и VLAN</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Режим</th><th>VLAN</th></tr></thead><tbody>${
-      p.ports_mapping.map(x => `<tr><td class="mono">${esc(x.name)}</td><td>${x.type === "dot1q" ? "trunk (dot1q)" : x.type === "qinq" ? "QinQ" : "access"}</td><td class="mono">${esc(x.vlan)}${x.type === "dot1q" ? " native" : ""}</td></tr>`).join("")}</tbody></table></div>`;
-  }
-  let guests = "";
-  if (c === "hypervisor") {
-    const gs = guestsOf(n);
-    if (!gs) {
-      guests = `<h3>Гости Proxmox</h3><p class="glead">${st.statusOn ? "Гостевой агент ноды пока не ответил." : "Появятся с живыми данными: шлюз спрашивает гостевой агент ноды, какие VM и контейнеры есть внутри и что из них запущено."}</p>`;
-    } else {
-      const items = [...gs.items].sort((a, b) => a.vmid - b.vmid);
-      const run = items.filter(x => x.status === "running").length;
-      const rows = items.map(x => `<tr><td class="mono">${esc(x.vmid)}</td><td>${esc(x.name)} <span class="peer">${x.type === "lxc" ? "CT" : "VM"}</span></td><td><span class="gs"><i class="sdot ${esc(x.status)}"></i>${esc(GSTATUS[x.status] || x.status)}</span></td><td class="mono">${fmtMem(x.mem)}&#8239;/&#8239;${fmtMem(x.maxmem)}</td></tr>`).join("");
-      guests = `<h3>Гости Proxmox <span class="count">${run} из ${items.length} работают</span></h3>
-        <div class="tblwrap"><table class="ifs"><thead><tr><th>ID</th><th>Имя</th><th>Статус</th><th>RAM</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="note">Источник: гостевой агент ноды, команда <code>${esc(gs.source)}</code>. ${esc(gs.note)}</p>`;
-    }
-  }
-  const hasConsole = n.consoleType && n.consoleType !== "none";
-  const layered = st.der && st.layer !== "l1", ferr = factsErrorHTML(n), macs = stage.reveal ? "" : macTableHTML(n);
-  return `
-    <div class="ph"><div><p class="eyebrow">${esc(CAT_NAME[c][0])} · ${esc(typeName(n.type))}</p><h2>${esc(n.name)}</h2></div></div>
-    ${statusLine(n)}
-    ${found ? `<p class="glead">${esc(hasConsole ? strings.ui_fog_found_note : strings.ui_fog_found_noconsole)}</p>` : ""}
-    ${seenHTML(n)}
-    ${ferr}
-    ${st.der && st.layer === "l1" && !found ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
-    ${layered && !found ? (ferr ? `<div class="fstale">${nodeLayerHTML(n)}</div>` : nodeLayerHTML(n)) : ""}
-    ${macs ? (ferr ? `<div class="fstale">${macs}</div>` : macs) : ""}
-    <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
-    ${layered ? "" : `<h3>Интерфейсы <span class="count">${ifs.length}</span></h3>
-    ${ifs.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Сосед</th></tr></thead><tbody>${ifRows}</tbody></table></div>` : `<p class="glead">${esc(stage.reveal ? strings.ui_fog_no_cables : "Ни один порт не подключён.")}</p>`}
-    ${stage.reveal && groupClosed(n, "l1") ? unexplored() : ""}
-    ${vlan}`}
-    ${guests}
-    ${hasConsole ? `<div><button class="gbtn primary" type="button" data-act="console" data-node="${esc(n.id)}">${esc(strings.ui_open_console)}</button></div>` : ""}
-    <p class="idline">node_id ${esc(n.id)}</p>`;
-}
-function linkHTML(l){
-  const m = st.model, A = m.nodes.get(l.a.nodeId), B = m.nodes.get(l.b.nodeId);
-  const fl = fmtFilters(l.filters);
-  const card = (N, end) => `<button class="endcard" type="button" data-goto-node="${esc(N.id)}"><b>${esc(N.name)}</b><span class="mono peer">${esc(portText(end))}</span></button>`;
-  return `
-    <div class="ph"><div><p class="eyebrow">Линк · ${esc(l.type)}</p><h2>${esc(A.name)} ↔ ${esc(B.name)}</h2></div></div>
-    <div class="ends">${card(A, l.a)}${card(B, l.b)}</div>
-    <dl class="kv">
-      <dt>Состояние</dt><dd>${linkState(l)}</dd>
-      ${fl.length ? fl.map(f => `<dt>${f.k}</dt><dd class="mono">${esc(f.v)}</dd>`).join("") : `<dt>Фильтры</dt><dd>нет</dd>`}
-    </dl>
-    ${st.layer === "l1" ? `<h3>TX → RX</h3><p class="note">${esc(strings.ui_canvas_duplex)}</p><div class="tblwrap"><table class="ifs"><thead><tr><th>TX →</th><th>→ RX</th></tr></thead><tbody>${linkDirections(l).map(({from, to}) => `<tr><td>${esc(m.nodes.get(from.nodeId).name)} <span class="mono">${esc(portText(from))}</span> TX</td><td>${esc(m.nodes.get(to.nodeId).name)} <span class="mono">${esc(portText(to))}</span> RX</td></tr>`).join("")}</tbody></table></div>` : ""}
-    ${st.der && st.layer === "l2" ? linkL2HTML(l) : ""}
-    ${st.layer === "l3" ? [l.a, l.b].map(e => {
-      const f = st.fx && st.fx.nodes.get(e.nodeId), i = endIf(st.fx, e);
-      const interfaces = i ? [i, ...f.subs(i.name)] : [];
-      return `<h3>${esc(m.nodes.get(e.nodeId).name)} · L3</h3>${groupClosed(m.nodes.get(e.nodeId), "l3") ? unexplored() : `<p class="mono">${esc(interfaces.flatMap(i => (i.ipv4 || []).map(ip => i.name + " · " + ip)).join(", ") || "—")}</p>`}`;
-    }).join("") : ""}
-    ${linkConsoles(l)}
-    <p class="idline">link_id ${esc(l.id)}</p>`;
-}
-function linkState(l){
-  const f1 = st.der && st.der.l1.links.get(l.id);
-  if (f1 && f1.down) return `<span class="tag bad">не работает</span> ${esc(f1.why.join("; "))}`;
-  if (f1 && f1.unknown) return "Нет актуальных L1-данных";
-  return l.suspend ? "Приостановлен — кадры не передаются" : f1 ? "Работает" : "Активен";
-}
-/* что настроено на портах и что проходит по линку */
-function modeText(f, i){
-  if (!i) return "фактов нет";
-  const sp = i.switchport, end = sp && portEnd(st.der, f, i), down = end && end.unknown ? " · ?" : end && end.down ? " · down" : "";
-  if (i.admin === "down" && !end) return "shutdown";
-  if (sp && sp.mode === "access") return `access · VLAN ${sp.vlan}${down}`;
-  if (sp && sp.mode === "none") return `без VLAN${down}`;
-  if (sp && sp.mode === "trunk") return `trunk · ${Array.isArray(sp.allowed) ? sp.allowed.join(",") : "все VLAN"} · ${sp.native === null ? "native нет" : "native " + (sp.native != null ? sp.native : 1)}${down}`;
-  if (i.kind === "subif") return `dot1q ${i.dot1q}`;
-  if (i.kind === "svi") return `SVI VLAN ${i.vlan}`;
-  if (i.kind === "loopback") return "loopback";
-  const subs = f ? f.subs(i.name) : [];
-  return subs.length ? `теги ${subs.map(s => s.dot1q).join(", ")}${v4(i).length ? " + без тега" : ""}` : "без тега";
-}
-function linkL2HTML(l){
-  const r = st.der.l2.links.get(l.id), fx = st.fx, m = st.model;
-  const row = (e, i) => `<tr><td>${esc(m.nodes.get(e.nodeId).name)} <span class="mono peer">${esc(stage.endShown(e) ? (i ? i.name : e.text) : "?")}</span></td><td class="mono">${esc(modeText(fx.nodes.get(e.nodeId), i))}${seenMark(i, "switchport", "admin", "oper")}</td></tr>`;
-  const pass = !r.known ? "нет фактов об одном из портов" : st.der.l1.links.get(l.id).down ? "ничего — линк не работает"
-    : r.tags.length ? (r.vlans.length ? r.vlans.map(v => `<span class="tag" style="border-left:3px solid ${vc(v)}">VLAN ${v}</span>`).join(" ") : "кадры без тега (точка-точка)") : `<span class="tag bad">ничего</span>`;
-  return `<h3>L2 на концах</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Порт</th><th>Настройка</th></tr></thead><tbody>${row(l.a, r.ia)}${row(l.b, r.ib)}</tbody></table></div>
-    <dl class="kv"><dt>Проходит</dt><dd>${pass}</dd></dl>
-    ${r.issues.length ? issuesHTML(r.issues.map(text => ({ sev: "warn", text })), "") : ""}`;
-}
-/* таблица MAC коммутатора: только показ, на слои и находки она не влияет */
-function macTableHTML(n){
-  const T = macTable(st.model, st.fx, n.id);
-  if (!T) return "";
-  const rows = T.rows.map(r => `<tr${r.link ? ` data-goto-link="${esc(r.link)}" tabindex="0"` : ""}><td class="mono">${esc(r.mac)}${r.owner ? ` <span class="peer">${esc(r.owner.node)} ${esc(r.owner.iface)}</span>` : ""}</td><td class="mono">${esc(r.iface)}${r.label && r.label !== r.iface ? ` <span class="peer">${esc(r.label)}</span>` : ""}</td><td class="mono">${esc(r.vlan)}</td></tr>`).join("");
-  return `<h3>${esc(strings.ui_mac_table)} <span class="count">${T.rows.length}</span></h3>
-    ${T.rows.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>${esc(strings.ui_mac_col_mac)}</th><th>${esc(strings.ui_mac_col_port)}</th><th>${esc(strings.ui_mac_col_vlan)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="glead">${esc(strings.ui_mac_empty)}</p>`}
-    ${T.truncated ? `<p class="note">${esc(strings.ui_mac_truncated)}</p>` : ""}
-    <p class="note">${esc(strings.ui_mac_note)}</p>`;
-}
-/* раздел ноды для текущего слоя */
-function nodeLayerHTML(n){
-  const f = st.fx.nodes.get(n.id), L = st.layer, D = st.der;
-  if (groupClosed(n, L)) return unexplored();
-  if (!f || !f.ifs) return `<p class="note">Фактов об интерфейсах нет${f && NODE_OFF[f.status] ? ` — узел ${NODE_OFF[f.status]}, бэкенд не может его опросить` : ""}.</p>`;
-  const nodeIssues = layerIssues().filter(x => x.text.includes(n.name + " ") || (x.go && x.go.kind === "node" && x.go.id === n.id));
-  const iss = nodeIssues.length ? issuesHTML(nodeIssues, "") : "";
-  if (L === "l1") {
-    const rows = f.ifs.filter(i => i.kind === "physical").map(i => `<tr><td class="mono">${esc(i.name)}</td><td>${esc(i.admin || "?")}</td><td>${esc(i.oper || "?")}${seenMark(i, "admin", "oper")}</td></tr>`).join("");
-    return `<h3>L1</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>${esc(strings.ui_canvas_interface)}</th><th>${esc(strings.ui_canvas_admin)}</th><th>${esc(strings.ui_canvas_oper)}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  }
-  if (L === "l2") {
-    const rows = f.ifs.filter(i => i.kind !== "loopback").map(i => {
-      const d = i.switchport ? null : D.l2.domFor(n.id, i);
-      const dom = d ? `<button class="tag" type="button" data-goto-vlan="${d.id}" style="cursor:pointer;border:0;border-left:3px solid ${d.vlans.length ? vc(d.vlans[0]) : "var(--wire)"}">${esc(d.label)}</button>` : "";
-      return `<tr><td class="mono">${esc(i.name)}</td><td class="mono">${esc(modeText(f, i))}${seenMark(i, "switchport", "admin", "oper")}</td><td>${dom}${i.stp ? ` <span class="peer">STP ${esc(i.stp.state)}</span>` : ""}</td></tr>`;
-    }).join("");
-    return `<h3>L2: порты и VLAN</h3>${iss}<div class="tblwrap"><table class="ifs"><thead><tr><th>Интерфейс</th><th>Настройка</th><th>Домен</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  }
-  if (L === "l3") {
-    const rows = f.ifs.filter(i => v4(i).length || i.kind === "physical").map(i => {
-      const ips = v4(i).map(c => `<button class="tag" type="button" data-goto-subnet="${esc(c.key)}" style="cursor:pointer;border:0">${esc(c.ip + "/" + c.pre)}</button>`).join(" ") || `<span class="peer">—</span>`;
-      const physical = portEnd(D, f, i), end = (i.switchport || (physical && physical.live)) && physical;
-      const state = end ? (end.unknown ? `<span class="peer">?</span>` : end.down ? `<span class="tag bad">down</span>` : "up")
-        : i.admin === "down" ? `<span class="tag bad">shutdown</span>` : i.oper === "down" ? `<span class="tag bad">down</span>` : "up";
-      return `<tr><td class="mono">${esc(i.name)}</td><td>${ips}${seenMark(i, "ipv4")}</td><td>${state}${seenMark(i, "admin", "oper")}</td></tr>`;
-    }).join("");
-    const gw = f.ifs.map(i => i.gateway).filter(Boolean);
-    return `<h3>L3: адреса</h3>${iss}<div class="tblwrap"><table class="ifs"><thead><tr><th>Интерфейс</th><th>Адрес</th><th>Состояние</th></tr></thead><tbody>${rows}</tbody></table></div>
-      ${gw.length ? `<dl class="kv"><dt>Шлюз</dt><dd class="mono">${esc(gw.join(", "))}</dd></dl>` : ""}`;
-  }
-  const oi = f.ifs.filter(i => i.ospf);
-  if (!oi.length) return `<p class="note">OSPF на этом узле не настроен.</p>`;
-  const adj = D.rt.edges.filter(e => e.a === n.id || e.b === n.id);
-  const arows = adj.map(e => { const o = e.a === n.id ? e.b : e.a;
-    return `<tr data-goto-adj="${esc(e.id)}" style="cursor:pointer"><td>${nodeName(o)}</td><td class="mono">${esc(e.ifs[n.id] || "—")}</td><td>${e.miss ? `<span class="tag bad">нет</span>` : "area " + esc(e.area) + " · " + esc(e.state)}</td></tr>`; }).join("");
-  const irows = oi.map(i => `<tr><td class="mono">${esc(i.name)}</td><td class="mono">${esc(v4(i).map(c => c.ip + "/" + c.pre).join(", ") || "—")}</td><td>area ${esc(i.ospf.area)}${i.ospf.passive ? " · passive" : ""}</td></tr>`).join("");
-  return `<dl class="kv"><dt>Router ID</dt><dd class="mono">${esc(f.rid || "—")}</dd></dl>${iss}
-    <h3>Соседи <span class="count">${adj.filter(e => !e.miss).length}</span></h3>
-    ${adj.length ? `<div class="tblwrap"><table class="ifs"><thead><tr><th>Сосед</th><th>Интерфейс</th><th>Состояние</th></tr></thead><tbody>${arows}</tbody></table></div>` : `<p class="glead">Соседей нет.</p>`}
-    <h3>Интерфейсы в OSPF</h3><div class="tblwrap"><table class="ifs"><thead><tr><th>Интерфейс</th><th>Адрес</th><th>Area</th></tr></thead><tbody>${irows}</tbody></table></div>`;
-}
-const closeBtn = '';
-function memberRows(list, cols){
-  return `<div class="tblwrap"><table class="ifs"><thead><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${list.join("")}</tbody></table></div>`;
-}
-function subnetHTML(s){
-  const mask = s.pre === 0 ? "0.0.0.0" : ipStr(2 ** 32 - 2 ** (32 - s.pre));
-  const rows = s.members.map(mb => `<tr data-goto-node="${esc(mb.nodeId)}" style="cursor:pointer"><td>${nodeName(mb.nodeId)} <span class="mono peer">${esc(mb.iface.name)}</span></td><td class="mono">${esc(mb.c.ip)}${mb.dup ? ` <span class="tag bad">дубль</span>` : ""}</td><td>${mb.dom ? esc(mb.dom.label) : "—"}${mb.down ? ` <span class="tag bad">down</span>` : ""}</td></tr>`);
-  return `<div class="ph"><div><p class="eyebrow">Подсеть IPv4</p><h2 class="mono" style="font-family:var(--mono);font-size:21px">${esc(s.key)}</h2></div>${closeBtn}</div>
-    <dl class="kv"><dt>Маска</dt><dd class="mono">${mask}</dd><dt>Адресов</dt><dd class="mono">${s.pre >= 31 ? s.size : Math.max(0, s.size - 2)}</dd><dt>Занято</dt><dd class="mono">${s.members.length}</dd></dl>
-    ${s.issues.length ? issuesHTML(s.issues.map(text => ({ sev: "bad", text })), "") : `<p class="okline">Все участники в одном L2-домене, дублей нет.</p>`}
-    <h3>Участники <span class="count">${s.members.length}</span></h3>${memberRows(rows, ["Интерфейс", "Адрес", "L2-домен"])}`;
-}
-function vlanHTML(d){
-  const rows = d.members.map(x => `<tr data-goto-node="${esc(x.nodeId)}" style="cursor:pointer"><td>${nodeName(x.nodeId)} <span class="mono peer">${esc(x.iface.name)}</span></td><td class="mono">${esc(v4(x.iface).map(c => c.ip + "/" + c.pre).join(", ") || "—")}</td></tr>`);
-  const iss = st.der.l2.issues.filter(x => x.go && x.go.kind === "vlan" && x.go.id === d.id);
-  return `<div class="ph"><div><p class="eyebrow">L2-домен · широковещательный</p><h2>${esc(d.label)}</h2></div>${closeBtn}</div>
-    <dl class="kv"><dt>${d.vlans.length ? "Коммутаторы" : "Между"}</dt><dd>${esc(d.where)}</dd><dt>Линков</dt><dd class="mono">${d.links.length}</dd></dl>
-    ${iss.length ? issuesHTML(iss, "") : ""}
-    <p class="glead">Кадр, отправленный любым участником на широковещательный адрес, получат все остальные участники этого домена — и только они.</p>
-    <h3>Участники <span class="count">${d.members.length}</span></h3>${memberRows(rows, ["Интерфейс", "Адрес"])}`;
-}
-function adjHTML(e){
-  const f = idv => st.fx.nodes.get(idv);
-  const card = idv => `<button class="endcard" type="button" data-goto-node="${esc(idv)}"><b>${nodeName(idv)}</b><span class="mono peer">${esc(e.ifs[idv] || "—")} · RID ${esc(f(idv).rid || "—")}</span></button>`;
-  return `<div class="ph"><div><p class="eyebrow">${e.miss ? "Ожидаемое соседство" : "Соседство " + esc(String(e.proto).toUpperCase())}</p><h2>${nodeName(e.a)} ↔ ${nodeName(e.b)}</h2></div>${closeBtn}</div>
-    <div class="ends">${card(e.a)}${card(e.b)}</div>
-    <dl class="kv"><dt>Area</dt><dd class="mono">${esc(e.area)}</dd><dt>Состояние</dt><dd>${e.miss ? `<span class="tag bad">не установлено</span>` : esc(e.state)}</dd></dl>
-    ${e.miss ? issuesHTML([{ sev: "bad", text: "Причина по фактам: " + e.reason + "." }], "") + `<p class="glead">OSPF включён на обоих концах одного сегмента, значит соседство должно было подняться.</p>` : ""}`;
-}
-
-return {
-  summary: () => (st.layer === "l2" && st.der ? l2SummaryHTML() : st.layer === "l3" && st.der ? l3SummaryHTML()
-    : st.layer === "rt" && st.der ? rtSummaryHTML() : st.layer === "l4" ? `<h2>L4</h2><p class="glead">${esc(strings.ui_canvas_l4)}</p>` : summaryHTML()),
-  node: nodeHTML, link: linkHTML, subnet: subnetHTML, vlan: vlanHTML, adj: adjHTML,
-  issues: () => layerIssues().length,
-  layerName: () => LAYER_NAME[st.layer],
-};
-};
+import {svgEl as el} from 'mod_gns3lab/dom';
+import {clamp, esc} from 'mod_gns3lab/model';
+import {objectData, factsStatus, groupOpen, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 
 export class Details {
-    /**
-     * Constructor.
-     *
-     * @param {HTMLElement} el the card element
-     * @param {object} options
-     * @param {object} options.stage the stage
-     * @param {object} options.strings language strings
-     * @param {object} options.host openConsole(node), canConsole(node) and, with live facts, refreshFacts()
-     */
-    constructor(el, {stage, strings, host}) {
-        this.el = el;
-        this.stage = stage;
-        this.strings = strings;
-        this.host = host;
-        this.sel = null;
-        this.layer = 'l1';
-        this.close = document.createElement('button');
-        this.close.type = 'button';
-        this.close.className = 'x';
-        this.close.dataset.act = 'close';
-        this.close.textContent = '×';
-        this.close.setAttribute('aria-label', strings.ui_close);
-        this.body = document.createElement('div');
-        this.body.className = 'dcontent';
-        el.append(this.close, this.body);
-        el.addEventListener('click', e => this.clicked(e));
-        new ResizeObserver(() => this.position()).observe(el);
-        el.addEventListener('keydown', e => {
-            if (e.key === 'Escape') { e.stopPropagation(); this.hide(); this.stage.select(null); this.stage.svg.focus(); return; }
-            const tab = e.target.closest('[data-card-layer]');
-            if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-                e.preventDefault();
-                const layers = [...this.body.querySelectorAll('[data-card-layer]')].map(b => b.dataset.cardLayer);
-                const index = layers.indexOf(this.layer);
-                this.layer = layers[e.key === 'Home' ? 0 : e.key === 'End' ? layers.length - 1
-                    : (index + (e.key === 'ArrowRight' ? 1 : layers.length - 1)) % layers.length];
-                this.render();
-                this.body.querySelector(`[data-card-layer="${this.layer}"]`).focus();
-                return;
-            }
-            const t = e.target.closest && e.target.closest('tr[data-goto-link]');
-            if (t && (e.key === 'Enter' || e.key === ' ')) {
-                e.preventDefault();
-                this.goto({kind: 'link', id: t.dataset.gotoLink});
-            }
+    constructor(element, {stage, strings, host}) {
+        this.el = element; this.stage = stage; this.strings = strings; this.host = host;
+        this.sel = null; this.layer = 'l1'; this.panel = 'ports'; this.shape = null; this.overviewTab = 'objects';
+        this.overview = stage.r('overviewPanel');
+        stage.r('overviewClose').onclick = () => { this.hideOverview(); stage.r('overview').focus(); };
+        this.overview.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { e.stopPropagation(); this.hideOverview(); stage.r('overview').focus(); }
         });
+        this.hide();
     }
-
-    /**
-     * Whether the card is on the screen.
-     *
-     * @returns {boolean}
-     */
-    get visible() {
-        return !this.el.hidden;
-    }
-
-    /**
-     * Shows the card of an object.
-     *
-     * @param {object} sel {kind: node|link|subnet|vlan|adj, id}
-     */
+    get visible() { return !!this.shape || !this.overview.hidden; }
+    t(key) { return this.stage.s('ui_canvas_' + key); }
     show(sel) {
-        this.sel = sel;
-        this.layer = sel && ['subnet', 'vlan', 'switchvlan'].includes(sel.kind)
-            ? (sel.kind === 'subnet' ? 'l3' : 'l2') : ['l1', 'l2', 'l3'].includes(this.stage.layer) ? this.stage.layer : 'l1';
+        this.hideOverview(); this.sel = sel; this.panel = 'ports';
+        this.layer = sel?.kind === 'subnet' ? 'l3' : ['vlan', 'switchvlan', 'segment'].includes(sel?.kind) ? 'l2'
+            : this.stage.layer === 'l4' ? 'l1' : this.stage.layer;
         this.render();
     }
-
-    /**
-     * Shows the overview of the lab (or of the current layer, with its findings).
-     */
-    showSummary() {
-        this.sel = null;
-        this.render();
-    }
-
-    /**
-     * Shows the overview, or hides it when it is already shown.
-     */
-    toggleSummary() {
-        if (this.visible && !this.sel) {
-            this.hide();
-        } else {
-            this.showSummary();
-        }
-    }
-
-    hide() {
-        this.el.hidden = true;
-        this.sel = null;
-        if (this.lead) this.lead.style.display = 'none';
+    hideOverview() {
+        this.overview.hidden = true;
+        this.stage.r('overview').setAttribute('aria-expanded', 'false');
         this.stage.canvas.scheduleLabels();
     }
-
-    /**
-     * Draws the card again after the lab, the layer or the facts changed.
-     */
-    refresh() {
-        if (this.visible) {
-            this.render();
-        }
+    hideCard() {
+        this.el.textContent = ''; this.shape = null; this.sel = null;
+        this.stage.canvas.scheduleLabels();
     }
-
+    hide() { this.hideCard(); this.hideOverview(); }
+    showSummary() {
+        this.hideCard(); this.stage.select(null); this.overview.hidden = false;
+        this.stage.r('overview').setAttribute('aria-expanded', 'true');
+        this.renderOverview(); this.stage.r('overviewClose').focus();
+    }
+    toggleSummary() { if (this.overview.hidden) this.showSummary(); else this.hideOverview(); }
+    refresh() { if (this.shape) this.render(); if (!this.overview.hidden) this.renderOverview(); }
+    table(heads, rows) {
+        return `<table><thead><tr>${heads.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row =>
+            `<tr${row.go ? ` data-go-kind="${esc(row.go.kind)}" data-go-id="${esc(row.go.id)}" tabindex="0"` : ''}>${row.map(value => {
+                const cell = value && typeof value === 'object' ? value : {text: value};
+                return `<td${cell.text === 'down' ? ' class="down"' : ''}>${esc(cell.text ?? '—')}${cell.seen ? ` <i class="seenmark" title="${esc(this.strings.ui_seen_mark)}">●</i>` : ''}</td>`;
+            }).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    banner(n) {
+        const s = this.stage, f = n && s.fx?.nodes.get(n.id), status = factsStatus(s);
+        let text = status.text;
+        if (n?.state === 'silhouette') text = this.strings.ui_fog_unknown_note;
+        else if (n?.state === 'known') text = this.strings.ui_fog_found_note;
+        else if (f?.err) text = this.strings['ui_facts_err_' + f.err.code] || this.strings.ui_facts_err_other;
+        const seen = f?.seen;
+        const time = seen?.at && new Date(seen.at).toLocaleTimeString(document.documentElement.lang, {hour: '2-digit', minute: '2-digit'});
+        return `<div class="fact-banner${status.state === 'stale' || status.state === 'error' || f?.err ? ' warn' : ''}"><p>${esc(text)}</p>`
+            + (time ? `<p class="seenline">${esc(this.strings.ui_seen_at.replace('{$a}', time))} (${esc(seen.command)})</p><p>${esc(this.strings.ui_seen_note)}</p>` : '') + '</div>';
+    }
     render() {
-        const stage = this.stage, m = stage.model, D = stage.der, s = this.sel;
-        if (!m) {
-            return;
-        }
-        const h = makeHtml(stage, this.strings, this.host, s ? this.layer : stage.layer);
-        let html = null, focus = null;
-        if (!s) {
-            html = h.summary();
-        } else if (s.kind === 'node' || s.kind === 'switchvlan') {
-            const virtual = s.kind === 'switchvlan' && stage.canvas.l2 && stage.canvas.l2.virtuals.get(s.id);
-            const n = virtual ? virtual.orig : m.nodes.get(s.id);
-            html = n ? h.node(n) : null;
-            if (virtual && html) html = `<p class="canvas-vlan-title">VLAN ${esc(virtual.vlan)}</p>` + html
-                + (this.layer === 'l2' && virtual.domain ? h.vlan(virtual.domain) : '');
-            focus = virtual || n;
-        } else if (s.kind === 'subnet') {
-            const x = D && D.l3.subnets.find(v => v.key === s.id);
-            html = x ? h.subnet(x) : null;
-            focus = x;
-        } else if (s.kind === 'vlan') {
-            const d = D && D.l2.domains.find(v => v.id === s.id);
-            html = d ? h.vlan(d) : null;
-        } else if (s.kind === 'adj') {
-            const e = D && D.rt.edges.find(v => v.id === s.id);
-            html = e ? h.adj(e) : null;
-        } else {
-            const l = m.links.find(x => x.id === s.id);
-            html = l ? h.link(l) : null;
-            if (l) {
-                const A = m.nodes.get(l.a.nodeId), B = m.nodes.get(l.b.nodeId);
-                focus = {cx: (A.cx + B.cx) / 2, cy: (A.cy + B.cy) / 2};
-            }
-        }
-        if (html === null) {
-            this.hide();
-            return;
-        }
-        const layers = s && s.kind === 'subnet' ? ['l3'] : s && s.kind === 'vlan' ? ['l2'] : ['l1', 'l2', 'l3'];
-        const tabs = s ? `<div class="card-layers" role="tablist" aria-label="${esc(this.strings.ui_canvas_card_layers)}">${layers.map(layer =>
-            `<button type="button" role="tab" data-card-layer="${layer}" aria-selected="${layer === this.layer}" aria-controls="${stage.prefix}-card-content" tabindex="${layer === this.layer ? 0 : -1}">${layer.toUpperCase()}</button>`).join('')}</div>` : '';
-        this.body.innerHTML = tabs + `<div id="${stage.prefix}-card-content"${s ? ' role="tabpanel" tabindex="0"' : ''}>${html}</div>`;
-        this.el.hidden = false;
-        this.el.dataset.kind = s ? s.kind : 'summary';
-        this.focus = focus;
+        if (!this.sel || !this.stage.model) { this.hideCard(); return; }
+        const data = objectData(this.stage, this.sel, this.layer, this.panel);
+        if (!data) { this.hideCard(); return; }
+        const focusInside = this.el.contains(document.activeElement);
+        this.el.textContent = '';
+        const lead = el('line', {class: 'card-lead'}, this.el), anchor = el('circle', {r: 5, class: 'card-anchor'}, this.el);
+        const card = el('g', {class: 'info-card'}, this.el), foreign = el('foreignObject', {}, card);
+        const html = document.createElementNS('http://www.w3.org/1999/xhtml', 'section');
+        html.setAttribute('class', 'object-card'); html.setAttribute('aria-label', data.title);
+        foreign.appendChild(html);
+        const layers = this.sel.kind === 'subnet' ? ['l3'] : this.sel.kind === 'vlan' ? ['l2'] : ['l1', 'l2', 'l3'];
+        const mac = this.layer === 'l2' && data.device?.cat === 'switch' && groupOpen(this.stage, data.device, 'l2');
+        const inspections = data.device && this.host.inspections ? this.host.inspections(data.device) : [];
+        const panelId = this.stage.prefix + '-object-facts';
+        html.innerHTML = `<header><div><span class="kicker">${esc(data.kind.toUpperCase())}</span><h2>${esc(data.title)}</h2><p>${esc(data.sub || '')}</p></div><button class="ib" type="button" data-act="close" aria-label="${esc(this.strings.ui_close)}">×</button></header>`
+            + `<div class="object-tabs" role="tablist" aria-label="${esc(this.strings.ui_canvas_card_layers)}">${layers.map(layer => `<button type="button" role="tab" id="${panelId}-${layer}" data-card-layer="${layer}" aria-controls="${panelId}" aria-selected="${layer === this.layer}" tabindex="${layer === this.layer ? 0 : -1}">${layer.toUpperCase()}</button>`).join('')}</div>`
+            + `<div class="object-content" id="${panelId}" role="tabpanel" aria-labelledby="${panelId}-${this.layer}" tabindex="0">${this.banner(data.device)}`
+            + (mac ? `<button class="btn mac-toggle" type="button" aria-pressed="${this.panel === 'mac'}">${esc(this.t(this.panel === 'mac' ? 'mac_back' : 'mac_open'))}</button>` : '')
+            + (data.rows?.length ? this.table(data.heads, data.rows) : `<p class="card-empty">${esc(data.empty || this.t('no_layer_data'))}</p>`)
+            + (data.directions ? `<h3>${esc(this.t('directions'))}</h3>${this.table(['TX →', '→ RX'], data.directions)}<p class="card-foot">${esc(this.strings.ui_canvas_duplex)}</p>` : '')
+            + (data.sections || []).map(x => `<h3>${esc(x.title)}</h3>${this.table(x.heads, x.rows)}`).join('')
+            + (data.messages?.length ? `<h3>${esc(this.t('issues'))}</h3>${data.messages.map(message => `<p class="fact-banner warn">${esc(message.text || message)}</p>`).join('')}` : '')
+            + (data.related?.length ? `<h3>${esc(this.t('related'))}</h3><div class="object-links">${data.related.map(r => `<button type="button" data-go-kind="${esc(r.kind)}" data-go-id="${esc(r.id)}">${esc(r.label)}</button>`).join('')}</div>` : '')
+            + (data.device?.consoleType && data.device.consoleType !== 'none' ? `<h3>${esc(this.strings.ui_console)}</h3><div class="object-links"><button type="button" data-act="console">${esc(this.strings.ui_open_console)}</button>`
+                + inspections.map(item => `<button type="button" data-inspect="${esc(item.id)}"${this.host.canInspect(data.device) ? '' : ' disabled'} title="${esc(this.t('inspect_note'))}">${esc(item.cmd)}</button>`).join('') + '</div>'
+                + (inspections.length ? `<p>${esc(this.t('inspect_note'))}</p>` : '') : '')
+            + `<p class="card-foot">${esc(data.foot || '')}</p></div>`;
+        html.querySelector('[data-act="close"]').onclick = () => { this.hideCard(); this.stage.svg.focus(); };
+        html.querySelector('[data-act="console"]')?.addEventListener('click', () => this.host.openConsole(data.device));
+        html.querySelectorAll('[data-inspect]').forEach(button => button.onclick = () => this.host.inspect(data.device, button.dataset.inspect));
+        const changeTab = layer => { this.layer = layer; this.panel = 'ports'; this.render(); this.el.querySelector(`[data-card-layer="${layer}"]`).focus(); };
+        html.querySelectorAll('[data-card-layer]').forEach((tab, index) => {
+            tab.onclick = () => changeTab(tab.dataset.cardLayer);
+            tab.onkeydown = e => {
+                const next = e.key === 'ArrowRight' ? (index + 1) % layers.length : e.key === 'ArrowLeft' ? (index + layers.length - 1) % layers.length
+                    : e.key === 'Home' ? 0 : e.key === 'End' ? layers.length - 1 : -1;
+                if (next >= 0) { e.preventDefault(); e.stopPropagation(); changeTab(layers[next]); }
+            };
+        });
+        html.querySelector('.mac-toggle')?.addEventListener('click', () => { this.panel = this.panel === 'mac' ? 'ports' : 'mac'; this.render(); this.el.querySelector('.mac-toggle').focus(); });
+        this.bindNavigation(html);
+        html.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { this.hide(); this.stage.select(null); this.stage.svg.focus(); } });
+        this.shape = {data, foreign, card, lead, anchor};
         this.position();
-        if (focus && focus.cx !== undefined) {
-            stage.revealAbove(focus.cx, focus.cy);
-        } else if (focus && focus.x !== undefined) {
-            stage.revealAbove(focus.x, focus.y);
-        }
+        if (focusInside) this.el.querySelector(`[data-card-layer="${this.layer}"]`).focus();
+        this.stage.canvas.scheduleLabels();
     }
-
     position() {
-        const stage = this.stage;
-        if (!this.visible || !stage.model) return;
-        const bounds = stage.wrap.getBoundingClientRect(), card = this.el.getBoundingClientRect();
-        const focus = this.focus;
-        if (!stage.mobile && bounds.width > 600) {
-            const pad = 14, top = 66, bottom = Math.max(top, bounds.height - card.height - 64);
-            const right = Math.max(pad, bounds.width - card.width - pad);
-            const choices = [{x: right, y: top}, {x: pad, y: top + 76}, {x: right, y: bottom}, {x: pad, y: bottom}];
-            const related = [...stage.svg.querySelectorAll('.node.on,.l2-virtual.on,.subnet.on')].map(e => e.getBoundingClientRect());
-            const score = p => related.reduce((total, r) => total + Math.max(0, Math.min(p.x + card.width, r.right - bounds.left + 12)
-                - Math.max(p.x, r.left - bounds.left - 12)) * Math.max(0, Math.min(p.y + card.height, r.bottom - bounds.top + 12)
-                - Math.max(p.y, r.top - bounds.top - 12)), 0);
-            const best = choices.sort((a, b) => score(a) - score(b))[0];
-            this.el.style.left = best.x + 'px'; this.el.style.top = best.y + 'px'; this.el.style.right = 'auto';
-        } else {
-            this.el.style.left = ''; this.el.style.top = ''; this.el.style.right = '';
+        const c = this.shape, s = this.stage;
+        if (!c) return;
+        const ww = s.wrap.clientWidth, wh = s.wrap.clientHeight, compact = ww < 760;
+        const w = Math.min(560, Math.max(1, ww - 24));
+        const h = Math.max(1, compact ? Math.min(520, wh * .6, wh - 128) : Math.min(520, wh - 24));
+        const p = s.toScreen(c.data.focus?.cx || 0, c.data.focus?.cy || 0);
+        const rawX = p.x + w + 76 < ww ? p.x + 74 : p.x - w - 74 > 4 ? p.x - w - 74 : ww - w - 12;
+        let x = clamp(rawX, 12, Math.max(12, ww - w - 12));
+        const minY = compact ? 12 : x < 396 ? 174 : 66, bottom = compact ? 112 : 12;
+        const y = clamp(compact ? wh - h - bottom : p.y - 80, Math.min(minY, wh - h - bottom), Math.max(12, wh - h - bottom));
+        if (!compact && s.sel) {
+            const root = s.wrap.getBoundingClientRect();
+            const boxes = [...s.vp.querySelectorAll('.node.on .ico,.l2-virtual.on > rect,.subnet-object.on rect')].map(e => {
+                const r = e.getBoundingClientRect(); return {x: r.left - root.left - 12, y: r.top - root.top - 8, w: r.width + 24, h: r.height + 36};
+            });
+            const overlap = candidate => boxes.reduce((score, b) => {
+                const width = Math.max(0, Math.min(candidate + w, b.x + b.w) - Math.max(candidate, b.x));
+                const height = Math.max(0, Math.min(y + h, b.y + b.h) - Math.max(y, b.y));
+                return score + (width && height ? 1000000 + width * height : 0);
+            }, candidate < 396 && y < 174 ? 25000000 : 0);
+            x = [x, Math.max(12, ww - w - 12), 12].reduce((best, candidate) => overlap(candidate) < overlap(best) ? candidate : best);
         }
-        if (!this.lead) {
-            this.lead = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            this.lead.setAttribute('class', 'card-lead');
-            stage.ov.appendChild(this.lead);
-        }
-        const x = focus && (focus.cx ?? focus.x), y = focus && (focus.cy ?? focus.y);
-        this.lead.hidden = !this.sel || x == null || stage.mobile;
-        this.lead.style.display = this.lead.hidden ? 'none' : '';
-        if (!this.lead.hidden) {
-            const p = stage.toScreen(x, y), r = this.el.getBoundingClientRect();
-            const endX = Math.max(r.left - bounds.left, Math.min(p.x, r.right - bounds.left));
-            const endY = Math.max(r.top - bounds.top, Math.min(p.y, r.bottom - bounds.top));
-            Object.entries({x1: p.x, y1: p.y, x2: endX, y2: endY}).forEach(([key, value]) => this.lead.setAttribute(key, value));
-        }
-        stage.canvas.scheduleLabels();
+        c.foreign.setAttribute('width', w); c.foreign.setAttribute('height', h);
+        c.card.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+        Object.entries({x1: p.x, y1: p.y, x2: clamp(p.x, x, x + w), y2: clamp(p.y, y, y + h)}).forEach(([k, v]) => c.lead.setAttribute(k, v));
+        c.anchor.setAttribute('cx', p.x); c.anchor.setAttribute('cy', p.y);
+        s.canvas.scheduleLabels();
     }
-
-    /**
-     * Goes to another object from a list in the card.
-     *
-     * @param {object} sel {kind, id}
-     */
-    goto(sel) {
-        this.stage.select(sel);
-        this.show(this.stage.sel);
+    goto(selection) {
+        this.stage.select(selection); this.show(selection);
+        const focus = this.shape?.data.focus;
+        if (focus) {
+            const s = this.stage, k = Math.max(s.view.k, 1.25), w = s.wrap.clientWidth, h = s.wrap.clientHeight;
+            s.animateTo({k, tx: (s.mobile ? w / 2 : Math.max(100, (w - Math.min(560, w - 24) - 48) / 2)) - k * focus.cx,
+                ty: (s.mobile ? Math.max(80, (h - Math.min(520, h * .6)) / 2) : h / 2) - k * focus.cy}, 320);
+        }
     }
-
-    clicked(e) {
-        const tab = e.target.closest('[data-card-layer]');
-        if (tab) {
-            this.layer = tab.dataset.cardLayer;
-            this.render();
-            this.body.querySelector(`[data-card-layer="${this.layer}"]`).focus();
-            return;
-        }
-        const t = e.target.closest('[data-goto-node],[data-goto-link],[data-goto-subnet],[data-goto-vlan],[data-goto-adj],[data-act]');
-        if (!t) {
-            return;
-        }
-        if (t.dataset.gotoNode) {
-            this.goto({kind: 'node', id: t.dataset.gotoNode});
-        } else if (t.dataset.gotoLink) {
-            this.goto({kind: 'link', id: t.dataset.gotoLink});
-        } else if (t.dataset.gotoSubnet) {
-            this.goto({kind: 'subnet', id: t.dataset.gotoSubnet});
-        } else if (t.dataset.gotoVlan) {
-            this.goto({kind: 'vlan', id: t.dataset.gotoVlan});
-        } else if (t.dataset.gotoAdj) {
-            this.goto({kind: 'adj', id: t.dataset.gotoAdj});
-        } else if (t.dataset.act === 'refreshfacts') {
-            t.disabled = true;
-            this.host.refreshFacts();
-        } else if (t.dataset.act === 'close') {
-            this.hide();
-        } else if (t.dataset.act === 'console') {
-            const id = t.dataset.node || (this.sel && this.sel.kind === 'node' ? this.sel.id : null);
-            const n = id && this.stage.model.nodes.get(id);
-            if (n) {
-                this.hide();
-                this.host.openConsole(n);
-            }
-        }
+    bindNavigation(root) {
+        root.querySelectorAll('[data-go-kind]').forEach(b => {
+            const run = () => this.goto({kind: b.dataset.goKind, id: b.dataset.goId});
+            b.onclick = run;
+            if (b.tagName === 'TR') b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(); } };
+        });
+    }
+    renderOverview() {
+        const s = this.stage, issues = layerIssues(s), objects = [];
+        if (s.layer === 'l1') s.model?.links.forEach(l => {
+            const state = s.der?.l1.links.get(l.id);
+            objects.push({kind: 'link', id: l.id, label: `${s.model.nodes.get(l.a.nodeId).name} ↔ ${s.model.nodes.get(l.b.nodeId).name}`,
+                note: !state || state.unknown ? this.t('unknown') : state.down ? this.t('blocked') : this.t('passing')});
+        });
+        if (s.layer === 'l2') s.der?.l2.domains.filter(d => d.shown).forEach(d => objects.push({kind: 'vlan', id: d.id, label: d.label, note: `${d.where} · ${d.members.length} ${this.t('interfaces')}`}));
+        if (s.layer === 'l3') s.canvas.subnets.forEach(x => objects.push({kind: 'subnet', id: x.key, label: x.key, note: `${x.members.length} ${this.t('interfaces')} · ${x.issues.length} ${this.t('issues')}`}));
+        s.r('overviewTitle').textContent = this.strings.ui_overview + ' · ' + s.layer.toUpperCase();
+        s.r('overviewLead').textContent = layerHelp(s, s.layer);
+        const body = s.r('overviewBody');
+        const unknown = [...(s.model?.nodes.values() || [])].filter(n => n.state === 'silhouette').length;
+        body.innerHTML = `<div class="overview-summary"><span>${objects.length} ${this.t('objects')}</span><span>${issues.length} ${this.t('issues')}</span></div>`
+            + (unknown ? `<p>${esc(this.strings.ui_fog_unknown_count)} ${unknown}</p>` : '')
+            + `<div class="panel-tabs"><button type="button" data-overview-tab="objects" aria-pressed="${this.overviewTab === 'objects'}">${esc(this.t('objects'))}</button><button type="button" data-overview-tab="issues" aria-pressed="${this.overviewTab === 'issues'}">${esc(this.t('issues'))} · ${issues.length}</button></div>`
+            + (this.overviewTab === 'objects' ? objects.map(o => `<button class="overview-row" type="button" data-go-kind="${o.kind}" data-go-id="${esc(o.id)}">${esc(o.label)}<small>${esc(o.note)}</small></button>`).join('') || `<p>${esc(this.t('no_objects'))}</p>`
+                : issues.map(i => `<button class="issue-row ${esc(i.sev)}" type="button" data-go-kind="${esc(i.go?.kind || '')}" data-go-id="${esc(i.go?.id || '')}">${esc(i.text)}</button>`).join('') || `<p>${esc(this.t(s.der ? 'no_issues' : 'no_check'))}</p>`);
+        body.querySelectorAll('[data-overview-tab]').forEach(b => b.onclick = () => { this.overviewTab = b.dataset.overviewTab; this.renderOverview(); });
+        this.bindNavigation(body); s.canvas.scheduleLabels();
     }
 }

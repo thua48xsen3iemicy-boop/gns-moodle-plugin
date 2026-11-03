@@ -3,7 +3,7 @@
  * teacher (.gns3lab-course).
  *
  * Plugin styles.css is loaded on every Moodle page, so every rule is scoped to .gns3lab-app, .gns3lab-student or .gns3lab-course.
- * Colours follow the theme through Bootstrap variables; own tokens only where Bootstrap has none.
+ * Administrative views follow Bootstrap variables. The student Canvas owns its scoped prototype palette.
  */
 
 .gns3lab-app {
@@ -4133,355 +4133,728 @@ body.gns3lab-fullscreen {
     .gns3lab-editor .ed-image-entry { margin-bottom: .3rem; }
 }
 
-/* Student Canvas: Moodle colours, screen sized geometry, and independent object cards. */
-.gns3lab-student.canvas-ui .canvas-hud {
-    top: 16px;
-    left: 16px;
-    bottom: auto;
-    display: grid;
-    gap: 9px;
-    min-width: 220px;
-    padding: 14px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    box-shadow: var(--shadow);
+/* Student Canvas: complete scoped presentation from student-ui-canvas.html. */
+/* session bar */.gns3lab-student.canvas-ui .bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;
+  padding-block:9px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.gns3lab-student.canvas-ui .ttl{min-width:0}
+.gns3lab-student.canvas-ui .ttl h1{margin:0;font:600 18px/1.2 var(--display);text-wrap:balance}
+.gns3lab-student.canvas-ui .meta{margin:2px 0 0;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-variant-numeric:tabular-nums}
+.gns3lab-student.canvas-ui .pill{display:inline-flex;align-items:center;gap:6px;font:600 11.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ok)}
+.gns3lab-student.canvas-ui .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.gns3lab-student.canvas-ui .demo{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border:1px dashed var(--line);padding:2px 6px;border-radius:4px}
+.gns3lab-student.canvas-ui .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.gns3lab-student.canvas-ui .btn{font:500 13px/1 var(--body);height:32px;padding:0 12px;border:1px solid var(--line);background:var(--canvas);color:var(--fg);border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.gns3lab-student.canvas-ui .btn:hover{border-color:var(--wire)}
+.gns3lab-student.canvas-ui .btn.danger{color:var(--bad)}
+.gns3lab-student.canvas-ui .btn:focus-visible,
+.gns3lab-student.canvas-ui .seg button:focus-visible,
+.gns3lab-student.canvas-ui .tab:focus-visible,
+.gns3lab-student.canvas-ui .ib:focus-visible,
+.gns3lab-student.canvas-ui .key:focus-visible,
+.gns3lab-student.canvas-ui .dchip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gns3lab-student.canvas-ui .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;background:var(--canvas);overflow:hidden}
+.gns3lab-student.canvas-ui .seg button{font:500 13px/1 var(--body);height:30px;padding:0 11px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.gns3lab-student.canvas-ui .seg button:first-child{border-left:0}
+.gns3lab-student.canvas-ui .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.gns3lab-student.canvas-ui .seg svg,
+.gns3lab-student.canvas-ui .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.gns3lab-student.canvas-ui.mob .seg,
+.gns3lab-student.canvas-ui.mob .wide,
+.gns3lab-student.canvas-ui.mob .demo{display:none}
+.gns3lab-student.canvas-ui .narrow{display:none}
+.gns3lab-student.canvas-ui.mob .narrow{display:inline}
+.gns3lab-student.canvas-ui.mob .bar{flex-wrap:nowrap;padding-block:7px}
+.gns3lab-student.canvas-ui.mob .ttl{flex:1}
+.gns3lab-student.canvas-ui.mob .ttl h1{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gns3lab-student.canvas-ui.mob .tools{flex-wrap:nowrap}
+.gns3lab-student.canvas-ui .stage[data-mode="grid"] .hint{display:none}
+.gns3lab-student.canvas-ui /* stage and its three desktop arrangements */
+.stage{flex:1;min-height:0;display:flex;position:relative}
+.gns3lab-student.canvas-ui .wrap{position:relative;flex:1;min-width:0;min-height:0;background:var(--canvas);overflow:hidden}
+.gns3lab-student.canvas-ui .grid,
+.gns3lab-student.canvas-ui .dock,
+.gns3lab-student.canvas-ui .splitter{display:none}
+.gns3lab-student.canvas-ui .stage[data-mode="panel"] .splitter{display:block;flex:none;width:9px;margin:0 -4px;z-index:5;cursor:col-resize;position:relative;touch-action:none}
+.gns3lab-student.canvas-ui .stage[data-mode="panel"] .splitter::after{content:"";position:absolute;left:4px;top:0;bottom:0;width:1px;background:var(--line)}
+.gns3lab-student.canvas-ui .stage[data-mode="panel"] .splitter:hover::after,
+.gns3lab-student.canvas-ui .splitter.drag::after{background:var(--accent);width:2px}
+.gns3lab-student.canvas-ui .stage[data-mode="panel"] .dock{display:flex;flex-direction:column;flex:none;width:var(--dockw,44%);min-width:320px;max-width:72%;background:var(--term-bg)}
+.gns3lab-student.canvas-ui .stage[data-mode="grid"]{display:grid;gap:8px;padding:8px;grid-auto-rows:minmax(0,1fr)}
+.gns3lab-student.canvas-ui .stage[data-mode="grid"] .grid{display:contents}
+.gns3lab-student.canvas-ui .stage[data-mode="grid"] .wrap{order:-1;border:1px solid var(--line);border-radius:8px}
+.gns3lab-student.canvas-ui /* topology */
+[data-region="svg"]{display:block;width:100%;height:100%;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.gns3lab-student.canvas-ui [data-region="svg"].dragging{cursor:grabbing}
+.gns3lab-student.canvas-ui [data-region="svg"]:focus{outline:none}
+.gns3lab-student.canvas-ui .dots{fill:var(--grid)}
+.gns3lab-student.canvas-ui .dtext{font-family:var(--display)}
+.gns3lab-student.canvas-ui .wire{stroke:var(--wire);stroke-width:2;fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .link{cursor:pointer}
+.gns3lab-student.canvas-ui .link:focus{outline:none}
+.gns3lab-student.canvas-ui .hit{stroke:transparent;stroke-width:18;fill:none;pointer-events:stroke;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .link.down .wire{stroke:var(--bad);stroke-dasharray:5 5}
+.gns3lab-student.canvas-ui .link.sel .wire,
+.gns3lab-student.canvas-ui .link:focus-visible .wire{stroke:var(--accent);stroke-width:2.2}
+.gns3lab-student.canvas-ui .link.sel.down .wire{stroke:var(--bad)}
+.gns3lab-student.canvas-ui .link.sel .l1,
+.gns3lab-student.canvas-ui .link.sel .l2{opacity:1;visibility:visible}
+.gns3lab-student.canvas-ui .link.sel .plabel,
+.gns3lab-student.canvas-ui .link.sel .pip{fill:var(--fg);font-weight:600}
+.gns3lab-student.canvas-ui .link.suspended .wire{stroke-dasharray:2 6;opacity:.6}
+.gns3lab-student.canvas-ui .filt{fill:var(--canvas);stroke:var(--warn);stroke-width:1.6}
+.gns3lab-student.canvas-ui .filt-t{font:600 8px var(--mono);fill:var(--warn);text-anchor:middle}
+.gns3lab-student.canvas-ui .pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .pdot.down{fill:var(--bad)}
+.gns3lab-student.canvas-ui .pdot.unknown{fill:var(--off)}
+.gns3lab-student.canvas-ui .plabel{font:500 9px var(--mono);font-size:calc(11px * var(--inv,1));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .pip{font:500 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .node{cursor:pointer;-webkit-touch-callout:none}
+.gns3lab-student.canvas-ui .node:focus{outline:none}
+.gns3lab-student.canvas-ui .halo{fill:transparent;stroke:transparent;stroke-width:var(--node-ring,1px);vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .node.sel .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 7%,transparent)}
+.gns3lab-student.canvas-ui .node:focus-visible .halo{stroke:var(--accent);stroke-dasharray:3 3}
+.gns3lab-student.canvas-ui .if{fill:var(--ico)}
+.gns3lab-student.canvas-ui .ig{fill:none;stroke:var(--ico-glyph);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.gns3lab-student.canvas-ui .igf{fill:var(--ico-glyph)}
+.gns3lab-student.canvas-ui .st-stopped .ico{opacity:.38}
+.gns3lab-student.canvas-ui .st-suspended .ico{opacity:.6}
+.gns3lab-student.canvas-ui .sdot{fill:var(--ok);stroke:none;font-size:.75em}
+.gns3lab-student.canvas-ui .st-suspended .sdot{fill:var(--warn)}
+.gns3lab-student.canvas-ui .st-stopped .sdot{fill:var(--off)}
+.gns3lab-student.canvas-ui .nname{font-family:var(--display);font-weight:600;font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)));fill:var(--fg);text-anchor:middle;dominant-baseline:hanging;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round}
+.gns3lab-student.canvas-ui .nsub{font:500 8px var(--mono);font-size:min(8px,calc(12px * var(--inv,1)));fill:var(--muted);text-anchor:middle;dominant-baseline:hanging}
+.gns3lab-student.canvas-ui .nadj{font:600 7px var(--mono);font-size:min(7px,calc(11px * var(--inv,1)));text-anchor:middle;dominant-baseline:hanging;fill:var(--ok)}
+.gns3lab-student.canvas-ui .nadj.warn{fill:var(--warn)}
+.gns3lab-student.canvas-ui .cbadge{display:none}
+.gns3lab-student.canvas-ui .has-con .cbadge{display:inline}
+.gns3lab-student.canvas-ui .cbadge rect{fill:var(--term-bg);stroke:var(--canvas);stroke-width:1.5}
+.gns3lab-student.canvas-ui .cbadge text{font:600 8px var(--mono);fill:var(--term-fg);text-anchor:middle}
+.gns3lab-student.canvas-ui .unread .cbadge rect{fill:var(--accent);animation:gnsCanvasPulse 1.2s ease-in-out infinite}
+.gns3lab-student.canvas-ui .unread .cbadge text{fill:var(--accent-ink)}
+.gns3lab-student.canvas-ui .minimized .cbadge rect{stroke:var(--accent);stroke-width:2}
+@keyframes gnsCanvasPulse{
+50%{opacity:.45}
+
 }
-.gns3lab-student.canvas-ui .canvas-heading {
-    font: 600 14px var(--display);
+.gns3lab-student.canvas-ui .card{cursor:pointer}
+.gns3lab-student.canvas-ui .card .cbg{fill:var(--term-bg);stroke:var(--term-line)}
+.gns3lab-student.canvas-ui .card .chd{fill:var(--term-dim);font-family:var(--mono);font-weight:600}
+.gns3lab-student.canvas-ui .card .cln{fill:var(--term-fg);font-family:var(--mono);white-space:pre}
+.gns3lab-student.canvas-ui .card .cpt{fill:var(--wire)}
+.gns3lab-student.canvas-ui .l1,
+.gns3lab-student.canvas-ui .l2,
+.gns3lab-student.canvas-ui .l3,
+.gns3lab-student.canvas-ui .l2x{opacity:0;visibility:hidden;transition:opacity .22s ease,visibility .22s}
+.gns3lab-student.canvas-ui [data-lod="1"] .l1,
+.gns3lab-student.canvas-ui [data-lod="2"] .l1,
+.gns3lab-student.canvas-ui [data-lod="3"] .l1,
+.gns3lab-student.canvas-ui [data-lod="2"] .l2,
+.gns3lab-student.canvas-ui [data-lod="3"] .l2,
+.gns3lab-student.canvas-ui [data-lod="3"] .l3,
+.gns3lab-student.canvas-ui [data-lod="2"] .l2x{opacity:1;visibility:visible}
+@media (prefers-reduced-motion: reduce){
+.gns3lab-student.canvas-ui .l1,
+.gns3lab-student.canvas-ui .l2,
+.gns3lab-student.canvas-ui .l3,
+.gns3lab-student.canvas-ui .l2x{transition:none}
+.gns3lab-student.canvas-ui .unread .cbadge rect{animation:none}
+
 }
-.gns3lab-student.canvas-ui .canvas-meta {
-    margin: 0;
-    color: var(--muted);
-    font: 11px var(--mono);
+.gns3lab-student.canvas-ui /* overlays on the topology */
+.ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+.gns3lab-student.canvas-ui .ov .fl-base{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4;opacity:.35;transition:opacity .25s}
+.gns3lab-student.canvas-ui .ov .hover .fl-base{opacity:.9}
+.gns3lab-student.canvas-ui .ov .fl-in,
+.gns3lab-student.canvas-ui .ov .fl-out{stroke-width:2.6;stroke-linecap:round;stroke-dasharray:1.5 10;opacity:0;transition:opacity .3s}
+.gns3lab-student.canvas-ui .ov .fl-in{stroke:var(--accent);animation:flowIn .45s linear infinite}
+.gns3lab-student.canvas-ui .ov .fl-out{stroke:var(--ok);animation:flowOut .45s linear infinite}
+.gns3lab-student.canvas-ui .ov .on{opacity:1}
+.gns3lab-student.canvas-ui .ov .fl-node{fill:var(--accent)}
+.gns3lab-student.canvas-ui .ov .ping{fill:none;stroke-width:2;transform-box:fill-box;transform-origin:center;animation:ping .6s ease-out forwards}
+.gns3lab-student.canvas-ui .ov .ping.in{stroke:var(--accent)}
+.gns3lab-student.canvas-ui .ov .ping.out{stroke:var(--ok)}
+@keyframes flowIn{
+from{stroke-dashoffset:11.5}
+to{stroke-dashoffset:0}
+
 }
-.gns3lab-student.canvas-ui .canvas-actions {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    display: flex;
-    gap: 8px;
-    z-index: 6;
+@keyframes flowOut{
+from{stroke-dashoffset:0}
+to{stroke-dashoffset:11.5}
+
 }
-.gns3lab-student.canvas-ui .canvas-facts {
-    position: absolute;
-    top: 153px;
-    left: 16px;
-    display: grid;
-    justify-items: start;
-    gap: 6px;
-    max-width: 245px;
-    color: var(--muted);
-    font-size: 11px;
+@keyframes ping{
+from{transform:scale(.2);opacity:.95}
+to{transform:scale(1);opacity:0}
+
 }
-.gns3lab-student.canvas-ui .canvas-facts .btn {
-    font-size: 11px;
-    min-height: 28px;
-    padding: 4px 8px;
+@media (prefers-reduced-motion: reduce){
+.gns3lab-student.canvas-ui .ov .fl-in,
+.gns3lab-student.canvas-ui .ov .fl-out,
+.gns3lab-student.canvas-ui .ov .ping{animation:none}
+.gns3lab-student.canvas-ui .ov .fl-in,
+.gns3lab-student.canvas-ui .ov .fl-out{stroke-dasharray:none}
+
 }
-.gns3lab-student.canvas-ui .canvas-placeholder {
-    position: absolute;
-    left: 50%;
-    top: 45%;
-    transform: translate(-50%, -50%);
-    color: var(--muted);
-    text-align: center;
-    max-width: 300px;
+.gns3lab-student.canvas-ui .hint{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:12px;margin:0;max-width:calc(100% - 210px);
+  font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--canvas) 88%,transparent);padding:5px 9px;border-radius:6px;pointer-events:none;z-index:2}
+.gns3lab-student.canvas-ui.mob .hint{bottom:auto;top:10px;max-width:calc(100% - 24px)}
+.gns3lab-student.canvas-ui .zoom{position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:12px;z-index:4;display:flex;align-items:center;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .zoom button{width:36px;height:36px;border:0;background:transparent;color:var(--fg);font:500 18px/1 var(--body);cursor:pointer;display:grid;place-items:center}
+.gns3lab-student.canvas-ui .zoom button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.gns3lab-student.canvas-ui .zoom output{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--muted);min-width:76px;text-align:center;display:flex;flex-direction:column;gap:3px;align-items:center}
+.gns3lab-student.canvas-ui .lodbar{display:flex;gap:3px}
+.gns3lab-student.canvas-ui .lodbar i{width:12px;height:3px;border-radius:2px;background:var(--line)}
+.gns3lab-student.canvas-ui .lodbar i.on{background:var(--accent)}
+.gns3lab-student.canvas-ui .toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:40;max-width:min(460px,calc(100% - 32px));
+  background:var(--fg);color:var(--bg);padding:9px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .chip{position:absolute;left:50%;bottom:calc(60px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:4;max-width:calc(100% - 24px);
+  background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;box-shadow:var(--shadow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gns3lab-student.canvas-ui .chip b{font-family:var(--display);font-weight:600}
+.gns3lab-student.canvas-ui .chip span{color:var(--muted)}
+.gns3lab-student.canvas-ui .dhint{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:9;background:var(--accent);color:var(--accent-ink);
+  font:600 13px var(--body);padding:8px 14px;border-radius:999px;box-shadow:var(--shadow);white-space:nowrap}
+.gns3lab-student.canvas-ui /* action wheel */
+.radial{position:absolute;width:236px;height:236px;margin:-118px 0 0 -118px;z-index:8;pointer-events:none;transform-origin:50% 50%}
+.gns3lab-student.canvas-ui .radial.in{animation:wheelIn .16s ease-out}
+@keyframes wheelIn{
+from{transform:scale(.55);opacity:0}
+
 }
-.gns3lab-student.canvas-ui .canvas-placeholder b {
-    font: 600 36px var(--mono);
+@media (prefers-reduced-motion: reduce){
+.gns3lab-student.canvas-ui .radial.in{animation:none}
+
 }
-.gns3lab-student.canvas-ui .details,
-.gns3lab-student.canvas-ui .assignments {
-    box-sizing: border-box;
-    width: min(560px, calc(100% - 32px));
-    top: 66px;
-    max-height: calc(100% - 136px);
-    border-radius: 16px;
-    padding: 20px;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
+.gns3lab-student.canvas-ui .radial svg{width:100%;height:100%;overflow:visible}
+.gns3lab-student.canvas-ui .radial .wedge path{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.gns3lab-student.canvas-ui .radial.pinned .wedge{pointer-events:auto;cursor:pointer}
+.gns3lab-student.canvas-ui .radial .wedge .wi{stroke:var(--fg);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.gns3lab-student.canvas-ui .radial .wedge text{font:600 10.5px var(--body);fill:var(--fg);text-anchor:middle}
+.gns3lab-student.canvas-ui .radial .wedge.hi path{fill:var(--accent);stroke:var(--accent)}
+.gns3lab-student.canvas-ui .radial .wedge.hi .wi{stroke:var(--accent-ink)}
+.gns3lab-student.canvas-ui .radial .wedge.hi text{fill:var(--accent-ink)}
+.gns3lab-student.canvas-ui .radial .wedge.danger .wi{stroke:var(--bad)}
+.gns3lab-student.canvas-ui .radial .wedge.danger text{fill:var(--bad)}
+.gns3lab-student.canvas-ui .radial .wedge.danger.hi path{fill:var(--bad);stroke:var(--bad)}
+.gns3lab-student.canvas-ui .radial .wedge.danger.hi .wi,
+.gns3lab-student.canvas-ui .radial .wedge.danger.hi text{stroke:var(--accent-ink);fill:var(--accent-ink)}
+.gns3lab-student.canvas-ui .radial .wedge.danger.hi .wi{fill:none}
+.gns3lab-student.canvas-ui .radial .wedge.off{opacity:.42}
+.gns3lab-student.canvas-ui .radial .hub{fill:var(--panel);stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 4px 10px rgb(0 0 0 / .2))}
+.gns3lab-student.canvas-ui .radial .ring{fill:none;stroke:var(--line);stroke-width:1}
+.gns3lab-student.canvas-ui .radial .hubt{font:600 12px var(--display);fill:var(--fg);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .rcap{position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%);background:var(--fg);color:var(--bg);
+  font:600 13px var(--body);padding:6px 11px;border-radius:7px;white-space:nowrap;box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .rcap small{font-weight:400;opacity:.75;margin-left:6px}
+.gns3lab-student.canvas-ui /* details */
+.details{position:absolute;top:12px;right:max(12px,env(safe-area-inset-right,0px));width:min(350px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;z-index:7;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:14px 16px 16px}
+.gns3lab-student.canvas-ui.mob .details{top:auto;left:0;right:0;bottom:0;width:auto;max-height:62%;border-radius:14px 14px 0 0;
+  padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.gns3lab-student.canvas-ui .dh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.gns3lab-student.canvas-ui .dh h2{margin:0;font:600 19px/1.2 var(--display)}
+.gns3lab-student.canvas-ui .dsub{margin:3px 0 0;font-size:12.5px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.gns3lab-student.canvas-ui .st{display:inline-flex;align-items:center;gap:5px;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.05em}
+.gns3lab-student.canvas-ui .st::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.gns3lab-student.canvas-ui .st.started{color:var(--ok)}
+.gns3lab-student.canvas-ui .st.suspended{color:var(--warn)}
+.gns3lab-student.canvas-ui .st.stopped{color:var(--off)}
+.gns3lab-student.canvas-ui .ib{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);cursor:pointer;display:grid;place-items:center;flex:none}
+.gns3lab-student.canvas-ui .ib svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.gns3lab-student.canvas-ui .eyebrow{margin:16px 0 6px;font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.gns3lab-student.canvas-ui .tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.gns3lab-student.canvas-ui .tbl th{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:4px 6px 4px 0;border-bottom:1px solid var(--line)}
+.gns3lab-student.canvas-ui .tbl td{padding:5px 6px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.gns3lab-student.canvas-ui .tbl td.m{font-family:var(--mono);font-size:12px}
+.gns3lab-student.canvas-ui .tbl .dn{color:var(--bad)}
+.gns3lab-student.canvas-ui .tblwrap{overflow-x:auto}
+.gns3lab-student.canvas-ui .dnote{font-size:12.5px;color:var(--muted);margin:10px 0 0}
+.gns3lab-student.canvas-ui .dacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.gns3lab-student.canvas-ui /* consoles */
+.termhost{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0}
+.gns3lab-student.canvas-ui .termview{flex:1;min-height:0;min-width:0;overflow:hidden;padding:6px 4px 4px 10px}
+.gns3lab-student.canvas-ui .termhost .xterm{height:100%}
+.gns3lab-student.canvas-ui .snips{display:flex;align-items:center;gap:6px;flex:none;overflow-x:auto;padding:7px 10px;background:var(--term-bg);border-top:1px solid var(--term-line);scrollbar-width:thin;scrollbar-color:var(--term-line) transparent}
+.gns3lab-student.canvas-ui .snips .lbl{flex:none;color:var(--term-dim);font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.gns3lab-student.canvas-ui .snip{flex:none;min-height:32px;padding:0 10px;border:1px dashed var(--term-line);border-radius:6px;background:transparent;color:var(--term-fg);font:500 11.5px var(--mono);cursor:pointer;touch-action:manipulation}
+.gns3lab-student.canvas-ui .snip:hover{background:var(--term-line)}
+.gns3lab-student.canvas-ui .snip:active{color:var(--accent)}
+.gns3lab-student.canvas-ui .snip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gns3lab-student.canvas-ui .tfail{color:var(--term-fg);font:13px/1.5 var(--body);padding:12px}
+.gns3lab-student.canvas-ui .tabs{display:flex;gap:2px;padding:6px 6px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:thin}
+.gns3lab-student.canvas-ui .tab{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 6px 0 11px;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;
+  background:transparent;color:var(--muted);font:600 13px var(--display);cursor:pointer;white-space:nowrap}
+.gns3lab-student.canvas-ui .tab[aria-selected="true"]{background:var(--term-bg);color:var(--term-fg);border-color:var(--term-line)}
+.gns3lab-student.canvas-ui .tab .x{width:20px;height:20px;border-radius:4px;display:grid;place-items:center;opacity:.6}
+.gns3lab-student.canvas-ui .tab .x:hover{opacity:1;background:color-mix(in srgb,var(--muted) 25%,transparent)}
+.gns3lab-student.canvas-ui .tab .x svg,
+.gns3lab-student.canvas-ui .thead svg,
+.gns3lab-student.canvas-ui .dhead svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.gns3lab-student.canvas-ui .dotst{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.gns3lab-student.canvas-ui .dotst.suspended{background:var(--warn)}
+.gns3lab-student.canvas-ui .dotst.stopped{background:var(--off)}
+.gns3lab-student.canvas-ui .unr{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:gnsCanvasPulse 1.2s infinite}
+.gns3lab-student.canvas-ui .dockbody{flex:1;min-height:0;position:relative}
+.gns3lab-student.canvas-ui .empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--term-dim);font-size:13.5px;line-height:1.55}
+.gns3lab-student.canvas-ui .empty b{color:var(--term-fg);font-weight:600}
+.gns3lab-student.canvas-ui .tile,
+.gns3lab-student.canvas-ui .win{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--term-bg);border:1px solid var(--term-line);border-radius:8px;overflow:hidden}
+.gns3lab-student.canvas-ui .tile.focus,
+.gns3lab-student.canvas-ui .win.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.gns3lab-student.canvas-ui .tile.max{position:absolute;inset:8px;z-index:6}
+.gns3lab-student.canvas-ui .thead{display:flex;align-items:center;gap:8px;height:32px;padding:0 4px 0 11px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;
+  font:600 13px var(--display);color:var(--fg);user-select:none;-webkit-user-select:none}
+.gns3lab-student.canvas-ui .thead .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gns3lab-student.canvas-ui .thead .nm small{font:500 11px var(--mono);color:var(--muted);margin-left:6px}
+.gns3lab-student.canvas-ui .thead button{width:26px;height:26px;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center}
+.gns3lab-student.canvas-ui .thead button:hover{background:var(--chip);color:var(--fg)}
+.gns3lab-student.canvas-ui .tbody{flex:1;min-height:0;position:relative}
+.gns3lab-student.canvas-ui .wins{position:absolute;inset:0;pointer-events:none;z-index:5}
+.gns3lab-student.canvas-ui .win{position:absolute;pointer-events:auto;resize:both;min-width:300px;min-height:170px;box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .win .thead{cursor:move;touch-action:none}
+.gns3lab-student.canvas-ui .win.anim{transition:transform .26s ease,opacity .26s ease}
+@media (prefers-reduced-motion: reduce){
+.gns3lab-student.canvas-ui .win.anim{transition:none}
+
 }
-.gns3lab-student.canvas-ui .details h2 {
-    padding-right: 12px;
+.gns3lab-student.canvas-ui /* phone: diving into a console */
+.dive{position:fixed;left:0;right:0;bottom:0;height:72%;z-index:20;display:flex;flex-direction:column;background:var(--term-bg);
+  border-radius:14px 14px 0 0;box-shadow:0 -10px 30px rgb(0 0 0 / .3);overflow:hidden}
+.gns3lab-student.canvas-ui .dive.in{animation:diveIn .24s ease-out}
+@keyframes diveIn{
+from{transform:translateY(40%);opacity:.3}
+
 }
-.gns3lab-student.canvas-ui .details .kv dd,
-.gns3lab-student.canvas-ui .details td,
-.gns3lab-student.canvas-ui .details th {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    text-overflow: clip;
-    max-width: none;
+@media (prefers-reduced-motion: reduce){
+.gns3lab-student.canvas-ui .dive.in{animation:none}
+
 }
-.gns3lab-student.canvas-ui .details .tblwrap {
-    overflow: auto;
+.gns3lab-student.canvas-ui .dhead{display:flex;align-items:center;gap:8px;padding-block:7px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.gns3lab-student.canvas-ui .dhead .grab{position:absolute;left:50%;top:4px;width:36px;height:4px;border-radius:2px;background:var(--line);transform:translateX(-50%)}
+.gns3lab-student.canvas-ui .dback{display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);font:500 13px var(--body);cursor:pointer}
+.gns3lab-student.canvas-ui .dchips{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+.gns3lab-student.canvas-ui .dchip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--canvas);color:var(--fg);font:600 13px var(--display);white-space:nowrap;cursor:pointer}
+.gns3lab-student.canvas-ui .dchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.gns3lab-student.canvas-ui .dchip[aria-pressed="true"] .dotst{box-shadow:0 0 0 1.5px var(--accent-ink)}
+.gns3lab-student.canvas-ui .dbody{flex:1;min-height:0;position:relative}
+.gns3lab-student.canvas-ui .keys{display:flex;gap:6px;overflow-x:auto;padding-block:7px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));
+  background:var(--panel);border-top:1px solid var(--line);flex:none;scrollbar-width:none;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))}
+.gns3lab-student.canvas-ui .key{flex:none;min-width:44px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);font:600 13px var(--mono);cursor:pointer;touch-action:manipulation}
+.gns3lab-student.canvas-ui .key:active{background:var(--accent);color:var(--accent-ink)}
+.gns3lab-student.canvas-ui /* gesture sheet */
+.help{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:color-mix(in srgb,#000 45%,transparent);padding:16px}
+.gns3lab-student.canvas-ui .helpcard{background:var(--panel);color:var(--fg);border-radius:12px;max-width:720px;width:100%;max-height:100%;overflow:auto;padding:20px 22px;box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .helpcard h2{margin:0 0 4px;font:600 21px var(--display)}
+.gns3lab-student.canvas-ui .helpcard>p{margin:0;color:var(--muted);font-size:13.5px}
+.gns3lab-student.canvas-ui .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+.gns3lab-student.canvas-ui .cols h3{margin:0 0 8px;font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.gns3lab-student.canvas-ui .cols dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 12px;font-size:13.5px}
+.gns3lab-student.canvas-ui .cols dt{font-weight:600}
+.gns3lab-student.canvas-ui .cols dd{margin:0;color:var(--muted)}
+.gns3lab-student.canvas-ui .lvls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.gns3lab-student.canvas-ui .lvls div{border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:12.5px;color:var(--muted)}
+.gns3lab-student.canvas-ui .lvls b{display:block;color:var(--fg);font:600 14px var(--display);margin-bottom:2px}
+@media (max-width:620px){
+.gns3lab-student.canvas-ui .cols{grid-template-columns:1fr}
+.gns3lab-student.canvas-ui .lvls{grid-template-columns:1fr 1fr}
+
 }
-.gns3lab-student.canvas-ui .card-layers {
-    display: flex;
-    gap: 6px;
-    margin: 0 22px 0 0;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
+.gns3lab-student.canvas-ui /* Canvas experiment: the topology owns its facts,
+.gns3lab-student.canvas-ui controls and popovers. */
+:root{
+  --bg:#0b1520;--canvas:#101f2b;--panel:#172b38;--fg:#eaf3f5;--muted:#9ab2bc;
+  --line:#31505d;--grid:#25404b;--wire:#648b9a;--accent:#57dfcf;--accent-ink:#092126;
+  --ico:#244b5c;--ico-glyph:#d8f5f0;--chip:#1e3744;--ok:#64dda6;--warn:#f3bd66;
+  --bad:#ef817c;--off:#6f8792;--shadow:0 18px 44px rgb(0 8 17 / .4);color-scheme:dark;
 }
-.gns3lab-student.canvas-ui .dcontent > [role="tabpanel"] {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+.gns3lab-student.canvas-ui body{background:var(--canvas)}
+.gns3lab-student.canvas-ui .bar{background:#0c1a25;border-bottom-color:#294653;padding-block:13px}
+.gns3lab-student.canvas-ui .ttl h1{font-size:21px;letter-spacing:.015em}
+.gns3lab-student.canvas-ui .bar .btn,
+.gns3lab-student.canvas-ui .bar .seg{background:#172b38;border-radius:10px}
+.gns3lab-student.canvas-ui .bar .seg button[aria-pressed="true"]{background:#295c62;color:#d9fff7}
+.gns3lab-student.canvas-ui .wrap{background:radial-gradient(ellipse at 46% 40%,#193341 0%,#10212d 58%,#0d1c27 100%)}
+.gns3lab-student.canvas-ui .dots{fill:#315260;opacity:.55}
+.gns3lab-student.canvas-ui .drawing rect,
+.gns3lab-student.canvas-ui .drawing ellipse,
+.gns3lab-student.canvas-ui .drawing circle,
+.gns3lab-student.canvas-ui .drawing line{stroke-width:1;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .wire{stroke:#557e8e;stroke-width:2.3}
+.gns3lab-student.canvas-ui .duplex{display:none;pointer-events:none}
+.gns3lab-student.canvas-ui [data-factlayer="l1"] .duplex{display:inline}
+.gns3lab-student.canvas-ui [data-factlayer="l1"] .physical-wire{display:none}
+.gns3lab-student.canvas-ui .duplex .wire{stroke-width:1.4}
+.gns3lab-student.canvas-ui .link.sel .duplex .wire,
+.gns3lab-student.canvas-ui .link:focus-visible .duplex .wire{stroke-width:1.6}
+.gns3lab-student.canvas-ui .duplex-arrow{fill:none;stroke:#9ac8d2;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .link.sel .duplex-arrow,
+.gns3lab-student.canvas-ui .link:focus-visible .duplex-arrow{stroke:var(--accent)}
+.gns3lab-student.canvas-ui .link.down .duplex-arrow{stroke:var(--bad)}
+.gns3lab-student.canvas-ui .link.suspended .duplex-arrow{opacity:.5}
+.gns3lab-student.canvas-ui .duplex-label{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:#b5d9df;text-anchor:middle;dominant-baseline:middle;
+  paint-order:stroke;stroke:var(--canvas);stroke-width:2.5px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .duplex-label-lead{stroke:#6c929e;stroke-width:.7;fill:none;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .node .halo{stroke-width:var(--node-ring,1px)}
+.gns3lab-student.canvas-ui .node:hover .halo{stroke:var(--accent);fill:rgb(87 223 207 / .04)}
+.gns3lab-student.canvas-ui .node .if{filter:drop-shadow(0 5px 9px rgb(0 0 0 / .3))}
+.gns3lab-student.canvas-ui .nname{letter-spacing:.03em}
+.gns3lab-student.canvas-ui [data-region="svg"][data-factlayer="l1"] .pip,
+.gns3lab-student.canvas-ui [data-factlayer="l1"] .nsub,
+.gns3lab-student.canvas-ui [data-factlayer="l1"] .nadj,
+.gns3lab-student.canvas-ui [data-region="svg"][data-factlayer="l2"] .pip,
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .nadj,
+.gns3lab-student.canvas-ui [data-region="svg"][data-factlayer="l4"] .pip,
+.gns3lab-student.canvas-ui [data-factlayer="l4"] .nsub,
+.gns3lab-student.canvas-ui [data-factlayer="l4"] .nadj{visibility:hidden;opacity:0}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="10"] .wire{stroke:#66dcb5}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="20"] .wire{stroke:#e5b971}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="trunk"] .wire{stroke:#98aaf5}
+.gns3lab-student.canvas-ui [data-factlayer="l3"] .link .wire{stroke:#73b5df}
+.gns3lab-student.canvas-ui [data-factlayer="l4"] [data-region="vp"]{opacity:.54}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .layer-vlan,
+.gns3lab-student.canvas-ui [data-factlayer="l3"] .l2{visibility:visible;opacity:1}
+.gns3lab-student.canvas-ui .l2-scene{display:none;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
+.gns3lab-student.canvas-ui [data-region="lyrDraw"],
+.gns3lab-student.canvas-ui [data-region="lyrLinks"],
+.gns3lab-student.canvas-ui [data-region="lyrNodes"],
+.gns3lab-student.canvas-ui [data-region="lyrCards"]{transition:opacity .32s ease,visibility .32s}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] [data-region="lyrDraw"],
+.gns3lab-student.canvas-ui [data-factlayer="l2"] [data-region="lyrLinks"],
+.gns3lab-student.canvas-ui [data-factlayer="l2"] [data-region="lyrNodes"],
+.gns3lab-student.canvas-ui [data-factlayer="l2"] [data-region="lyrCards"]{opacity:0;visibility:hidden;pointer-events:none}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .l2-scene{display:inline;opacity:1;visibility:visible;pointer-events:auto}
+.gns3lab-student.canvas-ui .l3-scene{display:none}
+.gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"]{opacity:.18;pointer-events:none}
+.gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .auto-label,
+.gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .pdot{display:none}
+.gns3lab-student.canvas-ui [data-factlayer="l3"] .l3-scene{display:inline}
+.gns3lab-student.canvas-ui .subnet-edge{stroke:#547c90;stroke-width:1.1;vector-effect:non-scaling-stroke;fill:none}
+.gns3lab-student.canvas-ui .subnet-edge.down{stroke:var(--bad);stroke-dasharray:4 5}
+.gns3lab-student.canvas-ui .subnet-object{cursor:pointer}
+.gns3lab-student.canvas-ui .subnet-object rect{fill:#193e50;stroke:#73c7ed;stroke-width:1;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .subnet-object.warn rect{stroke:var(--warn)}
+.gns3lab-student.canvas-ui .subnet-object.sel rect,
+.gns3lab-student.canvas-ui .subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:1.4}
+.gns3lab-student.canvas-ui .subnet-object text{fill:#e3f7fc;font:500 11px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .subnet-object:focus{outline:none}
+.gns3lab-student.canvas-ui [data-region="vp"] .connection-dim{opacity:.2}
+.gns3lab-student.canvas-ui [data-region="svg"][data-connection-focus="true"] [data-region="lyrDraw"]{opacity:.35}
+.gns3lab-student.canvas-ui [data-region="svg"][data-connection-focus="true"] [data-region="lyrLabelLeads"]{opacity:.35}
+.gns3lab-student.canvas-ui [data-region="vp"] .node.connection-related .halo{stroke:var(--accent);fill:rgb(87 223 207 / .03);stroke-width:var(--node-ring,1px)}
+.gns3lab-student.canvas-ui [data-region="vp"] .node.connection-primary .halo{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:rgb(87 223 207 / .08)}
+.gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related:not(.down):not(.unknown) .wire{stroke:var(--accent)}
+.gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related .wire{stroke-width:2.2}
+.gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related .duplex .wire{stroke-width:1.6}
+.gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related:not(.down):not(.unknown) .duplex-arrow{stroke:var(--accent)}
+.gns3lab-student.canvas-ui [data-region="vp"] .l2-path.connection-related .stroke{stroke-width:2.4}
+.gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-related > rect{stroke-width:calc(var(--node-ring,1px) * 1.15)}
+.gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-primary > rect{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:#224b59}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related{stroke-width:1.7}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related:not(.down){stroke:var(--accent)}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-related:not(.warn) rect{stroke:var(--accent);stroke-width:1.2}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-primary rect{stroke-width:1.5}
+.gns3lab-student.canvas-ui .link.unknown .wire{stroke:var(--off);stroke-dasharray:3 6}
+.gns3lab-student.canvas-ui .link.unknown .pdot{fill:var(--off)}
+.gns3lab-student.canvas-ui .link.unknown .duplex-arrow{stroke:var(--off)}
+.gns3lab-student.canvas-ui .node.silhouette .ico{display:none}
+.gns3lab-student.canvas-ui .node.silhouette .halo{stroke:var(--muted);stroke-dasharray:4 5;fill:#19303c}
+.gns3lab-student.canvas-ui .node.silhouette .nname{fill:var(--muted)}
+.gns3lab-student.canvas-ui .node.silhouette .sdot{display:none}
+.gns3lab-student.canvas-ui [data-region="svg"][data-source="stale"] [data-region="vp"],
+.gns3lab-student.canvas-ui [data-region="svg"][data-source="error"] [data-region="vp"]{opacity:.58}
+.gns3lab-student.canvas-ui .node.collection-error .halo{stroke:var(--warn);stroke-dasharray:3 4}
+.gns3lab-student.canvas-ui .l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:.8;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em}
+.gns3lab-student.canvas-ui .l2-virtual{cursor:pointer}
+.gns3lab-student.canvas-ui .l2-virtual rect{fill:#173747;stroke:var(--vlan-color,#79d8c6);stroke-width:var(--node-ring,1px);vector-effect:non-scaling-stroke;filter:drop-shadow(0 7px 13px rgb(0 0 0 / .22))}
+.gns3lab-student.canvas-ui .l2-virtual:hover rect,
+.gns3lab-student.canvas-ui .l2-virtual.sel rect{fill:#224b59;stroke-width:calc(var(--node-ring,1px) * 1.2)}
+.gns3lab-student.canvas-ui .l2-virtual.mixed > rect{stroke:#ffbc69;stroke-width:calc(var(--node-ring,1px) * 1.4)}
+.gns3lab-student.canvas-ui .l2-virtual .vmark{fill:var(--vlan-color,#79d8c6)}
+.gns3lab-student.canvas-ui .l2-virtual .vtitle{fill:#f2fafa;font:600 15px var(--display)}
+.gns3lab-student.canvas-ui .l2-virtual .vsub{fill:#a6c3c9;font:500 10px var(--mono)}
+.gns3lab-student.canvas-ui .l2-virtual:focus{outline:none}
+.gns3lab-student.canvas-ui .l2-endpoint .halo{stroke:#527886}
+.gns3lab-student.canvas-ui .l2-endpoint .if{fill:#2b5261}
+.gns3lab-student.canvas-ui .l2-endpoint .nname{font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)))}
+.gns3lab-student.canvas-ui .l2-path{cursor:pointer}
+.gns3lab-student.canvas-ui .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
+.gns3lab-student.canvas-ui .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:1.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path:focus-visible .stroke,
+.gns3lab-student.canvas-ui .l2-path.sel .stroke{stroke-width:2.4}
+.gns3lab-student.canvas-ui .link:hover .wire,
+.gns3lab-student.canvas-ui .l2-path:hover .stroke{animation:gnsCanvasLinkHoverPulse 1.8s ease-in-out infinite}
+@keyframes gnsCanvasLinkHoverPulse{
+0%,100%{stroke-opacity:1}
+50%{stroke-opacity:.25}
+
 }
-.gns3lab-student.canvas-ui .card-layers button {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--panel);
-    color: var(--muted);
-    padding: 7px 18px;
-    cursor: pointer;
-    font: 600 12px var(--mono);
+@media(prefers-reduced-motion:reduce){
+.gns3lab-student.canvas-ui .link:hover .wire,
+.gns3lab-student.canvas-ui .l2-path:hover .stroke{animation:none;stroke-opacity:.8}
+
+
 }
-.gns3lab-student.canvas-ui .card-layers button[aria-selected="true"] {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+.gns3lab-student.canvas-ui .l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
+.gns3lab-student.canvas-ui .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
+  font:600 10px var(--mono);font-size:calc(10px * var(--inv,1));text-anchor:middle;pointer-events:none;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path.down .caption{fill:#e49c97}
+.gns3lab-student.canvas-ui .l2-path.problem .stroke{stroke:#ff927d;stroke-width:2.6;stroke-dasharray:6 5}
+.gns3lab-student.canvas-ui .l2-path.problem .caption{fill:#ffb5a5}
+.gns3lab-student.canvas-ui .l2-path.mismatch .stroke{stroke:#ffbc69;stroke-width:2.6;stroke-dasharray:9 4}
+.gns3lab-student.canvas-ui .l2-path.mismatch .caption{fill:#ffd29a}
+.gns3lab-student.canvas-ui .l2-p2p .stroke{stroke:#637e8b;stroke-width:1.8}
+.gns3lab-student.canvas-ui .l2-p2p .caption{fill:#91aeb8}
+@media(prefers-reduced-motion:reduce){
+.gns3lab-student.canvas-ui .l2-scene,
+.gns3lab-student.canvas-ui [data-region="lyrDraw"],
+.gns3lab-student.canvas-ui [data-region="lyrLinks"],
+.gns3lab-student.canvas-ui [data-region="lyrNodes"],
+.gns3lab-student.canvas-ui [data-region="lyrCards"]{transition:none}
+
 }
-.gns3lab-student.canvas-ui .assignments {
-    position: absolute;
-    z-index: 7;
-    right: 16px;
-    overflow: auto;
-    color: var(--fg);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    box-shadow: var(--shadow);
+.gns3lab-student.canvas-ui .layer-vlan{visibility:hidden;opacity:0;fill:#dcf8f3;stroke:var(--canvas);stroke-width:4;paint-order:stroke;
+  font:600 9px var(--mono);text-anchor:middle;pointer-events:none}
+.gns3lab-student.canvas-ui [data-region="canvasUi"]{font-family:var(--body)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-bg{fill:#102633;stroke:#3a6570;stroke-width:1;filter:drop-shadow(0 12px 24px rgb(0 0 0 / .26))}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-kicker{fill:#78ddd1;font:600 10px var(--mono);letter-spacing:1.4px}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-meta{fill:#aac1c9;font:500 10px var(--mono)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button{cursor:pointer}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button rect{fill:#203d49;stroke:#3d6270;stroke-width:1}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button text{fill:#b3cbd2;font:600 12px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:hover rect,
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:focus-visible rect{stroke:#81e6d8}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button.active rect{fill:#58ddcb;stroke:#58ddcb}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button.active text{fill:#09252b}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:focus{outline:none}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-note{fill:#8daab4;font:500 10px var(--body)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump{cursor:pointer}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump rect{fill:#1c3c49;stroke:var(--vlan-color,#6ccdbf);stroke-width:1.2}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump text{fill:#d7edef;font:600 10px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:hover rect,
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus-visible rect{fill:#315e6a;stroke-width:2}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus{outline:none}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .card-lead{stroke:#81e2d5;stroke-width:1.5;stroke-dasharray:4 4;opacity:.9;pointer-events:none}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .card-anchor{fill:#81e2d5;stroke:#102633;stroke-width:3;pointer-events:none}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card{filter:drop-shadow(0 20px 26px rgb(0 0 0 / .5))}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .body{fill:#142c39;stroke:#54838a;stroke-width:1.3}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .top-rule{stroke:#355966;stroke-width:1}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .ey{fill:#69dfcf;font:600 10px var(--mono);letter-spacing:1.2px}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .title{fill:#f3fbfa;font:600 21px var(--display)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .minor{fill:#a9c3c9;font:500 11px var(--body)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .colhead{fill:#8cabb4;font:600 10px var(--mono)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .cell{fill:#e1f0f0;font:500 11px var(--mono)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .row-rule{stroke:#294c57;stroke-width:1}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .down{fill:#f08e87}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .warn{fill:#f0c77b}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .empty{fill:#aec4ca;font:400 12px var(--body)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card{cursor:pointer}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card rect{fill:#244652}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card text{fill:#e3f2f3;font:600 18px var(--body);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card:hover rect{fill:#3a6770}
+.gns3lab-student.canvas-ui .hint{background:rgb(15 36 48 / .84);border:1px solid #315460;color:#bcd2d7}
+.gns3lab-student.canvas-ui .zoom{background:#17313e;border-radius:12px}
+.gns3lab-student.canvas-ui .details{display:none !important}
+@media(max-width:760px){
+.gns3lab-student.canvas-ui .bar{padding-block:9px}
+.gns3lab-student.canvas-ui .ttl h1{font-size:17px}
+.gns3lab-student.canvas-ui .zoom{bottom:10px}
+
 }
-.gns3lab-student.canvas-ui .assignments .x {
-    float: right;
-    border: 0;
-    background: transparent;
-    color: var(--muted);
-    font-size: 24px;
-    cursor: pointer;
+.gns3lab-student.canvas-ui.mob .hint{display:none}
+.gns3lab-student.canvas-ui .auto-label{pointer-events:none}
+.gns3lab-student.canvas-ui .auto-label.label-hidden{display:none}
+.gns3lab-student.canvas-ui .auto-label .nsub{font-size:clamp(calc(9px * var(--inv,1)),8px,calc(12px * var(--inv,1)))}
+.gns3lab-student.canvas-ui .auto-label .nadj{font-size:clamp(calc(8.5px * var(--inv,1)),7px,calc(11px * var(--inv,1)))}
+.gns3lab-student.canvas-ui .label-lead{stroke:#6c929e;stroke-width:1;stroke-dasharray:2 3;opacity:.65;pointer-events:none}
+.gns3lab-student.canvas-ui .object-card,
+.gns3lab-student.canvas-ui .tasks-panel{box-sizing:border-box;background:#142c39;color:var(--fg);border:1px solid #54838a;
+  border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
+.gns3lab-student.canvas-ui .object-card{height:100%;display:flex;flex-direction:column}
+.gns3lab-student.canvas-ui .object-card header,
+.gns3lab-student.canvas-ui .tasks-panel header{padding:18px 20px 12px;display:flex;justify-content:space-between;gap:12px}
+.gns3lab-student.canvas-ui .object-card header > div,
+.gns3lab-student.canvas-ui .tasks-panel header > div{min-width:0;overflow-wrap:anywhere}
+.gns3lab-student.canvas-ui .object-card h2,
+.gns3lab-student.canvas-ui .tasks-panel h2{font:600 25px/1.2 var(--display);margin:5px 0}
+.gns3lab-student.canvas-ui .object-card p,
+.gns3lab-student.canvas-ui .tasks-panel p{margin:4px 0;color:var(--muted)}
+.gns3lab-student.canvas-ui .object-card .kicker,
+.gns3lab-student.canvas-ui .tasks-panel .kicker{font:600 10px var(--mono);letter-spacing:.1em;color:var(--accent)}
+.gns3lab-student.canvas-ui .object-card .ib,
+.gns3lab-student.canvas-ui .tasks-panel .ib{width:36px;height:36px}
+.gns3lab-student.canvas-ui .object-tabs{display:flex;gap:6px;margin:0 20px 12px;flex:none}
+.gns3lab-student.canvas-ui .object-tabs button{flex:1;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#203d49;color:var(--muted);cursor:pointer;font:600 13px var(--mono)}
+.gns3lab-student.canvas-ui .object-tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.gns3lab-student.canvas-ui .object-tabs button:focus-visible,
+.gns3lab-student.canvas-ui .object-card button:focus-visible,
+.gns3lab-student.canvas-ui .tasks-panel button:focus-visible,
+.gns3lab-student.canvas-ui .tasks-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gns3lab-student.canvas-ui .object-content{padding:0 20px 18px;overflow:auto;min-height:0;overscroll-behavior:contain;user-select:text;-webkit-user-select:text}
+.gns3lab-student.canvas-ui .object-content table{table-layout:fixed;width:100%;border-collapse:collapse;font:12px/1.5 var(--mono)}
+.gns3lab-student.canvas-ui .object-content th{color:var(--muted);font-size:10px;letter-spacing:.04em;text-align:left}
+.gns3lab-student.canvas-ui .object-content th,
+.gns3lab-student.canvas-ui .object-content td{padding:9px 8px 9px 0;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.gns3lab-student.canvas-ui .object-content td.down{color:var(--bad)}
+.gns3lab-student.canvas-ui .object-content h3{font:600 13px var(--body);margin:16px 0 8px}
+.gns3lab-student.canvas-ui .object-content .card-foot{font-size:12px;margin-top:14px}
+.gns3lab-student.canvas-ui .object-content .card-empty{padding:18px 0}
+.gns3lab-student.canvas-ui .object-content .mac-toggle{margin-bottom:10px}
+.gns3lab-student.canvas-ui .tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:#203d49;border-color:#54838a;border-radius:10px;box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .canvas-actions{position:absolute;right:14px;top:14px;z-index:5;display:flex;gap:8px}
+.gns3lab-student.canvas-ui .canvas-actions .tasks-toggle{position:static;box-shadow:none}
+.gns3lab-student.canvas-ui .canvas-actions .btn{height:40px;background:#203d49;border-color:#54838a;border-radius:10px}
+.gns3lab-student.canvas-ui .canvas-actions .btn[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
+.gns3lab-student.canvas-ui .canvas-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;
+  display:flex;flex-direction:column;background:#142c39;border:1px solid #54838a;border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
+.gns3lab-student.canvas-ui .canvas-panel header{display:flex;align-items:flex-start;justify-content:space-between;padding:18px 20px 12px;gap:12px}
+.gns3lab-student.canvas-ui .canvas-panel h2{margin:0;font:600 24px var(--display)}
+.gns3lab-student.canvas-ui .canvas-panel p{color:var(--muted);margin:6px 0}
+.gns3lab-student.canvas-ui .panel-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
+.gns3lab-student.canvas-ui .panel-body label{display:block;margin:14px 0 5px;color:var(--muted)}
+.gns3lab-student.canvas-ui .panel-body select{width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--line);border-radius:7px;background:#203d49;color:var(--fg);font:13px var(--body)}
+.gns3lab-student.canvas-ui .panel-body .check-label{display:flex;align-items:center;gap:8px}
+.gns3lab-student.canvas-ui .panel-body input{accent-color:var(--accent)}
+.gns3lab-student.canvas-ui .panel-tabs{display:flex;gap:6px;margin:10px 0 14px}
+.gns3lab-student.canvas-ui .panel-tabs button{flex:1;height:34px;border:1px solid var(--line);border-radius:7px;background:#203d49;color:var(--muted);cursor:pointer}
+.gns3lab-student.canvas-ui .panel-tabs button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.gns3lab-student.canvas-ui .overview-row,
+.gns3lab-student.canvas-ui .issue-row{display:block;width:100%;padding:12px 0;text-align:left;color:var(--fg);background:transparent;border:0;border-top:1px solid var(--line);font:13px/1.45 var(--body);cursor:pointer}
+.gns3lab-student.canvas-ui .overview-row small,
+.gns3lab-student.canvas-ui .issue-row small{display:block;color:var(--muted);margin-top:3px}
+.gns3lab-student.canvas-ui .issue-row.bad{border-left:3px solid var(--bad);padding-left:10px}
+.gns3lab-student.canvas-ui .issue-row.warn{border-left:3px solid var(--warn);padding-left:10px}
+.gns3lab-student.canvas-ui .overview-row:hover,
+.gns3lab-student.canvas-ui .issue-row:hover{color:var(--accent)}
+.gns3lab-student.canvas-ui .overview-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:4px 0 10px}
+.gns3lab-student.canvas-ui .fact-status{position:absolute;left:14px;top:124px;z-index:4;max-width:calc(100% - 28px);background:#102633;border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--muted);font:11px/1.4 var(--body);display:flex;align-items:center;gap:8px}
+.gns3lab-student.canvas-ui .fact-status[data-state="stale"],
+.gns3lab-student.canvas-ui .fact-status[data-state="error"]{border-color:var(--warn);color:var(--warn)}
+.gns3lab-student.canvas-ui .fact-status button{color:var(--accent);font:inherit;background:transparent;border:0;cursor:pointer;padding:2px}
+.gns3lab-student.canvas-ui .object-content .fact-banner{padding:9px 10px;border:1px solid var(--line);border-radius:7px;margin:0 0 12px;font-size:12px}
+.gns3lab-student.canvas-ui .object-content .fact-banner.warn{border-color:var(--warn);color:var(--warn)}
+.gns3lab-student.canvas-ui .object-content .object-links{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.gns3lab-student.canvas-ui .object-content .object-links button{border:1px solid var(--line);border-radius:6px;background:#203d49;color:var(--accent);padding:7px 9px;font:11px var(--mono);cursor:pointer}
+.gns3lab-student.canvas-ui .object-content .inspect-output{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.5 var(--mono);color:var(--term-fg);padding:10px;background:var(--term-bg);border-radius:7px}
+.gns3lab-student.canvas-ui .object-content .section-label{margin-top:18px;font-weight:600}
+.gns3lab-student.canvas-ui .empty-surface{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:2;width:min(360px,calc(100% - 40px));padding:18px;border:1px dashed var(--line);border-radius:12px;background:#102633;color:var(--muted);text-align:center;font:13px/1.6 var(--body);pointer-events:none}
+.gns3lab-student.canvas-ui .tasks-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+.gns3lab-student.canvas-ui .task-count{font:600 11px var(--mono);background:#102633;border-radius:5px;padding:4px 6px}
+.gns3lab-student.canvas-ui .tasks-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;display:flex;flex-direction:column}
+.gns3lab-student.canvas-ui .tasks-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
+.gns3lab-student.canvas-ui .tasks-progress{width:100%;height:5px;accent-color:var(--accent);margin:12px 0}
+.gns3lab-student.canvas-ui .task-item{padding:15px 0;border-top:1px solid var(--line)}
+.gns3lab-student.canvas-ui .task-item label{display:flex;align-items:flex-start;gap:10px;font-weight:600;cursor:pointer}
+.gns3lab-student.canvas-ui .task-item input{width:18px;height:18px;accent-color:var(--accent);flex:none;margin:2px 0}
+.gns3lab-student.canvas-ui .task-item.done label span{text-decoration:line-through;color:var(--muted)}
+.gns3lab-student.canvas-ui .task-item p{font-size:12px;margin:8px 0 10px 28px}
+.gns3lab-student.canvas-ui .task-targets{display:flex;gap:6px;flex-wrap:wrap;margin-left:28px}
+.gns3lab-student.canvas-ui .task-targets button{font:500 11px var(--mono);cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:#203d49;color:var(--accent)}
+@media(max-width:760px){
+.gns3lab-student.canvas-ui .canvas-actions{top:auto;bottom:60px;right:12px;gap:5px}
+.gns3lab-student.canvas-ui .canvas-actions .btn{padding-inline:9px;font-size:12px}
+.gns3lab-student.canvas-ui .canvas-panel,
+.gns3lab-student.canvas-ui .tasks-panel{top:12px;max-height:calc(100% - 126px)}
+.gns3lab-student.canvas-ui .object-card header{padding:14px 16px 10px}
+.gns3lab-student.canvas-ui .object-tabs{margin-inline:16px}
+.gns3lab-student.canvas-ui .object-content{padding-inline:16px}
+.gns3lab-student.canvas-ui .fact-status{top:124px;font-size:10px}
+.gns3lab-student.canvas-ui .canvas-actions .task-count{padding:3px}
+
 }
-.gns3lab-student.canvas-ui .assignments h2 {
-    font-size: 20px;
-    margin: 0 0 16px;
+@media(prefers-reduced-motion:reduce){
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card{filter:none}
+
 }
+
+
+.gns3lab-student.canvas-ui {
+ --bg:#0b1520;--canvas:#101f2b;--panel:#172b38;--fg:#eaf3f5;--muted:#9ab2bc;
+ --line:#31505d;--grid:#25404b;--wire:#648b9a;--accent:#57dfcf;--accent-ink:#092126;
+ --ico:#244b5c;--ico-glyph:#d8f5f0;--chip:#1e3744;--ok:#64dda6;--warn:#f3bd66;
+ --bad:#ef817c;--off:#6f8792;--shadow:0 18px 44px rgb(0 8 17 / .4);
+ --term-bg:#0F171D;--term-fg:#D6DEE5;--term-dim:#7F909C;--term-line:#24323C;
+ --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+ --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ color-scheme:dark;font-family:var(--body);background:var(--canvas);color:var(--fg);
+}
+
+/* The activity/session controls and live consoles use the same Canvas surface. */
+.gns3lab-student.canvas-ui,
+.gns3lab-student.canvas-ui .wrap {overflow:clip;}
+.gns3lab-student.canvas-ui .stage[data-mode="panel"]:not(.has-cons) .dock,
+.gns3lab-student.canvas-ui .stage[data-mode="panel"]:not(.has-cons) .splitter {display:none;}
+.gns3lab-student.canvas-ui .object-card {width:100%;box-sizing:border-box;}
+.gns3lab-student.canvas-ui .object-content .fact-banner {overflow-wrap:anywhere;}
+.gns3lab-student.canvas-ui .object-content .seenmark {color:var(--accent);}
+.gns3lab-student.canvas-ui .object-content .fact-banner p {margin:4px 0;}
+.gns3lab-student.canvas-ui .object-content .fstale {opacity:.6;}
 .gns3lab-student.canvas-ui .assignment-content img,
-.gns3lab-student.canvas-ui .assignment-content video {
-    max-width: 100%;
-    height: auto;
-}
-.gns3lab-student.canvas-ui .card-lead,
-.gns3lab-student.canvas-ui .label-lead {
-    stroke: var(--accent);
-    stroke-width: .7px;
-    opacity: .5;
-    pointer-events: none;
-    vector-effect: non-scaling-stroke;
-}
-.gns3lab-student.canvas-ui .label-lead {
-    stroke: var(--muted);
-    opacity: .45;
-}
-.gns3lab-student.canvas-ui .label-hidden {
-    visibility: hidden;
-    pointer-events: none;
-}
-.gns3lab-student.canvas-ui .wire,
-.gns3lab-student.canvas-ui .hit,
-.gns3lab-student.canvas-ui .halo,
-.gns3lab-student.canvas-ui .subnet rect,
-.gns3lab-student.canvas-ui .l2-virtual > rect,
-.gns3lab-student.canvas-ui .l2-chassis rect,
-.gns3lab-student.canvas-ui .duplex-arrow,
-.gns3lab-student.canvas-ui .duplex-label-lead {
-    vector-effect: non-scaling-stroke;
-}
-.gns3lab-student.canvas-ui .hit {
-    stroke-width: 18px;
-}
-.gns3lab-student.canvas-ui .wire,
-.gns3lab-student.canvas-ui .link.sel .wire {
-    stroke-width: 1.4px;
-}
-.gns3lab-student.canvas-ui .physical-wire {
-    opacity: .12;
-}
-.gns3lab-student.canvas-ui .duplex-arrow {
-    stroke: var(--wire);
-    fill: none;
-    stroke-width: 1.2px;
-}
-.gns3lab-student.canvas-ui .duplex-label-lead {
-    stroke: var(--muted);
-    stroke-width: .65px;
-    opacity: .6;
-}
-.gns3lab-student.canvas-ui .duplex-label {
-    fill: var(--muted);
-    font: 600 calc(9px * var(--inv, 1)) var(--mono);
-    paint-order: stroke;
-    stroke: var(--canvas);
-    stroke-width: calc(3px * var(--inv, 1));
-}
-.gns3lab-student.canvas-ui .link.on .wire,
-.gns3lab-student.canvas-ui .link.on .duplex-arrow {
-    stroke: var(--accent);
-    stroke-width: 1.6px;
-}
-.gns3lab-student.canvas-ui .link.down .wire,
-.gns3lab-student.canvas-ui .link.suspended .wire,
-.gns3lab-student.canvas-ui .link.down .duplex-arrow,
-.gns3lab-student.canvas-ui .link.suspended .duplex-arrow,
-.gns3lab-student.canvas-ui .link.problem .wire {
-    stroke: var(--bad);
-}
-.gns3lab-student.canvas-ui .link.unknown .wire,
-.gns3lab-student.canvas-ui .link.unknown .duplex-arrow {
-    stroke: var(--muted);
-}
-.gns3lab-student.canvas-ui .plabel {
-    font-size: calc(11px * var(--inv, 1));
-    stroke-width: calc(3px * var(--inv, 1));
-}
-.gns3lab-student.canvas-ui .pip {
-    font-size: calc(10px * var(--inv, 1));
-    stroke-width: calc(3px * var(--inv, 1));
-}
-.gns3lab-student.canvas-ui .nname {
-    font-size: calc(13px * var(--inv, 1));
-    stroke-width: calc(3px * var(--inv, 1));
-}
-.gns3lab-student.canvas-ui .nsub {
-    font-size: calc(10px * var(--inv, 1));
-}
-.gns3lab-student.canvas-ui .ppill text,
-.gns3lab-student.canvas-ui .subnet text {
-    font-size: 11px;
-}
-.gns3lab-student.canvas-ui .node .halo {
-    stroke-width: var(--ring-width, .7px);
-}
-.gns3lab-student.canvas-ui .node.sel .halo,
-.gns3lab-student.canvas-ui .node:focus-visible .halo {
-    stroke-width: calc(var(--ring-width, .7px) * 1.35);
-}
-.gns3lab-student.canvas-ui .edge .wire {
-    stroke-width: 1.1px;
-}
-.gns3lab-student.canvas-ui .edge.on .wire {
-    stroke-width: 1.7px;
-}
-.gns3lab-student.canvas-ui .subnet rect {
-    stroke-width: 1px;
-    filter: none;
-}
-.gns3lab-student.canvas-ui .subnet.on rect {
-    stroke-width: 1.2px;
-    filter: none;
-}
-.gns3lab-student.canvas-ui .subnet.sel rect {
-    stroke-width: 1.5px;
-}
-.gns3lab-student.canvas-ui .l2-chassis rect {
-    fill: color-mix(in srgb, var(--muted) 4%, transparent);
-    stroke: var(--line);
-    stroke-width: .8px;
-    stroke-dasharray: 4 5;
-}
-.gns3lab-student.canvas-ui .l2-virtual {
-    cursor: pointer;
-    outline: none;
-}
-.gns3lab-student.canvas-ui .l2-virtual > rect {
-    fill: var(--panel);
-    stroke: var(--vlan-color);
-    stroke-width: 1px;
-}
-.gns3lab-student.canvas-ui .l2-virtual.on > rect,
-.gns3lab-student.canvas-ui .l2-virtual:focus-visible > rect {
-    stroke-width: 1.5px;
-    fill: color-mix(in srgb, var(--vlan-color) 12%, var(--panel));
-}
-.gns3lab-student.canvas-ui .vtitle,
-.gns3lab-student.canvas-ui .vsub,
-.gns3lab-student.canvas-ui .caption {
-    fill: var(--fg);
-    font: 600 calc(11px * var(--inv, 1)) var(--mono);
-    text-anchor: middle;
-    paint-order: stroke;
-    stroke: var(--canvas);
-    stroke-width: calc(3px * var(--inv, 1));
-}
-.gns3lab-student.canvas-ui .vsub {
-    font-size: calc(10px * var(--inv, 1));
-    fill: var(--muted);
-}
-.gns3lab-student.canvas-ui .l2-port {
+.gns3lab-student.canvas-ui .assignment-content video {max-width:100%;height:auto;}
+.gns3lab-student.canvas-ui .st-none .sdot {display:none;}
+.gns3lab-student.canvas-ui .svg-card [hidden] {display:none !important;}
+.gns3lab-student.canvas-ui .hud-note {pointer-events:none;}
+.gns3lab-student.canvas-ui .canvas-panel .ib,
+.gns3lab-student.canvas-ui .tasks-panel .ib {flex:none;}
+.gns3lab-student.canvas-ui .object-tabs {flex:none;}
+.gns3lab-student.canvas-ui .wire.physical-wire {opacity:1;}
+.gns3lab-student.canvas-ui .label-lead {vector-effect:non-scaling-stroke;}
+.gns3lab-student.canvas-ui .l2-path.unknown .stroke {stroke:var(--off);}
+.gns3lab-student.canvas-ui .l2-path.unknown .caption {fill:var(--off);}
+.gns3lab-student.canvas-ui .subnet-edge {pointer-events:none;}
+.gns3lab-student.canvas-ui .object-links button:disabled {opacity:.45;cursor:default;}
+
+/* IBM Plex, bundled under the SIL Open Font License; no external font requests. */
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
     font-weight: 400;
-    font-size: calc(10px * var(--inv, 1));
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexMono-Regular.woff2]]") format("woff2");
 }
-.gns3lab-student.canvas-ui .virtual-caption .vtitle {
-    font-size: 13px;
-    stroke-width: 3px;
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexMono-Medium.woff2]]") format("woff2");
 }
-.gns3lab-student.canvas-ui .virtual-caption .vsub {
-    font-size: 10px;
-    stroke-width: 3px;
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexSans-Regular.woff2]]") format("woff2");
 }
-.gns3lab-student.canvas-ui .l2-path .wire {
-    stroke: var(--vlan-color);
-    stroke-width: 1.8px;
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexSans-Medium.woff2]]") format("woff2");
 }
-.gns3lab-student.canvas-ui .l2-path.on .wire {
-    stroke-width: 2.4px;
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexSans-SemiBold.woff2]]") format("woff2");
 }
-.gns3lab-student.canvas-ui .l2-path.down .wire,
-.gns3lab-student.canvas-ui .l2-path.problem .wire {
-    stroke: var(--bad);
-    stroke-dasharray: 5 5;
+@font-face {
+    font-family: "IBM Plex Sans Condensed";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexSansCondensed-Medium.woff2]]") format("woff2");
 }
-.gns3lab-student.canvas-ui .l2-path.unknown .wire {
-    stroke: var(--muted);
-}
-.gns3lab-student.canvas-ui .has-sel .dimmable:not(.on),
-.gns3lab-student.canvas-ui .has-sel .link:not(.on) {
-    opacity: .2;
-}
-.gns3lab-student.canvas-ui .has-sel .on {
-    opacity: 1;
-}
-.gns3lab-student.canvas-ui .canvas-vlan-title {
-    color: var(--accent);
-    font: 600 13px var(--mono);
-}
-.gns3lab-student.canvas-ui.mob .canvas-hud {
-    top: 10px;
-    left: 10px;
-    min-width: 0;
-    padding: 10px;
-    gap: 6px;
-}
-.gns3lab-student.canvas-ui.mob .canvas-heading {
-    font-size: 12px;
-}
-.gns3lab-student.canvas-ui.mob .canvas-actions {
-    top: 10px;
-    right: 10px;
-    flex-direction: column;
-    gap: 6px;
-}
-.gns3lab-student.canvas-ui.mob .canvas-facts {
-    top: 136px;
-    left: 10px;
-    max-width: 180px;
-}
-.gns3lab-student.canvas-ui.mob .details,
-.gns3lab-student.canvas-ui.mob .assignments {
-    top: auto;
-    left: 10px;
-    right: 10px;
-    bottom: 112px;
-    width: auto;
-    max-height: min(55%, 430px);
-    padding: 16px;
-    border-radius: 16px;
+@font-face {
+    font-family: "IBM Plex Sans Condensed";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("[[font:mod_gns3lab|IBMPlexSansCondensed-SemiBold.woff2]]") format("woff2");
 }

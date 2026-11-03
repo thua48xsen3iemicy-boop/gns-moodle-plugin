@@ -62,4 +62,40 @@
       <copyright>1996 Jef Poskanzer</copyright>
     </copyrights>
   </library>
+  <library>
+    <location>fonts</location>
+    <name>IBM Plex Mono</name>
+    <description>Unmodified complete WOFF2 fonts for the student Canvas. License files and package provenance are in fonts/.</description>
+    <version>2.5.0</version>
+    <license>OFL</license>
+    <licenseversion>1.1</licenseversion>
+    <repository>https://github.com/IBM/plex</repository>
+    <copyrights>
+      <copyright>2017 IBM Corp. with Reserved Font Name Plex</copyright>
+    </copyrights>
+  </library>
+  <library>
+    <location>fonts</location>
+    <name>IBM Plex Sans</name>
+    <description>Unmodified complete WOFF2 fonts for the student Canvas. License files and package provenance are in fonts/.</description>
+    <version>1.1.0</version>
+    <license>OFL</license>
+    <licenseversion>1.1</licenseversion>
+    <repository>https://github.com/IBM/plex</repository>
+    <copyrights>
+      <copyright>2017 IBM Corp. with Reserved Font Name Plex</copyright>
+    </copyrights>
+  </library>
+  <library>
+    <location>fonts</location>
+    <name>IBM Plex Sans Condensed</name>
+    <description>Unmodified complete WOFF2 fonts for the student Canvas. License files and package provenance are in fonts/.</description>
+    <version>2.0.0</version>
+    <license>OFL</license>
+    <licenseversion>1.1</licenseversion>
+    <repository>https://github.com/IBM/plex</repository>
+    <copyrights>
+      <copyright>2017 IBM Corp. with Reserved Font Name Plex</copyright>
+    </copyrights>
+  </library>
 </libraries>
