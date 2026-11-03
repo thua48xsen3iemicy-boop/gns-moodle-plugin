@@ -66,7 +66,9 @@ for (const name of modules) {
 }
 
 fs.cpSync(path.join(__dirname, 'stubs'), path.join(dist, 'stubs'), {recursive: true});
-fs.copyFileSync(path.join(plugin, 'styles.css'), path.join(dist, 'styles.css'));
+fs.writeFileSync(path.join(dist, 'styles.css'), fs.readFileSync(path.join(plugin, 'styles.css'), 'utf8')
+    .replace(/\[\[font:mod_gns3lab\|([^\]]+)\]\]/g, 'fonts/$1'));
+fs.cpSync(path.join(plugin, 'fonts'), path.join(dist, 'fonts'), {recursive: true});
 fs.copyFileSync(require.resolve('requirejs/require.js'), path.join(dist, 'require.js'));
 for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `strings.${lang}.json`), JSON.stringify(strings(lang)));
@@ -122,7 +124,7 @@ function page(lang, extra = {}) {
         js: () => () => '',
         ...extra,
     };
-    return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons});
+    return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons, 'mod_gns3lab/canvas_icons': fs.readFileSync(path.join(plugin, 'templates/canvas_icons.mustache'), 'utf8')});
 }
 const LAB_INIT = "require(['mod_gns3lab/lab'], function(lab) { lab.init('u1', 1, q.has('observer') ? 7 : 0); });";
 const EDITOR_INIT = "require(['mod_gns3lab/editor'], function(editor) { editor.init('u1'); });";

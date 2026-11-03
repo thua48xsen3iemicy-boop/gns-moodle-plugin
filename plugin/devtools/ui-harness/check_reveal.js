@@ -76,7 +76,7 @@ const drawnLinks = page => page.locator('.link').count();
 const calls = page => page.evaluate(() => ({...window.__stub.calls}));
 const uncovered = page => page.evaluate(() => window.__stub.reveal.items());
 const sceneText = page => page.locator('[data-region="svg"]').evaluate(e => e.textContent);
-const nameOf = (page, id) => node(page, id).locator('.nname').evaluate(e => e.textContent).catch(() => null);
+const nameOf = (page, id) => node(page, id).locator('.nname').evaluate(e => e.lastElementChild.textContent).catch(() => null);
 
 /**
  * Opens the console of a node the way a student does: a double click on it.
@@ -107,7 +107,7 @@ async function openCard(page, id, wedges = 0) {
         check('the wheel of a silhouette has the console and the card only', (await wheel.count()) === wedges, String(await wheel.count()));
     }
     await wheel.nth(1).click();
-    await page.locator('[data-region="details"]:not([hidden])').waitFor();
+    await page.locator('.object-card').waitFor();
 }
 
 /**
@@ -185,14 +185,14 @@ async function newPage(browser, problems, options = {}) {
 
         // the overview does not name them either
         await page.locator('[data-region="overview"]').click();
-        const overview = await page.locator('[data-region="details"]').innerText();
+        const overview = await page.locator('[data-region="overviewPanel"]').innerText();
         check('the overview names no silhouette', NAMES.every(n => !overview.includes(n)));
         check('...and counts them as not explored', /Not explored yet\s*\n?\s*11/.test(overview), JSON.stringify(overview.slice(0, 200)));
         await page.keyboard.press('Escape');
 
                 // the card of a silhouette, from the wheel (the key ContextMenu opens it): console and card, nothing else
         await openCard(page, R1, 2);
-        const card = await page.locator('[data-region="details"]').innerText();
+        const card = await page.locator('.object-card').innerText();
         check('the card of a silhouette says "Unknown device" and offers the console',
             /unknown device/i.test(card) && /open (the )?console/i.test(card) && !card.includes('R1'), JSON.stringify(card.slice(0, 160)));
         await page.keyboard.press('Escape');
@@ -220,7 +220,7 @@ async function newPage(browser, problems, options = {}) {
         // the card of the found node
         await page.keyboard.press('Escape');
         await openCard(page, SW1);
-        const found = await page.locator('[data-region="details"]').innerText();
+        const found = await page.locator('.object-card').innerText();
         check('the card of a found node says it was found by a cable', /Found by a cable/.test(found), JSON.stringify(found.slice(0, 200)));
 
         // the mask reaches the server in one call, with the right items
@@ -337,13 +337,12 @@ async function newPage(browser, problems, options = {}) {
         check('seen: every node is there with its name, every cable is there', (await silhouettes(seen)) === 0
             && (await nameOf(seen, R1)) === 'R1' && (await drawnLinks(seen)) === demo.links.length, String(await drawnLinks(seen)));
         await seen.locator('[data-region="layerSeg"]:not([hidden])').waitFor({timeout: 5000}).catch(() => null);
-        await seen.locator('[data-region="overview"]').click();
-        await seen.locator(`.rowbtn[data-goto-node="${PC1}"]`).click();
+        await openCard(seen, PC1);
         const layerButton = seen.locator('[data-layer="l3"]');
         check('seen: the layers are offered', (await layerButton.count()) === 1 && !(await layerButton.isDisabled()));
         await layerButton.click();
         await seen.locator('[data-card-layer="l3"]').click();
-        const before = await seen.locator('[data-region="details"]').innerText();
+        const before = await seen.locator('.object-card').innerText();
         check('seen: before any command the addresses of PC1 are not explored', /Not explored yet/.test(before)
             && !/10\.1\.10\./.test(before), JSON.stringify(before.slice(0, 160)));
         await openConsole(seen, PC1);
@@ -353,16 +352,15 @@ async function newPage(browser, problems, options = {}) {
         // The overview of a layer lists its subnets, not the nodes: back to L1 for the list, then to the layer again.
         await seen.keyboard.press('Escape');
         await seen.locator('[data-layer="l1"]').click();
-        await seen.locator('[data-region="overview"]').click();
-        await seen.locator(`.rowbtn[data-goto-node="${PC1}"]`).click();
+        await openCard(seen, PC1);
         await seen.locator('[data-card-layer="l3"]').click();
         await sleep(300);
-        const after = await seen.locator('[data-region="details"]').innerText();
+        const after = await seen.locator('.object-card').innerText();
         check('seen: show ip uncovers the addresses of PC1', /10\.1\.10\.77/.test(after) && !/Not explored yet/.test(after),
             JSON.stringify(after.slice(0, 200)));
         await seen.locator('[data-card-layer="l2"]').click();
         check('seen: ...and only the addresses: L2 of PC1 is still not explored',
-            /Not explored yet/.test(await seen.locator('[data-region="details"]').innerText()));
+            /Not explored yet/.test(await seen.locator('.object-card').innerText()));
         const sent2 = await until(async() => (await uncovered(seen)).some(i => i.kind === 'group' && i.item === 'l3'), 4000);
         check('seen: the group l3 of PC1 is on the server', !!sent2);
         check('seen: a node is not "opened" by seen - no node items', !(await uncovered(seen)).some(i => i.kind === 'node'));

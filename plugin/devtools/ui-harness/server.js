@@ -24,7 +24,7 @@ const {WebSocket, WebSocketServer} = require('ws');
 
 const dist = path.join(__dirname, 'dist');
 const port = +process.argv[2] || +process.env.PORT || 8123;
-const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json'};
+const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2'};
 
 const demoDir = path.join(__dirname, '../../plugin/demo');
 const nodes = fs.readdirSync(demoDir).filter(f => f.endsWith('.gns3'))

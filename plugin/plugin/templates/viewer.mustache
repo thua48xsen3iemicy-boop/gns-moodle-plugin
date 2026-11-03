@@ -98,7 +98,7 @@
             <svg class="scene" data-region="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
                 <defs>
                     <pattern data-region="dots" id="{{uniqid}}-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle class="dots" cx="1.2" cy="1.2" r="1.2"/></pattern>
-                    {{> mod_gns3lab/icons }}
+                    {{> mod_gns3lab/canvas_icons }}
                     <symbol id="{{uniqid}}-act-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15.5H17"/></symbol>
                     <symbol id="{{uniqid}}-act-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></symbol>
                     <symbol id="{{uniqid}}-act-zoom" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20M10.5 8v5M8 10.5h5"/></symbol>
@@ -112,6 +112,13 @@
                     <g data-region="lyrLabels"></g>
                     <g data-region="lyrNodes"></g>
                     <g data-region="lyrCards"></g>
+                    <g data-region="lyrL2" class="l2-scene"></g>
+                    <g data-region="lyrL3" class="l3-scene"></g>
+                    <g data-region="lyrLabelLeads" aria-hidden="true"></g>
+                </g>
+                <g data-region="canvasUi" aria-label="{{#str}}ui_canvas_title, mod_gns3lab{{/str}}">
+                    <g data-region="layerSeg"></g>
+                    <g class="svg-card" data-region="details"></g>
                 </g>
             </svg>
             <svg class="ov" data-region="ov" aria-hidden="true"></svg>
@@ -120,36 +127,23 @@
             <p class="hint" data-region="hint"></p>
             <div class="chip" data-region="chip" role="status" hidden></div>
             <div class="dhint" data-region="dhint" hidden></div>
-            <aside class="details" data-region="details" aria-label="{{#str}}details, mod_gns3lab{{/str}}" hidden></aside>
-            <div class="canvas-actions">
-                <button class="btn" type="button" data-region="overview" title="{{#str}}ui_overview_help, mod_gns3lab{{/str}}">{{#str}}ui_overview, mod_gns3lab{{/str}}</button>
-                <button class="btn" type="button" data-region="assignmentsOpen" aria-expanded="false" aria-controls="{{uniqid}}-assignments">{{#str}}ui_assignments, mod_gns3lab{{/str}}</button>
+            <div class="canvas-actions" data-region="canvasActions">
+                <button class="btn" type="button" data-region="overview" aria-expanded="false" aria-controls="{{uniqid}}-overview">{{#str}}ui_overview, mod_gns3lab{{/str}} <span class="task-count" data-region="issueCount">0</span></button>
+                <button class="btn tasks-toggle" type="button" data-region="assignmentsOpen" aria-expanded="false" aria-controls="{{uniqid}}-assignments">{{#str}}ui_assignments, mod_gns3lab{{/str}}</button>
             </div>
-            <aside class="assignments" data-region="assignments" id="{{uniqid}}-assignments" aria-labelledby="{{uniqid}}-assignments-title" hidden>
-                <button class="x" type="button" data-region="assignmentsClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button>
-                <h2 id="{{uniqid}}-assignments-title">{{#str}}ui_assignments, mod_gns3lab{{/str}}</h2>
-                {{#assignmenthtml}}<div class="assignment-content">{{{assignmenthtml}}}</div>{{/assignmenthtml}}
-                {{^assignmenthtml}}<p>{{#str}}ui_assignments_empty, mod_gns3lab{{/str}}</p>{{/assignmenthtml}}
+            <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
+            <div class="empty-surface" data-region="canvasEmpty" hidden></div>
+            <aside class="canvas-panel" data-region="overviewPanel" id="{{uniqid}}-overview" aria-labelledby="{{uniqid}}-overview-title" hidden>
+                <header><div><h2 id="{{uniqid}}-overview-title" data-region="overviewTitle">{{#str}}ui_overview, mod_gns3lab{{/str}}</h2><p data-region="overviewLead"></p></div><button class="ib" type="button" data-region="overviewClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>
+                <div class="panel-body" data-region="overviewBody"></div>
             </aside>
-            <div class="layerbox canvas-hud">
-                <div class="canvas-heading">{{#str}}ui_canvas_title, mod_gns3lab{{/str}}</div>
-                <p class="canvas-meta" data-region="canvasMeta"></p>
-                <div class="seg" data-region="layerSeg" role="group" aria-label="{{#str}}layers, mod_gns3lab{{/str}}" hidden>
-                    <button type="button" data-layer="l1" aria-pressed="true" title="{{#str}}layer_l1, mod_gns3lab{{/str}}">L1</button>
-                    <button type="button" data-layer="l2" aria-pressed="false" title="{{#str}}layer_l2, mod_gns3lab{{/str}}">L2</button>
-                    <button type="button" data-layer="l3" aria-pressed="false" title="{{#str}}layer_l3, mod_gns3lab{{/str}}">L3</button>
-                    <button type="button" data-layer="l4" aria-pressed="false" title="{{#str}}ui_canvas_l4, mod_gns3lab{{/str}}">L4</button>
+            <aside class="tasks-panel" data-region="assignments" id="{{uniqid}}-assignments" aria-labelledby="{{uniqid}}-assignments-title" hidden>
+                <header><div><span class="kicker">{{#str}}ui_canvas_practice, mod_gns3lab{{/str}}</span><h2 id="{{uniqid}}-assignments-title">{{#str}}ui_assignments, mod_gns3lab{{/str}}</h2></div><button class="ib" type="button" data-region="assignmentsClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>
+                <div class="tasks-body">
+                    {{#assignmenthtml}}<div class="assignment-content">{{{assignmenthtml}}}</div>{{/assignmenthtml}}
+                    {{^assignmenthtml}}<p>{{#str}}ui_assignments_empty, mod_gns3lab{{/str}}</p>{{/assignmenthtml}}
                 </div>
-                <select class="fsel" data-region="factsSel" hidden aria-label="{{#str}}facts, mod_gns3lab{{/str}}" title="{{#str}}facts_help, mod_gns3lab{{/str}}">
-                    <option value="ok">{{#str}}factsok, mod_gns3lab{{/str}}</option>
-                    <option value="broken">{{#str}}factsbroken, mod_gns3lab{{/str}}</option>
-                </select>
-            </div>
-            <div class="canvas-facts">
-                <span data-region="canvasFacts" role="status"></span>
-                <button class="btn" type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button>
-            </div>
-            <div class="canvas-placeholder" data-region="canvasL4" hidden><b>L4</b><p>{{#str}}ui_canvas_l4, mod_gns3lab{{/str}}</p></div>
+            </aside>
             <div class="zoom" role="group" aria-label="{{#str}}zoom, mod_gns3lab{{/str}}">
                 <button type="button" data-region="zoomOut" aria-label="{{#str}}zoomout, mod_gns3lab{{/str}}">&minus;</button>
                 <output><span data-region="lodName">{{#str}}ui_lod0, mod_gns3lab{{/str}}</span><span class="lodbar" data-region="lodBar"><i></i><i></i><i></i><i></i></span></output>

@@ -79,8 +79,23 @@ const calls = page => page.evaluate(() => ({...window.__stub.calls}));
  * @param {string} id node id
  */
 async function openConsole(page, id) {
-    const box = await node(page, id).locator('circle.halo').boundingBox();
+    let box = await node(page, id).locator('circle.halo').boundingBox();
+    const area = await page.locator('[data-region="wrap"]').boundingBox();
+    // The dock preserves the canvas zoom; an offscreen node is reached with the user's Fit control.
+    if (box.x + box.width / 2 < area.x || box.x + box.width / 2 > area.x + area.width
+        || box.y + box.height / 2 < area.y || box.y + box.height / 2 > area.y + area.height) {
+        await page.locator('[data-region="zoomFit"]').click();
+        await sleep(400);
+        box = await node(page, id).locator('circle.halo').boundingBox();
+    }
     await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+async function openCard(page, id) {
+    await node(page, id).focus();
+    await page.keyboard.press('ContextMenu');
+    await page.locator('[data-region="radial"] .wedge').nth(1).click();
+    await page.locator('.object-card').waitFor();
 }
 
 /**
@@ -151,10 +166,9 @@ async function run(page, command, prompt) {
         await page.screenshot({path: path.join(SHOTS, 'seen-1-link-down.png')});
 
         // ---- the card of the node: when and by which command, and the marks on the fields
-        await page.locator('[data-region="overview"]').click();
-        await page.locator(`.rowbtn[data-goto-node="${SW1}"]`).click();
+        await openCard(page, SW1);
         await page.locator('[data-card-layer="l2"]').click();
-        const details = page.locator('[data-region="details"]');
+        const details = page.locator('.object-card');
         const caption = await until(async() => {
             const text = await details.locator('.seenline').innerText();
             return text || null;
@@ -175,7 +189,7 @@ async function run(page, command, prompt) {
 
         // ---- VPCS: show ip moves the address of PC1 on the L3 layer (the interface is eth0 there, e0 in the facts)
         await page.locator('[data-layer="l3"]').click();
-        const pills = () => page.locator('.ppill').evaluateAll(els => els.map(e => e.textContent.trim()));
+        const pills = () => page.locator('[data-region="lyrL3"] .pip').evaluateAll(els => els.map(e => '.' + e.textContent.trim().split('.').pop()));
         check('before: PC1 is .11 on L3', (await pills()).includes('.11'), JSON.stringify(await pills()));
         await openConsole(page, PC1);
         check('the console of PC1 shows a VPCS prompt', !!(await until(async() => /PC1>$/.test((await screenText(page)).trimEnd()))));

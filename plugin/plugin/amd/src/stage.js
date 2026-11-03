@@ -43,7 +43,7 @@
 
 import {buildModel, clamp, esc, fmtFilters} from 'mod_gns3lab/model';
 import {svgEl as el, store, fill} from 'mod_gns3lab/dom';
-import {acolor, derive, endIf, endState, hostPart, vcolor} from 'mod_gns3lab/facts';
+import {derive, endIf, endState} from 'mod_gns3lab/facts';
 import {drawModel, layerModel} from 'mod_gns3lab/reveal';
 import {CanvasView} from 'mod_gns3lab/canvasview';
 
@@ -53,7 +53,7 @@ const KMIN = 0.22, KMAX = 6;
 const DIVE_PX = 140;
 
 /** On which layers an object can be seen; selecting it from a list switches to the first one. */
-const LAYER_OF = {subnet: ['l3'], vlan: ['l2'], adj: ['rt'], link: ['l1', 'l2'], switchvlan: ['l2']};
+const LAYER_OF = {subnet: ['l3'], vlan: ['l2'], link: ['l1', 'l2'], switchvlan: ['l2'], segment: ['l2']};
 
 const LAYERS = ['l1', 'l2', 'l3', 'l4'];
 
@@ -121,37 +121,6 @@ const linkGeometry = m => {
 };
 
 /**
- * Text label on the scheme with a background (pill); the background is measured when the label is drawn.
- *
- * @param {Element} parent layer
- * @param {number} x centre x
- * @param {number} y centre y
- * @param {string} text text
- * @param {string} cls class names
- * @param {string|null} linkId link the label belongs to
- * @returns {SVGElement}
- */
-const pill = (parent, x, y, text, cls, linkId) => {
-    const g = el('g', {class: cls, 'data-link': linkId}, parent);
-    const r = el('rect', {rx: 4}, g);
-    const t = el('text', {x, y, 'text-anchor': 'middle', 'dominant-baseline': 'central'}, g);
-    t.textContent = text;
-    let w = 0, h = 14;
-    try {
-        const b = t.getBBox();
-        w = b.width;
-        h = b.height;
-    } catch (e) {
-        w = text.length * 6.4;
-    }
-    r.setAttribute('x', x - w / 2 - 5);
-    r.setAttribute('y', y - h / 2 - 2);
-    r.setAttribute('width', w + 10);
-    r.setAttribute('height', h + 4);
-    return g;
-};
-
-/**
  * Interface name as the user types it in a console → a comparable key: letter group and number path.
  *
  * @param {string} v port name
@@ -186,7 +155,7 @@ export class Stage {
         this.vp = r('vp');
         this.dots = r('dots');
         this.ov = r('ov');
-        this.L = {draw: r('lyrDraw'), links: r('lyrLinks'), labels: r('lyrLabels'), nodes: r('lyrNodes'), cards: r('lyrCards')};
+        this.L = {draw: r('lyrDraw'), links: r('lyrLinks'), labels: r('lyrLabels'), nodes: r('lyrNodes'), cards: r('lyrCards'), l2: r('lyrL2'), l3: r('lyrL3'), leads: r('lyrLabelLeads')};
         // The lab as it is built from the .gns3 (`base`), as it is drawn (`model`: no hidden node, only the uncovered cables)
         // and as the layers see it (`lmodel`: only the named nodes). They are one and the same without a fog or `seen`.
         this.base = null;
@@ -302,7 +271,6 @@ export class Stage {
         this.setFactsMeta({at: null, stale: false});
         this.sel = null;
         this.derive();
-        if (!this.facts) this.layer = 'l1';
         this.syncLayerUI();
         this.render();
         const box = this.wrap.getBoundingClientRect();
@@ -424,11 +392,13 @@ export class Stage {
      * @param {string} layer l1, l2, l3 or the reserved l4
      */
     setLayer(layer) {
-        if (!LAYERS.includes(layer) || (!['l1', 'l4'].includes(layer) && !this.der) || layer === this.layer) return;
+        if (!LAYERS.includes(layer) || layer === this.layer) return;
+        if (layer === 'l2' || this.layer === 'l2') {
+            this.sel = null;
+            this.call('closeOverlays');
+        }
         this.layer = layer;
         this.syncLayerUI();
-        const s = this.sel;
-        if (s && LAYER_OF[s.kind] && !LAYER_OF[s.kind].includes(layer)) this.sel = null;
         this.render();
         this.call('select', this.sel);
         this.call('layerChanged', layer);
@@ -456,7 +426,6 @@ export class Stage {
         this.liveDoc = doc || null;
         this.facts = doc && doc.nodes && Object.keys(doc.nodes).length ? {ok: doc} : null;
         this.factsKey = 'ok';
-        if (!this.facts) this.layer = 'l1';
         this.factsChanged();
     }
 
@@ -501,20 +470,7 @@ export class Stage {
     }
 
     syncLayerUI() {
-        const seg = this.r('layerSeg');
-        if (!seg) return;
-        const has = !!this.der;
-        seg.hidden = false;
-        seg.querySelectorAll('button').forEach(b => {
-            b.setAttribute('aria-pressed', String(b.dataset.layer === this.layer));
-            b.disabled = !['l1', 'l4'].includes(b.dataset.layer) && !has;
-        });
-        const fs = this.r('factsSel');
-        if (fs) {
-            // The demo switch between the two fixtures; live facts are what they are.
-            fs.hidden = !(has && !this.factsLive && this.facts && this.facts.broken);
-            fs.value = this.factsKey;
-        }
+        this.canvas.renderHud();
     }
 
     /* ---------------- rendering ---------------- */
@@ -525,6 +481,7 @@ export class Stage {
         for (const k in this.L) this.L[k].textContent = '';
         this.canvas.reset();
         if (this.sel && this.sel.kind === 'switchvlan' && (!this.canvas.l2 || !this.canvas.l2.virtuals.has(this.sel.id))) this.sel = null;
+        if (this.sel && this.sel.kind === 'segment' && !this.canvas.l2?.segments.some(p => p.id === this.sel.id)) this.sel = null;
         const b = {x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity};
         this.grow = (x0, y0, x1, y1) => {
             b.x0 = Math.min(b.x0, x0);
@@ -534,12 +491,10 @@ export class Stage {
         };
         this.renderDrawings();
         const geo = linkGeometry(m), L = this.layer, D = this.der;
-        if (L === 'l3' || L === 'rt') geo.forEach(g => el('line', {class: 'wire ghost', x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by}, this.L.links));
-        else if (L !== 'l2' && L !== 'l4') m.links.forEach(l => this.drawLink(l, geo.get(l.id)));
+        if (L !== 'l2') m.links.forEach(l => this.drawLink(l, geo.get(l.id)));
         if (L === 'l2' && D) this.canvas.renderL2();
-        if (L === 'l3' && D) this.drawL3();
-        if (L === 'rt' && D) this.drawRT();
-        if (L !== 'l4') this.renderNodes();
+        if (L === 'l3' && D) this.canvas.renderL3();
+        this.renderNodes();
         this.canvas.prepareLabels();
         this.bounds = isFinite(b.x0) ? {x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0} : {x: -200, y: -150, w: 400, h: 300};
         this.applySel();
@@ -594,6 +549,8 @@ export class Stage {
         const fl = fmtFilters(l.filters);
         if (fl.length) {
             const mx = (g.ax + g.bx) / 2, my = (g.ay + g.by) / 2, f = el('g', {class: 'l1'}, G);
+            f.dataset.fixedX = mx;
+            f.dataset.fixedY = my;
             el('circle', {cx: mx, cy: my, r: 8, class: 'filt'}, f);
             el('text', {x: mx, y: my + 2.8, class: 'filt-t'}, f).textContent = 'ms';
             el('title', {}, f).textContent = fill(this.s('ui_filter_on'), fl.map(x => x.k).join(', '));
@@ -608,68 +565,6 @@ export class Stage {
             const px = x + ux * d, py = y + uy * d;
             el('text', {x: px, y: py + 3, class: 'plabel l1'}, G).textContent = e.text;
             if (ifc && ifc.ipv4 && ifc.ipv4.length) el('text', {x: px, y: py + 3, dy: '1.35em', class: 'pip l2' + old}, G).textContent = ifc.ipv4[0];
-        });
-    }
-
-    /**
-     * Layer L2: the wire has the colour of the VLAN that really passes it; several stripes mean a trunk.
-     *
-     * @param {object} l Link of the topology model.
-     * @param {object} g Calculated link geometry.
-     */
-    drawLinkL2(l, g) {
-        const D = this.der, f1 = D.l1.links.get(l.id), down = !!(f1 && f1.down);
-        const r2 = D.l2.links.get(l.id);
-        let cls = 'link dimmable' + (l.suspend ? ' suspended' : '') + (down && !l.suspend ? ' down' : '');
-        if (r2 && !down) cls += ' ' + r2.kind + (r2.known && !r2.tags.length ? ' dead' : '');
-        const G = el('g', {class: cls, 'data-link': l.id}, this.L.links);
-        const line = (o, extra) => el('line', Object.assign({x1: g.ax - g.dy * o, y1: g.ay + g.dx * o, x2: g.bx - g.dy * o, y2: g.by + g.dx * o}, extra), G);
-        line(0, {class: 'hit'});
-        if (r2 && !down && r2.vlans.length && r2.kind !== 'p2p') {
-            const k = r2.vlans.length, step = k > 1 ? 3.4 : 0;
-            r2.vlans.forEach((v, j) => line((j - (k - 1) / 2) * step, {class: 'wire vl', style: `stroke:${vcolor(D, v)}`}));
-        } else line(0, {class: 'wire'});
-        const mx = (g.ax + g.bx) / 2, my = (g.ay + g.by) / 2;
-        if (down) pill(this.L.labels, mx, my, 'down', 'bpill dimmable', l.id);
-        else if (r2.issues.length) pill(this.L.labels, mx, my, '⚠ ' + (r2.vlans.length ? r2.vlans.join(' · ') : '—'), 'wpill dimmable', l.id);
-        else if (r2.known && !r2.tags.length) pill(this.L.labels, mx, my, '∅', 'bpill dimmable', l.id);
-        else if (r2.kind === 'trunk' && g.len > 240) pill(this.L.labels, mx, my, r2.vlans.join(' · '), 'vpill dimmable', l.id);
-        const d = Math.min(46, g.len * 0.32);
-        [[l.a, 1, r2.ia], [l.b, -1, r2.ib]].forEach(([e, s, i]) => {
-            if (!this.endShown(e)) return;
-            const bad = this.endDown(e);
-            const sp = i && i.switchport, text = sp ? e.text + (sp.mode === 'access' ? ' · ' + sp.vlan : sp.mode === 'none' ? ' · —' : ' · T') : e.text;
-            pill(this.L.labels, (s > 0 ? g.ax : g.bx) + s * g.dx * d, (s > 0 ? g.ay : g.by) + s * g.dy * d, text, 'ppill l1 dimmable' + (bad ? ' bad' : '') + (this.factsFailed(e.nodeId) ? ' fstale' : ''), l.id);
-        });
-    }
-
-    /** Layer L3: subnets as separate objects, the interfaces with addresses are tied to them. */
-    drawL3() {
-        const m = this.model, S = this.der.l3;
-        S.subnets.forEach(s => s.members.forEach(mb => {
-            const N = m.nodes.get(mb.nodeId);
-            const G = el('g', {class: 'edge dimmable' + (mb.down ? ' down' : '') + (mb.dup ? ' dup' : ''), 'data-subnet': s.key, 'data-member': mb.nodeId}, this.L.links);
-            el('line', {class: 'hit', x1: N.cx, y1: N.cy, x2: s.x, y2: s.y}, G);
-            el('line', {class: 'wire', x1: N.cx, y1: N.cy, x2: s.x, y2: s.y}, G);
-            const dx = s.x - N.cx, dy = s.y - N.cy, len = Math.hypot(dx, dy) || 1, d = Math.min(dy / len > 0.5 ? 66 : 50, len * 0.5);
-            pill(this.L.labels, N.cx + dx / len * d, N.cy + dy / len * d, hostPart(mb.c), 'ppill l1 dimmable' + (mb.dup || mb.down ? ' bad' : '') + (this.factsFailed(mb.nodeId) ? ' fstale' : ''), null).setAttribute('data-subnet', s.key);
-        }));
-        S.subnets.forEach(s => {
-            pill(this.L.labels, s.x, s.y, (s.issues.length ? '⚠ ' : '') + s.key, 'subnet dimmable' + (s.issues.length ? ' warn' : ''), null).setAttribute('data-subnet', s.key);
-            this.grow(s.x - 60, s.y - 14, s.x + 60, s.y + 14);
-        });
-    }
-
-    /** Layer OSPF: adjacency edges coloured by area; a missing adjacency is a red dashed line. */
-    drawRT() {
-        const m = this.model, R = this.der.rt;
-        R.edges.forEach(e => {
-            const A = m.nodes.get(e.a), B = m.nodes.get(e.b);
-            const G = el('g', {class: 'adj dimmable' + (e.miss ? ' miss' : ''), 'data-adj': e.id}, this.L.links);
-            el('line', {class: 'hit', x1: A.cx, y1: A.cy, x2: B.cx, y2: B.cy}, G);
-            el('line', {class: 'wire', x1: A.cx, y1: A.cy, x2: B.cx, y2: B.cy, style: e.miss ? null : `stroke:${acolor(this.der, e.area)}`}, G);
-            const text = e.miss ? '✕' : `area ${e.area}` + (e.state !== 'full' ? ' · ' + e.state : '');
-            pill(this.L.labels, (A.cx + B.cx) / 2, (A.cy + B.cy) / 2, text, (e.miss ? 'bpill' : 'vpill') + ' dimmable', null).setAttribute('data-adj', e.id);
         });
     }
 
@@ -690,40 +585,24 @@ export class Stage {
             // A silhouette is a place with a console: no name, no kind, no state, no facts.
             const sil = n.state === 'silhouette';
             const st = sil ? null : this.nodeStatus(n);
-            const ghost = !sil && !!D && ((L === 'l3' && !D.l3.nodes.has(n.id)) || (L === 'rt' && !D.rt.nodes.has(n.id)));
-            const g = el('g', {class: 'node dimmable st-' + (st || 'none') + (sil ? ' silhouette' : '') + (ghost ? ' ghost' : '') + (this.factsFailed(n.id) ? ' fstale' : ''), transform: `translate(${n.cx} ${n.cy})`,
-                'data-node': n.id, tabindex: '0', role: 'button', 'aria-label': ''}, this.L.nodes);
+            const g = el('g', {class: 'node dimmable st-' + (st || 'none') + (sil ? ' silhouette' : '') +
+                (L === 'l2' ? ' l2-endpoint' : '') + (this.factsFailed(n.id) ? ' collection-error' : ''), transform: `translate(${n.cx} ${n.cy})`,
+                'data-node': n.id, tabindex: '0', role: 'button', 'aria-label': ''}, this.canvas.nodeLayer || this.L.nodes);
             n.g = g;
             g.setAttribute('aria-label', this.nodeLabel(n));
             el('circle', {r: 31, class: 'halo'}, g);
             el('use', {href: `#${this.prefix}-ico-${sil ? 'unknown' : n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
-            if (sil) {
-                const bd = el('g', {class: 'cbadge', transform: 'translate(-22 -21)'}, g);
-                el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, bd);
-                el('text', {y: 3}, bd).textContent = '>_';
-                this.paintBadge(n);
-                this.grow(n.cx - 40, n.cy - 36, n.cx + 40, n.cy + 36);
-                return;
-            }
-            el('circle', {cx: 19, cy: -17, r: 5.5, class: 'sdot'}, g);
-            el('text', {y: 25, class: 'nname'}, g).textContent = n.name;
-            const f = this.fx && this.fx.nodes.get(n.id);
-            const sub = this.subtitle(n);
-            if (sub) el('text', {y: 25, dy: '1.9em', class: 'nsub l2'}, g).textContent = sub;
-            if (L === 'rt' && f && f.adj && f.adj.length) {
-                const full = f.adj.filter(x => x.state === 'full').length;
-                el('text', {y: 25, dy: '3.6em', class: 'nadj l2' + (full < f.adj.length ? ' warn' : '')}, g).textContent = `OSPF ${full}/${f.adj.length} FULL`;
-            }
+            const label = el('g', {class: 'auto-label', 'data-priority': 0}, g);
+            const title = el('text', {y: L === 'l2' ? 23 : 25, class: 'nname'}, label);
+            el('tspan', {class: 'sdot', 'aria-hidden': 'true'}, title).textContent = '● ';
+            el('tspan', {}, title).textContent = sil ? this.s('ui_fog_unknown') : n.name;
+            const sub = !sil && this.subtitle(n);
+            if (sub) el('text', {y: 25, dy: '1.9em', class: 'nsub l2'}, label).textContent = sub;
             const bd = el('g', {class: 'cbadge', transform: 'translate(-22 -21)'}, g);
             el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, bd);
             el('text', {y: 3}, bd).textContent = '>_';
             this.paintBadge(n);
-            const gs = this.statusKnown && this.guests && this.guests[n.id];
-            if (gs) {
-                const vm = gs.items.filter(x => x.type === 'qemu').length, ct = gs.items.filter(x => x.type === 'lxc').length;
-                pill(this.L.nodes, n.cx, n.cy + 61, `${vm} VM · ${ct} CT`, 'gpill', null);
-            } else if (L === 'rt' && f && f.rid && !ghost) pill(this.L.nodes, n.cx, n.cy + 60, 'RID ' + f.rid, 'rpill', null);
-            this.grow(n.cx - 40, n.cy - 36, n.cx + 40, n.cy + (gs ? 72 : 52));
+            this.grow(n.cx - 40, n.cy - 36, n.cx + 40, n.cy + 52);
         });
     }
 
@@ -998,13 +877,6 @@ export class Stage {
         r('zoomIn').onclick = () => this.zoomBy(1.6);
         r('zoomOut').onclick = () => this.zoomBy(1 / 1.6);
         r('zoomFit').onclick = () => this.fit();
-        const seg = r('layerSeg');
-        if (seg) seg.addEventListener('click', e => {
-            const b = e.target.closest('button[data-layer]');
-            if (b && !b.disabled) this.setLayer(b.dataset.layer);
-        });
-        const fs = r('factsSel');
-        if (fs) fs.addEventListener('change', e => this.setFactsKey(e.target.value));
     }
 
     setHint() {
@@ -1207,6 +1079,12 @@ export class Stage {
         const dbl = this.lastTap && now - this.lastTap.t < 320 && Math.hypot(p.x - this.lastTap.x, p.y - this.lastTap.y) < 30;
         this.lastTap = dbl ? null : {t: now, x: p.x, y: p.y};
         const t = g.target, near = sel => t.closest && t.closest(sel);
+        const segment = near('[data-segment]');
+        if (segment) {
+            this.select({kind: 'segment', id: segment.dataset.segment});
+            this.call('details', this.sel);
+            return;
+        }
         const virtual = near('[data-virtual]');
         if (virtual) {
             const v = this.canvas.l2 && this.canvas.l2.virtuals.get(virtual.dataset.virtual);
@@ -1296,11 +1174,11 @@ export class Stage {
             const node = nodeEl ? this.model.nodes.get(nodeEl.dataset.node) : null;
             const link = linkEl ? this.model.links.find(x => x.id === linkEl.dataset.link) : null;
             const cur = node || (link && {isLink: true, link, id: link.id}) || (this.sel && this.sel.kind === 'node' ? this.model.nodes.get(this.sel.id) : null);
-            const semantic = ae && ae.closest && ae.closest('[data-virtual],[data-subnet]');
+            const semantic = ae && ae.closest && ae.closest('[data-virtual],[data-subnet],[data-segment]');
             if ((e.key === 'Enter' || e.key === ' ') && semantic) {
                 e.preventDefault();
                 this.select(semantic.hasAttribute('data-virtual') ? {kind: 'switchvlan', id: semantic.dataset.virtual}
-                    : {kind: 'subnet', id: semantic.dataset.subnet});
+                    : semantic.hasAttribute('data-segment') ? {kind: 'segment', id: semantic.dataset.segment} : {kind: 'subnet', id: semantic.dataset.subnet});
                 this.call('details', this.sel);
             } else if (e.key === 'Enter' && link) {
                 e.preventDefault();
