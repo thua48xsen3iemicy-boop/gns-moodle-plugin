@@ -83,6 +83,7 @@ export class VncConnection {
      * @param {Function} options.nodeStatus async () => {status, stale} from a fresh session state
      * @param {Function} options.onState called with the new state name
      * @param {Function} options.onNote called with a message to show over the screen, an empty string clears it
+     * @param {Function} [options.api] the transport of web service calls, Ajax.call by default
      */
     constructor({cmid, userid, nodeId, RFB, screen, strings, nodeStatus, onState, onNote, api = requests => Ajax.call(requests)}) {
         this.api = api;

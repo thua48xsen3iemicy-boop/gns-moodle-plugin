@@ -110,7 +110,9 @@ export class Details {
             + `<p class="card-foot">${esc(data.foot || '')}</p></div>`;
         html.querySelector('[data-act="close"]').onclick = () => { this.hideCard(); this.stage.svg.focus(); };
         html.querySelector('[data-act="console"]')?.addEventListener('click', () => this.host.openConsole(data.device));
-        html.querySelectorAll('[data-inspect]').forEach(button => button.onclick = () => this.host.inspect(data.device, button.dataset.inspect));
+        html.querySelectorAll('[data-inspect]').forEach(button => {
+            button.onclick = () => this.host.inspect(data.device, button.dataset.inspect);
+        });
         const changeTab = layer => { this.layer = layer; this.panel = 'ports'; this.render(); this.el.querySelector(`[data-card-layer="${layer}"]`).focus(); };
         html.querySelectorAll('[data-card-layer]').forEach((tab, index) => {
             tab.onclick = () => changeTab(tab.dataset.cardLayer);
@@ -191,7 +193,12 @@ export class Details {
             + `<div class="panel-tabs"><button type="button" data-overview-tab="objects" aria-pressed="${this.overviewTab === 'objects'}">${esc(this.t('objects'))}</button><button type="button" data-overview-tab="issues" aria-pressed="${this.overviewTab === 'issues'}">${esc(this.t('issues'))} · ${issues.length}</button></div>`
             + (this.overviewTab === 'objects' ? objects.map(o => `<button class="overview-row" type="button" data-go-kind="${o.kind}" data-go-id="${esc(o.id)}">${esc(o.label)}<small>${esc(o.note)}</small></button>`).join('') || `<p>${esc(this.t('no_objects'))}</p>`
                 : issues.map(i => `<button class="issue-row ${esc(i.sev)}" type="button" data-go-kind="${esc(i.go?.kind || '')}" data-go-id="${esc(i.go?.id || '')}">${esc(i.text)}</button>`).join('') || `<p>${esc(this.t(s.der ? 'no_issues' : 'no_check'))}</p>`);
-        body.querySelectorAll('[data-overview-tab]').forEach(b => b.onclick = () => { this.overviewTab = b.dataset.overviewTab; this.renderOverview(); });
+        body.querySelectorAll('[data-overview-tab]').forEach(b => {
+            b.onclick = () => {
+                this.overviewTab = b.dataset.overviewTab;
+                this.renderOverview();
+            };
+        });
         this.bindNavigation(body); s.canvas.scheduleLabels();
     }
 }

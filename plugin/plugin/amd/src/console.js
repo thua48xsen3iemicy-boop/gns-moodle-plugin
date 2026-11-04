@@ -152,8 +152,10 @@ export class ConsoleConnection {
      * @param {Function} options.onState called with the new state name
      * @param {Function} [options.transform] changes typed input before it is sent
      * @param {boolean} [options.paced] send long pastes line by line (Cisco IOS)
+     * @param {Function} [options.api] the transport of web service calls, Ajax.call by default
      */
-    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data, paced = false, api = requests => Ajax.call(requests)}) {
+    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data, paced = false,
+            api = requests => Ajax.call(requests)}) {
         this.api = api;
         this.cmid = cmid;
         this.userid = userid;

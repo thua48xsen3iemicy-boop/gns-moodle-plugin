@@ -585,6 +585,7 @@ export class Consoles {
      * @param {Function} options.toast shows a short message
      * @param {Function} [options.onSeen] called with {nodeId, kind, command, lines, partial} for a command seen in a console
      * @param {Function} [options.onScreen] called with the node id when the screen of a node answers (a fog opens the node)
+     * @param {Function} [options.api] the transport of web service calls, passed to the consoles
      */
     constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}, api}) {
         this.api = api;
