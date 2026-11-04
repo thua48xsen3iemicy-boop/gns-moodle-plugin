@@ -800,3 +800,20 @@ def test_manager_commands_on_a_routeros_node_are_routeros_scripts(mock_server, m
     response = client.post(f"/v1/labs/{pid}/nodes/{nid}/serial/enable", headers=HEADERS)
     assert response.status_code == 409 and "RouterOS" in response.json()["detail"]
     assert qga.execs == [(command, "routeros")]
+
+
+def test_a_failed_provisioning_command_names_what_the_guest_said(tmp_path, monkeypatch):
+    class Failing(Qga):
+        async def exec(self, node_id, command, **options):
+            await super().exec(node_id, command, **options)
+            return {"exit_code": -1, "stdout": "adapter 2 not found in the guest\n",
+                    "stderr": "\nadapter 2 not found in the guest\n"}
+
+    spec = {"kind": "qemu", "provisioning": [{"command": ":error x", "timeout_seconds": 5}]}
+    with pytest.raises(RuntimeError) as error:
+        run_provision(tmp_path, monkeypatch, spec, qga=Failing(osinfo=ROUTEROS))
+    assert str(error.value) == "Mandatory provisioning command failed (exit -1): adapter 2 not found in the guest"
+    from api.lifecycle import provision_failure
+
+    assert provision_failure({"exit_code": 1, "stderr": ""}) == "Mandatory provisioning command failed (exit 1)"
+    assert len(provision_failure({"exit_code": 1, "stderr": "x" * 999})) < 260
