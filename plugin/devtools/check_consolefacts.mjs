@@ -23,7 +23,7 @@ export async function load(url, context, next) {
 }`));
 const {buildModel} = await import(srcUrl + 'model.js');
 const {derive} = await import(srcUrl + 'facts.js');
-const {kindOf} = await import(srcUrl + 'snippets.js');
+const {kindOf, snippetSet, STRING_KEYS} = await import(srcUrl + 'snippets.js');
 const cf = await import(srcUrl + 'consolefacts.js');
 const {ConsoleWatch} = await import(srcUrl + 'consolewatch.js');
 const {interpret, recognize, addSeen, mergeSeen, pruneSeen, fingerprint, parseVlanList, iosName} = cf;
@@ -723,6 +723,35 @@ check('watch to scheme: a console session of the IOL switch changes the layers a
     const store = addSeen(new Map(), sw1.id, res, {at: 1, fp: fingerprint(facts, sw1.id)});
     const e02 = mergeSeen(m, facts, store).nodes[sw1.id].interfaces.find(i => i.name === 'e0/2');
     assert.deepEqual([e02.admin, e02.oper], ['down', 'down']);
+});
+
+check('MikroTik RouterOS: own snippets by guest or disk image, no IOS prompt', () => {
+    const topo = {topology: {nodes: [
+        {node_id: 'r1', name: 'R1', node_type: 'qemu', symbol: ':/symbols/router.svg', guest: 'routeros'},
+        {node_id: 'r2', name: 'R2', node_type: 'qemu', symbol: ':/symbols/router.svg',
+            properties: {hda_disk_image: 'chr-7.25.1.img'}},
+        {node_id: 'r3', name: 'R3', node_type: 'qemu', symbol: ':/symbols/router.svg',
+            properties: {hda_disk_image: 'vyos-1.4.qcow2'}},
+        {node_id: 'h1', name: 'H1', node_type: 'qemu', symbol: ':/symbols/computer.svg',
+            properties: {hda_disk_image: 'chrome-kiosk.qcow2'}},
+    ], links: []}};
+    const m = buildModel(topo);
+    const kinds = Object.fromEntries([...m.nodes.values()].map(n => [n.name, kindOf(n)]));
+    assert.deepEqual(kinds, {R1: 'routeros', R2: 'routeros', R3: 'ios', H1: 'linux'});
+    const set = snippetSet(m.nodes.get('r1'));
+    assert.equal(set.kind, 'routeros');
+    assert.ok(set.items.every(item => item.cmd.startsWith('/') && item.typed.startsWith('\x03')));
+    assert.deepEqual(set.defaults, ['ros_ipaddr', 'ros_iface', 'ros_export', 'ros_route', 'ros_ospfnei']);
+    assert.equal(set.items.find(item => item.id === 'ros_ping').insertOnly, true);
+    // Every snippet has its description in both languages.
+    for (const lang of ['en', 'ru']) {
+        const text = fs.readFileSync(new URL(`../plugin/lang/${lang}/gns3lab.php`, import.meta.url), 'utf8');
+        const missing = STRING_KEYS.filter(key => !text.includes(`$string['${key}']`));
+        assert.deepEqual(missing, [], lang);
+    }
+    // The console of RouterOS feeds no facts: its prompt is not taken for IOS or Linux.
+    assert.equal(cf.promptKind('routeros', '[admin@MikroTik] > '), null);
+    assert.equal(cf.promptKind('routeros', 'R1#'), null);
 });
 
 for (const [name, fn] of queue) {

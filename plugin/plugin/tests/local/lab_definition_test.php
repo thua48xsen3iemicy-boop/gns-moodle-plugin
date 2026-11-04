@@ -40,6 +40,20 @@ final class lab_definition_test extends \basic_testcase {
         $this->assertSame([1, 2], array_column($ports, 'adapter_number'));
     }
 
+    public function test_marks_mikrotik_nodes_for_their_console_snippets(): void {
+        $raw = ['nodes' => [['name' => 'R1', 'image' => 'mikrotik-chr7', 'x' => 0, 'y' => 0],
+            ['name' => 'PC1', 'image' => 'debian12', 'x' => 100, 'y' => 0]], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'CHR');
+        $images = [
+            (object) ['id' => 'mikrotik-chr7', 'kind' => 'qemu', 'guest' => 'routeros', 'ports_per_adapter' => 1,
+                'port_name' => 'Ethernet{adapter}'],
+            (object) ['id' => 'debian12', 'kind' => 'qemu', 'ports_per_adapter' => 1, 'port_name' => 'Ethernet{adapter}'],
+        ];
+        $nodes = lab_definition::to_topology($def, $images)->topology->nodes;
+        $this->assertSame('routeros', $nodes[0]['guest']);
+        $this->assertArrayNotHasKey('guest', $nodes[1]);
+    }
+
     public function test_keeps_known_fields_and_sets_the_title(): void {
         $raw = fake_manager::lab();
         $raw['title'] = 'From the browser';

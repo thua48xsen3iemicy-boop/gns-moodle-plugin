@@ -104,6 +104,33 @@ const KINDS = {
             sn('tools', 'lx_clear', 'clear'),
         ],
     },
+    // MikroTik RouterOS (CHR). Commands take whole menu paths, so the submenu the student is in does not matter;
+    // Ctrl+C drops a half-typed line. RouterOS keeps every change at once: there is nothing to save.
+    routeros: {
+        pre: '\x03',
+        prompt: '>',
+        items: [
+            sn('inspect', 'ros_ipaddr', '/ip address print', {short: 'ip address', quick: true}),
+            sn('inspect', 'ros_iface', '/interface print', {short: 'interface', quick: true}),
+            sn('inspect', 'ros_export', '/export terse', {short: 'export', quick: true}),
+            sn('inspect', 'ros_neighbor', '/ip neighbor print', {short: 'ip neighbor'}),
+            sn('inspect', 'ros_arp', '/ip arp print', {short: 'ip arp'}),
+            sn('inspect', 'ros_resource', '/system resource print', {short: 'resource'}),
+            sn('routing', 'ros_route', '/ip route print', {short: 'ip route', quick: 'router'}),
+            sn('routing', 'ros_ospfnei', '/routing ospf neighbor print', {short: 'ospf neighbor', quick: 'router'}),
+            sn('routing', 'ros_ospfif', '/routing ospf interface print', {short: 'ospf interface'}),
+            sn('routing', 'ros_ospflsa', '/routing ospf lsa print', {short: 'ospf lsa'}),
+            sn('routing', 'ros_bgp', '/routing bgp session print', {short: 'bgp session'}),
+            sn('switching', 'ros_vlan', '/interface vlan print', {short: 'vlan'}),
+            sn('switching', 'ros_bridgeport', '/interface bridge port print', {short: 'bridge port'}),
+            sn('switching', 'ros_bridgevlan', '/interface bridge vlan print', {short: 'bridge vlan'}),
+            sn('switching', 'ros_host', '/interface bridge host print', {short: 'bridge host'}),
+            sn('tools', 'ros_ping', '/ping count=3 ', {short: 'ping'}),
+            sn('tools', 'ros_trace', '/tool traceroute ', {short: 'traceroute'}),
+            sn('config', 'ros_addaddr', '/ip address add ', {short: 'add address'}),
+            sn('config', 'ros_history', '/system history print', {short: 'history'}),
+        ],
+    },
     // VPCS.
     vpcs: {
         pre: '\x15',
@@ -138,12 +165,18 @@ export const STRING_KEYS = [
 /**
  * Kind of the device by its node.
  *
+ * MikroTik RouterOS is told by `guest` of the node (the image catalog of the lab manager, CONTRACTS §2.6) or, in an
+ * uploaded .gns3, by the disk image of a QEMU node (chr-7.x.img and alike).
+ *
  * @param {object} node node of the model
- * @returns {string} ios, linux or vpcs
+ * @returns {string} ios, linux, vpcs or routeros
  */
 export const kindOf = node => {
     if (node.type === 'iou' || node.type === 'dynamips') {
         return 'ios';
+    }
+    if (node.guest === 'routeros') {
+        return 'routeros';
     }
     if (node.type === 'vpcs') {
         return 'vpcs';

@@ -290,6 +290,10 @@ class lab_definition {
                 'ports' => $ports,
                 'properties' => new \stdClass(),
             ];
+            if (($image->guest ?? '') === 'routeros') {
+                // MikroTik RouterOS: the console snippets of the node are those of RouterOS (snippets.js kindOf).
+                $nodes[count($nodes) - 1]['guest'] = 'routeros';
+            }
         }
         $links = [];
         foreach ($def['links'] ?? [] as $i => $link) {
