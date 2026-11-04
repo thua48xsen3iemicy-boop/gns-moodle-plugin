@@ -246,6 +246,24 @@ def test_stop_resume_wipe_and_dedup(mock_server):
     assert nodes[pid] == original
 
 
+def test_a_new_operation_starts_from_zero_progress(mock_server, monkeypatch):
+    client, _projects, _nodes = mock_server
+    data = payload()
+    pid = data["project_id"]
+    assert wait(client, client.post("/v1/labs/deploy", json=data, headers=HEADERS))["status"] == "SUCCEEDED"
+    assert wait(client, client.post(f"/v1/labs/{pid}/stop", headers=HEADERS))["status"] == "SUCCEEDED"
+    assert client.get(f"/v1/labs/{pid}/status", headers=HEADERS).json()["progress"] == 100
+
+    async def held(self, op, lab):  # the operation has not made its first step yet
+        pass
+
+    monkeypatch.setattr(Lifecycle, "run", held)
+    resumed = client.post(f"/v1/labs/{pid}/resume", headers=HEADERS).json()
+    # Not the 100 % the stop left in the lab record (it travels with the student's project).
+    assert client.get(f"/v1/labs/{pid}/status", headers=HEADERS).json()["progress"] == 0
+    assert client.get(f"/v1/operations/{resumed['operation_id']}", headers=HEADERS).json()["progress"] == 0
+
+
 def test_competing_requests(mock_server, monkeypatch):
     import asyncio
 

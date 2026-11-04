@@ -442,7 +442,9 @@ class Lifecycle:
             self.project_locks[pid] = handle
         previous_state = lab.get("state", "FAILED")
         lab["generation"] = lab.get("generation", 0) + 1
-        lab.update(state=next_state, stage=action, error=None, updated_at=time.time())
+        # A new operation starts from 0 %: the lab record keeps the progress of the previous one (100 after a
+        # stop), and it travels with the student's project, so a resume would show it before its first step.
+        lab.update(state=next_state, stage=action, error=None, progress=0, updated_at=time.time())
         if next_state == "DEPLOYING":
             lab["shutdown_nodes"] = []
         op = {
