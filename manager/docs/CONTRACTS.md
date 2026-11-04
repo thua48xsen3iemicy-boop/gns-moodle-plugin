@@ -232,7 +232,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 
 🆕 `preconfig` — можно ли ставить ноду с этим образом в сегмент (см. `gns3lab.lab/2` ниже): `true` у `vpcs` и у образа,
 для которого администратор указал в каталоге `net_config` (механизм сети гостя: `ifupdown`, `networkmanager`, `netplan`,
-`networkd`; только `qemu`; `template` пока не принимается). Самого `net_config` в ответе нет. Нет поля — `false`.
+`networkd`, 🆕 `routeros` — MikroTik CHR; только `qemu`; `template` пока не принимается). Самого `net_config` в ответе нет. Нет поля — `false`.
 
 `cpus` есть только у `qemu`; у `vpcs` `ram_mb`, `cpus`, `adapters` — `null` (один порт 0/0).
 `port_name` — как GNS3 2.2.61 называет порты нод слота: `iou` — `Ethernet{adapter}/{port}`
@@ -318,7 +318,14 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 `renderer: networkd`; образ с netplan поверх NetworkManager указывается как `networkmanager`; иначе выход с
 `net_config mismatch: declared X, found Y` и лаба `FAILED`), находит интерфейс по MAC (адаптер N — N-й по возрастанию MAC), пишет
 файлы механизма, убирает мешающие конфигурации, выключает сетевую часть cloud-init (`/etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg`,
-если в госте есть `/etc/cloud/cloud.cfg.d`; при любом механизме), применяет; задаётся статический IPv4 и маршрут по умолчанию. Участнику-VPCS —
+если в госте есть `/etc/cloud/cloud.cfg.d`; при любом механизме), применяет; задаётся статический IPv4 и маршрут по умолчанию.
+🆕 У `net_config: "routeros"` (менеджер 0.16.0, слот 0.15.0 с `routeros`) вместо `/bin/sh` — скрипт RouterOS, который слот исполняет
+как скрипт RouterOS (§4.2): порт — N-й интерфейс `/interface ethernet` по возрастанию MAC, как у Linux; сначала удаляются адреса и
+маршруты с `comment=gns3lab` (повтор даёт тот же результат), с порта снимается DHCP-клиент (в CHR по умолчанию он есть на `ether1`),
+затем `/ip address add … comment=gns3lab` и `/ip route add dst-address=0.0.0.0/0 gateway=G comment=gns3lab`. RouterOS сохраняет
+изменения сразу, отдельного «записать в автозагрузку» нет. Нет такого порта — `:error "adapter N not found in the guest"`, лаба
+`FAILED`. Проверки, что гость действительно RouterOS, в скрипте нет: у Linux-гостя слот отдал бы его `/bin/sh`, и тот упал бы с
+ошибкой разбора. Участнику-VPCS —
 строка `ip A/N [G]` в конце `startup_script`. 🆕 Коммутаторам и маршрутизаторам IOL — `nvram_config` (`NodeSpec`, §4.2), текст
 `startup-config` (`lab_manager/iosconfig.py`, проект §15.2):
 - настраивается коммутатор IOL (`kind: iou`, `category: switch`) **на пути** сегмента (коммутаторы между концами сегмента; ветка без
@@ -678,6 +685,18 @@ gns3server (`iou_import`); продолжение проекта его не п�
 менеджер и слот выпускаются вместе; слот объявляет `iol-nvram` в `features` (§7). Ошибка записи (нет модуля, импорт или запись
 не удались) — лаба `FAILED`.
 
+🆕 **Гость MikroTik RouterOS (CHR)** (слот 0.15.0, возможность `routeros`). Полей билета нет: слот узнаёт RouterOS у самого гостя,
+QGA `guest-get-osinfo` → `id: "routeros"` (CHR 7.25.1: `name: "RouterOS"`, `variant-id: "chr"`), один раз на ноду; агент без этой
+команды — Linux, как раньше. У такой ноды:
+- готовность telnet-ноды — `guest-ping` и TCP-порт консоли, **без** `serial-getty` (в RouterOS нет systemd, вход на серийной консоли
+  RouterOS даёт сам); `vnc`-нода — как у всех;
+- `provisioning[].command` и `POST /v1/labs/{project_id}/nodes/{node_id}/qga/exec` — **скрипт RouterOS**, а не команда `/bin/sh`:
+  агент CHR не запускает программ, `guest-exec` исполняет `input-data` как скрипт (с `path` отвечает `Invalid path`). Ответ — тот же
+  `{exit_code, stdout, stderr}`: успех `0`, ошибка скрипта `-1`. RouterOS пишет текст ошибки в вывод, а `err-data` оставляет пустым;
+  слот переносит последнюю непустую строку вывода в `stderr` и заменяет `\r\n` на `\n`. Скрипт не атомарен: команды до ошибки
+  уже применены;
+- `POST …/serial/enable` — `409`.
+
 🆕 **`NodeSpec.uplink_port`** — номер адаптера узла «Интернет» (`0 ≤ uplink_port < adapters`), только `kind: "qemu"`, не более
 одного узла в билете; к этому порту в `links` ничего не подключается. Слот присваивает порту MAC из своего `SLOT_UPLINK_MAC`
 (свойство `mac_address` узла — базовый MAC, GNS3 нумерует адаптеры вверх от него, поэтому база = `SLOT_UPLINK_MAC − uplink_port`),
@@ -860,6 +879,23 @@ QGA не присылает успешный ответ на guest-shutdown; п�
 | `ipv4` | все IPv4-адреса адаптера с маской, по возрастанию. Адрес в состоянии `Duplicate` не используется и не входит; остальные (в том числе `Tentative` и 169.254.x.x от APIPA, а также адрес на адаптере без кабеля) — то, что настроено. Сроки аренды DHCP не копируются |
 | `routes` | `Get-NetRoute`: `0.0.0.0/0` → `default`, `NextHop 0.0.0.0` → без `via`, `dev` — имя адаптера, `proto` — `Protocol` в нижнем регистре (`local`, `netmgmt`, `dhcp`), `metric` — `RouteMetric + InterfaceMetric` (как в `route print`, у Linux метрика только маршрута). Не входят то, чего нет в `ip route`: хост-маршруты `Local` с /32 (свои адреса, широковещание), мультикаст `224.0.0.0/4`, маршруты loopback. `gateway` интерфейса — по правилу `linux.net`: `default` с наименьшей метрикой |
 
+#### 🆕 Коллектор `routeros.net/1` (гость MikroTik RouterOS)
+
+Слот 0.15.0. Тот же формат `data`, что у `linux.net/1`: `interfaces` и `routes`. Слот отдаёт его вместо `linux.net`, `switch.net` и
+`windows.net` нодам, чей агент сообщил `id: "routeros"` (семейство гостя — как у `windows.net/1`, правило «какая ОС»). Менеджер и
+плагин ничего не меняют. RouterOS применяет каждое изменение сразу и сам его сохраняет, поэтому факты — текущее состояние, как у
+Linux, а не «сохранённое», как у `ios.config/1`.
+
+| Правило | Что значит |
+|---|---|
+| команда | один скрипт RouterOS через брокер (`METRICS`, `wait=False`, `max_age`): четыре строки `:put ("<имя> " . [:serialize to=json [<меню>/print as-value]])` для `/interface`, `/interface/vlan`, `/ip/address`, `/ip/route`. Нужен RouterOS 7.13 и новее; нет `:serialize` (`bad command name`) — `unsupported` |
+| `interfaces` | `type: ether` — `kind: "physical"`, `vlan` — `subif` (`parent` и `dot1q` из `/interface/vlan`), `loopback` (`lo`) — `loopback`; мосты, bond, туннели не входят (как у `linux.net`). Порядок — по `.id`. `mac` — в нижнем регистре, `port` — по MAC адаптера GNS3, как у `linux.net` |
+| `admin` / `oper` | `disabled: true` — `admin: down`; `oper: up` только при `running: true` и не `disabled` |
+| `ipv4` | адреса `/ip/address` интерфейса, кроме `disabled` и `invalid`; динамические (DHCP) входят. По возрастанию |
+| `routes` | только `active: true` таблицы `main` (то, что в FIB). `0.0.0.0/0` → `default`; `via` — IP из `gateway` (или `immediate-gw` `IP%iface`); `dev` — имя интерфейса из `gateway`/`immediate-gw`, иначе интерфейс, в сети которого лежит `via`; `proto` — первый взведённый флаг из `connect`, `static`, `dhcp`, `ospf`, `bgp`, `rip`, `vpn`, `modem`, `slaac`, `copy` (как называет RouterOS); `metric` — `distance`. `gateway` интерфейса — по правилу `linux.net` |
+| сбои | как у `linux.net` после того, как семейство известно: ошибка скрипта — `failed` с текстом RouterOS, прежние `data` остаются |
+| проверено | вывод четырёх таблиц и коды ошибок — на CHR 7.25.1 под QEMU с параметрами канала QGA слота. Лаба в GNS3 и совпадение MAC `etherN` с адаптерами — проверить на стенде |
+
 #### Коллектор `ios.config/1` (сохранённая конфигурация IOL)
 
 Решение владельца: у Cisco авторитетна **сохранённая** конфигурация — то, с чем устройство загрузится после
@@ -1025,6 +1061,7 @@ QGA не присылает успешный ответ на guest-shutdown; п�
 | `vnc` | слот | 🆕 `NodeSpec.console: "vnc"` и сырой поток RFB в консольном WS (§4.2); слот объявляет её в `features` (0.8.0); когда появится `requires`, лабы с такими узлами будут требовать её |
 | `collectors` | слот | ✅ (0.6.0) слот собирает факты о нодах: `GET /v1/labs/{project_id}/facts` и список `collectors` в `capabilities` (§4.6) |
 | `iol-cli` | слот | provisioning IOL через CLI (`cli_prompt`) |
+| `routeros` | слот | 🆕 (0.15.0) гость MikroTik RouterOS (CHR): готовность без `serial-getty`, `provisioning` и `qga/exec` — скрипты RouterOS, коллектор `routeros.net/1` (§4.2, §4.6). Нужна для образов с `net_config: "routeros"`; менеджер и слот выпускаются вместе |
 | `iol-nvram` | слот | 🆕 `NodeSpec.nvram_config`: `startup-config` IOL кладётся в NVRAM при создании проекта, до первого старта (§4.2) |
 | `uplink` | слот; менеджер | 🆕 `NodeSpec.uplink_port`: узел «Интернет», его внешний порт получает `SLOT_UPLINK_MAC` и подключается к `eth1` слота через облако GNS3 (§4.2). Только при заданном `SLOT_UPLINK_MAC` и наличии `eth1`; лаба с `uplink_port` выбирает только такие слоты. Менеджер не опрашивает слот (свободный слот — выключенный LXC): возможность записывает администратор в `slots.json` (`"features": ["uplink"]`, `lab-provision secrets` делает это при заданном `INET_BRIDGE`); сам слот в любом случае отклонит такую лабу `422` |
 | `student-state` | слот | 🆕 состояние лабы переносится вместе с каталогом студента (`/opt/gns3/projects`): проект продолжается в любом слоте. Без этой возможности межслотовый `resume` не включается |

@@ -238,3 +238,32 @@ def test_netplan_on_networkmanager_is_refused_before_any_change(tmp_path):
     assert (root / "etc/netplan/01-network-manager-all.yaml").exists()
     assert not (root / "etc/netplan/gns3lab-disabled").exists()
     assert not (root / "etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg").exists()
+
+
+ROUTEROS_TWO = """\
+:local macs ({})
+:foreach i in=[/interface ethernet find] do={:set ($macs->[/interface ethernet get $i mac-address]) $i}
+:local ids ({})
+:foreach m,i in=$macs do={:set ids ($ids, $i)}
+/ip address remove [find comment="gns3lab"]
+/ip route remove [find comment="gns3lab"]
+:if ([:len $ids] <= 0) do={:error "adapter 0 not found in the guest"}
+:local n0 [/interface ethernet get [:pick $ids 0] name]
+/ip dhcp-client remove [find interface=$n0]
+/ip address add address=192.168.10.1/24 interface=$n0 comment=gns3lab
+/ip route add dst-address=0.0.0.0/0 gateway=192.168.10.254 comment=gns3lab
+:if ([:len $ids] <= 1) do={:error "adapter 1 not found in the guest"}
+:local n1 [/interface ethernet get [:pick $ids 1] name]
+/ip dhcp-client remove [find interface=$n1]
+/ip address add address=10.0.0.5/30 interface=$n1 comment=gns3lab
+"""
+
+
+def test_routeros_is_a_routeros_script_found_by_mac_and_repeatable():
+    # Not /bin/sh: the CHR agent runs it as a RouterOS script (slot 0.15.0). Reference text, not run here.
+    text = script("routeros", TWO)
+    assert text == ROUTEROS_TWO
+    assert script("routeros", list(reversed(TWO))) == text and text.isascii() and "\r" not in text
+    assert "routeros" in netconfig.NET_CONFIGS and "routeros" not in netconfig.MECHANISMS
+    with pytest.raises(ScriptTooLarge):
+        script("routeros", [Iface(n, IPv4Interface(f"10.{n}.0.1/24")) for n in range(16)] * 12)

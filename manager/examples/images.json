@@ -53,6 +53,19 @@
       "slot": {"disk_interface": "virtio"}
     },
     {
+      "id": "mikrotik-chr7",
+      "title": "MikroTik RouterOS 7 (CHR)",
+      "kind": "qemu",
+      "category": "router",
+      "symbol": ":/symbols/router.svg",
+      "net_config": "routeros",
+      "file": "chr-7.25.1.qcow2",
+      "ram_mb": {"default": 256, "min": 256, "max": 1024},
+      "cpus": {"default": 1, "min": 1, "max": 2},
+      "adapters": {"default": 4, "min": 1, "max": 8},
+      "slot": {"disk_interface": "virtio"}
+    },
+    {
       "id": "vpcs",
       "title": "VPCS",
       "kind": "vpcs",
