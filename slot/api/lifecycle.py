@@ -20,6 +20,18 @@ from api.l1 import Keepalives
 from api.models import DeployTicket
 from api.qga import Priority, QgaBroker, QgaCommandError, QgaError
 
+PROVISION_MESSAGE_LIMIT = 200
+
+
+def provision_failure(result):
+    """The error of a failed provisioning command: its exit code and the last line it wrote to stderr."""
+    lines = [line.strip() for line in str(result.get("stderr") or "").splitlines() if line.strip()]
+    text = f"Mandatory provisioning command failed (exit {result.get('exit_code')})"
+    if lines:
+        text += ": " + lines[-1][:PROVISION_MESSAGE_LIMIT]
+    return text
+
+
 TRANSITIONS = {
     None: {"DEPLOYING"},
     "DEPLOYING": {"STARTING", "FAILED"},
@@ -728,7 +740,8 @@ class Lifecycle:
                     shell=shell,
                 )
                 if result["exit_code"] != 0:
-                    raise RuntimeError("Mandatory provisioning command failed")
+                    # The lab is rolled back with its slot: what the guest said is the only trace left.
+                    raise RuntimeError(provision_failure(result))
 
     async def run(self, op, lab):
         pid = lab["project_id"]
