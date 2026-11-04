@@ -241,6 +241,8 @@ def test_netplan_on_networkmanager_is_refused_before_any_change(tmp_path):
 
 
 ROUTEROS_TWO = """\
+:local t 0
+:while ([:len [/interface ethernet find]] < 2 && $t < 90) do={:delay 1s; :set t ($t + 1)}
 :local macs ({})
 :foreach i in=[/interface ethernet find] do={:set ($macs->[/interface ethernet get $i mac-address]) $i}
 :local ids ({})
@@ -265,5 +267,8 @@ def test_routeros_is_a_routeros_script_found_by_mac_and_repeatable():
     assert text == ROUTEROS_TWO
     assert script("routeros", list(reversed(TWO))) == text and text.isascii() and "\r" not in text
     assert "routeros" in netconfig.NET_CONFIGS and "routeros" not in netconfig.MECHANISMS
+    # It waits for as many ports as the highest adapter needs, and less than the command may take.
+    assert "< 3 && $t < 90)" in script("routeros", [Iface(2, IPv4Interface("10.0.0.1/24"))])
+    assert netconfig.ROUTEROS_WAIT_SECONDS < netconfig.TIMEOUT_SECONDS
     with pytest.raises(ScriptTooLarge):
         script("routeros", [Iface(n, IPv4Interface(f"10.{n}.0.1/24")) for n in range(16)] * 12)

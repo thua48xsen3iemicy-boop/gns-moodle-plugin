@@ -192,8 +192,14 @@ ROUTEROS_PRELUDE = ''':local macs ({})
 '''
 
 
+# The slot runs the script as soon as the agent answers; RouterOS may still be bringing its ports up then.
+ROUTEROS_WAIT_SECONDS = 90  # within TIMEOUT_SECONDS of the command
+
+
 def routeros_script(ifaces: list[Iface]) -> str:
-    parts = [ROUTEROS_PRELUDE]
+    need = max(int(i.adapter) for i in ifaces) + 1
+    parts = [f':local t 0\n:while ([:len [/interface ethernet find]] < {need} && $t < {ROUTEROS_WAIT_SECONDS}) '
+             f'do={{:delay 1s; :set t ($t + 1)}}\n', ROUTEROS_PRELUDE]
     for iface in sorted(ifaces, key=lambda i: i.adapter):
         n = int(iface.adapter)
         parts.append(
