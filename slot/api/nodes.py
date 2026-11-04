@@ -37,16 +37,21 @@ async def qga_exec(
     node = await call(request, "GET", f"projects/{project_id}/nodes/{node_id}")
     if node.get("node_type") != "qemu" or node.get("status") != "started":
         raise HTTPException(409, "QGA command requires a running QEMU node")
-    try:
-        return await admitted(
-            request,
-            get_lifecycle(request).qga.exec(
-                str(node_id),
-                ticket.command,
-                timeout=ticket.timeout_seconds,
-                priority=Priority.COMMAND,
-            ),
+    lifecycle = get_lifecycle(request)
+
+    async def run():
+        # The command is a RouterOS script on a RouterOS guest, a /bin/sh command elsewhere (CONTRACTS 4.2).
+        family = await lifecycle.guest_family(str(node_id), Priority.COMMAND)
+        return await lifecycle.qga.exec(
+            str(node_id),
+            ticket.command,
+            timeout=ticket.timeout_seconds,
+            priority=Priority.COMMAND,
+            shell="routeros" if family == "routeros" else "sh",
         )
+
+    try:
+        return await admitted(request, run())
     except (QgaError, OSError, ValueError) as exc:
         raise HTTPException(502, f"QGA error: {type(exc).__name__}: {exc}") from exc
 
@@ -76,6 +81,8 @@ async def enable_serial_getty(request: Request, project_id: UUID, node_id: UUID)
         else:
             raise HTTPException(504, "QGA did not become ready")
         try:
+            if await get_lifecycle(request).guest_family(str(node_id), Priority.COMMAND) == "routeros":
+                raise HTTPException(409, "Serial getty setup is for Linux guests; RouterOS has its own console login")
             return await qga.exec(
                 str(node_id),
                 "systemctl enable --now serial-getty@ttyS0.service",

@@ -241,26 +241,29 @@ def test_vnc_payload_leaves_the_port_to_gns3(mock_server):
 
 
 class Qga:
-    def __init__(self):
+    def __init__(self, osinfo=None):
         self.calls = []
+        self.osinfo = {"id": "debian"} if osinfo is None else osinfo
+        self.shells = []  # the shell of every exec, in order
 
     async def call(self, node_id, command, args=None, **options):
         self.calls.append(("call", command))
-        return {}
+        return self.osinfo if command == "guest-get-osinfo" else {}
 
     async def exec(self, node_id, command, **options):
         self.calls.append(("exec", command))
+        self.shells.append(options.get("shell", "sh"))
         return {"exit_code": 0}
 
     async def close(self):
         pass
 
 
-def run_provision(tmp_path, monkeypatch, spec, node=None, *, initial=True, listen=True):
+def run_provision(tmp_path, monkeypatch, spec, node=None, *, initial=True, listen=True, qga=None):
     """Run Lifecycle.provision against a local TCP listener; returns the QGA calls."""
     monkeypatch.setenv("SLOT_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("SLOT_READY_TIMEOUT", "0")
-    qga = Qga()
+    qga = Qga() if qga is None else qga
 
     async def scenario():
         async def handler(reader, writer):
@@ -305,6 +308,7 @@ def test_vnc_node_waits_for_qga_only_to_run_provisioning(tmp_path, monkeypatch):
     }
     assert run_provision(tmp_path, monkeypatch, spec, initial=True) == [
         ("call", "guest-ping"),
+        ("call", "guest-get-osinfo"),
         ("exec", "echo ok"),
     ]
     # A resume replays nothing and needs no guest at all.
@@ -316,10 +320,41 @@ def test_telnet_node_still_waits_for_serial_getty(tmp_path, monkeypatch, extra):
     # `extra` empty is a ticket stored by an older Slot: no console key at all.
     spec = {"kind": "qemu", "provisioning": [], **extra}
     calls = run_provision(tmp_path, monkeypatch, spec, initial=True)
-    assert calls[0] == ("call", "guest-ping")
-    assert calls[1][0] == "exec" and "enable --now serial-getty@ttyS0" in calls[1][1]
+    assert calls[:2] == [("call", "guest-ping"), ("call", "guest-get-osinfo")]
+    assert calls[2][0] == "exec" and "enable --now serial-getty@ttyS0" in calls[2][1]
     calls = run_provision(tmp_path, monkeypatch, spec, initial=False)
-    assert calls[1][0] == "exec" and "is-active" in calls[1][1] and "enable" not in calls[1][1]
+    assert calls[2][0] == "exec" and "is-active" in calls[2][1] and "enable" not in calls[2][1]
+
+
+ROUTEROS = {"id": "routeros", "name": "RouterOS", "variant-id": "chr", "version": "7.25.1"}
+
+
+def test_routeros_telnet_node_is_ready_without_serial_getty_and_runs_routeros_scripts(tmp_path, monkeypatch):
+    # RouterOS logs in on its serial port by itself; its provisioning commands are RouterOS scripts.
+    spec = {"kind": "qemu", "provisioning": [{"command": "/ip address print", "timeout_seconds": 5}]}
+    qga = Qga(osinfo=ROUTEROS)
+    calls = run_provision(tmp_path, monkeypatch, spec, initial=True, qga=qga)
+    assert calls == [("call", "guest-ping"), ("call", "guest-get-osinfo"), ("exec", "/ip address print")]
+    assert qga.shells == ["routeros"]
+    qga = Qga(osinfo=ROUTEROS)
+    assert run_provision(tmp_path, monkeypatch, spec, initial=False, qga=qga) == [
+        ("call", "guest-ping"), ("call", "guest-get-osinfo"),
+    ]
+
+
+def test_an_agent_without_osinfo_is_an_old_linux_one(tmp_path, monkeypatch):
+    from api.qga import QgaCommandError
+
+    class OldAgent(Qga):
+        async def call(self, node_id, command, args=None, **options):
+            if command == "guest-get-osinfo":
+                self.calls.append(("call", command))
+                raise QgaCommandError("The command guest-get-osinfo has not been found")
+            return await super().call(node_id, command, args, **options)
+
+    qga = OldAgent()
+    calls = run_provision(tmp_path, monkeypatch, {"kind": "qemu", "provisioning": []}, qga=qga)
+    assert "enable --now serial-getty@ttyS0" in calls[2][1] and qga.shells == ["sh"]
 
 
 def test_vnc_readiness_fails_without_a_vnc_console_or_listener(tmp_path, monkeypatch):
@@ -730,3 +765,38 @@ def test_cancelling_the_handler_leaves_no_task_and_no_socket():
         await server.wait_closed()
 
     asyncio.run(scenario())
+
+
+class RouterOsQga:
+    """A CHR agent: tells it is RouterOS and records the shell of every command."""
+
+    def __init__(self):
+        self.execs = []
+
+    async def call(self, node_id, command, args=None, **options):
+        assert command in ("guest-ping", "guest-get-osinfo")
+        return ROUTEROS if command == "guest-get-osinfo" else {}
+
+    async def exec(self, node_id, command, **options):
+        self.execs.append((command, options.get("shell", "sh")))
+        return {"exit_code": 0, "stdout": "CHR\n", "stderr": ""}
+
+    async def close(self):
+        pass
+
+
+def test_manager_commands_on_a_routeros_node_are_routeros_scripts(mock_server, monkeypatch):
+    client, projects, nodes = mock_server
+    pid, nid = add_node(nodes, projects, 5002)
+    nodes[pid][0].update(node_type="qemu", console_type="telnet")
+    qga = RouterOsQga()
+    monkeypatch.setattr(app.state.lifecycle, "qga", qga)
+    monkeypatch.setattr(app.state.lifecycle, "guest_families", {})
+    command = ":put [/system identity get name]"
+    response = client.post(f"/v1/labs/{pid}/nodes/{nid}/qga/exec", headers=HEADERS, json={"command": command})
+    assert response.status_code == 200 and response.json()["stdout"] == "CHR\n"
+    assert qga.execs == [(command, "routeros")]
+    # No systemd in RouterOS: the serial console logs in by itself.
+    response = client.post(f"/v1/labs/{pid}/nodes/{nid}/serial/enable", headers=HEADERS)
+    assert response.status_code == 409 and "RouterOS" in response.json()["detail"]
+    assert qga.execs == [(command, "routeros")]
