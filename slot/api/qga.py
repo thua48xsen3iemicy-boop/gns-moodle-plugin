@@ -23,7 +23,7 @@ POLL_MAX = 0.5
 MAX_CHANNELS = 64
 MAX_CACHED = 256
 POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
-SHELLS = ("sh", "powershell")
+SHELLS = ("sh", "powershell", "routeros")
 
 
 class Priority(IntEnum):
@@ -88,6 +88,8 @@ def exec_arguments(shell, command):
 
     PowerShell takes the script as -EncodedCommand (base64 of UTF-16LE): no quoting rules of
     the Windows command line apply to it. The execution policy governs script files, not this.
+    The agent of MikroTik RouterOS (CHR) has no programs to start: it runs `input-data` as a
+    RouterOS script, and a `path` is refused ("Invalid path"). Checked on CHR 7.25.1.
     """
     if shell == "sh":
         return {"path": "/bin/sh", "arg": ["-c", command], "capture-output": True}
@@ -98,7 +100,27 @@ def exec_arguments(shell, command):
             "arg": ["-NoProfile", "-NonInteractive", "-EncodedCommand", script],
             "capture-output": True,
         }
+    if shell == "routeros":
+        return {"input-data": base64.b64encode(command.encode()).decode(), "capture-output": True}
     raise ValueError(f"Unknown shell: {shell}")
+
+
+def exec_result(status, shell):
+    """exit_code, stdout and stderr of a finished `guest-exec`.
+
+    RouterOS ends the lines of `:put` with CRLF and never writes `err-data`: a failed script exits
+    with -1 and its message is the last line of `out-data` (CHR 7.25.1). Its stdout comes without
+    CR, and the message of a failure is copied into stderr, so callers read every family alike.
+    """
+    stdout = base64.b64decode(status.get("out-data", "")).decode(errors="replace")
+    stderr = base64.b64decode(status.get("err-data", "")).decode(errors="replace")
+    exit_code = status.get("exitcode")
+    if shell == "routeros":
+        stdout = stdout.replace("\r\n", "\n")
+        if exit_code != 0 and not stderr.strip():
+            lines = [line for line in stdout.splitlines() if line.strip()]
+            stderr = lines[-1] if lines else ""
+    return {"exit_code": exit_code, "stdout": stdout, "stderr": stderr}
 
 
 class _Request:
@@ -414,7 +436,7 @@ class QgaBroker:
         max_age=None,
         shell="sh",
     ):
-        """Run `command` in the guest's `shell` (`/bin/sh -c`, or PowerShell for a Windows guest);
+        """Run `command` in the guest's `shell` (`/bin/sh -c`, PowerShell for a Windows guest, a RouterOS script);
         returns exit_code, stdout and stderr.
 
         With `max_age` (seconds) a result that fresh is reused and identical concurrent
@@ -480,15 +502,7 @@ class QgaBroker:
                 max_wait=max(deadline - time.monotonic(), 0.0) + 1.0,
             )
             if status.get("exited"):
-                return {
-                    "exit_code": status.get("exitcode"),
-                    "stdout": base64.b64decode(status.get("out-data", "")).decode(
-                        errors="replace"
-                    ),
-                    "stderr": base64.b64decode(status.get("err-data", "")).decode(
-                        errors="replace"
-                    ),
-                }
+                return exec_result(status, shell)
 
     def state(self, node_id):
         """Snapshot of one channel; an unknown node is reported as idle."""

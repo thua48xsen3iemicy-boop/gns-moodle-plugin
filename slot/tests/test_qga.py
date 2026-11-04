@@ -121,8 +121,29 @@ def test_exec_arguments_pick_the_shell_of_the_guest():
     assert args["path"].lower().endswith("\\powershell.exe") and args["capture-output"] is True
     assert args["arg"][:3] == ["-NoProfile", "-NonInteractive", "-EncodedCommand"]
     assert base64.b64decode(args["arg"][3]).decode("utf-16-le") == script  # what -EncodedCommand expects
+    routeros = qga.exec_arguments("routeros", "/ip address print")
+    assert routeros == {"input-data": base64.b64encode(b"/ip address print").decode(), "capture-output": True}
     with pytest.raises(ValueError):
         qga.exec_arguments("cmd", "dir")
+
+
+def encoded(text):
+    return base64.b64encode(text.encode()).decode()
+
+
+def test_a_routeros_result_loses_its_cr_and_reports_failures_in_stderr():
+    # What CHR 7.25.1 answers: CRLF after `:put`, err-data always empty, -1 and the message for a failure.
+    ok = qga.exec_result({"exitcode": 0, "out-data": encoded("CHR\r\n"), "err-data": ""}, "routeros")
+    assert ok == {"exit_code": 0, "stdout": "CHR\n", "stderr": ""}
+    failed = qga.exec_result(
+        {"exitcode": -1, "out-data": encoded("ok\r\ninvalid value for argument address (line 1)\n"), "err-data": ""},
+        "routeros",
+    )
+    assert failed["exit_code"] == -1 and failed["stderr"] == "invalid value for argument address (line 1)"
+    assert failed["stdout"] == "ok\ninvalid value for argument address (line 1)\n"
+    # Other shells are untouched.
+    posix = qga.exec_result({"exitcode": 1, "out-data": encoded("a\r\n"), "err-data": ""}, "sh")
+    assert posix == {"exit_code": 1, "stdout": "a\r\n", "stderr": ""}
 
 @pytest.fixture
 def sockdir():

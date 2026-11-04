@@ -275,7 +275,7 @@ class Keepalives:
     def guest_ready(self, pid, side):
         records = self.lc.facts.results.get(pid, {}).get(side["node_id"], {}).get("collectors", {})
         # switch.net describes bridge ports that linux.net deliberately omits.
-        for name in ("switch.net", "windows.net", "linux.net"):
+        for name in ("switch.net", "windows.net", "routeros.net", "linux.net"):
             record = records.get(name)
             if record is None:
                 continue

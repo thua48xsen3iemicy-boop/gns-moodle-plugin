@@ -1,4 +1,4 @@
-"""Guest network setup for lab segments: one /bin/sh script per QEMU node (lab constructor README §4.1).
+"""Guest network setup for lab segments: one script per QEMU node (lab constructor README §4.1).
 
 The script runs once as a `ProvisionCommand` through QGA, after the commands of the image. It
   1. checks that the network mechanism declared by the image (`net_config`) really runs in the guest,
@@ -11,12 +11,17 @@ The script runs once as a `ProvisionCommand` through QGA, after the commands of 
 Nothing but validated addresses (ipaddress) and adapter numbers is put into the text: the guest's
 MAC and interface names are read in the guest and checked there against a pattern. Set ROOT in the
 environment to run the script against a fake tree (tests); in the guest it is empty.
+
+`routeros` (MikroTik CHR) is no /bin/sh mechanism: its agent runs the command as a RouterOS script (slot 0.15.0,
+CONTRACTS 4.2), so routeros_script() writes one. Same rules: adapter N is the N-th ethernet interface by ascending
+MAC, addresses and the default route are static and survive a reboot (RouterOS keeps every change).
 """
 
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Interface
 
-MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")
+MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")  # /bin/sh scripts
+NET_CONFIGS = (*MECHANISMS, "routeros")  # what images.json may declare
 MAX_SCRIPT = 8192  # ProvisionCommand.command of the slot
 TIMEOUT_SECONDS = 120
 
@@ -175,8 +180,41 @@ apply() {
 }
 
 
+# RouterOS: ethernet interfaces into an array keyed by MAC. RouterOS keeps the keys of an array sorted, and its
+# MACs are upper case of one length, so `ids` lists them by ascending MAC: adapter N is item N. What the script
+# set before (comment gns3lab) is removed first, so running it again gives the same result.
+ROUTEROS_PRELUDE = ''':local macs ({})
+:foreach i in=[/interface ethernet find] do={:set ($macs->[/interface ethernet get $i mac-address]) $i}
+:local ids ({})
+:foreach m,i in=$macs do={:set ids ($ids, $i)}
+/ip address remove [find comment="gns3lab"]
+/ip route remove [find comment="gns3lab"]
+'''
+
+
+def routeros_script(ifaces: list[Iface]) -> str:
+    parts = [ROUTEROS_PRELUDE]
+    for iface in sorted(ifaces, key=lambda i: i.adapter):
+        n = int(iface.adapter)
+        parts.append(
+            f':if ([:len $ids] <= {n}) do={{:error "adapter {n} not found in the guest"}}\n'
+            f':local n{n} [/interface ethernet get [:pick $ids {n}] name]\n'
+            # The default configuration of CHR asks DHCP on ether1: a static address replaces it.
+            f'/ip dhcp-client remove [find interface=$n{n}]\n'
+            f'/ip address add address={iface.address} interface=$n{n} comment=gns3lab\n'
+        )
+        if iface.gateway is not None:
+            parts.append(f'/ip route add dst-address=0.0.0.0/0 gateway={iface.gateway} comment=gns3lab\n')
+    return "".join(parts)
+
+
 def script(mechanism: str, ifaces: list[Iface]) -> str:
     """The provisioning script for `ifaces` of one node (non-empty, by ascending adapter)."""
+    if mechanism == "routeros":
+        text = routeros_script(ifaces)
+        if len(text) > MAX_SCRIPT:
+            raise ScriptTooLarge(f"network script is {len(text)} characters, the slot takes {MAX_SCRIPT}")
+        return text
     if mechanism not in MECHANISMS:
         raise ValueError(f"unknown net_config {mechanism!r}")
     parts = [PRELUDE,

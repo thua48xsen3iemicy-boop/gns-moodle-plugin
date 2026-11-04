@@ -263,6 +263,7 @@ def test_net_config_in_the_catalog(tmp_path):
         with pytest.raises(Exception):
             Image.model_validate(bad)
     assert Image.model_validate({**base, "net_config": "networkd"}).public()["preconfig"] is True
+    assert Image.model_validate({**base, "net_config": "routeros"}).public()["preconfig"] is True  # MikroTik CHR
     assert Image.model_validate(base).public()["preconfig"] is False
     assert "net_config" not in Image.model_validate({**base, "net_config": "networkd"}).public()
     assert IMAGES["vpcs"].public()["preconfig"] and IMAGES["debian12"].public()["preconfig"]

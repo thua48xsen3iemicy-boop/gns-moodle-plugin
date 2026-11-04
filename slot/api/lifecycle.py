@@ -15,10 +15,10 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api import uplink
 from api.client import call, get_lifecycle
-from api.facts import Facts
+from api.facts import Facts, guest_family
 from api.l1 import Keepalives
 from api.models import DeployTicket
-from api.qga import Priority, QgaBroker, QgaError
+from api.qga import Priority, QgaBroker, QgaCommandError, QgaError
 
 TRANSITIONS = {
     None: {"DEPLOYING"},
@@ -173,6 +173,7 @@ class Lifecycle:
             self.boot_requires_new_owner = True
             self.project_locks = {}
             self.qga = QgaBroker(self.qga_socket)
+            self.guest_families = {}  # node_id -> "posix" | "windows" | "routeros" (guest_family)
             self.labs = LabStore(
                 Path(os.getenv("SLOT_LAB_STATE_DIR", LAB_STATE_DIR)) / "labs"
             )
@@ -637,6 +638,22 @@ class Lifecycle:
             )
         uplink.check_attached(lab["ticket"], all_nodes, all_links)
 
+    async def guest_family(self, node_id, priority=Priority.LIFECYCLE):
+        """The guest family of a running QEMU node as its agent says (`guest-get-osinfo`), asked once.
+
+        An agent without the command is an old Linux one. Errors of the exchange go to the caller: the
+        family stays unknown and is asked again next time.
+        """
+        family = self.guest_families.get(node_id)
+        if family is None:
+            try:
+                info = await self.qga.call(node_id, "guest-get-osinfo", timeout=5, priority=priority)
+            except QgaCommandError:
+                info = None
+            family = guest_family(info)
+            self.guest_families[node_id] = family
+        return family
+
     async def provision(self, lab, node, spec, initial):
         deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
         # A VNC node has no serial console: neither serial-getty nor a Telnet port exist, and
@@ -656,7 +673,11 @@ class Lifecycle:
                         timeout=2,
                         priority=Priority.LIFECYCLE,
                     )
-                if spec["kind"] == "qemu" and not vnc:
+                # RouterOS has its own login on the serial port: no systemd, nothing to start there.
+                routeros = spec["kind"] == "qemu" and qga_needed and (
+                    await self.guest_family(node["node_id"]) == "routeros"
+                )
+                if spec["kind"] == "qemu" and not vnc and not routeros:
                     command = (
                         "systemctl enable --now serial-getty@ttyS0.service && systemctl is-active --quiet serial-getty@ttyS0.service"
                         if initial
@@ -697,11 +718,14 @@ class Lifecycle:
                     raise RuntimeError(
                         "NOT_SUPPORTED: Cisco CLI provisioning requires a verified prompt/command adapter"
                     )
+                # A RouterOS guest has no /bin/sh: its commands are RouterOS scripts (CONTRACTS 4.2).
+                shell = "routeros" if routeros else "sh"
                 result = await self.qga.exec(
                     node["node_id"],
                     cmd["command"],
                     timeout=cmd["timeout_seconds"],
                     priority=Priority.LIFECYCLE,
+                    shell=shell,
                 )
                 if result["exit_code"] != 0:
                     raise RuntimeError("Mandatory provisioning command failed")
@@ -732,6 +756,7 @@ class Lifecycle:
                 nodes = await self.wait_nodes(lab, "stopped")
                 for node in nodes:
                     await self.qga.forget(node["node_id"])
+                    self.guest_families.pop(node["node_id"], None)
                 self.update(lab, "STOPPED", "stopped", progress=100)
                 handle = self.project_locks.pop(pid, None)
                 if handle:

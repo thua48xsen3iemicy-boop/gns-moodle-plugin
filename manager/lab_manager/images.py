@@ -8,9 +8,10 @@ console_type: telnet (default), vnc (QEMU screen instead of a serial console; qe
 (no console for anybody). A vnc image makes the manager put `console: "vnc"` into the node of the
 slot's ticket (labdef.deploy_ticket); nodes of other images get no such field.
 
-net_config (qemu only): which mechanism configures the network inside the guest - ifupdown, networkmanager, netplan or
-networkd. It is what lets the lab constructor preconfigure addresses (netconfig.py, lab constructor README §4.1); an
-image without it (and not vpcs) cannot be a member of a segment. `preconfig` in public() says whether it can.
+net_config (qemu only): which mechanism configures the network inside the guest - ifupdown, networkmanager, netplan,
+networkd, or routeros (MikroTik CHR: a RouterOS script instead of /bin/sh). It is what lets the lab constructor
+preconfigure addresses (netconfig.py, lab constructor README §4.1); an image without it (and not vpcs) cannot be a
+member of a segment. `preconfig` in public() says whether it can.
 
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
@@ -73,7 +74,7 @@ class Image(Strict):
     category: str = Field(default="other", pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
     symbol: str | None = Field(default=None, max_length=200)
     console_type: Literal["telnet", "vnc", "none"] = "telnet"
-    net_config: Literal["ifupdown", "networkmanager", "netplan", "networkd"] | None = None
+    net_config: Literal["ifupdown", "networkmanager", "netplan", "networkd", "routeros"] | None = None
     file: str | None = Field(default=None, max_length=255)  # Basename in /opt/gns3/images/{QEMU,IOU}
     ram_mb: Range | None = None
     cpus: Range | None = None

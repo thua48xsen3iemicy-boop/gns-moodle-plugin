@@ -17,14 +17,17 @@ from api import facts as facts_module
 from api.facts import (
     COLLECTORS,
     LINUX_NET_COMMAND,
+    ROUTEROS_NET_COMMAND,
     SWITCH_FDB_COMMAND,
     SWITCH_NET_COMMAND,
     WINDOWS_NET_COMMAND,
     Facts,
     FactError,
     adapter_macs,
+    guest_family,
     guest_is_windows,
     parse_linux_net,
+    parse_routeros_net,
     parse_switch_fdb,
     parse_switch_net,
     parse_windows_net,
@@ -554,6 +557,7 @@ class FakeQga:
         self.fdb_reply = fdb_reply
         self.osinfo = osinfo
         self.windows_reply = None
+        self.routeros_reply = None
         self.switch_by_node = {}  # node_id -> reply: a lab with a switch next to ordinary hosts
         self.fdb_by_node = {}  # the same for the MAC table
         self.calls = []  # exec only
@@ -578,6 +582,8 @@ class FakeQga:
             reply = self.fdb_by_node.get(node_id, self.fdb_reply)
         if command == WINDOWS_NET_COMMAND:
             reply = self.windows_reply
+        if command == ROUTEROS_NET_COMMAND:
+            reply = self.routeros_reply
         if isinstance(reply, BaseException):
             raise reply
         return reply
@@ -1425,8 +1431,129 @@ def test_an_owner_change_during_the_question_leaves_no_family(monkeypatch):
     scenario(monkeypatch, body)
 
 
+# --- routeros.net ------------------------------------------------------------------------------
+
+ROUTEROS = {"id": "routeros", "name": "RouterOS", "pretty-name": "RouterOS 7.25.1", "variant-id": "chr"}
+
+
+def routeros_output(**parts):
+    """What ROUTEROS_NET_COMMAND prints on CHR 7.25.1 (after the broker took CR away); `parts` replace tables."""
+    tables = {
+        "interfaces": [
+            {".id": "*2", "actual-mtu": 1500, "disabled": False, "mac-address": "00:00:AB:CD:00:00",
+             "name": "ether1", "running": True, "type": "ether"},
+            {".id": "*3", "actual-mtu": 1500, "disabled": True, "mac-address": "00:00:AB:CD:00:01",
+             "name": "wan", "running": False, "type": "ether"},
+            {".id": "*1", "actual-mtu": 65536, "disabled": False, "mac-address": "00:00:00:00:00:00",
+             "name": "lo", "running": True, "type": "loopback"},
+            {".id": "*4", "disabled": False, "mac-address": "00:00:AB:CD:00:00", "name": "v10",
+             "running": True, "type": "vlan"},
+            {".id": "*5", "disabled": False, "mac-address": "00:00:AB:CD:00:00", "name": "bridge1",
+             "running": True, "type": "bridge"},
+        ],
+        "vlans": [{".id": "*4", "interface": "ether1", "name": "v10", "vlan-id": 10}],
+        "addresses": [
+            {".id": "*1", "address": "10.0.2.15/24", "disabled": False, "dynamic": True, "interface": "ether1",
+             "invalid": False, "network": "10.0.2.0"},
+            {".id": "*2", "address": "10.10.0.1/24", "disabled": False, "dynamic": False, "interface": "v10",
+             "invalid": False, "network": "10.10.0.0"},
+            {".id": "*3", "address": "192.0.2.1/24", "disabled": True, "interface": "ether1", "invalid": False},
+            {".id": "*4", "address": "198.51.100.1/24", "disabled": False, "interface": "bridge1", "invalid": False},
+        ],
+        "routes": [
+            {".id": "*80000001", "active": True, "dhcp": True, "distance": 1, "dst-address": "0.0.0.0/0",
+             "dynamic": True, "gateway": "10.0.2.2", "inactive": False, "routing-table": "main"},
+            {".id": "*20143020", "active": True, "connect": True, "distance": 0, "dst-address": "10.0.2.0/24",
+             "dynamic": True, "gateway": "ether1", "inactive": False, "routing-table": "main"},
+            {".id": "*3", "active": True, "static": True, "distance": 1, "dst-address": "172.16.0.0/16",
+             "gateway": "10.10.0.2", "immediate-gw": "10.10.0.2%v10", "routing-table": "main"},
+            {".id": "*4", "active": False, "static": True, "distance": 1, "dst-address": "172.17.0.0/16",
+             "gateway": "10.99.0.1", "inactive": True, "routing-table": "main"},
+            {".id": "*5", "active": True, "static": True, "distance": 1, "dst-address": "0.0.0.0/0",
+             "gateway": "10.0.2.3", "routing-table": "other"},
+        ],
+    }
+    tables.update(parts)
+    return "".join(f"{name} {json.dumps(value)}\n" for name, value in tables.items())
+
+
+def test_parse_routeros_net_describes_interfaces_and_routes_like_linux_net():
+    data = parse_routeros_net(routeros_output(), MACS)
+    assert data["interfaces"] == [
+        {"name": "lo", "kind": "loopback", "admin": "up", "oper": "up", "ipv4": []},
+        {"name": "ether1", "kind": "physical", "admin": "up", "oper": "up", "mac": "00:00:ab:cd:00:00",
+         "port": {"adapter": 0, "port": 0}, "ipv4": ["10.0.2.15/24"], "gateway": "10.0.2.2"},
+        {"name": "wan", "kind": "physical", "admin": "down", "oper": "down", "mac": "00:00:ab:cd:00:01",
+         "port": {"adapter": 1, "port": 0}, "ipv4": []},
+        {"name": "v10", "kind": "subif", "parent": "ether1", "dot1q": 10, "admin": "up", "oper": "up",
+         "mac": "00:00:ab:cd:00:00", "ipv4": ["10.10.0.1/24"]},
+    ]
+    assert data["routes"] == [
+        {"dst": "10.0.2.0/24", "dev": "ether1", "proto": "connect", "metric": 0},
+        {"dst": "172.16.0.0/16", "via": "10.10.0.2", "dev": "v10", "proto": "static", "metric": 1},
+        {"dst": "default", "via": "10.0.2.2", "dev": "ether1", "proto": "dhcp", "metric": 1},
+    ]
+
+
+def test_routeros_empty_tables_are_known_and_a_missing_one_is_a_failure():
+    empty = "interfaces []\nvlans\naddresses []\nroutes []\n"  # an empty menu may print nothing after its name
+    assert parse_routeros_net(empty, MACS) == {"interfaces": [], "routes": []}
+    for stdout in ("interfaces []\nvlans []\naddresses []\n", "routes {", "", "bad command name serialize"):
+        with pytest.raises(FactError) as error:
+            parse_routeros_net(stdout, MACS)
+        assert error.value.code == "failed"
+
+
+@pytest.mark.parametrize(
+    "info, family",
+    [(ROUTEROS, "routeros"), ({"name": "RouterOS"}, "routeros"), (WINDOWS, "windows"), (DEBIAN, "posix"),
+     (None, "posix")],
+)
+def test_guest_family_by_what_the_agent_says(info, family):
+    assert guest_family(info) == family
+
+
+def test_the_routeros_script_prints_every_table_behind_its_name():
+    assert ROUTEROS_NET_COMMAND.isascii() and len(ROUTEROS_NET_COMMAND.splitlines()) == 4
+    for menu in ("/interface/print", "/interface/vlan/print", "/ip/address/print", "/ip/route/print"):
+        assert f"[:serialize to=json [{menu} as-value]]" in ROUTEROS_NET_COMMAND
+
+
+def routeros_of(facts, node_id="n1"):
+    return facts.snapshot("p1")["nodes"][node_id]["collectors"]["routeros.net"]
+
+
+def test_a_routeros_guest_gets_routeros_net_through_a_routeros_script_and_only_that(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        lifecycle.qga.osinfo = ROUTEROS
+        lifecycle.qga.routeros_reply = {"exit_code": 0, "stdout": routeros_output(), "stderr": ""}
+        for _ in range(2):
+            await facts.cycle()
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["routeros.net"]
+        record = routeros_of(facts)
+        assert record["schema"] == "routeros.net/1" and record["ok"] is True
+        assert set(record["data"]) == {"interfaces", "routes"}
+        asked = lifecycle.qga.asked(ROUTEROS_NET_COMMAND)
+        assert len(asked) == 2 and asked[0][2]["shell"] == "routeros"
+        assert asked[0][2]["priority"] is Priority.METRICS and asked[0][2]["wait"] is False
+        for command in (LINUX_NET_COMMAND, SWITCH_NET_COMMAND, SWITCH_FDB_COMMAND, WINDOWS_NET_COMMAND):
+            assert lifecycle.qga.asked(command) == []
+        assert facts.families == {("p1", "n1"): "routeros"}
+
+        lifecycle.qga.routeros_reply = {"exit_code": -1, "stdout": "", "stderr": "bad command name serialize (line 1)"}
+        await facts.cycle()
+        assert routeros_of(facts)["error"]["code"] == "unsupported"  # RouterOS older than 7.13
+        lifecycle.qga.routeros_reply = {"exit_code": -1, "stdout": "", "stderr": "no such item (line 2)"}
+        await facts.cycle()
+        record = routeros_of(facts)
+        assert record["error"] == {"code": "failed", "message": "Command exited with -1: no such item (line 2)"}
+        assert record["data"]["interfaces"]  # the last known facts stay
+
+    scenario(monkeypatch, body)
+
+
 def test_the_registry_matches_the_capabilities():
-    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1"]
+    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1"]
     assert [c.schema for c in COLLECTORS] == ids
     assert facts_module.COLLECTOR_IDS == ids + ["iol.l1/1"]  # passive provider, not a guest command
 
@@ -1539,5 +1666,7 @@ def test_capabilities_announce_the_collectors(mock_server):
     client, _projects, _nodes = mock_server
     body = client.get("/v1/capabilities", headers=HEADERS).json()
     assert "collectors" in body["features"]
-    assert body["collectors"] == ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "ios.config/1", "iol.l1/1"]
+    assert body["collectors"] == [
+        "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1", "iol.l1/1",
+    ]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"

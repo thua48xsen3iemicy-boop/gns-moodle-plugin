@@ -3,7 +3,8 @@
 A collector is one guest command plus the parser of its output. It runs through the QGA broker at
 METRICS priority, so it yields to student and Manager commands. Results live in memory only: the
 Manager polls them and keeps the history. Nothing here ever runs a command that changes a guest.
-The exception to "a guest command" is `ios.config`: Cisco IOL has no guest to ask, so it reads the saved
+A guest family (Linux, Windows, MikroTik RouterOS) is told by the guest agent itself; every family has its own
+collectors. The exception to "a guest command" is `ios.config`: Cisco IOL has no guest to ask, so it reads the saved
 configuration GNS3 keeps in the node directory and never touches the student's console.
 """
 
@@ -301,6 +302,153 @@ def guest_is_windows(info):
     return str(info.get("id", "")).lower() == "mswindows" or "windows" in str(info.get("name", "")).lower()
 
 
+def guest_is_routeros(info):
+    """The agent of MikroTik CHR reports `id: routeros`, `name: RouterOS` (CHR 7.25.1)."""
+    if not isinstance(info, dict):
+        return False
+    return str(info.get("id", "")).lower() == "routeros" or str(info.get("name", "")).lower() == "routeros"
+
+
+def guest_family(info):
+    """"windows", "routeros" or "posix" from a `guest-get-osinfo` answer."""
+    if guest_is_windows(info):
+        return "windows"
+    if guest_is_routeros(info):
+        return "routeros"
+    return "posix"
+
+
+# MikroTik RouterOS (family "routeros"): one RouterOS script, four tables as JSON, one per line behind its
+# name. `:serialize` needs RouterOS 7.13 or newer; an older one answers "bad command name".
+ROUTEROS_PARTS = ("interfaces", "vlans", "addresses", "routes")
+ROUTEROS_NET_COMMAND = "\n".join(
+    f':put ("{part} " . [:serialize to=json [{menu}/print as-value]])'
+    for part, menu in zip(ROUTEROS_PARTS, ("/interface", "/interface/vlan", "/ip/address", "/ip/route"))
+)
+# What a route was made by: the first flag of these that is set, as RouterOS names it.
+ROUTEROS_PROTOS = ("connect", "static", "dhcp", "ospf", "bgp", "rip", "vpn", "modem", "slaac", "copy")
+
+
+def routeros_tables(stdout):
+    tables = {}
+    for line in stdout.splitlines():
+        name, _, rest = line.strip().partition(" ")
+        if name in ROUTEROS_PARTS and name not in tables:
+            rest = rest.strip()
+            tables[name] = json.loads(rest) if rest else []  # an empty menu may print nothing
+    missing = [part for part in ROUTEROS_PARTS if part not in tables]
+    if missing:
+        raise KeyError(missing[0])
+    for name, value in tables.items():
+        tables[name] = as_list(value)
+    return tables
+
+
+def routeros_id(item):
+    """`.id` is `*` and hex: the order RouterOS created the entries in."""
+    try:
+        return int(str(item.get(".id", "")).lstrip("*"), 16)
+    except ValueError:
+        return 0
+
+
+def routeros_interface(item, vlans, macs):
+    name, kind = item["name"], item.get("type")
+    if not isinstance(name, str):
+        raise TypeError("interface without a name")
+    entry = {"name": name}
+    if kind == "ether":
+        entry["kind"] = "physical"
+    elif kind == "loopback":
+        entry["kind"] = "loopback"
+    elif kind == "vlan":
+        vlan = vlans.get(name) or {}
+        if type(vlan.get("vlan-id")) is not int or not isinstance(vlan.get("interface"), str):
+            return None
+        entry.update(kind="subif", parent=vlan["interface"], dot1q=vlan["vlan-id"])
+    else:
+        return None  # bridges, bonds, tunnels...: routeros.net/1 does not describe them
+    disabled = item.get("disabled") is True
+    entry["admin"] = "down" if disabled else "up"
+    entry["oper"] = "up" if item.get("running") is True and not disabled else "down"
+    mac = normalized_mac(item.get("mac-address")) if entry["kind"] != "loopback" else None
+    if mac:
+        entry["mac"] = mac
+        if entry["kind"] == "physical" and mac in macs:
+            entry["port"] = {"adapter": macs[mac], "port": 0}
+    entry["ipv4"] = []
+    return entry
+
+
+def routeros_route(route, interfaces):
+    """One active route of the main table -> a route of live-state.md 3.3, or None."""
+    if route.get("active") is not True or route.get("routing-table", "main") != "main":
+        return None
+    dst = route.get("dst-address")
+    if not isinstance(dst, str) or ":" in dst:
+        return None
+    network = ipaddress.ip_network(dst, strict=False)
+    entry = {"dst": "default" if network.prefixlen == 0 else str(network)}
+    via, dev = None, None
+    for gateway in (route.get("gateway"), route.get("immediate-gw")):
+        if not isinstance(gateway, str) or not gateway:
+            continue
+        address, _, iface = gateway.partition("%")
+        try:
+            via = via or str(ipaddress.IPv4Address(address))
+        except ValueError:
+            iface = iface or gateway  # a connected route names its interface
+        dev = dev or iface or None
+    if via is not None and dev is None:  # the interface whose network holds the next hop
+        hop = ipaddress.IPv4Address(via)
+        dev = next((i["name"] for i in interfaces
+                    if any(hop in ipaddress.ip_interface(a).network for a in i["ipv4"])), None)
+    if via is not None:
+        entry["via"] = via
+    if dev is not None:
+        entry["dev"] = dev
+    proto = next((flag for flag in ROUTEROS_PROTOS if route.get(flag) is True), None)
+    if proto:
+        entry["proto"] = proto
+    if type(route.get("distance")) is int:
+        entry["metric"] = route["distance"]
+    return entry
+
+
+def parse_routeros_net(stdout, macs):
+    """Turn the output of ROUTEROS_NET_COMMAND into `interfaces` and `routes` of a live-state.md node.
+
+    Same shape and rules as `parse_linux_net`. Interfaces: ethernet ports, VLAN interfaces and the loopback
+    `lo`; an interface that is disabled is `admin: down`, one that is not running `oper: down`. Addresses:
+    every IPv4 address of the interface that is not disabled or invalid, dynamic ones (DHCP) included.
+    Routes: the active ones of the `main` table, as the FIB has them.
+    """
+    try:
+        tables = routeros_tables(stdout)
+        vlans = {v["name"]: v for v in tables["vlans"] if isinstance(v.get("name"), str)}
+        interfaces = [
+            entry
+            for item in sorted(tables["interfaces"], key=routeros_id)
+            if (entry := routeros_interface(item, vlans, macs)) is not None
+        ]
+        by_name = {entry["name"]: entry for entry in interfaces}
+        for address in tables["addresses"]:
+            entry = by_name.get(address.get("interface"))
+            if entry is None or address.get("disabled") is True or address.get("invalid") is True:
+                continue
+            entry["ipv4"].append(str(ipaddress.IPv4Interface(address["address"])))
+        for entry in interfaces:
+            entry["ipv4"].sort(key=ipaddress.ip_interface)
+        routes = sorted(
+            (entry for route in tables["routes"] if (entry := routeros_route(route, interfaces)) is not None),
+            key=lambda e: (e["dst"], e.get("metric", 0), e.get("via", ""), e.get("dev", "")),
+        )
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise FactError("failed", f"Unexpected output of RouterOS: {type(exc).__name__}") from exc
+    set_gateway(interfaces, routes)
+    return {"interfaces": interfaces, "routes": routes}
+
+
 # Linux switch (images/linux-switch): one exec asks the guest API twice. No switchctl means the node
 # is not a switch (exit 127). A failed call still prints its envelope, so the statuses of the two
 # calls are not checked here: the parser reads `ok`. An empty answer becomes `null`.
@@ -473,7 +621,8 @@ class Collector:
     # The guest tells whether it takes part: exit 127 means "not here" and nothing is published,
     # failures of the exchange stay silent until the first success (see Facts.attempt).
     probe: bool = False
-    # The guest family the collector is for: "posix" (a shell in /bin/sh) or "windows" (PowerShell).
+    # The guest family the collector is for: "posix" (a shell in /bin/sh), "windows" (PowerShell) or
+    # "routeros" (a RouterOS script).
     # The guest tells it (Facts.detect_family); a collector never runs on the other family.
     family: str = "posix"
     shell: str = "sh"  # how QgaBroker.exec runs `command`
@@ -520,6 +669,16 @@ WINDOWS_NET = Collector(
     shell="powershell",
     timeout_scale=3.0,
 )
+ROUTEROS_NET = Collector(
+    name="routeros.net",
+    schema="routeros.net/1",
+    command=ROUTEROS_NET_COMMAND,
+    applies=LINUX_NET.applies,
+    parse=lambda stdout, node: parse_routeros_net(stdout, adapter_macs(node)),
+    missing="RouterOS 7.13 or newer is needed (:serialize)",
+    family="routeros",
+    shell="routeros",
+)
 # Cisco IOL: what the device boots with, from startup-config.cfg or NVRAM (api/ios_config.py).
 IOS_CONFIG = Collector(
     name="ios.config",
@@ -527,7 +686,7 @@ IOS_CONFIG = Collector(
     applies=lambda node, spec: node.get("node_type") == "iou",
     local=ios_config.collect,
 )
-COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET, IOS_CONFIG)
+COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET, ROUTEROS_NET, IOS_CONFIG)
 COLLECTOR_IDS = [collector.schema for collector in COLLECTORS] + ["iol.l1/1"]
 
 
@@ -543,8 +702,9 @@ def classify(exc):
 def failure_of(result, collector):
     """A guest command that ran but did not succeed."""
     stderr = (result.get("stderr") or "").strip()
-    # no tool, an `ip` without -j, or a PowerShell without the NetTCPIP cmdlets
-    if result.get("exit_code") == 127 or "is unknown" in stderr or "is not recognized" in stderr:
+    # no tool, an `ip` without -j, a PowerShell without the NetTCPIP cmdlets, a RouterOS without :serialize
+    if (result.get("exit_code") == 127 or "is unknown" in stderr or "is not recognized" in stderr
+            or (collector.shell == "routeros" and "bad command name" in stderr)):
         return FactError("unsupported", collector.missing)
     return FactError("failed", f"Command exited with {result.get('exit_code')}: {stderr}"[:MESSAGE_LIMIT])
 
@@ -564,7 +724,7 @@ class Facts:
         # What the guests told about their role, for probe collectors; same keys as next_due.
         self.absent = set()  # the guest is not what the collector looks for: not asked again
         self.confirmed = set()  # the collector has succeeded at least once: its failures are published
-        # What the guest said about itself: (project_id, node_id) -> "posix" | "windows". Until it
+        # What the guest said about itself: (project_id, node_id) -> "posix" | "windows" | "routeros". Until it
         # has, no collector of a family runs and nothing is published: a record of the wrong family
         # would stay as a stranger's error (the manager never deletes a collector's row).
         self.families = {}
@@ -703,7 +863,7 @@ class Facts:
                 pass
 
     async def detect_family(self, node):
-        """"windows" or "posix" as the guest agent says; None while the guest cannot be asked.
+        """"windows", "routeros" or "posix" as the guest agent says; None while the guest cannot be asked.
 
         An agent that does not know `guest-get-osinfo` answers with an error: that is a Linux guest
         with an old agent, which is what every node was before this check existed. QgaBusy goes
@@ -726,7 +886,7 @@ class Facts:
             raise
         except (QgaError, OSError):
             return None
-        return "windows" if guest_is_windows(info) else "posix"
+        return guest_family(info)
 
     def drop(self, key):
         """Forget what was published for a collector, and the node if nothing else is left."""
