@@ -152,7 +152,8 @@ class manager_client {
      * Image catalog for the lab editor (MANAGER_REQUESTS П10), cached like the info.
      *
      * @return \stdClass[] images with id, title, kind, category, symbol, console_type, ram_mb, cpus, adapters,
-     *     port_name, ports_per_adapter and, with the lab constructor, preconfig; empty if the manager has no catalog
+     *     port_name, ports_per_adapter, with the lab constructor preconfig and, for MikroTik images, guest "routeros";
+     *     empty if the manager has no catalog
      */
     public function get_images(bool $fresh = false): array {
         if (!$this->has_feature('images')) {

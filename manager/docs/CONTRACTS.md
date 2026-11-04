@@ -189,7 +189,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `status_message` | текст для студента по-русски; логика по нему не строится |
 | `error` | при `failed`: `{"code", "retryable"}` (§2.5); иначе `null` |
 | `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
-| `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами) |
+| `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами). 🆕 `guest` — так же из эталона или каталога (§2.6), только у нод MikroTik RouterOS |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
 | `capture_nodes` | у authoring: `[{"name", "status"}]`, когда-либо запускавшиеся QEMU-ноды проекта, включая штатно выключенные маршрутом shutdown |
 | `mode` | 🆕 только у авторского запуска (§2.8): `"authoring"`. У обычной сессии поля нет |
@@ -233,6 +233,10 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 🆕 `preconfig` — можно ли ставить ноду с этим образом в сегмент (см. `gns3lab.lab/2` ниже): `true` у `vpcs` и у образа,
 для которого администратор указал в каталоге `net_config` (механизм сети гостя: `ifupdown`, `networkmanager`, `netplan`,
 `networkd`, 🆕 `routeros` — MikroTik CHR; только `qemu`; `template` пока не принимается). Самого `net_config` в ответе нет. Нет поля — `false`.
+
+🆕 `guest: "routeros"` (менеджер 0.16.2) — у образа с `net_config: "routeros"`: в ноде MikroTik RouterOS, а не то, что обычно у
+`qemu`. У остальных образов поля нет. Плагин выбирает по нему подсказки консоли; менеджер переносит его в ноды эталонной
+топологии лабы из каталога и в `session.topology` (§2.3) по имени ноды, как `symbol`.
 
 `cpus` есть только у `qemu`; у `vpcs` `ram_mb`, `cpus`, `adapters` — `null` (один порт 0/0).
 `port_name` — как GNS3 2.2.61 называет порты нод слота: `iou` — `Ethernet{adapter}/{port}`

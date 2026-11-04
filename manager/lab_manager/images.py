@@ -144,6 +144,8 @@ class Image(Strict):
             "preconfig": self.preconfig,
             "capture": self.kind == "qemu" if self.capture is None else self.capture,
             **({"uplink_port": self.uplink_port} if self.uplink_port is not None else {}),
+            # The plugin picks console snippets by it; only RouterOS images carry the field (CONTRACTS 2.6).
+            **({"guest": "routeros"} if self.net_config == "routeros" else {}),
             **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }
 

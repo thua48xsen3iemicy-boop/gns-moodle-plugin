@@ -53,11 +53,14 @@ export const PROMPTS = {
  * VPCS is told by the node, not by the prompt: its prompt looks like the user mode of IOS. Any other node is taken
  * for what its category says first and for the other family second: a virtual "switch" may run Linux.
  *
- * @param {string} hint kind of the node: ios, linux or vpcs (snippets.js kindOf)
+ * @param {string} hint kind of the node: ios, linux, vpcs or routeros (snippets.js kindOf)
  * @param {string} text the line left of the cursor
  * @returns {string|null} ios, linux, vpcs, or null if the line is not a prompt
  */
 export const promptKind = (hint, text) => {
+    if (hint === 'routeros') {
+        return null; // No parser reads RouterOS output yet: its console adds nothing to the facts.
+    }
     if (hint === 'vpcs') {
         return PROMPTS.vpcs.test(text) ? 'vpcs' : null;
     }

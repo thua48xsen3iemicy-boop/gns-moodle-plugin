@@ -135,11 +135,15 @@ def session_topology(name: str, raw: dict, reference=None) -> dict:
     # The slot creates nodes without a symbol and GNS3 2.2 draws them all as computers
     # (slot ALIGNMENT §3.4): the symbol of the reference node with the same name wins.
     symbols = {n.get("name"): n["symbol"] for n in ref.get("nodes", []) if n.get("symbol")}
+    # The guest OS the image catalog names (`guest`, CONTRACTS 2.6) goes the same way: GNS3 does not know it.
+    guests = {n.get("name"): n["guest"] for n in ref.get("nodes", []) if isinstance(n.get("guest"), str)}
     nodes = []
     for n in raw.get("nodes", []):
         node = {k: n[k] for k in NODE_KEYS if k in n}
         if node.get("name") in symbols:
             node["symbol"] = symbols[node["name"]]
+        if node.get("name") in guests:
+            node["guest"] = guests[node["name"]]
         node["properties"] = {}  # QEMU options, paths and sockets are internal to the slot
         nodes.append(node)
     links = [{k: link[k] for k in LINK_KEYS if k in link} for link in raw.get("links", [])]

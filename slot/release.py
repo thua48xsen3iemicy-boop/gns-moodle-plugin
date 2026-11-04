@@ -10,7 +10,7 @@ import sys
 from importlib.metadata import version
 from pathlib import Path
 
-VERSION = "0.15.1"
+VERSION = "0.15.2"
 ROOT = Path(__file__).resolve().parent
 
 

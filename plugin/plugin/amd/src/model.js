@@ -80,6 +80,23 @@ export const catOf = n => {
 };
 
 /**
+ * Operating system of a node when it is not what its type says: "routeros" for MikroTik, otherwise null.
+ *
+ * The lab manager names it (`guest` of the image catalog and of the live topology, CONTRACTS §2.6); in an uploaded
+ * .gns3 the disk image of a QEMU node tells it (MikroTik CHR images: chr-7.x.img, mikrotik-*, routeros-*).
+ *
+ * @param {object} n node of the .gns3
+ * @returns {string|null}
+ */
+export const guestOf = n => {
+    if (n.guest === 'routeros') {
+        return 'routeros';
+    }
+    const img = String((n.properties && n.properties.hda_disk_image) || '');
+    return n.node_type === 'qemu' && /(^|[^a-z])(chr|mikrotik|routeros)([^a-z]|$)/i.test(img) ? 'routeros' : null;
+};
+
+/**
  * Name of a port for a link label.
  *
  * In the live topology of a session the properties are empty, but GNS3 returns ports with the device port names.
@@ -164,6 +181,7 @@ export const buildModel = doc => {
             status: n.status || null,
         };
         node.cat = catOf(node);
+        node.guest = guestOf(n);
         nodes.set(n.node_id, node);
     }
     const links = [];
