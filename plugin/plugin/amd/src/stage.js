@@ -578,7 +578,7 @@ export class Stage {
     }
 
     renderNodes() {
-        const L = this.layer, D = this.der;
+        const L = this.layer;
         this.model.nodes.forEach(n => {
             n.g = null;
             if (this.canvas.l2 && this.canvas.l2.switches.has(n.id)) return;

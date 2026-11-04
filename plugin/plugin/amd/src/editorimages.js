@@ -17,7 +17,13 @@
 import Ajax from 'core/ajax';
 import Notification from 'core/notification';
 
-/** Connect capture to the editor's draft and catalog without changing published versions. */
+/**
+ * Connect capture to the editor's draft and catalog without changing published versions.
+ *
+ * @param {HTMLElement} root the editor element
+ * @param {object} data the data of the editor page
+ * @param {object} host the editor: its draft definition and catalog
+ */
 export const init = (root, data, host) => {
     if (!data.imagecapture) {
         return;
@@ -164,7 +170,9 @@ export const init = (root, data, host) => {
     const submitCapture = async(expected, nodes, force) => {
         let blocked = null;
         await withBusy(async() => {
-            if (host.definition() !== expected) throw new Error(text('authoringdraftconflict'));
+            if (host.definition() !== expected) {
+                throw new Error(text('authoringdraftconflict'));
+            }
             const response = await call('capture', {nodes, definition: expected, force});
             if (response.capture.state === 'failed') {
                 blocked = response.capture;
@@ -180,13 +188,17 @@ export const init = (root, data, host) => {
             }
             blocked = await waitForCapture(expected);
         });
-        if (blocked) blockedDialog(blocked, expected, nodes);
+        if (blocked) {
+            blockedDialog(blocked, expected, nodes);
+        }
     };
     const recover = async() => {
         let blocked;
         const expected = pendingDefinition || host.definition();
         await withBusy(async() => { blocked = await waitForCapture(expected); });
-        if (blocked) blockedDialog(blocked, expected, pendingNodes);
+        if (blocked) {
+            blockedDialog(blocked, expected, pendingNodes);
+        }
     };
     const capture = button('authoringcapture', async() => {
         if (working) {
@@ -216,7 +228,8 @@ export const init = (root, data, host) => {
             const legend = document.createElement('legend');
             const checked = document.createElement('input');
             checked.type = 'checkbox'; checked.checked = true;
-            legend.append(checked, document.createTextNode(' ' + node.name + ' — ' + text('authoringstatus_' + statuses.get(node.name))));
+            const status = text('authoringstatus_' + statuses.get(node.name));
+            legend.append(checked, document.createTextNode(' ' + node.name + ' — ' + status));
             const title = document.createElement('input');
             title.type = 'text'; title.required = true; title.maxLength = 100;
             title.value = Array.from(data.labname + ' — ' + node.name).slice(0, 100).join('');

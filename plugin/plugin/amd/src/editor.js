@@ -469,7 +469,8 @@ export const init = (prefix) => {
         + (imageOf(n) ? "" : " unknown") + role + pickable;
       const g = el("g", {class: cls, "data-node": i, role: "button", "aria-label": n.name}, lyr.nodes);
       el("rect", {class: "halo", x: cx - 31, y: cy - 31, width: 62, height: 62, rx: 12}, g);
-      el("use", {href: `#${prefix}-ico-${adapterOffset(n) ? "cloud" : ICON[category(n)] || "server"}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
+      const icon = adapterOffset(n) ? "cloud" : ICON[category(n)] || "server";
+      el("use", {href: `#${prefix}-ico-${icon}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
       /* имя — над подписями портов, как во вьюере */
       const t = el("text", {class: "nname", x: cx, y: cy + 42, "text-anchor": "middle", "data-node": i}, lyr.names);
       t.textContent = n.name;
@@ -558,31 +559,52 @@ export const init = (prefix) => {
     const superseded = new Set(list.filter(i => i.derived).map(i => i.derived.supersedes).filter(Boolean));
     const retired = list.filter(i => i.derived && i.retired && i.derived.author_user_id === D.userid);
     const visible = list.filter(i => !i.retired && !superseded.has(i.id));
-    const entry = img => `<div class="ed-image-entry" data-search="${esc((img.title + " " + (img.derived?.description || "") + " " + (img.authorname || "")).toLowerCase())}">
-      <button class="ed-img" type="button" draggable="${img.retired ? "false" : "true"}" data-image="${img.retired ? "" : esc(img.id)}" title="${esc(img.title)}" ${img.retired ? "disabled" : ""}>
-        <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${prefix}-ico-${Number.isInteger(img.uplink_port) ? "cloud" : ICON[img.category] || "server"}"/></svg>
-        <span>${esc(img.title || img.id)}</span>${img.derived?.forced ? `<span data-forced-image="${esc(img.id)}" role="img" aria-label="${esc(str("authoringforcedhint"))}" title="${esc(str("authoringforcedhint"))}">⚠</span>` : ""}</button>
-      ${img.derived ? `<small>${esc(img.derived.description || "")} · ${esc(img.derived.base)} · ${esc(img.authorname || "")}</small>
-        ${img.derived.author_user_id === D.userid ? `<button type="button" class="gbtn" data-edit-image="${esc(img.id)}">${esc(str("authoringedit"))}</button>` : ""}
-        ${D.manageimages ? `<button type="button" class="gbtn" data-feature-image="${esc(img.id)}">${esc(str(img.featured ? "authoringunfeature" : "authoringfeature"))}</button>` : ""}` : ""}
+    const entry = img => {
+      const search = (img.title + " " + (img.derived?.description || "") + " " + (img.authorname || "")).toLowerCase();
+      const icon = Number.isInteger(img.uplink_port) ? "cloud" : ICON[img.category] || "server";
+      const hint = esc(str("authoringforcedhint"));
+      const forced = img.derived?.forced
+        ? `<span data-forced-image="${esc(img.id)}" role="img" aria-label="${hint}" title="${hint}">⚠</span>` : "";
+      const edit = img.derived?.author_user_id === D.userid
+        ? `<button type="button" class="gbtn" data-edit-image="${esc(img.id)}">${esc(str("authoringedit"))}</button>` : "";
+      const feature = D.manageimages
+        ? `<button type="button" class="gbtn" data-feature-image="${esc(img.id)}">`
+          + `${esc(str(img.featured ? "authoringunfeature" : "authoringfeature"))}</button>` : "";
+      const about = img.derived
+        ? `<small>${esc(img.derived.description || "")} · ${esc(img.derived.base)} · ${esc(img.authorname || "")}</small>
+        ${edit}
+        ${feature}` : "";
+      return `<div class="ed-image-entry" data-search="${esc(search)}">
+      <button class="ed-img" type="button" draggable="${img.retired ? "false" : "true"}"
+        data-image="${img.retired ? "" : esc(img.id)}" title="${esc(img.title)}" ${img.retired ? "disabled" : ""}>
+        <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#${prefix}-ico-${icon}"/></svg>
+        <span>${esc(img.title || img.id)}</span>${forced}</button>
+      ${about}
       </div>`;
+    };
     const main = visible.filter(i => !i.derived || i.featured);
     const mine = visible.filter(i => i.derived && !i.featured && i.derived.author_user_id === D.userid);
     const others = visible.filter(i => i.derived && !i.featured && i.derived.author_user_id !== D.userid);
     const groups = new Map();
     others.forEach(img => {
       const author = img.derived.author_user_id;
-      if (!groups.has(author)) groups.set(author, []);
+      if (!groups.has(author)) {
+        groups.set(author, []);
+      }
       groups.get(author).push(img);
     });
     palette.innerHTML = `<p class="eyebrow">${esc(str("ed_catalog"))}</p>
-      <input type="search" data-image-search aria-label="${esc(str("authoringsearch"))}" placeholder="${esc(str("authoringsearch"))}">`
+      <input type="search" data-image-search aria-label="${esc(str("authoringsearch"))}"
+        placeholder="${esc(str("authoringsearch"))}">`
       + main.map(entry).join("")
-      + (mine.length ? `<details open data-default-open="1"><summary>${esc(str("authoringmine"))}</summary>${mine.map(entry).join("")}</details>` : "")
+      + (mine.length ? `<details open data-default-open="1"><summary>${esc(str("authoringmine"))}</summary>`
+        + `${mine.map(entry).join("")}</details>` : "")
       + (others.length ? `<details><summary>${esc(str("authoringothers"))}</summary>` + [...groups.values()].map(items =>
-        `<details><summary>${esc(items[0].authorname || items[0].derived.author_user_id)}</summary>${items.map(entry).join("")}</details>`
+        `<details><summary>${esc(items[0].authorname || items[0].derived.author_user_id)}</summary>`
+        + `${items.map(entry).join("")}</details>`
       ).join("") + "</details>" : "")
-      + (retired.length ? `<details><summary>${esc(str("authoringretired"))}</summary>${retired.map(entry).join("")}</details>` : "");
+      + (retired.length ? `<details><summary>${esc(str("authoringretired"))}</summary>`
+        + `${retired.map(entry).join("")}</details>` : "");
   };
 
   const fmtMem = mb => mb >= 1024 ? (mb / 1024).toFixed(1).replace(/\.0$/, "") + " GB" : mb + " MB";
@@ -990,7 +1012,9 @@ export const init = (prefix) => {
     }
   });
   palette.addEventListener("input", e => {
-    if (!e.target.matches("[data-image-search]")) return;
+    if (!e.target.matches("[data-image-search]")) {
+      return;
+    }
     const query = e.target.value.toLowerCase();
     palette.querySelectorAll(".ed-image-entry").forEach(entry => { entry.hidden = !entry.dataset.search.includes(query); });
     palette.querySelectorAll("details").forEach(details => {
@@ -1005,7 +1029,8 @@ export const init = (prefix) => {
     render();
   };
   const patchImage = async(imageid, args) => {
-    const result = await Ajax.call([{methodname: "mod_gns3lab_authoring", args: {labid: D.labid, action: "patch", imageid, ...args}}])[0];
+    const result = await Ajax.call([{methodname: "mod_gns3lab_authoring",
+      args: {labid: D.labid, action: "patch", imageid, ...args}}])[0];
     updateCatalog(result.images);
   };
   palette.addEventListener("click", e => {
@@ -1016,13 +1041,16 @@ export const init = (prefix) => {
       return;
     }
     const edit = e.target.closest("[data-edit-image]");
-    if (!edit) return;
+    if (!edit) {
+      return;
+    }
     const img = images.get(edit.dataset.editImage);
     const dialog = document.createElement("dialog");
     dialog.className = "ed-capture-dialog";
     dialog.innerHTML = `<form><h2>${esc(str("authoringedit"))}</h2>
       <label>${esc(str("authoringtitle"))}<input name="title" required maxlength="100" value="${esc(img.title)}"></label>
-      <label>${esc(str("authoringdescription"))}<textarea name="description" maxlength="2000">${esc(img.derived.description)}</textarea></label>
+      <label>${esc(str("authoringdescription"))}<textarea name="description" maxlength="2000">${
+        esc(img.derived.description)}</textarea></label>
       <label><input name="retired" type="checkbox" ${img.retired ? "checked" : ""}> ${esc(str("authoringretire"))}</label>
       <button class="gbtn primary" type="submit">${esc(str("ed_save"))}</button>
       <button class="gbtn" type="button" data-cancel>${esc(str("authoringcancel"))}</button></form>`;

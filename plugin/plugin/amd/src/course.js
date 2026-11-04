@@ -54,9 +54,6 @@ const CARD_POLL_L1 = 3000;
 /** Requests to get_state and get_facts at the same time. */
 const MAX_REQUESTS = 4;
 
-/** Statuses of a session whose lab is on the way up or down: shown as they are, no facts. */
-const LIVE_STATUSES = ['queued', 'starting', 'running', 'stopping'];
-
 /**
  * Order of the cells when the table is sorted by a lab: what needs a look comes first.
  *

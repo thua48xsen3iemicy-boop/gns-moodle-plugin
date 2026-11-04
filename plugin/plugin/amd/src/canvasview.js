@@ -257,7 +257,7 @@ export class CanvasView {
             const x = Number(g.dataset.fixedX), y = Number(g.dataset.fixedY);
             g.setAttribute('transform', `translate(${x} ${y}) scale(${inv}) translate(${-x} ${-y})`);
         });
-        this.rails.forEach(({link, geometry: g, directions, group}) => {
+        this.rails.forEach(({link, geometry: g, directions}) => {
             const half = Math.max(0, g.len / 2 - Math.min(31, g.len / 4));
             const mx = (g.ax + g.bx) / 2, my = (g.ay + g.by) / 2;
             directions.forEach(({line, arrow, labels, sign}) => {
@@ -316,14 +316,20 @@ export class CanvasView {
             // facts.js omits domains without host members. Their accepted switch paths still exist.
             if (v && !v.domain) {
                 const vertices = new Set([v.id]);
-                let added;
-                do {
-                    added = false;
+                const grow = () => {
+                    let added = false;
                     this.l2.segments.filter(p => p.active && (vertices.has(p.va) || vertices.has(p.vb))).forEach(p => {
                         p.g.classList.add('on');
-                        [p.va, p.vb].forEach(id => { if (!vertices.has(id)) { vertices.add(id); added = true; } });
+                        [p.va, p.vb].filter(id => !vertices.has(id)).forEach(id => {
+                            vertices.add(id);
+                            added = true;
+                        });
                     });
-                } while (added);
+                    return added;
+                };
+                while (grow()) {
+                    // Every round adds the vertices reached through the segments found in the round before.
+                }
                 vertices.forEach(id => { mark('data-virtual', id); const peer = this.l2.virtuals.get(id); if (peer) mark('data-node', peer.orig.id); });
             }
             if (v) mark('data-node', v.orig.id);

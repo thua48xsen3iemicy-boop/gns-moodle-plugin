@@ -161,11 +161,15 @@ class LabPage {
                     ? snippetSet(n).items.filter(item => item.group === 'inspect').slice(0, n.type === 'vpcs' ? 1 : 2) : [],
                 canInspect: n => this.userid === 0 && this.canConsole(n) && this.consoles.cons.get(n.id)?.conn?.state === 'open',
                 inspect: (n, id) => {
-                    if (this.userid !== 0 || !this.canConsole(n)) return;
+                    if (this.userid !== 0 || !this.canConsole(n)) {
+                        return;
+                    }
                     const con = this.consoles.cons.get(n.id);
                     if (!con) { this.toast(fill(this.strings.ui_not_connected, n.name)); return; }
                     const item = snippetSet(n).items.find(item => item.id === id && item.group === 'inspect');
-                    if (item) con.runSnippet(item.seq);
+                    if (item) {
+                        con.runSnippet(item.seq);
+                    }
                 },
             },
         });
@@ -251,7 +255,12 @@ class LabPage {
     hookStage() {
         const stage = this.stage, consoles = this.consoles, details = this.details, wheel = this.wheel;
         stage.hooks = {
-            details: sel => { if (this.hideAssignments) this.hideAssignments(); details.show(sel); },
+            details: sel => {
+                if (this.hideAssignments) {
+                    this.hideAssignments();
+                }
+                details.show(sel);
+            },
             console: n => this.openConsole(n),
             nodeAction: n => {
                 if (this.canConsole(n)) {
@@ -264,7 +273,12 @@ class LabPage {
             canConsole: n => this.canConsole(n),
             diveCandidate: n => consoles.diveCandidate(n),
             diveRelease: n => consoles.diveRelease(n),
-            closeOverlays: () => { details.hide(); if (this.hideAssignments) this.hideAssignments(); },
+            closeOverlays: () => {
+                details.hide();
+                if (this.hideAssignments) {
+                    this.hideAssignments();
+                }
+            },
             viewChanged: () => {
                 if (wheel.node && !wheel.tracking) {
                     wheel.position();
@@ -307,7 +321,9 @@ class LabPage {
         });
         const assignments = region('assignments'), open = region('assignmentsOpen'), close = region('assignmentsClose');
         const hideAssignments = () => {
-            if (!assignments) return;
+            if (!assignments) {
+                return;
+            }
             assignments.hidden = true;
             open.setAttribute('aria-expanded', 'false');
             this.stage.canvas.scheduleLabels();
@@ -317,10 +333,14 @@ class LabPage {
             open.onclick = () => {
                 const show = assignments.hidden;
                 this.details.hide();
-                if (show) this.stage.select(null);
+                if (show) {
+                    this.stage.select(null);
+                }
                 assignments.hidden = !show;
                 open.setAttribute('aria-expanded', String(show));
-                if (show) close.focus();
+                if (show) {
+                    close.focus();
+                }
                 this.stage.canvas.scheduleLabels();
             };
             close.onclick = () => { hideAssignments(); open.focus(); };
@@ -330,10 +350,16 @@ class LabPage {
         }
         region('overview').onclick = () => { hideAssignments(); this.details.toggleSummary(); };
         const refresh = region('canvasRefresh');
-        if (refresh) refresh.onclick = async() => {
-            refresh.disabled = true;
-            try { await this.refreshFacts(); } finally { refresh.disabled = false; }
-        };
+        if (refresh) {
+            refresh.onclick = async() => {
+                refresh.disabled = true;
+                try {
+                    await this.refreshFacts();
+                } finally {
+                    refresh.disabled = false;
+                }
+            };
+        }
     }
 
     /**

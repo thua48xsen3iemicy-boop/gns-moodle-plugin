@@ -16,7 +16,13 @@
 /** @module mod_gns3lab/authoringapi */
 import Ajax from 'core/ajax';
 
-/** Adapt the existing viewer and console modules to the server-checked library session. */
+/**
+ * Adapt the existing viewer and console modules to the server-checked library session.
+ *
+ * @param {number} labid library lab id
+ * @param {object} definition lab definition of the authoring session
+ * @returns {Function} the transport: requests => promises, like Ajax.call
+ */
 export const authoringTransport = (labid, definition) => requests => requests.map(request => {
     const operations = {
         mod_gns3lab_get_state: ['state', 'state'],

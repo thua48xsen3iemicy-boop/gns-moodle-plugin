@@ -60,6 +60,7 @@ export class Session {
      * @param {number} options.userid whose lab, 0 for the current user
      * @param {object} options.strings language strings
      * @param {Function} options.onState called with (state, before) after every state from the server
+     * @param {Function} [options.api] the transport of web service calls, Ajax.call by default
      */
     constructor(root, {cmid, userid, strings, onState, api = requests => Ajax.call(requests)}) {
         this.api = api;
