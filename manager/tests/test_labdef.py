@@ -156,3 +156,22 @@ def test_public_image_has_no_file_or_slot_options():
     assert public["port_name"] == "Ethernet{adapter}" and public["ports_per_adapter"] == 1
     assert IMAGES["cisco-iou-l2"].public()["port_name"] == "Ethernet{adapter}/{port}"
     assert IMAGES["vpcs"].public()["adapters"] is None
+
+
+def test_routeros_nodes_carry_their_guest_to_the_reference_and_the_live_topology():
+    from lab_manager.orchestrator import session_topology
+
+    chr7 = IMAGES["mikrotik-chr7"].public()
+    assert chr7["guest"] == "routeros" and chr7["preconfig"] is True
+    assert all("guest" not in image.public() for key, image in IMAGES.items() if key != "mikrotik-chr7")
+    definition = {"nodes": [{"name": "R1", "image": "mikrotik-chr7"}, {"name": "PC1", "image": "debian12"}]}
+    ref = reference_topology(definition, IMAGES)
+    assert ref["topology"]["nodes"] == [
+        {"name": "R1", "symbol": ":/symbols/router.svg", "guest": "routeros"},
+        {"name": "PC1", "symbol": ":/symbols/computer.svg"},
+    ]
+    raw = {"nodes": [{"node_id": "a", "name": "R1", "node_type": "qemu", "symbol": ":/symbols/computer.svg"},
+                     {"node_id": "b", "name": "PC1", "node_type": "qemu"}], "links": []}
+    live = {n["name"]: n for n in session_topology("lab", raw, ref)["topology"]["nodes"]}
+    assert live["R1"]["guest"] == "routeros" and live["R1"]["symbol"] == ":/symbols/router.svg"
+    assert "guest" not in live["PC1"]

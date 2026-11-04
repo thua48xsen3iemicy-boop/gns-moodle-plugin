@@ -333,7 +333,11 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
 
 
 def reference_topology(definition: dict, images: dict) -> dict:
-    """What a lab.gns3 gives a catalog lab: node symbols by name (no drawings: they are Moodle's)."""
-    return {"topology": {"nodes": [{"name": n["name"], "symbol": images[n["image"]].public()["symbol"]}
-                                   for n in definition["nodes"] if n["image"] in images],
-                         "drawings": []}}
+    """What a lab.gns3 gives a catalog lab: node symbols (and `guest`) by name (no drawings: they are Moodle's)."""
+    nodes = []
+    for n in definition["nodes"]:
+        if n["image"] in images:
+            public = images[n["image"]].public()
+            nodes.append({"name": n["name"], "symbol": public["symbol"],
+                          **({"guest": public["guest"]} if "guest" in public else {})})
+    return {"topology": {"nodes": nodes, "drawings": []}}
