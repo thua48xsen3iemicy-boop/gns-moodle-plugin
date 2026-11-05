@@ -46,6 +46,9 @@ export const STRING_KEYS = [
     'ui_canvas_no_check', 'ui_canvas_inspect_note',
 ];
 
+/** Colours of the subnets on L3, in the order of the subnets. */
+const NET_COLORS = ['#73c7ed', '#60dfaf', '#f0bd73', '#da9fe8', '#ff9f8f', '#b7e07a', '#8bb5fa', '#f2a5c8', '#7fe0d6', '#e6d27a'];
+
 /** Top of the HUD controls under the layer note, in pixels of the scheme area (styles.css .hud-tools). */
 const TOOLS_TOP = 106;
 
@@ -157,12 +160,15 @@ export class CanvasView {
 
     renderL3() {
         const s = this.stage;
-        this.subnets.forEach(x => {
+        this.subnets.forEach((x, index) => {
             x.edges = [];
+            // Each subnet has its own colour, as each VLAN on L2: the pill, its lines and its address labels.
+            const color = NET_COLORS[index % NET_COLORS.length];
             x.members.forEach(m => {
                 const n = s.model.nodes.get(m.nodeId);
                 const line = el('line', {x1: n.cx, y1: n.cy, x2: x.cx, y2: x.cy, class: 'subnet-edge dimmable' + (m.down || m.dup ? ' down' : ''),
                     'data-subnet': x.key}, s.L.l3);
+                line.style.setProperty('--net-color', color);
                 const group = el('g', {class: 'auto-label dimmable', 'data-priority': 2, 'data-subnet': x.key}, s.L.l3);
                 const label = el('text', {x: n.cx + (x.cx - n.cx) * .4, y: n.cy + (x.cy - n.cy) * .4 - 5 / s.view.k, class: 'pip'}, group);
                 label.textContent = this.portText(n, m.iface) + ' · ' + m.c.ip;
@@ -170,10 +176,19 @@ export class CanvasView {
             });
             const g = el('g', {class: 'subnet-object dimmable' + (x.issues.length ? ' warn' : ''), transform: `translate(${x.cx} ${x.cy})`,
                 'data-subnet': x.key, tabindex: '0', role: 'button', 'aria-label': x.key + ', ' + x.members.length + ' ' + s.s('ui_canvas_interfaces')}, s.L.l3);
+            g.style.setProperty('--net-color', color);
+            const title = (x.issues.length ? '! ' : '') + x.key;
+            // Compact pill in screen pixels: the address and an "i" that opens the card (a tap on the pill only selects).
+            x.hw = Math.round((title.length * 6.2 + 12 + 22) / 2); x.hh = 11;
             const pill = el('g', {class: 'subnet-pill', transform: `scale(${1 / s.view.k})`}, g);
-            el('rect', {x: -78, y: -16, width: 156, height: 32, rx: 9}, pill);
-            el('text', {y: 1}, pill).textContent = (x.issues.length ? '! ' : '') + x.key;
-            x.g = g; s.grow(x.x - 78, x.y - 16, x.x + 78, x.y + 16);
+            el('rect', {x: -x.hw, y: -x.hh, width: 2 * x.hw, height: 2 * x.hh, rx: x.hh}, pill);
+            el('text', {x: -8, y: 1}, pill).textContent = title;
+            const info = el('g', {class: 'subnet-info', 'data-subnet-info': x.key, transform: `translate(${x.hw - 12} 0)`}, pill);
+            el('circle', {r: 13, class: 'hit'}, info);
+            el('circle', {r: 7.5, class: 'dot'}, info);
+            el('text', {y: 1}, info).textContent = 'i';
+            el('title', {}, info).textContent = s.s('ui_act_info');
+            x.g = g; s.grow(x.x - x.hw, x.y - x.hh, x.x + x.hw, x.y + x.hh);
         });
     }
 
@@ -252,14 +267,14 @@ export class CanvasView {
             for (const r of [24, 48, 80, 120, 176, 240]) for (let a = 0; a < 360; a += 45) offsets.push([r * Math.cos(a * Math.PI / 180), r * Math.sin(a * Math.PI / 180)]);
             const offscreen = origin.x < -80 || origin.x > w + 80 || origin.y < -20 || origin.y > h + 20;
             const offset = offscreen ? [0, 0] : offsets.find(([dx, dy]) => {
-                const b = {x: origin.x + dx - 78, y: origin.y + dy - 16, w: 156, h: 32};
+                const b = {x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh};
                 return b.x >= 8 && b.y >= 8 && b.x + b.w <= w - 8 && b.y + b.h <= h - 8 && !busy.some(o => intersects(b, o));
             });
             x.g.style.display = offset ? '' : 'none'; x.g.setAttribute('tabindex', offset ? '0' : '-1');
             const [dx, dy] = offset || [0, 0]; x.cx = x.x + dx / k; x.cy = x.y + dy / k;
             x.g.setAttribute('transform', `translate(${x.cx} ${x.cy})`);
             x.g.querySelector('.subnet-pill').setAttribute('transform', `scale(${1 / k})`);
-            if (offset && !offscreen) busy.push({x: origin.x + dx - 78, y: origin.y + dy - 16, w: 156, h: 32});
+            if (offset && !offscreen) busy.push({x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh});
             x.edges.forEach(({line, label, node}) => {
                 line.style.display = offset ? '' : 'none'; label.parentNode.style.display = offset ? '' : 'none';
                 line.setAttribute('x2', x.cx); line.setAttribute('y2', x.cy);
