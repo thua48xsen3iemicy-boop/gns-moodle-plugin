@@ -1015,6 +1015,8 @@ export class Consoles {
         }
         this.box.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
         this.box.style.gridTemplateRows = `repeat(${Math.ceil(n / cols)}, minmax(0, 1fr))`;
+        // One row of tiles: the scheme tile can reach the bottom edge as in the other modes (styles.css).
+        this.box.dataset.rows = Math.ceil(n / cols);
         this.cons.forEach(c => {
             const t = hel('div', 'tile', this.grid);
             t.dataset.id = c.n.id;
