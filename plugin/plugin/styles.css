@@ -4176,7 +4176,9 @@ body.gns3lab-fullscreen {
 .gns3lab-student.canvas-ui .pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .pdot.down{fill:var(--bad)}
 .gns3lab-student.canvas-ui .pdot.unknown{fill:var(--off)}
-.gns3lab-student.canvas-ui .plabel{font:500 9px var(--mono);font-size:calc(11px * var(--inv,1));fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .plabel-bg{fill:#0e2430;stroke:#3d6270;stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+.gns3lab-student.canvas-ui .link.down .plabel-bg{stroke:var(--bad)}
+.gns3lab-student.canvas-ui .plabel{font:600 9px var(--mono);font-size:calc(11px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .pip{font:500 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .node{cursor:pointer;-webkit-touch-callout:none}
 .gns3lab-student.canvas-ui .node:focus{outline:none}
@@ -4436,8 +4438,8 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .drawing line{stroke-width:1;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .wire{stroke:#557e8e;stroke-width:2.3}
 .gns3lab-student.canvas-ui .duplex{display:none;pointer-events:none}
-.gns3lab-student.canvas-ui [data-factlayer="l1"] .duplex{display:inline}
-.gns3lab-student.canvas-ui [data-factlayer="l1"] .physical-wire{display:none}
+.gns3lab-student.canvas-ui [data-factlayer="l1"][data-duplex="on"] .duplex{display:inline}
+.gns3lab-student.canvas-ui [data-factlayer="l1"][data-duplex="on"] .physical-wire{display:none}
 .gns3lab-student.canvas-ui .duplex .wire{stroke-width:1.4}
 .gns3lab-student.canvas-ui .link.sel .duplex .wire,
 .gns3lab-student.canvas-ui .link:focus-visible .duplex .wire{stroke-width:1.6}

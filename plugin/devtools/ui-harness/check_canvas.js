@@ -262,7 +262,7 @@ async function captureStage(page) {
         });
         geometry.forEach(r => {
             assert.ok(r.valid, `TX → RX: ${r.angle}°, zoom ${r.k}`);
-            assert.ok(near(r.dot, 6.4) && near(r.font, 11), JSON.stringify(r));
+            assert.ok(near(r.dot, 9) && near(r.font, 11), JSON.stringify(r));
             assert.ok(near(r.filter, 16), JSON.stringify(r));
             assert.equal(r.effect, 'non-scaling-stroke');
             assert.ok(parseFloat(r.stroke) <= 1.6);

@@ -45,7 +45,7 @@ import {buildModel, clamp, esc, fmtFilters} from 'mod_gns3lab/model';
 import {svgEl as el, store, fill} from 'mod_gns3lab/dom';
 import {derive, endIf, endState} from 'mod_gns3lab/facts';
 import {drawModel, layerModel} from 'mod_gns3lab/reveal';
-import {CanvasView} from 'mod_gns3lab/canvasview';
+import {CanvasView, PORT_DOT} from 'mod_gns3lab/canvasview';
 
 const KMIN = 0.22, KMAX = 6;
 
@@ -569,7 +569,7 @@ export class Stage {
             const portState = endState(this.der, e);
             const bad = this.endDown(e);
             const old = (portState && portState.live ? portState.unknown : this.factsFailed(e.nodeId)) ? ' fstale' : '';
-            el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: 3.2, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
+            el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: PORT_DOT, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
             if (!this.endShown(e)) return;
             const px = x + ux * d, py = y + uy * d;
             el('text', {x: px, y: py + 3, class: 'plabel l1'}, G).textContent = e.text;
@@ -594,7 +594,6 @@ export class Stage {
             el('use', {href: `#${this.prefix}-ico-${sil ? 'unknown' : n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
             const label = el('g', {class: 'auto-label', 'data-priority': 0}, g);
             const title = el('text', {y: L === 'l2' ? 23 : 25, class: 'nname'}, label);
-            el('tspan', {class: 'sdot', 'aria-hidden': 'true'}, title).textContent = '● ';
             el('tspan', {}, title).textContent = sil ? this.s('ui_fog_unknown') : n.name;
             const bd = el('g', {class: 'cbadge', transform: 'translate(-22 -21)'}, g);
             el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, bd);
