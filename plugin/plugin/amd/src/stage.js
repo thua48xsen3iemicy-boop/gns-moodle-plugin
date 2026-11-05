@@ -154,8 +154,6 @@ export class Stage {
         this.svg = r('svg');
         this.vp = r('vp');
         this.dots = r('dots');
-        this.dotsMajor = r('dotsMajor');
-        this.dotsMinor = r('dotsMinor');
         this.ov = r('ov');
         this.L = {draw: r('lyrDraw'), links: r('lyrLinks'), labels: r('lyrLabels'), nodes: r('lyrNodes'), cards: r('lyrCards'), l2: r('lyrL2'), l3: r('lyrL3'), leads: r('lyrLabelLeads')};
         // The lab as it is built from the .gns3 (`base`), as it is drawn (`model`: no hidden node, only the uncovered cables)
@@ -634,13 +632,6 @@ export class Stage {
         const v = this.view;
         this.vp.setAttribute('transform', `translate(${v.tx} ${v.ty}) scale(${v.k})`);
         this.dots.setAttribute('patternTransform', `translate(${v.tx} ${v.ty}) scale(${v.k})`);
-        // Two grids of dots, as in design tools: every fifth dot stays, the fine ones fade in as the scheme comes closer.
-        if (this.dotsMajor) {
-            this.dotsMajor.setAttribute('patternTransform', `translate(${v.tx} ${v.ty}) scale(${v.k})`);
-            // The steady dots keep 1.1-2.4 px on the screen at any zoom.
-            this.dotsMajor.firstElementChild.setAttribute('r', clamp(1.9, 1.1 / v.k, 2.4 / v.k).toFixed(3));
-        }
-        if (this.dotsMinor) this.dotsMinor.style.opacity = clamp((24 * v.k - 7) / 11, 0, 1).toFixed(3);
         this.svg.style.setProperty('--inv', (1 / v.k).toFixed(4));
         const nl = this.lodOf(v.k);
         if (nl !== this.lod) {
@@ -717,25 +708,6 @@ export class Stage {
             }
         };
         this.anim = requestAnimationFrame(step);
-    }
-
-    /**
-     * A faint ring under the pointer for a wheel notch: it opens when zooming in and closes when zooming out.
-     *
-     * @param {{x: number, y: number}} p pointer in the coordinates of the scheme area
-     * @param {boolean} zoomIn direction
-     */
-    wheelRipple(p, zoomIn) {
-        const now = performance.now();
-        if (this.reduced || now - (this.rippleAt || 0) < 140) return;
-        this.rippleAt = now;
-        const ring = document.createElement('div');
-        ring.className = 'zoom-ripple ' + (zoomIn ? 'in' : 'out');
-        ring.setAttribute('aria-hidden', 'true');
-        ring.style.left = p.x + 'px';
-        ring.style.top = p.y + 'px';
-        ring.addEventListener('animationend', () => ring.remove());
-        this.wrap.appendChild(ring);
     }
 
     zoomAt(sx, sy, f) {
@@ -1056,7 +1028,6 @@ export class Stage {
                 return;
             }
             this.wheelGlide(p, f);
-            this.wheelRipple(p, f > 1);
         }, {passive: false});
         // A node reached with the keyboard is selected; a click selects by itself (and a right click opens the wheel).
         svg.addEventListener('focusin', e => {

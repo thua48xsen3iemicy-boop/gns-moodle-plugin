@@ -97,7 +97,6 @@
             <svg class="scene" data-region="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
                 <defs>
                     <pattern data-region="dots" id="{{uniqid}}-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle class="dots" cx="1.2" cy="1.2" r="1.2"/></pattern>
-                    <pattern data-region="dotsMajor" id="{{uniqid}}-dots-major" width="120" height="120" patternUnits="userSpaceOnUse"><circle class="dots dots-major" cx="1.2" cy="1.2" r="1.9"/></pattern>
                     {{> mod_gns3lab/canvas_icons }}
                     <symbol id="{{uniqid}}-act-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15.5H17"/></symbol>
                     <symbol id="{{uniqid}}-act-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></symbol>
@@ -105,8 +104,7 @@
                     <symbol id="{{uniqid}}-act-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
                     <symbol id="{{uniqid}}-act-free" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" stroke-dasharray="2.6 3"/><path d="M12 9v6M9 12h6"/></symbol>
                 </defs>
-                <rect data-region="dotsMinor" width="100%" height="100%" fill="url(#{{uniqid}}-dots)"/>
-                <rect width="100%" height="100%" fill="url(#{{uniqid}}-dots-major)"/>
+                <rect width="100%" height="100%" fill="url(#{{uniqid}}-dots)"/>
                 <g data-region="vp">
                     <g data-region="lyrDraw"></g>
                     <g data-region="lyrLinks"></g>
