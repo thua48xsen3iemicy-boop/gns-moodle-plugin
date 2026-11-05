@@ -2245,6 +2245,9 @@ body.gns3lab-fullscreen {
     min-width: 0;
     overflow: hidden;
     padding: 6px 4px 4px 10px;
+    /* The fit addon of xterm takes the height of this element as the room for rows: with border-box (Bootstrap) it
+       would count the padding too, and the last row, the one with the prompt, would hide under the bar. */
+    box-sizing: content-box;
 }
 .gns3lab-student .termhost .xterm {
     height: 100%;
@@ -2491,6 +2494,56 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-student .tf-btn[aria-disabled="true"]:hover {
     background: transparent;
+}
+/* the fold button at the end of the bar; a folded bar is a thin strip with this button only */
+.gns3lab-student .tbar-fold {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin-left: auto;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--term-dim);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.gns3lab-student .tbar-fold svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform .15s;
+}
+.gns3lab-student .tbar-fold:hover {
+    border-color: var(--term-line);
+    color: var(--term-fg);
+}
+.gns3lab-student .tbar-fold:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+.gns3lab-student .tbar.folded {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+.gns3lab-student .tbar.folded > :not(.tbar-fold) {
+    display: none;
+}
+.gns3lab-student .tbar.folded .tbar-fold {
+    width: 44px;
+    height: 16px;
+    border-radius: 0 0 6px 6px;
+}
+.gns3lab-student .tbar.folded .tbar-fold svg {
+    transform: rotate(180deg);
 }
 /* the snippet menu and the hint over a pinned snippet: dark in both themes, like the terminal */
 .gns3lab-student .snipmenu,
@@ -2743,6 +2796,14 @@ body.gns3lab-fullscreen {
     .gns3lab-student .tf-btn {
         min-width: 36px;
         height: 36px;
+    }
+    .gns3lab-student .tbar-fold {
+        width: 36px;
+        height: 36px;
+    }
+    .gns3lab-student .tbar.folded .tbar-fold {
+        width: 56px;
+        height: 22px;
     }
     .gns3lab-student .sm-item {
         padding: 8px 4px 8px 8px;
@@ -4376,7 +4437,8 @@ from{transform:scale(.55);opacity:0}
 .termhost{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0}
 .gns3lab-student.canvas-ui .termview{flex:1;min-height:0;min-width:0;overflow:hidden;padding:6px 4px 4px 10px}
 .gns3lab-student.canvas-ui .termhost .xterm{height:100%}
-.gns3lab-student.canvas-ui .snips{display:flex;align-items:center;gap:6px;flex:none;overflow-x:auto;padding:7px 10px;background:var(--term-bg);border-top:1px solid var(--term-line);scrollbar-width:thin;scrollbar-color:var(--term-line) transparent}
+/* the strip sits inside .tbar: it shrinks and scrolls, so the font size and the fold button stay on the bar */
+.gns3lab-student.canvas-ui .snips{display:flex;align-items:center;gap:6px;flex:1;min-width:0;overflow-x:auto;padding:2px 0;scrollbar-width:none}
 .gns3lab-student.canvas-ui .snips .lbl{flex:none;color:var(--term-dim);font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em}
 .gns3lab-student.canvas-ui .snip{flex:none;min-height:32px;padding:0 10px;border:1px dashed var(--term-line);border-radius:6px;background:transparent;color:var(--term-fg);font:500 11.5px var(--mono);cursor:pointer;touch-action:manipulation}
 .gns3lab-student.canvas-ui .snip:hover{background:var(--term-line)}
