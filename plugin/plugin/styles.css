@@ -4468,6 +4468,10 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="trunk"] .wire{stroke:#98aaf5}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] .link .wire{stroke:#73b5df}
 .gns3lab-student.canvas-ui [data-factlayer="l4"] [data-region="vp"]{opacity:.54}
+/* The scheme is pale while the lab of the student is not running (not started, starting, stopping, stopped, failed). */
+.gns3lab-student.canvas-ui [data-region="vp"] > g{transition:opacity .4s ease,filter .4s ease}
+.gns3lab-student.canvas-ui[data-session]:not([data-session="running"]) [data-region="vp"] > g{opacity:.38;filter:saturate(.25)}
+@media(prefers-reduced-motion:reduce){.gns3lab-student.canvas-ui [data-region="vp"] > g{transition:none}}
 .gns3lab-student.canvas-ui [data-factlayer="l2"] .layer-vlan,
 .gns3lab-student.canvas-ui [data-factlayer="l3"] .l2{visibility:visible;opacity:1}
 .gns3lab-student.canvas-ui .l2-scene{display:none;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .36s ease,visibility .36s}
