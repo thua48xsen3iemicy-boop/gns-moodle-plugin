@@ -127,16 +127,11 @@ export class CanvasView {
                 'aria-label': s.model.nodes.get(link.a.nodeId).name + ' ↔ ' + s.model.nodes.get(link.b.nodeId).name + ' · ' + (vlan == null ? 'p2p' : 'VLAN ' + vlan)}, lines);
             g.style.setProperty('--vlan-color', color(vlan));
             el('path', {d, class: 'hit'}, g); el('path', {d, class: 'stroke'}, g);
-            // Host ports read as on the other layers (E0.10), devices keep their own names.
-            const shown = (end, iface, fallback) => !s.endShown(end) ? '?' : iface ? this.portText(s.model.nodes.get(end.nodeId), iface) : fallback;
-            const aname = shown(link.a, segment.aif, segment.aname), bname = shown(link.b, segment.bif, segment.bname);
-            // A plain point-to-point segment needs no caption: the line says it all.
+            // The colour tells the VLAN and the pill the details: a line carries a caption only for a problem.
             const caption = segment.mismatch ? `native VLAN ${va.split('|')[2]} ↔ ${vb.split('|')[2]} !`
-                : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : vlan == null ? ''
-                : segment.unknown ? `VLAN ${vlan} · ${s.s('ui_canvas_unknown')}` : aname.includes('.') ? `${aname} · ${vlan}`
-                : bname.includes('.') ? `${bname} · ${vlan}` : 'VLAN ' + vlan;
+                : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : '';
             if (caption) {
-                const label = el('g', {class: 'auto-label', 'data-priority': segment.blocked || segment.mismatch ? 1 : 3}, g);
+                const label = el('g', {class: 'auto-label', 'data-priority': 1}, g);
                 el('text', {x: mx, y: my - 7, class: 'caption'}, label).textContent = caption;
             }
             segment.g = g;
