@@ -2910,8 +2910,8 @@ body.gns3lab-fullscreen {
     border-radius: 8px;
     overflow: hidden;
 }
-.gns3lab-student .tile.focus,
-.gns3lab-student .win.focus {
+.gns3lab-student .tile.focus:focus-within,
+.gns3lab-student .win.focus:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
 }
@@ -4143,7 +4143,8 @@ body.gns3lab-fullscreen {
 .gns3lab-student.canvas-ui .stage[data-mode="panel"] .dock{display:flex;flex-direction:column;flex:none;width:var(--dockw,44%);min-width:320px;max-width:72%;background:var(--term-bg)}
 .gns3lab-student.canvas-ui .stage[data-mode="grid"]{display:grid;gap:8px;padding:8px;grid-auto-rows:minmax(0,1fr)}
 .gns3lab-student.canvas-ui .stage[data-mode="grid"] .grid{display:contents}
-.gns3lab-student.canvas-ui .stage[data-mode="grid"] .wrap{order:-1;border:1px solid var(--line);border-radius:8px}
+/* The scheme tile sits flush with the top left corner as in the other modes, so the HUD on it does not move between modes. */
+.gns3lab-student.canvas-ui .stage[data-mode="grid"] .wrap{order:-1;margin:-8px 0 0 -8px;border:solid var(--line);border-width:0 1px 1px 0;border-radius:0 0 8px 0}
 .gns3lab-student.canvas-ui /* topology */
 [data-region="svg"]{display:block;width:100%;height:100%;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .gns3lab-student.canvas-ui [data-region="svg"].dragging{cursor:grabbing}
@@ -4360,8 +4361,9 @@ from{transform:scale(.55);opacity:0}
 .gns3lab-student.canvas-ui .empty b{color:var(--term-fg);font-weight:600}
 .gns3lab-student.canvas-ui .tile,
 .gns3lab-student.canvas-ui .win{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--term-bg);border:1px solid var(--term-line);border-radius:8px;overflow:hidden}
-.gns3lab-student.canvas-ui .tile.focus,
-.gns3lab-student.canvas-ui .win.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+/* Only the console that really has the keyboard is outlined: focus on the scheme or a panel takes the outline away. */
+.gns3lab-student.canvas-ui .tile.focus:focus-within,
+.gns3lab-student.canvas-ui .win.focus:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .gns3lab-student.canvas-ui .tile.max{position:absolute;inset:8px;z-index:6}
 .gns3lab-student.canvas-ui .thead{display:flex;align-items:center;gap:8px;height:32px;padding:0 4px 0 11px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;
   font:600 13px var(--display);color:var(--fg);user-select:none;-webkit-user-select:none}
