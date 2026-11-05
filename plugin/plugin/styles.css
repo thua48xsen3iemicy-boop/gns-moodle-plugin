@@ -4365,6 +4365,12 @@ from{transform:scale(.55);opacity:0}
 .gns3lab-student.canvas-ui .tile.focus:focus-within,
 .gns3lab-student.canvas-ui .win.focus:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .gns3lab-student.canvas-ui .tile.max{position:absolute;inset:8px;z-index:6}
+/* A console spread over the whole scheme by a double click on its title: the scheme stays alive underneath. */
+.gns3lab-student.canvas-ui .stage[data-mode="panel"] .dock.max{position:absolute;inset:0;width:auto;max-width:none;z-index:20}
+.gns3lab-student.canvas-ui .win.max{left:8px!important;top:8px!important;width:calc(100% - 16px)!important;height:calc(100% - 16px)!important;resize:none;z-index:9999!important}
+.gns3lab-student.canvas-ui .win.max .thead{cursor:default}
+.gns3lab-student.canvas-ui .stage.con-max .ov{visibility:hidden}
+.gns3lab-student.canvas-ui .stage.con-max .wins{z-index:30}
 .gns3lab-student.canvas-ui .thead{display:flex;align-items:center;gap:8px;height:32px;padding:0 4px 0 11px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;
   font:600 13px var(--display);color:var(--fg);user-select:none;-webkit-user-select:none}
 .gns3lab-student.canvas-ui .thead .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
