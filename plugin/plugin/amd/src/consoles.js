@@ -73,6 +73,14 @@ const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: '
  * Ctrl+Alt+Del and Paste instead of snippets and font size. The views do not tell them apart: both have a host,
  * a connection in `conn` and the same methods.
  */
+/**
+ * Whether a key press moves between the open consoles: Shift+Left or Shift+Right, with no other modifier.
+ *
+ * @param {KeyboardEvent} e key event
+ * @returns {boolean}
+ */
+const cycleKey = e => e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight');
+
 class Con {
     /**
      * Constructor.
@@ -495,6 +503,12 @@ class Con {
             }
             if (event.ctrlKey && event.shiftKey && (event.code === 'Digit6' || event.key === '^')) {
                 this.send('\x1e');
+                return false;
+            }
+            // Shift+Left / Shift+Right move to the previous / next open console, as in Konsole; the device never sees them.
+            if (cycleKey(event)) {
+                event.preventDefault();
+                o.cycle(event.key === 'ArrowLeft' ? -1 : 1);
                 return false;
             }
             return true;
@@ -1392,6 +1406,12 @@ export class Consoles {
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape' && !this.stage.mobile) this.unmax();
         });
+        // Shift+Left / Shift+Right also work from the buttons of a console; a terminal handles them itself (addKeyHandler).
+        this.root.addEventListener('keydown', e => {
+            if (!cycleKey(e) || e.target.closest('.xterm') || !e.target.closest('.tile,.win,.dock,.dive')) return;
+            e.preventDefault();
+            this.cycle(e.key === 'ArrowLeft' ? -1 : 1);
+        });
         const vv = window.visualViewport;
         if (vv) {
             vv.addEventListener('resize', () => this.fitDive());
@@ -1414,6 +1434,45 @@ export class Consoles {
                 this.exitDive(true);
             }
         }, {passive: true});
+    }
+
+    /**
+     * Moves to the previous or the next open console, round, in the order they were opened, in every arrangement:
+     * the panel shows its tab, the grid and the windows give it the keyboard (a minimized window comes back, a window
+     * goes on top), a console spread over the scheme hands the spread over to it.
+     *
+     * @param {number} dir -1 previous, 1 next
+     */
+    cycle(dir) {
+        const list = Array.from(this.cons.values());
+        if (list.length < 2) return;
+        const at = Math.max(0, list.findIndex(c => c.n.id === this.active));
+        const c = list[(at + dir + list.length) % list.length];
+        this.active = c.n.id;
+        c.unread = false;
+        this.paintBadges(c);
+        if (this.stage.mobile) {
+            if (this.diving) this.enterDive(c);
+            return;
+        }
+        const spread = this.root.querySelector('.tile.max,.win.max');
+        if (this.mode === 'panel') {
+            this.renderPanel();
+        } else if (this.mode === 'windows' && c.min) {
+            if (spread) spread.classList.remove('max');
+            this.restoreWin(c);
+            if (spread) c.win.classList.add('max');
+            this.afterMax(c);
+            return;
+        } else if (this.mode === 'windows' && c.win) {
+            c.win.style.zIndex = ++this.zTop;
+        }
+        if (spread) {
+            const el = this.mode === 'windows' ? c.win : this.root.querySelector(`.tile[data-id="${CSS.escape(c.n.id)}"]`);
+            spread.classList.remove('max');
+            if (el) el.classList.add('max');
+        }
+        this.afterMax(c);
     }
 
     /**
