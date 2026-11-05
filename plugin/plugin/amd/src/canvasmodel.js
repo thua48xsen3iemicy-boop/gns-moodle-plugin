@@ -131,7 +131,7 @@ export const canvasL2 = stage => {
             const name = (wire, iface) => port(wire, iface)?.name || '?';
             segments.push({id: link.id + '|' + tag, link, tag, va, vb, vlan, active: accepted,
                 blocked, mismatch, unknown: !r.known || der.l1.links.get(link.id).unknown,
-                aname: name(wa, ia), bname: name(wb, ib), aif: port(wa, ia), bif: port(wb, ib), domain: accepted ? der.l2.domOf.get(va) : null});
+                aname: name(wa, ia), bname: name(wb, ib), domain: accepted ? der.l2.domOf.get(va) : null});
         });
     });
     layoutVlans(model, vlans).forEach(({orig, items}) => items.forEach(({vlan, x, y, w}) => {
