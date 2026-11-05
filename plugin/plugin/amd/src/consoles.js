@@ -1023,6 +1023,7 @@ export class Consoles {
             hd.innerHTML = this.headHtml(c, `<button type="button" data-max title="${esc(this.s('ui_maximize'))}">${ICON_MAX}</button><button type="button" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</button>`);
             const b = hel('div', 'tbody', t);
             hd.title = this.s('ui_max_title');
+            this.focusOnTitle(c, hd);
             hd.addEventListener('dblclick', e => {
                 if (!e.target.closest('button')) this.toggleMax(t);
             });
@@ -1060,6 +1061,7 @@ export class Consoles {
                 });
                 this.dragWin(c, hd);
                 hd.title = this.s('ui_max_title');
+                this.focusOnTitle(c, hd);
                 hd.addEventListener('dblclick', e => {
                     if (!e.target.closest('button')) this.toggleMax(w);
                 });
@@ -1091,6 +1093,22 @@ export class Consoles {
             if (!this.cons.has(w.dataset.id)) w.remove();
         });
         this.markFocus();
+    }
+
+    /**
+     * A click on the title of a tile or a window gives that console the keyboard: the title itself takes no input, so
+     * without this the press only took the focus away from the terminal. After a drag of a window as well.
+     *
+     * @param {object} c console
+     * @param {HTMLElement} hd its title bar
+     */
+    focusOnTitle(c, hd) {
+        hd.addEventListener('click', e => {
+            if (e.target.closest('button')) return;
+            this.active = c.n.id;
+            this.markFocus();
+            c.focus();
+        });
     }
 
     dragWin(c, hd) {
