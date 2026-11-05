@@ -85,7 +85,6 @@
                 <button type="button" data-mode="windows" aria-pressed="false" title="{{#str}}ui_mode_windows_help, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="9" height="7" rx="1"/><rect x="5.5" y="7.5" width="9" height="7" rx="1"/></svg><span class="wide">{{#str}}ui_mode_windows, mod_gns3lab{{/str}}</span></button>
             </div>
             <button class="btn" type="button" data-region="asStudent" aria-pressed="false" hidden title="{{#str}}ui_as_student_help, mod_gns3lab{{/str}}">{{#str}}ui_as_student, mod_gns3lab{{/str}}</button>
-            <button class="btn" type="button" data-region="helpBtn" title="{{#str}}ui_help_help, mod_gns3lab{{/str}}">?<span class="wide">{{#str}}ui_help, mod_gns3lab{{/str}}</span></button>
             {{#cancontrol}}
             <button class="btn primary" type="button" data-region="start" hidden>{{#str}}startlab, mod_gns3lab{{/str}}</button>
             <button class="btn danger" type="button" data-region="stop" hidden><span class="wide">{{#str}}stoplab, mod_gns3lab{{/str}}</span><span class="narrow">{{#str}}ui_stop_short, mod_gns3lab{{/str}}</span></button>
@@ -183,45 +182,6 @@
         </div>
     </div>
     {{/cancontrol}}
-
-    <div class="help" data-region="help" hidden>
-        <div class="helpcard" role="dialog" aria-modal="true" aria-labelledby="{{uniqid}}-helpT">
-            <div class="dh">
-                <div><h2 id="{{uniqid}}-helpT">{{#str}}ui_help_title, mod_gns3lab{{/str}}</h2><p>{{#str}}ui_help_lead, mod_gns3lab{{/str}}</p></div>
-                <button class="ib" type="button" data-region="helpClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
-            </div>
-            <div class="lvls">
-                <div><b>{{#str}}ui_lod0, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod0, mod_gns3lab{{/str}}</div>
-                <div><b>{{#str}}ui_lod1, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod1, mod_gns3lab{{/str}}</div>
-                <div><b>{{#str}}ui_lod2, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod2, mod_gns3lab{{/str}}</div>
-                <div><b>{{#str}}ui_lod3, mod_gns3lab{{/str}}</b>{{#str}}ui_help_lod3, mod_gns3lab{{/str}}</div>
-            </div>
-            <div class="cols">
-                <div>
-                    <h3>{{#str}}ui_help_phone, mod_gns3lab{{/str}}</h3>
-                    <dl>
-                        <dt>{{#str}}ui_help_p1t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p1, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_p2t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p2, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_p3t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p3, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_p4t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p4, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_p5t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_p5, mod_gns3lab{{/str}}</dd>
-                    </dl>
-                </div>
-                <div>
-                    <h3>{{#str}}ui_help_desktop, mod_gns3lab{{/str}}</h3>
-                    <dl>
-                        <dt>{{#str}}ui_help_d1t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d1, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_d2t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d2, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_d3t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d3, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_d4t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d4, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_d5t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d5, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_d6t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d6, mod_gns3lab{{/str}}</dd>
-                        <dt>{{#str}}ui_help_d7t, mod_gns3lab{{/str}}</dt><dd>{{#str}}ui_help_d7, mod_gns3lab{{/str}}</dd>
-                    </dl>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 {{#js}}
 require(['mod_gns3lab/lab'], function(lab) {

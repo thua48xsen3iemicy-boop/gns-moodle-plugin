@@ -22,7 +22,7 @@
  *
  * Hooks (all optional):
  * - select(sel)            the user changed the selection; sel is {kind, id} or null;
- * - details(sel)           the user asked for the details of a link, subnet or adjacency;
+ * - details(sel)           the user asked for the details of an object (a click on a subnet or adjacency, Enter);
  * - console(node)          badge, preview or double click: open the console of the node;
  * - nodeAction(node)       Enter on a node;
  * - diveCandidate(node)    pinch on a phone reached a node that has a console (null: no longer);
@@ -1115,9 +1115,9 @@ export class Stage {
                 else this.call('console', n);
                 return;
             }
+            // A click only selects: the card opens from the action wheel ("Details").
             this.call('closeOverlays');
             this.select({kind: 'node', id: n.id});
-            this.call('details', this.sel);
             return;
         }
         const sub = near('[data-subnet]'), adj = near('[data-adj]'), linkEl = near('[data-link]');
@@ -1129,8 +1129,10 @@ export class Stage {
                 if (l) this.zoomToLink(l);
                 return;
             }
+            this.call('closeOverlays');
             this.select(obj);
-            this.call('details', obj);
+            // Nodes and links have the action wheel for their card; the other objects have no wheel.
+            if (obj.kind !== 'link') this.call('details', obj);
             return;
         }
         this.select(null);

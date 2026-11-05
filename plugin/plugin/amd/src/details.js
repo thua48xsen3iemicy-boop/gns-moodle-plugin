@@ -86,7 +86,6 @@ export class Details {
         this.stage.r('chip').hidden = true;
         const focusInside = this.el.contains(document.activeElement);
         this.el.textContent = '';
-        const lead = el('line', {class: 'card-lead'}, this.el), anchor = el('circle', {r: 5, class: 'card-anchor'}, this.el);
         const card = el('g', {class: 'info-card'}, this.el), foreign = el('foreignObject', {}, card);
         const html = document.createElementNS('http://www.w3.org/1999/xhtml', 'section');
         html.setAttribute('class', 'object-card'); html.setAttribute('aria-label', data.title);
@@ -125,7 +124,7 @@ export class Details {
         html.querySelector('.mac-toggle')?.addEventListener('click', () => { this.panel = this.panel === 'mac' ? 'ports' : 'mac'; this.render(); this.el.querySelector('.mac-toggle').focus(); });
         this.bindNavigation(html);
         html.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { this.hide(); this.stage.select(null); this.stage.svg.focus(); } });
-        this.shape = {data, foreign, card, lead, anchor};
+        this.shape = {data, foreign, card};
         this.position();
         if (focusInside) this.el.querySelector(`[data-card-layer="${this.layer}"]`).focus();
         this.stage.canvas.scheduleLabels();
@@ -155,8 +154,6 @@ export class Details {
         }
         c.foreign.setAttribute('width', w); c.foreign.setAttribute('height', h);
         c.card.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-        Object.entries({x1: p.x, y1: p.y, x2: clamp(p.x, x, x + w), y2: clamp(p.y, y, y + h)}).forEach(([k, v]) => c.lead.setAttribute(k, v));
-        c.anchor.setAttribute('cx', p.x); c.anchor.setAttribute('cy', p.y);
         s.canvas.scheduleLabels();
     }
     goto(selection) {

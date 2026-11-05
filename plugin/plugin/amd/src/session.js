@@ -46,7 +46,7 @@ const STAGES = [
 export const STRING_KEYS = [
     'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
     'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'managernotconfigured', 'labnotready',
-    'failedretry', 'failedadmin', 'stopconfirmtitle', 'stopconfirm', 'conflictlink',
+    'failedretry', 'failedadmin', 'stopconfirmtitle', 'stopconfirm', 'stopconfirmkept', 'conflictlink',
     ...STAGES.map(stage => 'stage_' + stage),
 ];
 
@@ -141,15 +141,14 @@ export class Session {
     }
 
     /**
-     * Stops the lab, asking first when the manager does not keep the work.
+     * Stops the lab after the user confirms: a stray click must not stop it.
      */
     async stop() {
-        if (!this.state.resume) {
-            try {
-                await saveCancelPromise(this.strings.stopconfirmtitle, this.strings.stopconfirm, this.strings.stoplab);
-            } catch (cancelled) {
-                return;
-            }
+        const text = this.state.resume ? this.strings.stopconfirmkept : this.strings.stopconfirm;
+        try {
+            await saveCancelPromise(this.strings.stopconfirmtitle, text, this.strings.stoplab);
+        } catch (cancelled) {
+            return;
         }
         await this.act('mod_gns3lab_stop_session');
     }
