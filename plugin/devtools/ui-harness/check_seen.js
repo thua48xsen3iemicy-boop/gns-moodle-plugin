@@ -133,6 +133,8 @@ async function run(page, command, prompt) {
         }
 
         const context = await browser.newContext({viewport: {width: 1440, height: 860}});
+        // The scenario reads the terminal of the one console on the screen: the panel mode (windows are the default).
+        await context.addInitScript(() => localStorage.setItem('gns3lab.mode', JSON.stringify('panel')));
         const page = await context.newPage();
         const problems = [];
         page.on('pageerror', e => problems.push('pageerror: ' + e.message));

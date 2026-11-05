@@ -1235,26 +1235,6 @@ body.gns3lab-fullscreen {
         opacity: .45;
     }
 }
-.gns3lab-student .card {
-    cursor: pointer;
-}
-.gns3lab-student .card .cbg {
-    fill: var(--term-bg);
-    stroke: var(--term-line);
-}
-.gns3lab-student .card .chd {
-    fill: var(--term-dim);
-    font-family: var(--mono);
-    font-weight: 600;
-}
-.gns3lab-student .card .cln {
-    fill: var(--term-fg);
-    font-family: var(--mono);
-    white-space: pre;
-}
-.gns3lab-student .card .cpt {
-    fill: var(--wire);
-}
 .gns3lab-student .l1,
 .gns3lab-student .l2,
 .gns3lab-student .l3,
@@ -4220,11 +4200,6 @@ body.gns3lab-fullscreen {
 50%{opacity:.45}
 
 }
-.gns3lab-student.canvas-ui .card{cursor:pointer}
-.gns3lab-student.canvas-ui .card .cbg{fill:var(--term-bg);stroke:var(--term-line)}
-.gns3lab-student.canvas-ui .card .chd{fill:var(--term-dim);font-family:var(--mono);font-weight:600}
-.gns3lab-student.canvas-ui .card .cln{fill:var(--term-fg);font-family:var(--mono);white-space:pre}
-.gns3lab-student.canvas-ui .card .cpt{fill:var(--wire)}
 .gns3lab-student.canvas-ui .l1,
 .gns3lab-student.canvas-ui .l2,
 .gns3lab-student.canvas-ui .l3,
@@ -4879,3 +4854,73 @@ from{transform:translateY(40%);opacity:.3}
     font-size: .8125rem;
 }
 
+
+/* Compact consoles with a mouse: a thin window frame, a low title bar and snippet bar, less padding. Touch screens keep
+   the larger targets above. */
+@media (pointer: fine) {
+    .gns3lab-student.canvas-ui .win {
+        border-radius: 6px;
+        box-shadow: 0 6px 18px rgb(0 0 0 / .28);
+    }
+    .gns3lab-student.canvas-ui .win.focus {
+        box-shadow: 0 6px 18px rgb(0 0 0 / .28);
+    }
+    .gns3lab-student.canvas-ui .thead {
+        height: 24px;
+        gap: 6px;
+        padding: 0 2px 0 8px;
+        font-size: 12px;
+    }
+    .gns3lab-student.canvas-ui .thead button {
+        width: 20px;
+        height: 20px;
+    }
+    .gns3lab-student.canvas-ui .thead svg {
+        width: 11px;
+        height: 11px;
+    }
+    .gns3lab-student.canvas-ui .termview {
+        padding: 3px 2px 2px 6px;
+    }
+    .gns3lab-student.canvas-ui .tbar {
+        gap: 5px;
+        padding: 2px 4px;
+    }
+    .gns3lab-student.canvas-ui .snips {
+        gap: 4px;
+        padding: 0;
+    }
+    .gns3lab-student.canvas-ui .snipbtn,
+    .gns3lab-student.canvas-ui .snip {
+        min-height: 22px;
+        padding: 0 8px;
+        gap: 5px;
+        font-size: 11px;
+    }
+    .gns3lab-student.canvas-ui .tf-btn,
+    .gns3lab-student.canvas-ui .tbar-fold {
+        min-width: 22px;
+        width: auto;
+        height: 22px;
+        padding: 0 5px;
+    }
+    .gns3lab-student.canvas-ui .tf-val {
+        min-width: 28px;
+    }
+}
+
+/* A thin cyan scrollbar in the terminals: standard properties, and the WebKit ones for Safari. */
+.gns3lab-student.canvas-ui .xterm .xterm-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--accent) 75%, transparent) transparent;
+}
+.gns3lab-student.canvas-ui .xterm .xterm-viewport::-webkit-scrollbar {
+    width: 6px;
+}
+.gns3lab-student.canvas-ui .xterm .xterm-viewport::-webkit-scrollbar-track {
+    background: transparent;
+}
+.gns3lab-student.canvas-ui .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 75%, transparent);
+    border-radius: 3px;
+}
