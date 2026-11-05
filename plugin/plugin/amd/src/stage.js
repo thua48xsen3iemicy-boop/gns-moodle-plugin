@@ -154,6 +154,8 @@ export class Stage {
         this.svg = r('svg');
         this.vp = r('vp');
         this.dots = r('dots');
+        this.dotsMajor = r('dotsMajor');
+        this.dotsMinor = r('dotsMinor');
         this.ov = r('ov');
         this.L = {draw: r('lyrDraw'), links: r('lyrLinks'), labels: r('lyrLabels'), nodes: r('lyrNodes'), cards: r('lyrCards'), l2: r('lyrL2'), l3: r('lyrL3'), leads: r('lyrLabelLeads')};
         // The lab as it is built from the .gns3 (`base`), as it is drawn (`model`: no hidden node, only the uncovered cables)
@@ -632,6 +634,13 @@ export class Stage {
         const v = this.view;
         this.vp.setAttribute('transform', `translate(${v.tx} ${v.ty}) scale(${v.k})`);
         this.dots.setAttribute('patternTransform', `translate(${v.tx} ${v.ty}) scale(${v.k})`);
+        // Two grids of dots, as in design tools: every fifth dot stays, the fine ones fade in as the scheme comes closer.
+        if (this.dotsMajor) {
+            this.dotsMajor.setAttribute('patternTransform', `translate(${v.tx} ${v.ty}) scale(${v.k})`);
+            // The steady dots keep 1.1-2.4 px on the screen at any zoom.
+            this.dotsMajor.firstElementChild.setAttribute('r', clamp(1.9, 1.1 / v.k, 2.4 / v.k).toFixed(3));
+        }
+        if (this.dotsMinor) this.dotsMinor.style.opacity = clamp((24 * v.k - 7) / 11, 0, 1).toFixed(3);
         this.svg.style.setProperty('--inv', (1 / v.k).toFixed(4));
         const nl = this.lodOf(v.k);
         if (nl !== this.lod) {
@@ -684,6 +693,49 @@ export class Stage {
             this.anim = p < 1 ? requestAnimationFrame(step) : null;
         };
         this.anim = requestAnimationFrame(step);
+    }
+
+    /**
+     * Glides to the zoom of a wheel notch around the pointer in about 150 ms; notches in a row add up.
+     *
+     * @param {{x: number, y: number}} p pointer in the coordinates of the scheme area
+     * @param {number} f zoom factor of this notch
+     */
+    wheelGlide(p, f) {
+        const v = this.view;
+        this.wheelK = clamp((this.wheelK || v.k) * f, KMIN, KMAX);
+        const step = () => {
+            const k = v.k + (this.wheelK - v.k) * 0.32;
+            const done = Math.abs(this.wheelK - k) / this.wheelK < 0.002;
+            this.zoomAt(p.x, p.y, (done ? this.wheelK : k) / v.k);
+            this.applyView();
+            if (done) {
+                this.wheelK = null;
+                this.anim = null;
+            } else {
+                this.anim = requestAnimationFrame(step);
+            }
+        };
+        this.anim = requestAnimationFrame(step);
+    }
+
+    /**
+     * A faint ring under the pointer for a wheel notch: it opens when zooming in and closes when zooming out.
+     *
+     * @param {{x: number, y: number}} p pointer in the coordinates of the scheme area
+     * @param {boolean} zoomIn direction
+     */
+    wheelRipple(p, zoomIn) {
+        const now = performance.now();
+        if (this.reduced || now - (this.rippleAt || 0) < 140) return;
+        this.rippleAt = now;
+        const ring = document.createElement('div');
+        ring.className = 'zoom-ripple ' + (zoomIn ? 'in' : 'out');
+        ring.setAttribute('aria-hidden', 'true');
+        ring.style.left = p.x + 'px';
+        ring.style.top = p.y + 'px';
+        ring.addEventListener('animationend', () => ring.remove());
+        this.wrap.appendChild(ring);
     }
 
     zoomAt(sx, sy, f) {
@@ -740,7 +792,9 @@ export class Stage {
             this.needFit = false;
             this.fit(false);
         }
-        if (this.lastSize && r.width && r.height) {
+        // The scheme holds on to its top left corner, so a change of the console mode only covers or uncovers its right
+        // part and the dots and nodes stay put. A phone keeps the centre (a turn of the device).
+        if (this.mobile && this.lastSize && r.width && r.height) {
             this.view.tx += (r.width - this.lastSize.w) / 2;
             this.view.ty += (r.height - this.lastSize.h) / 2;
             this.applyView();
@@ -988,11 +1042,21 @@ export class Stage {
         svg.addEventListener('pointercancel', end);
         svg.addEventListener('wheel', e => {
             e.preventDefault();
+            const pending = this.anim && this.wheelK;
             this.stopAnim();
+            if (!pending) this.wheelK = null;
             this.hideHint();
             const p = this.relPt(e), unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
-            this.zoomAt(p.x, p.y, Math.exp(-e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.0018)));
-            this.applyView();
+            const f = Math.exp(-e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.0018));
+            // A notch of a mouse wheel glides to its zoom; a touchpad and a pinch (small steps, Ctrl) follow the fingers.
+            if (this.reduced || e.ctrlKey || Math.abs(e.deltaY * unit) < 40) {
+                this.wheelK = null;
+                this.zoomAt(p.x, p.y, f);
+                this.applyView();
+                return;
+            }
+            this.wheelGlide(p, f);
+            this.wheelRipple(p, f > 1);
         }, {passive: false});
         // A node reached with the keyboard is selected; a click selects by itself (and a right click opens the wheel).
         svg.addEventListener('focusin', e => {
