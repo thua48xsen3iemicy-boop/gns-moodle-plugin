@@ -41,6 +41,7 @@ import {clamp, esc} from 'mod_gns3lab/model';
 const ICON_X = '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
 const ICON_MAX = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
 const ICON_MIN = '<svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg>';
+const ICON_FOLD = '<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>';
 const ICON_LIST = '<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>';
 
 /**
@@ -110,9 +111,10 @@ class Con {
         this.ro.observe(this.host);
     }
 
-    /** The bar under the terminal: the snippets menu, the pinned snippets, the font size. */
+    /** The bar under the terminal: the snippets menu, the pinned snippets, the font size, the fold button. */
     buildBar() {
         const o = this.owner, bar = hel('div', 'tbar', this.host);
+        this.bar = bar;
         bar.setAttribute('role', 'toolbar');
         bar.setAttribute('aria-label', fill(o.s('ui_snippets_for'), this.n.name));
         this.quick = hel('div', 'snips');
@@ -142,6 +144,41 @@ class Con {
         this.renderQuick();
         this.buildFont(bar);
         this.applyFont();
+        this.buildFold(bar);
+    }
+
+    /**
+     * The button at the end of the bar folds it to a thin strip and back: the terminal gets the room.
+     *
+     * @param {HTMLElement} bar Toolbar under the terminal.
+     */
+    buildFold(bar) {
+        const o = this.owner, b = hel('button', 'tbar-fold', bar);
+        b.type = 'button';
+        b.innerHTML = ICON_FOLD;
+        b.addEventListener('pointerdown', e => e.preventDefault());
+        b.addEventListener('click', () => {
+            o.foldBars(!o.barsFolded);
+            this.focus();
+        });
+        this.foldBtn = b;
+        this.applyFold();
+    }
+
+    /** Shows the bar folded or open, as the owner says. */
+    applyFold() {
+        if (!this.bar) return;
+        const o = this.owner, folded = o.barsFolded, label = o.s(folded ? 'ui_bar_show' : 'ui_bar_hide');
+        this.bar.classList.toggle('folded', folded);
+        this.foldBtn.setAttribute('aria-expanded', String(!folded));
+        this.foldBtn.setAttribute('aria-label', label);
+        this.foldBtn.title = label;
+        if (folded) {
+            o.snip.closeFor(this);
+            o.snip.hideTip();
+        }
+        this.refit();
+        requestAnimationFrame(() => this.fadeSnips());
     }
 
     /** The snippets pinned to the bar. */
@@ -642,6 +679,7 @@ export class Consoles {
         this.fonts = store.get('termfonts', {});
         if (!this.fonts || typeof this.fonts !== 'object' || Array.isArray(this.fonts)) this.fonts = {};
         this.pins = store.get('snippins', {});
+        this.barsFolded = store.get('tbarfolded', false) === true;
         this.snip = new SnipMenu(this);
         this.mode = store.get('mode', 'panel');
         if (!['panel', 'grid', 'windows'].includes(this.mode)) this.mode = 'panel';
@@ -730,6 +768,17 @@ export class Consoles {
         const keys = Object.keys(this.fonts);
         keys.slice(0, Math.max(0, keys.length - FONT_KEEP)).forEach(k => delete this.fonts[k]);
         store.set('termfonts', this.fonts);
+    }
+
+    /**
+     * Folds the bars under all terminals to a thin strip, or opens them; the choice stays in the browser.
+     *
+     * @param {boolean} folded Whether the bars are folded.
+     */
+    foldBars(folded) {
+        this.barsFolded = folded;
+        store.set('tbarfolded', folded);
+        this.cons.forEach(c => c.applyFold());
     }
 
     /**
