@@ -44,14 +44,17 @@ const ICON_MIN = '<svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg>';
 const ICON_LIST = '<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>';
 
 /**
- * Font sizes of the terminals, px. The choice is one for all consoles and stays in the browser: a student with weak
- * sight takes it larger, a student on a small screen smaller.
+ * Font sizes of the terminals, px. Each console has its own choice and it stays in the browser, per activity and node:
+ * a student makes one console larger without touching the others.
  */
 export const FONT_STEPS = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
 
 /** Font size before the student chooses one, px. */
 const FONT_DESKTOP = 12;
 const FONT_MOBILE = 13;
+
+/** Most remembered console font choices; the oldest are dropped. */
+const FONT_KEEP = 200;
 
 /** Ctrl + wheel turns the size by one step after this much scrolling (a wheel notch is 100, a trackpad pinch is many small ones). */
 const FONT_WHEEL_STEP = 50;
@@ -86,6 +89,7 @@ class Con {
         this.conn = null;
         this.state = 'idle';
         this.vnc = node.consoleType === 'vnc';
+        this.font = owner.loadFont(node.id);
         this.win = null;
         this.wpos = null;
         this.flowIn = 0;
@@ -215,7 +219,7 @@ class Con {
     }
 
     /**
-     * Smaller, size, larger: the size is one for all consoles.
+     * Smaller, size, larger: the size belongs to this console only.
      *
      * @param {HTMLElement} bar Toolbar containing the font controls.
      */
@@ -236,16 +240,48 @@ class Con {
             });
             return b;
         };
-        this.fontDec = button('tf-btn tf-dec', 'A−', o.s('ui_font_smaller'), () => o.stepFont(-1));
-        this.fontVal = button('tf-btn tf-val', '', '', () => o.resetFont());
+        this.fontDec = button('tf-btn tf-dec', 'A−', o.s('ui_font_smaller'), () => this.stepFont(-1));
+        this.fontVal = button('tf-btn tf-val', '', '', () => this.resetFont());
         this.fontVal.setAttribute('aria-live', 'polite');
-        this.fontInc = button('tf-btn tf-inc', 'A+', o.s('ui_font_larger'), () => o.stepFont(1));
+        this.fontInc = button('tf-btn tf-inc', 'A+', o.s('ui_font_larger'), () => this.stepFont(1));
     }
 
-    /** The size of the font of the owner: in the terminal and in the controls. */
+    /** Font size of this console, px: the student's choice or the default for the screen. */
+    get fontSize() {
+        return this.font || this.owner.defaultFont();
+    }
+
+    /**
+     * Sets the font size of this console and remembers it.
+     *
+     * @param {number} size px; 0 goes back to the default, which follows the screen
+     */
+    setFont(size) {
+        if (size === this.font) return;
+        this.font = size;
+        this.owner.saveFont(this.n.id, size);
+        this.applyFont();
+    }
+
+    /**
+     * One step larger (1) or smaller (-1).
+     *
+     * @param {number} dir Direction of the font size change.
+     */
+    stepFont(dir) {
+        const i = FONT_STEPS.indexOf(this.fontSize);
+        this.setFont(FONT_STEPS[clamp(i + dir, 0, FONT_STEPS.length - 1)]);
+    }
+
+    /** Back to the default size, which follows the screen: phone or desktop. */
+    resetFont() {
+        this.setFont(0);
+    }
+
+    /** The font size of this console: in the terminal and in the controls. */
     applyFont() {
         if (this.vnc) return;
-        const o = this.owner, size = o.fontSize;
+        const o = this.owner, size = this.fontSize;
         this.fontVal.textContent = String(size);
         const label = fill(o.s('ui_font_reset'), size);
         this.fontVal.title = label;
@@ -272,7 +308,7 @@ class Con {
         if (this.wheelSum * delta < 0) this.wheelSum = 0;
         this.wheelSum += delta;
         if (Math.abs(this.wheelSum) >= FONT_WHEEL_STEP) {
-            this.owner.stepFont(this.wheelSum < 0 ? 1 : -1);
+            this.stepFont(this.wheelSum < 0 ? 1 : -1);
             this.wheelSum = 0;
         }
     }
@@ -375,7 +411,7 @@ class Con {
         const o = this.owner, {Terminal, FitAddon} = o.xterm;
         this.term = new Terminal({
             fontFamily: getComputedStyle(o.root).getPropertyValue('--mono').trim() || 'monospace',
-            fontSize: o.fontSize, lineHeight: 1.15, cursorBlink: !o.readonly,
+            fontSize: this.fontSize, lineHeight: 1.15, cursorBlink: !o.readonly,
             scrollback: o.stage.mobile ? 1000 : 3000, theme: THEME, disableStdin: o.readonly,
         });
         this.fit = new FitAddon();
@@ -603,7 +639,8 @@ export class Consoles {
         this.RFB = null;
         this.cons = new Map();
         this.active = null;
-        this.fontSize = this.loadFont();
+        this.fonts = store.get('termfonts', {});
+        if (!this.fonts || typeof this.fonts !== 'object' || Array.isArray(this.fonts)) this.fonts = {};
         this.pins = store.get('snippins', {});
         this.snip = new SnipMenu(this);
         this.mode = store.get('mode', 'panel');
@@ -653,39 +690,46 @@ export class Consoles {
         return this.cons.has(nodeId);
     }
 
-    /* ---------------- font size and pinned snippets: shared by all consoles, kept in the browser ---------------- */
+    /* ---------------- font size of each console and pinned snippets, kept in the browser ---------------- */
 
     defaultFont() {
         return this.stage.mobile ? FONT_MOBILE : FONT_DESKTOP;
     }
 
-    loadFont() {
-        const size = Number(store.get('termfont', 0));
-        return FONT_STEPS.includes(size) ? size : this.defaultFont();
-    }
-
-    setFont(size) {
-        if (size === this.fontSize) return;
-        this.fontSize = size;
-        store.set('termfont', size);
-        this.cons.forEach(c => c.applyFont());
+    /**
+     * Key of the font choice of a console: per activity and node.
+     *
+     * @param {string} nodeId Node of the console.
+     * @returns {string}
+     */
+    fontKey(nodeId) {
+        return this.cmid + ':' + nodeId;
     }
 
     /**
-     * One step larger (1) or smaller (-1).
+     * The font size the student chose for the console of a node.
      *
-     * @param {number} dir Direction of the font size change.
+     * @param {string} nodeId Node of the console.
+     * @returns {number} px, 0 when nothing was chosen
      */
-    stepFont(dir) {
-        const i = FONT_STEPS.indexOf(this.fontSize);
-        this.setFont(FONT_STEPS[clamp(i + dir, 0, FONT_STEPS.length - 1)]);
+    loadFont(nodeId) {
+        const size = Number(this.fonts[this.fontKey(nodeId)]);
+        return FONT_STEPS.includes(size) ? size : 0;
     }
 
-    /** Back to the default size, which follows the screen: phone or desktop. */
-    resetFont() {
-        this.fontSize = this.defaultFont();
-        store.set('termfont', 0);
-        this.cons.forEach(c => c.applyFont());
+    /**
+     * Remembers the font size of the console of a node; the newest choice goes last, the oldest are dropped.
+     *
+     * @param {string} nodeId Node of the console.
+     * @param {number} size px, 0 forgets the choice
+     */
+    saveFont(nodeId, size) {
+        const key = this.fontKey(nodeId);
+        delete this.fonts[key];
+        if (size) this.fonts[key] = size;
+        const keys = Object.keys(this.fonts);
+        keys.slice(0, Math.max(0, keys.length - FONT_KEEP)).forEach(k => delete this.fonts[k]);
+        store.set('termfonts', this.fonts);
     }
 
     /**
@@ -1248,10 +1292,7 @@ export class Consoles {
      */
     mobileChanged(mobile) {
         if (!mobile && this.diving) this.exitDive(false);
-        if (!Number(store.get('termfont', 0))) {
-            this.fontSize = this.defaultFont();
-            this.cons.forEach(c => c.applyFont());
-        }
+        this.cons.forEach(c => c.applyFont());
         this.layout();
         this.renderTabsAndChips();
     }
