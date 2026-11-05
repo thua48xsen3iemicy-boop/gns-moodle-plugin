@@ -671,7 +671,6 @@ $string['authoringstatus_unknown'] = 'статус неизвестен';
 $string['ui_canvas_title'] = 'ТОПОЛОГИЯ / ФАКТЫ';
 $string['ui_canvas_l4'] = 'L4 — место для будущего представления.';
 $string['ui_canvas_duplex'] = 'Каждый TX соединён с RX другого конца. Стрелки показывают направления, а не текущий трафик.';
-$string['ui_canvas_chassis'] = 'один корпус, отдельные VLAN';
 $string['ui_canvas_blocked'] = 'не проходит';
 $string['ui_canvas_unknown'] = 'нет фактов';
 $string['ui_canvas_disconnected'] = 'нет активного домена';

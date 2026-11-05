@@ -671,7 +671,6 @@ $string['authoringstatus_unknown'] = 'status unknown';
 $string['ui_canvas_title'] = 'TOPOLOGY / FACTS';
 $string['ui_canvas_l4'] = 'L4 is reserved for a later update.';
 $string['ui_canvas_duplex'] = 'Each TX connects to the RX at the other end. Arrows show directions, not live traffic.';
-$string['ui_canvas_chassis'] = 'one device, separate VLANs';
 $string['ui_canvas_blocked'] = 'blocked';
 $string['ui_canvas_unknown'] = 'no facts';
 $string['ui_canvas_disconnected'] = 'no active domain';
