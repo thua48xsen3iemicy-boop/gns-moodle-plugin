@@ -138,7 +138,7 @@ export class Details {
         const p = s.toScreen(c.data.focus?.cx || 0, c.data.focus?.cy || 0);
         const rawX = p.x + w + 76 < ww ? p.x + 74 : p.x - w - 74 > 4 ? p.x - w - 74 : ww - w - 12;
         let x = clamp(rawX, 12, Math.max(12, ww - w - 12));
-        const minY = compact ? 12 : x < 396 ? (s.hudBottom || 168) + 8 : 12, bottom = compact ? 112 : 12;
+        const minY = compact ? 12 : x < (s.hudRight || 384) + 12 ? (s.hudBottom || 168) + 8 : 12, bottom = compact ? 112 : 12;
         const y = clamp(compact ? wh - h - bottom : p.y - 80, Math.min(minY, wh - h - bottom), Math.max(12, wh - h - bottom));
         if (!compact && s.sel) {
             const root = s.wrap.getBoundingClientRect();
@@ -149,7 +149,7 @@ export class Details {
                 const width = Math.max(0, Math.min(candidate + w, b.x + b.w) - Math.max(candidate, b.x));
                 const height = Math.max(0, Math.min(y + h, b.y + b.h) - Math.max(y, b.y));
                 return score + (width && height ? 1000000 + width * height : 0);
-            }, candidate < 396 && y < (s.hudBottom || 168) + 8 ? 25000000 : 0);
+            }, candidate < (s.hudRight || 384) + 12 && y < (s.hudBottom || 168) + 8 ? 25000000 : 0);
             x = [x, Math.max(12, ww - w - 12), 12].reduce((best, candidate) => overlap(candidate) < overlap(best) ? candidate : best);
         }
         c.foreign.setAttribute('width', w); c.foreign.setAttribute('height', h);

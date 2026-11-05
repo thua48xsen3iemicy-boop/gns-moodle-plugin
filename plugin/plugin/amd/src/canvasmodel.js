@@ -29,6 +29,69 @@ export const linkDirections = link => [
     {from: link.b, to: link.a, sign: -1},
 ];
 
+/** Height of a VLAN pill inside a switch chassis, its gap and the padding of the chassis around the pills. */
+export const PILL_H = 26;
+const GAP = 8, PAD = 12;
+
+/**
+ * Width of a VLAN pill: a colour dot and "VLAN n".
+ *
+ * @param {number} vlan VLAN id
+ * @returns {number}
+ */
+export const pillWidth = vlan => Math.round(34 + 6.4 * ('VLAN ' + vlan).length);
+
+/**
+ * Offsets of the VLAN pills of one switch from its centre for a shape: a row, a column or two columns.
+ *
+ * @param {number[]} values VLAN ids in order
+ * @param {string} shape row, column or grid
+ * @returns {{items: Array<{vlan: number, x: number, y: number, w: number}>, hw: number, hh: number}}
+ */
+const arrange = (values, shape) => {
+    const widths = values.map(pillWidth), max = Math.max(...widths);
+    const cols = shape === 'row' ? values.length : shape === 'column' ? 1 : 2;
+    const rows = Math.ceil(values.length / cols);
+    const colW = shape === 'row' ? widths : Array(cols).fill(max);
+    const totalW = colW.slice(0, cols).reduce((a, b) => a + b, 0) + GAP * (cols - 1), totalH = rows * PILL_H + GAP * (rows - 1);
+    const items = values.map((vlan, i) => {
+        const c = i % cols, r = Math.floor(i / cols);
+        const left = colW.slice(0, c).reduce((a, b) => a + b, 0) + GAP * c;
+        return {vlan, w: widths[i], x: -totalW / 2 + left + colW[c] / 2, y: -totalH / 2 + r * (PILL_H + GAP) + PILL_H / 2};
+    });
+    return {items, hw: totalW / 2 + PAD, hh: totalH / 2 + PAD};
+};
+
+/**
+ * Lays out the VLAN pills of every switch so that chassis do not cover each other or the nodes around them:
+ * each switch takes the row, column or two-column shape that overlaps its neighbours least.
+ *
+ * @param {object} model topology model
+ * @param {Map<string, Set<number>>} vlans VLAN ids by switch id
+ * @returns {Array<{orig: object, items: Array}>}
+ */
+export const layoutVlans = (model, vlans) => {
+    const switches = [...vlans].map(([id, set]) => ({orig: model.nodes.get(id), values: [...set].sort((a, b) => a - b)}))
+        .filter(x => x.orig && x.orig.state !== 'silhouette');
+    const ids = new Set(switches.map(x => x.orig.id));
+    // Other nodes keep their icon and name; the margin leaves room for the chassis outline and its title.
+    const fixed = [...model.nodes.values()].filter(n => !ids.has(n.id)).map(n => ({cx: n.cx, cy: n.cy, hw: 40, hh: 42}));
+    const overlap = (a, b) => Math.max(0, Math.min(a.cx + a.hw, b.cx + b.hw) - Math.max(a.cx - a.hw, b.cx - b.hw) + 16)
+        * Math.max(0, Math.min(a.cy + a.hh, b.cy + b.hh) - Math.max(a.cy - a.hh, b.cy - b.hh) + 20);
+    switches.forEach(x => { x.shape = arrange(x.values, 'row'); });
+    for (let pass = 0; pass < 3; pass++) {
+        switches.forEach(x => {
+            const others = [...fixed, ...switches.filter(y => y !== x).map(y => ({cx: y.orig.cx, cy: y.orig.cy, hw: y.shape.hw, hh: y.shape.hh}))];
+            const shapes = ['row', 'column', 'grid'].filter(shape => shape !== 'grid' || x.values.length > 2);
+            x.shape = shapes.map((shape, rank) => {
+                const a = arrange(x.values, shape), box = {cx: x.orig.cx, cy: x.orig.cy, hw: a.hw, hh: a.hh};
+                return {a, score: others.reduce((sum, o) => sum + overlap(box, o), 0) + rank};
+            }).reduce((best, c) => c.score < best.score ? c : best).a;
+        });
+    }
+    return switches.map(x => ({orig: x.orig, items: x.shape.items}));
+};
+
 export const canvasL2 = stage => {
     const {model, fx, der} = stage, virtuals = new Map(), segments = [], vlans = new Map();
     const note = vertex => {
@@ -63,22 +126,17 @@ export const canvasL2 = stage => {
             note(va); note(vb);
             const vlan = wa && wa.sw ? wa.map(tag) : wb && wb.sw ? wb.map(tag) : null;
             const mismatch = accepted && tag === 'u' && wa.sw && wb.sw && wa.map(tag) !== wb.map(tag);
-            const name = (wire, iface) => !iface ? '?' : !wire || wire.sw || tag === 'u' ? iface.name
-                : (wire.subs.find(i => Number(i.dot1q) === tag) || iface).name;
+            const port = (wire, iface) => !iface ? null : !wire || wire.sw || tag === 'u' ? iface
+                : (wire.subs.find(i => Number(i.dot1q) === tag) || iface);
+            const name = (wire, iface) => port(wire, iface)?.name || '?';
             segments.push({id: link.id + '|' + tag, link, tag, va, vb, vlan, active: accepted,
                 blocked, mismatch, unknown: !r.known || der.l1.links.get(link.id).unknown,
-                aname: name(wa, ia), bname: name(wb, ib), domain: accepted ? der.l2.domOf.get(va) : null});
+                aname: name(wa, ia), bname: name(wb, ib), aif: port(wa, ia), bif: port(wb, ib), domain: accepted ? der.l2.domOf.get(va) : null});
         });
     });
-    vlans.forEach((set, id) => {
-        const orig = model.nodes.get(id);
-        if (!orig || orig.state === 'silhouette') return;
-        const values = [...set].sort((a, b) => a - b);
-        values.forEach((vlan, index) => {
-            const id = `S|${orig.id}|${vlan}`;
-            virtuals.set(id, {id, orig, vlan, cx: orig.cx + (index - (values.length - 1) / 2) * 152,
-                cy: orig.cy, domain: der.l2.domOf.get(id)});
-        });
-    });
+    layoutVlans(model, vlans).forEach(({orig, items}) => items.forEach(({vlan, x, y, w}) => {
+        const id = `S|${orig.id}|${vlan}`;
+        virtuals.set(id, {id, orig, vlan, w, cx: orig.cx + x, cy: orig.cy + y, domain: der.l2.domOf.get(id)});
+    }));
     return {virtuals, segments, switches: new Set([...virtuals.values()].map(v => v.orig.id))};
 };

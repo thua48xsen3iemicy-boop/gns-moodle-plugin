@@ -25,10 +25,10 @@
 import {svgEl as el} from 'mod_gns3lab/dom';
 import {clamp, isHost} from 'mod_gns3lab/model';
 import {factsStatus, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
-import {canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
+import {PILL_H, canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
 
 export const STRING_KEYS = [
-    'ui_canvas_title', 'ui_canvas_l4', 'ui_canvas_duplex', 'ui_canvas_chassis',
+    'ui_canvas_title', 'ui_canvas_l4', 'ui_canvas_duplex',
     'ui_canvas_blocked', 'ui_canvas_unknown', 'ui_canvas_disconnected', 'ui_canvas_objects',
     'ui_canvas_card_layers', 'ui_canvas_interface', 'ui_canvas_admin', 'ui_canvas_oper',
     'ui_assignments', 'ui_assignments_empty', 'ui_canvas_practice', 'ui_overview', 'ui_canvas_l1_help', 'ui_canvas_l2_help', 'ui_canvas_l3_help',
@@ -101,12 +101,15 @@ export class CanvasView {
             groups.get(v.orig.id).push(v);
         });
         groups.forEach(vs => {
-            const n = vs[0].orig, x = vs[0].cx - 66, width = vs[vs.length - 1].cx - x + 66;
+            // The chassis outline holds the VLANs of one switch; its title is just the switch name.
+            const n = vs[0].orig, pad = 12;
+            const x0 = Math.min(...vs.map(v => v.cx - v.w / 2)) - pad, x1 = Math.max(...vs.map(v => v.cx + v.w / 2)) + pad;
+            const y0 = Math.min(...vs.map(v => v.cy)) - PILL_H / 2 - pad, y1 = Math.max(...vs.map(v => v.cy)) + PILL_H / 2 + pad;
             const g = el('g', {class: 'l2-chassis dimmable', 'data-node': n.id}, zones);
-            el('rect', {x, y: n.cy - 51, width, height: 102, rx: 16}, g);
+            el('rect', {x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 12}, g);
             const label = el('g', {class: 'auto-label', 'data-priority': 1}, g);
-            el('text', {x: x + 11, y: n.cy - 60}, label).textContent = n.name + ' · ' + s.s('ui_canvas_chassis') + ' / ' + vs.length + ' VLAN';
-            s.grow(x, n.cy - 70, x + width, n.cy + 54);
+            el('text', {x: x0 + 8, y: y0 - 6}, label).textContent = n.name;
+            s.grow(x0, y0 - 20, x1, y1);
         });
         segments.forEach(segment => {
             const {link, va, vb, vlan} = segment;
@@ -121,7 +124,9 @@ export class CanvasView {
                 'aria-label': s.model.nodes.get(link.a.nodeId).name + ' ↔ ' + s.model.nodes.get(link.b.nodeId).name + ' · ' + (vlan == null ? 'p2p' : 'VLAN ' + vlan)}, lines);
             g.style.setProperty('--vlan-color', color(vlan));
             el('path', {d, class: 'hit'}, g); el('path', {d, class: 'stroke'}, g);
-            const aname = s.endShown(link.a) ? segment.aname : '?', bname = s.endShown(link.b) ? segment.bname : '?';
+            // Host ports read as on the other layers (E0.10), devices keep their own names.
+            const shown = (end, iface, fallback) => !s.endShown(end) ? '?' : iface ? this.portText(s.model.nodes.get(end.nodeId), iface) : fallback;
+            const aname = shown(link.a, segment.aif, segment.aname), bname = shown(link.b, segment.bif, segment.bname);
             // A plain point-to-point segment needs no caption: the line says it all.
             const caption = segment.mismatch ? `native VLAN ${va.split('|')[2]} ↔ ${vb.split('|')[2]} !`
                 : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : vlan == null ? ''
@@ -135,14 +140,16 @@ export class CanvasView {
             segment.ends = [[link.a.nodeId, a, b], [link.b.nodeId, b, a]];
         });
         virtuals.forEach(v => {
-            const g = el('g', {class: 'l2-virtual dimmable' + (v.domain?.vlans.length > 1 ? ' mixed' : '') + (s.factsFailed(v.orig.id) ? ' collection-error' : ''),
+            const mixed = v.domain?.vlans.length > 1;
+            const g = el('g', {class: 'l2-virtual dimmable' + (mixed ? ' mixed' : '') + (!v.domain ? ' idle' : '') + (s.factsFailed(v.orig.id) ? ' collection-error' : ''),
                 transform: `translate(${v.cx} ${v.cy})`, 'data-virtual': v.id, tabindex: '0', role: 'button', 'aria-label': v.orig.name + ' · VLAN ' + v.vlan}, this.nodeLayer);
             g.style.setProperty('--vlan-color', color(v.vlan));
-            el('rect', {x: -56, y: -30, width: 112, height: 60, rx: 12}, g);
-            el('circle', {cx: -38, cy: -8, r: 5, class: 'vmark'}, g);
-            el('text', {x: -27, y: -4, class: 'vtitle'}, g).textContent = 'VLAN ' + v.vlan;
-            el('text', {x: -43, y: 18, class: 'vsub'}, g).textContent = v.domain
-                ? v.domain.vlans.length > 1 ? `${v.domain.id} · VLAN ${v.domain.vlans.join('+')} !` : `${v.domain.id} · ${v.domain.members.length} ${s.s('ui_canvas_members')}`
+            el('rect', {x: -v.w / 2, y: -PILL_H / 2, width: v.w, height: PILL_H, rx: PILL_H / 2}, g);
+            el('circle', {cx: -v.w / 2 + 13, cy: 0, r: 4, class: 'vmark'}, g);
+            el('text', {x: -v.w / 2 + 23, y: 0, class: 'vtitle'}, g).textContent = 'VLAN ' + v.vlan + (mixed ? ' !' : '');
+            // Domain and members are in the tooltip and the card, not on the scheme.
+            el('title', {}, g).textContent = v.domain
+                ? mixed ? `VLAN ${v.domain.vlans.join('+')} !` : `${v.domain.members.length} ${s.s('ui_canvas_members')}`
                 : s.s('ui_canvas_disconnected');
             v.g = g;
         });
@@ -237,7 +244,7 @@ export class CanvasView {
         const busy = [...s.model.nodes.values()].map(n => {
             const p = s.toScreen(n.cx, n.cy), r = Math.max(14, 26 * k); return {x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r};
         });
-        busy.push({x: 0, y: 0, w: Math.min(396, w), h: (s.hudBottom || 168) + 8}, {x: 0, y: h - 112, w, h: 112});
+        busy.push({x: 0, y: 0, w: Math.min((s.hudRight || 384) + 12, w), h: (s.hudBottom || 168) + 8}, {x: 0, y: h - 112, w, h: 112});
         const intersects = (a, b) => a.x < b.x + b.w + 5 && a.x + a.w + 5 > b.x && a.y < b.y + b.h + 5 && a.y + a.h + 5 > b.y;
         this.subnets.forEach(x => {
             if (!x.g) return;
@@ -262,28 +269,38 @@ export class CanvasView {
     }
 
     renderHud() {
-        const s = this.stage, hud = s.r('layerSeg'), tools = s.r('hudTools'), w = Math.max(220, Math.min(370, s.wrap.clientWidth - 24));
-        // The overview, assignments and facts controls sit in the HUD under the layer buttons; the HUD grows to hold them.
-        if (tools) tools.style.width = (w - 30) + 'px';
+        const s = this.stage, hud = s.r('layerSeg'), tools = s.r('hudTools');
+        const maxW = Math.max(220, Math.min(370, s.wrap.clientWidth - 24));
+        // The HUD is as wide as its content: compact layer buttons, the layer note and the overview/facts controls.
+        let natural = 0;
+        if (tools) { tools.style.width = 'max-content'; natural = tools.offsetWidth; }
+        const key = [maxW, s.layer, natural, tools ? tools.offsetHeight : 0].join('/');
+        if (this.hudKey !== key) {
+            this.hudKey = key; hud.textContent = '';
+            const bg = el('rect', {x: 14, y: 14, height: 0, rx: 14, class: 'hud-bg'}, hud);
+            const text = (cls, x, y, value) => { const t = el('text', {class: cls, x, y}, hud); t.textContent = value; return t; };
+            const kicker = text('hud-kicker', 29, 36, s.s('ui_canvas_title'));
+            const bw = 36, gap = 6;
+            ['l1', 'l2', 'l3', 'l4'].forEach((layer, i) => {
+                const g = el('g', {class: 'layer-button' + (s.layer === layer ? ' active' : ''), tabindex: '0', role: 'button',
+                    'data-layer': layer, 'aria-label': layerHelp(s, layer), 'aria-pressed': String(s.layer === layer)}, hud);
+                el('rect', {x: 29 + i * (bw + gap), y: 46, width: bw, height: 28, rx: 7}, g);
+                el('text', {x: 29 + i * (bw + gap) + bw / 2, y: 60}, g).textContent = layer.toUpperCase();
+                el('title', {}, g).textContent = layerHelp(s, layer);
+                g.onclick = () => s.setLayer(layer);
+                g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.setLayer(layer); s.r('layerSeg').querySelector(`[data-layer="${layer}"]`).focus(); } };
+            });
+            const note = text('hud-note', 29, 94, layerHelp(s, s.layer));
+            const measure = t => { try { return t.getComputedTextLength(); } catch (e) { return 0; } };
+            this.hudW = clamp(Math.max(4 * bw + 3 * gap, measure(kicker), measure(note), natural) + 30, 200, maxW);
+            bg.setAttribute('width', this.hudW);
+            this.hudBg = bg;
+        }
+        if (tools) tools.style.width = (this.hudW - 30) + 'px';
         const height = TOOLS_TOP - 14 + (tools ? tools.offsetHeight + 12 : 0);
-        const key = [w, s.layer, height].join('/');
+        this.hudBg.setAttribute('height', height);
         s.hudBottom = 14 + height;
-        if (this.hudKey === key) return;
-        this.hudKey = key; hud.textContent = '';
-        el('rect', {x: 14, y: 14, width: w, height, rx: 17, class: 'hud-bg'}, hud);
-        const text = (cls, x, y, value) => { const t = el('text', {class: cls, x, y}, hud); t.textContent = value; return t; };
-        text('hud-kicker', 29, 36, s.s('ui_canvas_title'));
-        const bw = (w - 38) / 4;
-        ['l1', 'l2', 'l3', 'l4'].forEach((layer, i) => {
-            const g = el('g', {class: 'layer-button' + (s.layer === layer ? ' active' : ''), tabindex: '0', role: 'button',
-                'data-layer': layer, 'aria-label': layerHelp(s, layer), 'aria-pressed': String(s.layer === layer)}, hud);
-            el('rect', {x: 29 + i * (bw + 3), y: 46, width: bw, height: 29, rx: 8}, g);
-            el('text', {x: 29 + i * (bw + 3) + bw / 2, y: 61}, g).textContent = layer.toUpperCase();
-            el('title', {}, g).textContent = layerHelp(s, layer);
-            g.onclick = () => s.setLayer(layer);
-            g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.setLayer(layer); s.r('layerSeg').querySelector(`[data-layer="${layer}"]`).focus(); } };
-        });
-        text('hud-note', 29, 95, layerHelp(s, s.layer));
+        s.hudRight = 14 + this.hudW;
     }
 
     prepareLabels() {

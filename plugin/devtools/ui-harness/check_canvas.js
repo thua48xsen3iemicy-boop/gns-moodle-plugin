@@ -44,13 +44,14 @@ async function prototypeParity(browser, page) {
             return {palette: ['--canvas', '--panel', '--fg', '--accent', '--ico', '--line'].map(k => getComputedStyle(root).getPropertyValue(k).trim()),
                 card: {width: box.width, height: box.height, background: style.backgroundColor, border: style.borderTopColor, radius: style.borderTopLeftRadius,
                     font: style.fontFamily, titleSize: title.fontSize, titleFont: title.fontFamily, tabFill: tabs.backgroundColor, tabHeight: tabs.minHeight},
-                // The HUD is taller than in the prototype: it also holds the overview, assignments and facts controls.
-                hud: ['width', 'rx'].map(k => hud.getAttribute(k)),
+                // The HUD is not compared: it is as wide as its compact content and also holds the overview,
+                // assignments and facts controls, unlike the prototype.
+                hud: !!hud,
                 mounted: !!card.closest('foreignObject')?.closest(isPrototype ? '#canvasUi' : '[data-region="canvasUi"]')};
         }, prototype);
         assert.deepEqual(await appearance(page, false), await appearance(reference, true));
         assert.equal(await page.locator('[data-region="factsSel"],#demoPanel,#viewMode,#demoToggle').count(), 0);
-        console.log('PASS  live Canvas palette, SVG HUD, card geometry and typography match the original prototype; no prototype mode controls');
+        console.log('PASS  live Canvas palette, SVG HUD present, card geometry and typography match the original prototype; no prototype mode controls');
     } finally {
         await reference.close();
         await new Promise(resolve => referenceServer.close(resolve));
