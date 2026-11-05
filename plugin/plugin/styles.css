@@ -4483,14 +4483,20 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .auto-label,
 .gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .pdot{display:none}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] .l3-scene{display:inline}
-.gns3lab-student.canvas-ui .subnet-edge{stroke:#547c90;stroke-width:1.1;vector-effect:non-scaling-stroke;fill:none}
+.gns3lab-student.canvas-ui .subnet-edge{stroke:var(--net-color,#547c90);stroke-opacity:.75;stroke-width:1.2;vector-effect:non-scaling-stroke;fill:none}
+.gns3lab-student.canvas-ui .ghost-wire{stroke:#6d93a3;stroke-opacity:.38;stroke-width:1.4;vector-effect:non-scaling-stroke;pointer-events:none}
 .gns3lab-student.canvas-ui .subnet-edge.down{stroke:var(--bad);stroke-dasharray:4 5}
 .gns3lab-student.canvas-ui .subnet-object{cursor:pointer}
-.gns3lab-student.canvas-ui .subnet-object rect{fill:#193e50;stroke:#73c7ed;stroke-width:1;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .subnet-object rect{fill:#193e50;stroke:var(--net-color,#73c7ed);stroke-width:1;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .subnet-object.warn rect{stroke:var(--warn)}
 .gns3lab-student.canvas-ui .subnet-object.sel rect,
 .gns3lab-student.canvas-ui .subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:1.4}
-.gns3lab-student.canvas-ui .subnet-object text{fill:#e3f7fc;font:500 11px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .subnet-object text{fill:#e3f7fc;font:500 10.5px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .subnet-info{cursor:pointer}
+.gns3lab-student.canvas-ui .subnet-info .hit{fill:transparent}
+.gns3lab-student.canvas-ui .subnet-info .dot{fill:var(--net-color,#73c7ed);fill-opacity:.22;stroke:var(--net-color,#73c7ed);stroke-width:1}
+.gns3lab-student.canvas-ui .subnet-info text{fill:var(--net-color,#73c7ed);font:700 10px var(--display);font-style:italic}
+.gns3lab-student.canvas-ui .subnet-info:hover .dot{fill-opacity:.5}
 .gns3lab-student.canvas-ui .subnet-object:focus{outline:none}
 .gns3lab-student.canvas-ui [data-region="vp"] .connection-dim{opacity:.2}
 .gns3lab-student.canvas-ui [data-region="svg"][data-connection-focus="true"] [data-region="lyrDraw"]{opacity:.35}
@@ -4505,8 +4511,8 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-related > rect{stroke-width:calc(var(--node-ring,1px) * 1.15)}
 .gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-primary > rect{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:#224b59}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related{stroke-width:1.7}
-.gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related:not(.down){stroke:var(--accent)}
-.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-related:not(.warn) rect{stroke:var(--accent);stroke-width:1.2}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related:not(.down){stroke:var(--net-color,var(--accent));stroke-opacity:1}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-related:not(.warn) rect{stroke:var(--net-color,var(--accent));stroke-width:1.2}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-primary rect{stroke-width:1.5}
 .gns3lab-student.canvas-ui .link.unknown .wire{stroke:var(--off);stroke-dasharray:3 6}
 .gns3lab-student.canvas-ui .link.unknown .pdot{fill:var(--off)}

@@ -491,8 +491,13 @@ export class Stage {
         };
         this.renderDrawings();
         const geo = linkGeometry(m), L = this.layer, D = this.der;
-        // L2 draws its own segments; L3 shows only the lines to the IP subnets, not the cables.
+        // L2 draws its own segments; L3 draws the lines to the IP subnets over pale cables.
         if (L !== 'l2' && L !== 'l3') m.links.forEach(l => this.drawLink(l, geo.get(l.id)));
+        // L3 keeps the cables as pale lines for orientation, without ports, labels or clicks.
+        if (L === 'l3') m.links.forEach(l => {
+            const g = geo.get(l.id);
+            el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'ghost-wire', 'aria-hidden': 'true'}, this.L.links);
+        });
         if (L === 'l2' && D) this.canvas.renderL2();
         if (L === 'l3' && D) this.canvas.renderL3();
         this.renderNodes();
@@ -1113,6 +1118,14 @@ export class Stage {
             this.select({kind: 'node', id: n.id});
             return;
         }
+        const info = near('[data-subnet-info]');
+        if (info) {
+            // The "i" of a subnet pill opens its card; a tap elsewhere on the pill only selects the subnet.
+            this.call('closeOverlays');
+            this.select({kind: 'subnet', id: info.getAttribute('data-subnet-info')});
+            this.call('details', this.sel);
+            return;
+        }
         const sub = near('[data-subnet]'), adj = near('[data-adj]'), linkEl = near('[data-link]');
         const obj = sub ? {kind: 'subnet', id: sub.getAttribute('data-subnet')} : adj ? {kind: 'adj', id: adj.getAttribute('data-adj')}
             : linkEl ? {kind: 'link', id: linkEl.getAttribute('data-link')} : null;
@@ -1124,8 +1137,8 @@ export class Stage {
             }
             this.call('closeOverlays');
             this.select(obj);
-            // Nodes and links have the action wheel for their card; the other objects have no wheel.
-            if (obj.kind !== 'link') this.call('details', obj);
+            // Nodes and links have the action wheel for their card, a subnet its "i"; the other objects open it at once.
+            if (obj.kind !== 'link' && obj.kind !== 'subnet') this.call('details', obj);
             return;
         }
         this.select(null);
