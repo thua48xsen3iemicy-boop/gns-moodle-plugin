@@ -4429,6 +4429,14 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .bar .seg button[aria-pressed="true"]{background:#295c62;color:#d9fff7}
 .gns3lab-student.canvas-ui .wrap{background:radial-gradient(ellipse at 46% 40%,#193341 0%,#10212d 58%,#0d1c27 100%)}
 .gns3lab-student.canvas-ui .dots{fill:#315260;opacity:.55}
+.gns3lab-student.canvas-ui .dots-major{fill:#3d6676;opacity:.65}
+/* A faint ring for a wheel notch (stage.wheelRipple): opens when zooming in, closes when zooming out. */
+.gns3lab-student.canvas-ui .zoom-ripple{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;
+  border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);pointer-events:none;z-index:1;animation:gns3lab-ripple-in .32s ease-out forwards}
+.gns3lab-student.canvas-ui .zoom-ripple.out{animation-name:gns3lab-ripple-out}
+@keyframes gns3lab-ripple-in{from{transform:scale(.35);opacity:.9}to{transform:scale(1.25);opacity:0}}
+@keyframes gns3lab-ripple-out{from{transform:scale(1.25);opacity:.9}to{transform:scale(.35);opacity:0}}
+@media(prefers-reduced-motion:reduce){.gns3lab-student.canvas-ui .zoom-ripple{display:none}}
 .gns3lab-student.canvas-ui .drawing rect,
 .gns3lab-student.canvas-ui .drawing ellipse,
 .gns3lab-student.canvas-ui .drawing circle,
