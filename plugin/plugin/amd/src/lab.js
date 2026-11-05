@@ -296,29 +296,11 @@ class LabPage {
     }
 
     /**
-     * The help card, the overview button and the demo switch of the facts.
+     * The overview button and the demo switch of the facts.
      *
      * @param {Function} region finds an element of the template
      */
     bindChrome(region) {
-        const help = region('help');
-        region('helpBtn').onclick = () => {
-            help.hidden = false;
-            region('helpClose').focus();
-        };
-        region('helpClose').onclick = () => {
-            help.hidden = true;
-        };
-        help.addEventListener('click', e => {
-            if (e.target === help) {
-                help.hidden = true;
-            }
-        });
-        document.addEventListener('keydown', e => {
-            if (e.key === 'Escape' && !help.hidden) {
-                help.hidden = true;
-            }
-        });
         const assignments = region('assignments'), open = region('assignmentsOpen'), close = region('assignmentsClose');
         const hideAssignments = () => {
             if (!assignments) {
@@ -926,7 +908,10 @@ class LabPage {
             },
             zoom: () => stage.zoomToNode(t, Math.max(2.4, stage.view.k)),
             close: () => this.consoles.close(t.id),
-            linfo: () => this.details.show(stage.sel && stage.sel.kind === 'link' ? stage.sel : {kind: 'link', id: t.id}),
+            linfo: () => {
+                stage.select({kind: 'link', id: t.id}, true);
+                this.details.show(stage.sel);
+            },
             lzoom: () => stage.zoomToLink(t.link),
             cona: () => this.openConsole(ends[0]),
             conb: () => this.openConsole(ends[1]),

@@ -3189,98 +3189,6 @@ body.gns3lab-fullscreen {
     flex-wrap: wrap;
     gap: 8px;
 }
-/* gesture sheet */
-.gns3lab-student .help {
-    position: fixed;
-    inset: 0;
-    z-index: 70;
-    display: grid;
-    place-items: center;
-    background: color-mix(in srgb,#000 45%,transparent);
-    padding: 16px;
-}
-.gns3lab-student .helpcard {
-    background: var(--panel);
-    color: var(--fg);
-    border-radius: 12px;
-    max-width: 720px;
-    width: 100%;
-    max-height: 100%;
-    overflow: auto;
-    padding: 20px 22px;
-    box-shadow: var(--shadow);
-}
-.gns3lab-student .helpcard h2 {
-    margin: 0 0 4px;
-    font: 600 21px var(--display);
-    color: var(--fg);
-}
-.gns3lab-student .helpcard>.dh p,
-.gns3lab-student .helpcard .dh p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 13.5px;
-}
-.gns3lab-student .helpcard .dh {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-}
-.gns3lab-student .cols {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-    margin-top: 14px;
-}
-.gns3lab-student .cols h3 {
-    margin: 0 0 8px;
-    font: 600 10.5px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: .09em;
-    color: var(--muted);
-}
-.gns3lab-student .cols dl {
-    margin: 0;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 7px 12px;
-    font-size: 13.5px;
-}
-.gns3lab-student .cols dt {
-    font-weight: 600;
-}
-.gns3lab-student .cols dd {
-    margin: 0;
-    color: var(--muted);
-}
-.gns3lab-student .lvls {
-    display: grid;
-    grid-template-columns: repeat(4,1fr);
-    gap: 8px;
-    margin-top: 16px;
-}
-.gns3lab-student .lvls div {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 9px 10px;
-    font-size: 12.5px;
-    color: var(--muted);
-}
-.gns3lab-student .lvls b {
-    display: block;
-    color: var(--fg);
-    font: 600 14px var(--display);
-    margin-bottom: 2px;
-}
-@media (max-width:620px) {
-    .gns3lab-student .cols {
-        grid-template-columns: 1fr;
-    }
-    .gns3lab-student .lvls {
-        grid-template-columns: 1fr 1fr;
-    }
-}
 
 /* stylelint-enable csstree/validator */
 
@@ -4506,24 +4414,6 @@ from{transform:translateY(40%);opacity:.3}
   background:var(--panel);border-top:1px solid var(--line);flex:none;scrollbar-width:none;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))}
 .gns3lab-student.canvas-ui .key{flex:none;min-width:44px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);font:600 13px var(--mono);cursor:pointer;touch-action:manipulation}
 .gns3lab-student.canvas-ui .key:active{background:var(--accent);color:var(--accent-ink)}
-.gns3lab-student.canvas-ui /* gesture sheet */
-.help{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:color-mix(in srgb,#000 45%,transparent);padding:16px}
-.gns3lab-student.canvas-ui .helpcard{background:var(--panel);color:var(--fg);border-radius:12px;max-width:720px;width:100%;max-height:100%;overflow:auto;padding:20px 22px;box-shadow:var(--shadow)}
-.gns3lab-student.canvas-ui .helpcard h2{margin:0 0 4px;font:600 21px var(--display)}
-.gns3lab-student.canvas-ui .helpcard>p{margin:0;color:var(--muted);font-size:13.5px}
-.gns3lab-student.canvas-ui .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
-.gns3lab-student.canvas-ui .cols h3{margin:0 0 8px;font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
-.gns3lab-student.canvas-ui .cols dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 12px;font-size:13.5px}
-.gns3lab-student.canvas-ui .cols dt{font-weight:600}
-.gns3lab-student.canvas-ui .cols dd{margin:0;color:var(--muted)}
-.gns3lab-student.canvas-ui .lvls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
-.gns3lab-student.canvas-ui .lvls div{border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:12.5px;color:var(--muted)}
-.gns3lab-student.canvas-ui .lvls b{display:block;color:var(--fg);font:600 14px var(--display);margin-bottom:2px}
-@media (max-width:620px){
-.gns3lab-student.canvas-ui .cols{grid-template-columns:1fr}
-.gns3lab-student.canvas-ui .lvls{grid-template-columns:1fr 1fr}
-
-}
 .gns3lab-student.canvas-ui /* Canvas experiment: the topology owns its facts,
 .gns3lab-student.canvas-ui controls and popovers. */
 :root{
@@ -4699,8 +4589,6 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:hover rect,
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus-visible rect{fill:#315e6a;stroke-width:2}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus{outline:none}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .card-lead{stroke:#81e2d5;stroke-width:1.5;stroke-dasharray:4 4;opacity:.9;pointer-events:none}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .card-anchor{fill:#81e2d5;stroke:#102633;stroke-width:3;pointer-events:none}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card{filter:drop-shadow(0 20px 26px rgb(0 0 0 / .5))}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .body{fill:#142c39;stroke:#54838a;stroke-width:1.3}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .top-rule{stroke:#355966;stroke-width:1}
