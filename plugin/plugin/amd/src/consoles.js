@@ -1375,7 +1375,7 @@ export class Consoles {
         });
         this.root.querySelectorAll('[data-region="modes"] button').forEach(b => {
             b.onclick = () => {
-                this.unmax();
+                this.unmax(false);
                 this.mode = b.dataset.mode;
                 store.set('mode', this.mode);
                 if (this.mode === 'windows') {
@@ -1425,24 +1425,41 @@ export class Consoles {
     toggleMax(el) {
         if (this.stage.mobile) return;
         const on = !el.classList.contains('max');
-        this.unmax();
+        // The console whose title was double clicked keeps (or gets) the keyboard both ways.
+        const c = this.cons.get(el.dataset.con || this.active);
+        this.unmax(false);
         el.classList.toggle('max', on);
         this.box.classList.toggle('con-max', on);
-        requestAnimationFrame(() => {
-            this.cons.forEach(c => c.refit());
-            this.drawLinks();
-        });
+        this.afterMax(c);
     }
 
-    /** Puts a console spread over the scheme back where it was. */
-    unmax() {
+    /**
+     * Puts a console spread over the scheme back where it was.
+     *
+     * @param {boolean} [refocus] give the keyboard back to the active console (Escape); a change of mode does not
+     */
+    unmax(refocus = true) {
         const maxed = this.root.querySelectorAll('.tile.max,.win.max,.dock.max');
         if (!maxed.length) return;
         maxed.forEach(el => el.classList.remove('max'));
         this.box.classList.remove('con-max');
+        this.afterMax(refocus ? this.cons.get(this.active) : null);
+    }
+
+    /**
+     * Refits the terminals to their new size and gives the keyboard to a console.
+     *
+     * @param {object|null} c console to focus, or null
+     */
+    afterMax(c) {
+        if (c) {
+            this.active = c.n.id;
+            this.markFocus();
+        }
         requestAnimationFrame(() => {
-            this.cons.forEach(c => c.refit());
+            this.cons.forEach(x => x.refit());
             this.drawLinks();
+            if (c) c.focus();
         });
     }
 
