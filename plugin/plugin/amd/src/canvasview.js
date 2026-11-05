@@ -533,7 +533,7 @@ export class CanvasView {
         });
         if (!this.leads) return;
         this.leads.textContent = '';
-        const occupied = [...svg.querySelectorAll('.node .ico,.l2-virtual > rect,.subnet-object rect,.drawing text,.duplex-label,.card')]
+        const occupied = [...svg.querySelectorAll('.node .ico,.l2-virtual > rect,.subnet-object rect,.drawing text,.duplex-label')]
             .filter(visible).map(box).filter(r => r.w && r.h);
         // Only objects of the scheme push labels aside: the screen edge and the panels over the scheme do not, so labels
         // do not slide while the scheme is dragged.

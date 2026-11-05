@@ -178,8 +178,6 @@ export class Stage {
         this.statusKnown = false;
         this.guests = null;
         this.badges = new Map();
-        this.cards = new Map();
-        this.cardTimers = new Map();
         this.bounds = {x: -200, y: -150, w: 400, h: 300};
         this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         this.mq = matchMedia('(max-width: 760px)');
@@ -506,7 +504,6 @@ export class Stage {
         this.applySel();
         this.view.k = this.view.k || 1;
         this.applyView();
-        this.cards.forEach((_, id) => this.scheduleCard(id));
         // Labels that fade in are skipped by the layout while transparent: lay them out again once they are shown.
         clearTimeout(this.relabelTimer);
         this.relabelTimer = setTimeout(() => this.canvas.scheduleLabels(), 450);
@@ -624,50 +621,6 @@ export class Stage {
         n.g.classList.toggle('minimized', !!f.min);
     }
 
-    /* ---------------- console previews on the scheme ---------------- */
-
-    /**
-     * Sets the preview of a console on the scheme: the last lines of its output.
-     * It is drawn from the level "Addresses" on, and only while the console is not on the screen.
-     *
-     * @param {string} nodeId node id
-     * @param {object|null} data {lines: string[]|function, unread: boolean} or null to remove
-     */
-    setCard(nodeId, data) {
-        if (data) this.cards.set(nodeId, data);
-        else this.cards.delete(nodeId);
-        this.scheduleCard(nodeId);
-    }
-
-    scheduleCard(nodeId) {
-        if (this.cardTimers.has(nodeId)) return;
-        this.cardTimers.set(nodeId, setTimeout(() => {
-            this.cardTimers.delete(nodeId);
-            this.drawCard(nodeId);
-        }, 120));
-    }
-
-    drawCard(nodeId) {
-        this.L.cards.querySelectorAll('.card').forEach(c => { if (c.getAttribute('data-card') === nodeId) c.remove(); });
-        const data = this.cards.get(nodeId), n = this.model && this.model.nodes.get(nodeId);
-        if (!data || !n || this.lod < 2) return;
-        const g = el('g', {class: 'card', 'data-card': nodeId}, this.L.cards);
-        const tail = (typeof data.lines === 'function' ? data.lines() : data.lines).slice(-14);
-        while (tail.length && !tail[0].trim()) tail.shift();
-        const variants = [{cls: 'l2x', n: 5, fs: 6.4, w: 158}, {cls: 'l3', n: 12, fs: 4.3, w: 150}];
-        for (const v of variants) {
-            const sub = el('g', {class: v.cls, transform: `translate(${n.cx + 36} ${n.cy - 30})`}, g);
-            const rows = tail.slice(-v.n), lh = v.fs * 1.32, max = Math.floor(v.w / (v.fs * 0.6)) - 1, hh = v.fs * 1.9;
-            el('path', {d: `M-4 ${hh / 2} L0 ${hh / 2 - 3} L0 ${hh / 2 + 3} Z`, class: 'cpt'}, sub);
-            el('rect', {x: 0, y: 0, width: v.w, height: hh + rows.length * lh + v.fs * 0.9, rx: 3.5, class: 'cbg'}, sub);
-            el('text', {x: v.fs * 0.8, y: v.fs * 1.35, class: 'chd', 'font-size': v.fs * 0.86}, sub).textContent = `${n.name} · ${this.s('ui_console')}` + (data.unread ? ' · ' + this.s('ui_new') : '');
-            rows.forEach((row, i) => {
-                const t = el('text', {x: v.fs * 0.8, y: hh + (i + 0.85) * lh, class: 'cln', 'font-size': v.fs}, sub);
-                t.textContent = row.length > max ? row.slice(0, max - 1) + '…' : row;
-            });
-        }
-    }
-
     /* ---------------- view: zoom, position, levels of detail ---------------- */
 
     lodOf(k) {
@@ -687,7 +640,6 @@ export class Stage {
             const name = this.r('lodName'), bar = this.r('lodBar');
             if (name) name.textContent = this.s('ui_lod' + nl);
             if (bar) Array.from(bar.children).forEach((i, j) => i.classList.toggle('on', j <= nl));
-            this.cards.forEach((_, id) => this.scheduleCard(id));
             this.call('lodChanged', nl);
         }
         this.canvas.view();
@@ -1094,13 +1046,8 @@ export class Stage {
             this.call('details', this.sel);
             return;
         }
-        const badge = near('.cbadge'), nodeEl = near('.node'), cardEl = near('.card');
+        const badge = near('.cbadge'), nodeEl = near('.node');
         const m = this.model;
-        if (cardEl) {
-            const n = m.nodes.get(cardEl.getAttribute('data-card'));
-            if (n) this.call('console', n);
-            return;
-        }
         if (badge && nodeEl) {
             this.call('console', m.nodes.get(nodeEl.dataset.node));
             return;

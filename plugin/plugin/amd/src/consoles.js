@@ -544,22 +544,6 @@ class Con {
         }
     }
 
-    /**
-     * The last lines of the output for the preview on the scheme.
-     *
-     * @param {number} n Maximum number of lines to return.
-     */
-    tail(n) {
-        if (!this.term) return [];
-        const buf = this.term.buffer.active, out = [];
-        for (let i = Math.max(0, buf.length - 60); i < buf.length; i++) {
-            const l = buf.getLine(i);
-            out.push(l ? l.translateToString(true) : '');
-        }
-        while (out.length && !out[out.length - 1].trim()) out.pop();
-        return out.slice(-n);
-    }
-
     output() {
         const o = this.owner;
         this.activity('out');
@@ -569,7 +553,6 @@ class Con {
                 o.paintBadges(this);
                 o.renderTabsAndChips();
             }
-            o.stage.scheduleCard(this.n.id);
         }
     }
 
@@ -681,8 +664,9 @@ export class Consoles {
         this.pins = store.get('snippins', {});
         this.barsFolded = store.get('tbarfolded', false) === true;
         this.snip = new SnipMenu(this);
-        this.mode = store.get('mode', 'panel');
-        if (!['panel', 'grid', 'windows'].includes(this.mode)) this.mode = 'panel';
+        // Windows by default: students like them best; a mode the student chose is kept in the browser.
+        this.mode = store.get('mode', 'windows');
+        if (!['panel', 'grid', 'windows'].includes(this.mode)) this.mode = 'windows';
         this.diving = false;
         this.preDive = null;
         this.zTop = 10;
@@ -865,7 +849,6 @@ export class Consoles {
         c.dispose();
         this.cons.delete(nodeId);
         this.stage.setBadge(nodeId, null);
-        this.stage.setCard(nodeId, null);
         if (this.active === nodeId) this.active = this.cons.size ? Array.from(this.cons.keys()).pop() : null;
         if (this.diving) {
             if (this.active) this.enterDive(this.cons.get(this.active));
@@ -934,17 +917,7 @@ export class Consoles {
         if (c && c.unread) {
             c.unread = false;
             this.paintBadges(c);
-            this.refreshCards();
         }
-    }
-
-    /** Previews on the scheme: of every console that is not on the screen. */
-    refreshCards() {
-        this.cons.forEach(c => {
-            // A screen has no text to preview.
-            if (c.vnc || this.isVisible(c)) this.stage.setCard(c.n.id, null);
-            else this.stage.setCard(c.n.id, {lines: () => c.tail(14), unread: c.unread});
-        });
     }
 
     /* ---------------- the arrangements ---------------- */
@@ -977,7 +950,6 @@ export class Consoles {
         requestAnimationFrame(() => {
             this.cons.forEach(c => c.refit());
             this.drawLinks();
-            this.refreshCards();
         });
     }
 
@@ -1011,7 +983,6 @@ export class Consoles {
                 c.unread = false;
                 this.paintBadges(c);
                 this.renderPanel();
-                this.refreshCards();
                 c.focus();
             };
         });
@@ -1194,7 +1165,6 @@ export class Consoles {
             w.classList.remove('anim');
             c.min = true;
             this.paintBadges(c);
-            this.refreshCards();
             this.drawLinks();
         }, this.stage.reduced ? 0 : 270);
     }
@@ -1204,7 +1174,6 @@ export class Consoles {
         if (!w) return;
         c.min = false;
         this.paintBadges(c);
-        this.refreshCards();
         const p = this.stage.toScreen(c.n.cx, c.n.cy), cx = c.wpos.x + c.wpos.w / 2, cy = c.wpos.y + c.wpos.h / 2;
         w.style.transform = `translate(${p.x - cx}px, ${p.y - cy}px) scale(.05)`;
         w.style.opacity = '0';
@@ -1250,7 +1219,6 @@ export class Consoles {
             if (ch !== c.host) ch.remove();
         });
         this.renderTabsAndChips();
-        this.refreshCards();
         const top = this.stage.wrap.getBoundingClientRect().height - d.offsetHeight;
         this.stage.zoomToNode(c.n, 1.7, Math.max(60, top / 2 + 10));
         setTimeout(() => c.refit(), 280);
@@ -1263,7 +1231,6 @@ export class Consoles {
         if (restore && this.preDive) this.stage.animateTo(this.preDive, 320);
         this.preDive = null;
         this.renderTabsAndChips();
-        this.refreshCards();
     }
 
     /** The sheet follows the visible part of the screen: the system keyboard covers the lower part of it. */
