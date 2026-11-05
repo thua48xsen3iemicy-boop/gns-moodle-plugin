@@ -259,26 +259,26 @@ export class CanvasView {
     }
 
     positionSubnets() {
-        const s = this.stage, {k} = s.view, w = s.wrap.clientWidth, h = s.wrap.clientHeight;
+        const s = this.stage, {k} = s.view;
         const busy = [...s.model.nodes.values()].map(n => {
             const p = s.toScreen(n.cx, n.cy), r = Math.max(14, 26 * k); return {x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r};
         });
-        busy.push({x: 0, y: 0, w: Math.min((s.hudRight || 384) + 12, w), h: (s.hudBottom || 168) + 8}, {x: 0, y: h - 112, w, h: 112});
+        // Pills keep clear of the nodes and of each other only: near the screen edge or under a panel they stay put,
+        // so the scheme moves as one picture while it is dragged.
         const intersects = (a, b) => a.x < b.x + b.w + 5 && a.x + a.w + 5 > b.x && a.y < b.y + b.h + 5 && a.y + a.h + 5 > b.y;
         this.subnets.forEach(x => {
             if (!x.g) return;
             const origin = s.toScreen(x.x, x.y), offsets = [[0, 0]];
             for (const r of [24, 48, 80, 120, 176, 240]) for (let a = 0; a < 360; a += 45) offsets.push([r * Math.cos(a * Math.PI / 180), r * Math.sin(a * Math.PI / 180)]);
-            const offscreen = origin.x < -80 || origin.x > w + 80 || origin.y < -20 || origin.y > h + 20;
-            const offset = offscreen ? [0, 0] : offsets.find(([dx, dy]) => {
+            const offset = offsets.find(([dx, dy]) => {
                 const b = {x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh};
-                return b.x >= 8 && b.y >= 8 && b.x + b.w <= w - 8 && b.y + b.h <= h - 8 && !busy.some(o => intersects(b, o));
+                return !busy.some(o => intersects(b, o));
             });
             x.g.style.display = offset ? '' : 'none'; x.g.setAttribute('tabindex', offset ? '0' : '-1');
             const [dx, dy] = offset || [0, 0]; x.cx = x.x + dx / k; x.cy = x.y + dy / k;
             x.g.setAttribute('transform', `translate(${x.cx} ${x.cy})`);
             x.g.querySelector('.subnet-pill').setAttribute('transform', `scale(${1 / k})`);
-            if (offset && !offscreen) busy.push({x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh});
+            if (offset) busy.push({x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh});
             x.edges.forEach(({line, label, node}) => {
                 line.style.display = offset ? '' : 'none'; label.parentNode.style.display = offset ? '' : 'none';
                 line.setAttribute('x2', x.cx); line.setAttribute('y2', x.cy);
@@ -535,7 +535,8 @@ export class CanvasView {
         this.leads.textContent = '';
         const occupied = [...svg.querySelectorAll('.node .ico,.l2-virtual > rect,.subnet-object rect,.drawing text,.duplex-label,.card')]
             .filter(visible).map(box).filter(r => r.w && r.h);
-        s.wrap.querySelectorAll('[data-region=layerSeg],.canvas-actions,[data-region=details] foreignObject,.canvas-panel:not([hidden]),.tasks-panel:not([hidden]),.fact-status,.zoom').forEach(e => occupied.push(box(e)));
+        // Only objects of the scheme push labels aside: the screen edge and the panels over the scheme do not, so labels
+        // do not slide while the scheme is dragged.
         labels.map(g => {
             const texts = [...g.querySelectorAll('text')].filter(visible);
             if (!texts.length) return null;
@@ -550,7 +551,7 @@ export class CanvasView {
                 }
                 const offset = offsets.find(([dx, dy]) => {
                     const c = {...r, x: r.x + dx, y: r.y + dy};
-                    return c.x >= 5 && c.y >= 5 && c.x + c.w <= root.width - 5 && c.y + c.h <= root.height - 5 && !occupied.some(b => overlaps(c, b));
+                    return !occupied.some(b => overlaps(c, b));
                 });
                 if (!offset) { g.classList.add('label-hidden'); return; }
                 const [dx, dy] = offset;
