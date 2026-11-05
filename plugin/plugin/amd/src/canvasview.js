@@ -23,7 +23,7 @@
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 import {svgEl as el} from 'mod_gns3lab/dom';
-import {clamp} from 'mod_gns3lab/model';
+import {clamp, isHost} from 'mod_gns3lab/model';
 import {factsStatus, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 import {canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
 
@@ -119,14 +119,18 @@ export class CanvasView {
                 'aria-label': s.model.nodes.get(link.a.nodeId).name + ' ↔ ' + s.model.nodes.get(link.b.nodeId).name + ' · ' + (vlan == null ? 'p2p' : 'VLAN ' + vlan)}, lines);
             g.style.setProperty('--vlan-color', color(vlan));
             el('path', {d, class: 'hit'}, g); el('path', {d, class: 'stroke'}, g);
-            const label = el('g', {class: 'auto-label', 'data-priority': segment.blocked || segment.mismatch ? 1 : 3}, g);
             const aname = s.endShown(link.a) ? segment.aname : '?', bname = s.endShown(link.b) ? segment.bname : '?';
+            // A plain point-to-point segment needs no caption: the line says it all.
             const caption = segment.mismatch ? `native VLAN ${va.split('|')[2]} ↔ ${vb.split('|')[2]} !`
-                : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : vlan == null ? 'p2p'
+                : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : vlan == null ? ''
                 : segment.unknown ? `VLAN ${vlan} · ${s.s('ui_canvas_unknown')}` : aname.includes('.') ? `${aname} · ${vlan}`
                 : bname.includes('.') ? `${bname} · ${vlan}` : 'VLAN ' + vlan;
-            el('text', {x: mx, y: my - 7, class: 'caption'}, label).textContent = caption;
+            if (caption) {
+                const label = el('g', {class: 'auto-label', 'data-priority': segment.blocked || segment.mismatch ? 1 : 3}, g);
+                el('text', {x: mx, y: my - 7, class: 'caption'}, label).textContent = caption;
+            }
             segment.g = g;
+            segment.ends = [[link.a.nodeId, a, b], [link.b.nodeId, b, a]];
         });
         virtuals.forEach(v => {
             const g = el('g', {class: 'l2-virtual dimmable' + (v.domain?.vlans.length > 1 ? ' mixed' : '') + (s.factsFailed(v.orig.id) ? ' collection-error' : ''),
@@ -152,7 +156,7 @@ export class CanvasView {
                     'data-subnet': x.key}, s.L.l3);
                 const group = el('g', {class: 'auto-label dimmable', 'data-priority': 2, 'data-subnet': x.key}, s.L.l3);
                 const label = el('text', {x: n.cx + (x.cx - n.cx) * .4, y: n.cy + (x.cy - n.cy) * .4 - 5 / s.view.k, class: 'pip'}, group);
-                label.textContent = m.iface.name + ' · ' + m.c.ip;
+                label.textContent = this.portText(n, m.iface) + ' · ' + m.c.ip;
                 x.edges.push({line, label, node: n});
             });
             const g = el('g', {class: 'subnet-object dimmable' + (x.issues.length ? ' warn' : ''), transform: `translate(${x.cx} ${x.cy})`,
@@ -162,6 +166,68 @@ export class CanvasView {
             el('text', {y: 1}, pill).textContent = (x.issues.length ? '! ' : '') + x.key;
             x.g = g; s.grow(x.x - 78, x.y - 16, x.x + 78, x.y + 16);
         });
+    }
+
+    /**
+     * Name of an interface on the scheme: a host shows the name of its cable end (E0, E1, ...), other nodes the device name.
+     *
+     * @param {object} n node of the model
+     * @param {object} iface interface from the facts
+     * @returns {string}
+     */
+    portText(n, iface) {
+        if (!isHost(n)) return iface.name;
+        // A subinterface keeps its suffix: ens3.10 on the cable end E0 is E0.10.
+        const f = this.stage.fx && this.stage.fx.nodes.get(n.id);
+        const parent = !iface.port && iface.parent && f && f.byName.get(iface.parent);
+        if (parent && iface.name.startsWith(parent.name)) return this.portText(n, parent) + iface.name.slice(parent.name.length);
+        const p = iface.port;
+        const end = p && this.stage.model.links.flatMap(l => [l.a, l.b])
+            .find(e => e.nodeId === n.id && e.adapter === p.adapter && e.port === p.port);
+        return end ? end.text : iface.name;
+    }
+
+    /**
+     * Directions of the lines drawn from each node on the current layer.
+     *
+     * @returns {Map<string, Array<{x: number, y: number}>>} node id: unit vectors in scene coordinates
+     */
+    spokes() {
+        const s = this.stage, out = new Map();
+        const add = (id, from, to) => {
+            const dx = to.cx - from.cx, dy = to.cy - from.cy, len = Math.hypot(dx, dy);
+            if (!len) return;
+            if (!out.has(id)) out.set(id, []);
+            out.get(id).push({x: dx / len, y: dy / len});
+        };
+        if (s.layer === 'l3') {
+            this.subnets.forEach(x => {
+                if (x.g && x.g.style.display !== 'none') x.edges.forEach(e => add(e.node.id, e.node, x));
+            });
+        } else if (s.layer === 'l2') {
+            (this.l2?.segments || []).forEach(segment => (segment.ends || []).forEach(([id, from, to]) => add(id, from, to)));
+        } else if (s.layer !== 'l4') {
+            s.model.links.forEach(l => {
+                const a = s.model.nodes.get(l.a.nodeId), b = s.model.nodes.get(l.b.nodeId);
+                add(a.id, a, b); add(b.id, b, a);
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Side of a node for its name: below if no line leaves that way, else above, right or left; the freest one at worst.
+     *
+     * @param {Array<{x: number, y: number}>} dirs directions of the lines of the node
+     * @returns {string} bottom, top, right or left
+     */
+    static labelSide(dirs) {
+        const sides = {bottom: [0, 1], top: [0, -1], right: [1, 0], left: [-1, 0]};
+        const score = ([x, y]) => Math.max(-1, ...dirs.map(d => d.x * x + d.y * y));
+        const order = Object.keys(sides);
+        // cos 55°: a line closer than that to the side would cross the name.
+        return order.find(side => score(sides[side]) < 0.57)
+            || order.reduce((best, side) => score(sides[side]) < score(sides[best]) - 0.01 ? side : best);
     }
 
     positionSubnets() {
@@ -393,15 +459,23 @@ export class CanvasView {
         const box = e => { const r = e.getBoundingClientRect(); return {x: r.left - root.left, y: r.top - root.top, w: r.width, h: r.height}; };
         const overlaps = (a, b) => a.x < b.x + b.w + 3 && a.x + a.w + 3 > b.x && a.y < b.y + b.h + 3 && a.y + a.h + 3 > b.y;
         labels.forEach(g => { g.classList.remove('label-hidden'); g.style.translate = ''; });
+        const spokes = this.spokes();
         labels.forEach(g => {
-            const name = g.querySelector('.nname');
-            if (!name || !visible(name)) return;
-            const r = name.getBBox();
-            let y = r.y + r.height + 4 * inv;
-            g.querySelectorAll('.nsub,.nadj').forEach(t => {
-                t.setAttribute('dy', '0'); t.setAttribute('y', y);
-                if (visible(t)) y += t.getBBox().height + 4 * inv;
+            const name = g.querySelector('.nname'), node = g.closest('.node');
+            // Placed even while the layer fades in (opacity 0): the bounding box is already known then.
+            if (!name || !node) return;
+            // The name goes where no line leaves the node, so it does not cover the connections.
+            const side = CanvasView.labelSide(spokes.get(node.dataset.node) || []), gap = 4 * inv;
+            const lines = [name, ...[...g.querySelectorAll('.nsub,.nadj')].filter(visible)];
+            const heights = lines.map(t => t.getBBox().height), total = heights.reduce((a, b) => a + b, 0) + gap * (lines.length - 1);
+            const x = side === 'right' ? 33 : side === 'left' ? -33 : 0;
+            let y = side === 'bottom' ? (s.layer === 'l2' ? 23 : 25) : side === 'top' ? -25 - total : -total / 2;
+            lines.forEach((t, i) => {
+                t.setAttribute('dy', '0'); t.setAttribute('x', x); t.setAttribute('y', y);
+                t.style.textAnchor = side === 'right' ? 'start' : side === 'left' ? 'end' : '';
+                y += heights[i] + gap;
             });
+            g.dataset.side = side;
         });
         if (!this.leads) return;
         this.leads.textContent = '';
