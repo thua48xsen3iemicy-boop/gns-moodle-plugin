@@ -4831,3 +4831,41 @@ from{transform:translateY(40%);opacity:.3}
     font-display: swap;
     src: url("[[font:mod_gns3lab|IBMPlexSansCondensed-SemiBold.woff2]]") format("woff2");
 }
+
+/* Small read-only scheme of the reference lab on the activity page (preview.js), in the colours of the lab page. */
+.gns3lab-preview {
+    --ico: #2a4b5c;
+    --ico-glyph: #e9f6f7;
+    margin: 0 0 1rem;
+    border: 1px solid #2c4a56;
+    border-radius: 12px;
+    background: #101f2b;
+    overflow: hidden;
+}
+.gns3lab-preview svg {
+    display: block;
+    width: 100%;
+    height: clamp(220px, 40vw, 340px);
+}
+.gns3lab-preview .pv-wire {
+    stroke: #6d93a3;
+    stroke-width: 1.6;
+    vector-effect: non-scaling-stroke;
+}
+.gns3lab-preview .pv-name {
+    fill: #eaf3f5;
+    font: 600 13px var(--bs-body-font-family, system-ui, sans-serif);
+    text-anchor: middle;
+    dominant-baseline: hanging;
+    paint-order: stroke;
+    stroke: #101f2b;
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+.gns3lab-preview figcaption {
+    padding: 6px 12px;
+    border-top: 1px solid #2c4a56;
+    color: #9ab2bc;
+    font-size: .8125rem;
+}
+

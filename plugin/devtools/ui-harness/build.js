@@ -312,6 +312,27 @@ for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `index.${lang}.course.html`), shell(lang, '', body, 'live', '', COURSE_INIT));
 }
 
+// The activity page (view.php, templates/overview.mustache) with the small scheme of the reference lab: index.<lang>.overview.html.
+const OVERVIEW_INIT = "require(['mod_gns3lab/preview'], function(preview) { preview.init('u1'); });";
+for (const lang of ['en', 'ru']) {
+    const str = strings(lang);
+    const view = {
+        uniqid: 'u1', openurl: `index.${lang}.html`, isdemo: true, courselabsurl: `index.${lang}.course.html`,
+        previewjson: JSON.stringify({topology: data.topology, source: str.demosource}),
+        str: () => (text, render) => {
+            const key = render(text).split(',')[0].trim();
+            if (!(key in str)) {
+                throw new Error('Missing string ' + key);
+            }
+            return str[key];
+        },
+        js: () => () => '',
+    };
+    const body = Mustache.render(fs.readFileSync(path.join(plugin, 'templates/overview.mustache'), 'utf8'), view,
+        {'mod_gns3lab/canvas_icons': fs.readFileSync(path.join(plugin, 'templates/canvas_icons.mustache'), 'utf8')});
+    fs.writeFileSync(path.join(dist, `index.${lang}.overview.html`), shell(lang, '', body, 'live', '', OVERVIEW_INIT));
+}
+
 // A user who may only look: no session bar.
 fs.writeFileSync(path.join(dist, 'index.viewer.html'), shell('ru', '', page('ru', {cancontrol: false})));
 

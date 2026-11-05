@@ -67,7 +67,7 @@ const OK_AT = new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r',
  * @param {string} src SVG source of the drawing
  * @returns {{g: SVGElement, w: number, h: number}|null}
  */
-const sanitizeDrawing = src => {
+export const sanitizeDrawing = src => {
     let doc;
     try {
         doc = new DOMParser().parseFromString(String(src || ''), 'image/svg+xml');
