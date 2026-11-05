@@ -684,8 +684,6 @@ $string['ui_assignments'] = 'Задания';
 $string['ui_assignments_empty'] = 'Преподаватель ещё не добавил инструкции в описание этой активности.';
 
 $string['ui_canvas_practice'] = 'ПРАКТИКА НА ТОПОЛОГИИ';
-$string['ui_canvas_nodes'] = 'УЗЛОВ';
-$string['ui_canvas_links'] = 'ЛИНКОВ';
 $string['ui_canvas_l1_help'] = 'Физические соединения и состояние портов';
 $string['ui_canvas_l2_help'] = 'VLAN, транки и широковещательные домены';
 $string['ui_canvas_l3_help'] = 'Адреса, подсети и их участники';

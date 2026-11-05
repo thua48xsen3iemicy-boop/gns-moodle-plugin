@@ -126,11 +126,13 @@
             <p class="hint" data-region="hint"></p>
             <div class="chip" data-region="chip" role="status" hidden></div>
             <div class="dhint" data-region="dhint" hidden></div>
-            <div class="canvas-actions" data-region="canvasActions">
-                <button class="btn" type="button" data-region="overview" aria-expanded="false" aria-controls="{{uniqid}}-overview">{{#str}}ui_overview, mod_gns3lab{{/str}} <span class="task-count" data-region="issueCount">0</span></button>
-                <button class="btn tasks-toggle" type="button" data-region="assignmentsOpen" aria-expanded="false" aria-controls="{{uniqid}}-assignments">{{#str}}ui_assignments, mod_gns3lab{{/str}}</button>
+            <div class="hud-tools" data-region="hudTools">
+                <div class="canvas-actions" data-region="canvasActions">
+                    <button class="btn" type="button" data-region="overview" aria-expanded="false" aria-controls="{{uniqid}}-overview">{{#str}}ui_overview, mod_gns3lab{{/str}} <span class="task-count" data-region="issueCount">0</span></button>
+                    <button class="btn tasks-toggle" type="button" data-region="assignmentsOpen" aria-expanded="false" aria-controls="{{uniqid}}-assignments">{{#str}}ui_assignments, mod_gns3lab{{/str}}</button>
+                </div>
+                <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
             </div>
-            <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
             <div class="empty-surface" data-region="canvasEmpty" hidden></div>
             <aside class="canvas-panel" data-region="overviewPanel" id="{{uniqid}}-overview" aria-labelledby="{{uniqid}}-overview-title" hidden>
                 <header><div><h2 id="{{uniqid}}-overview-title" data-region="overviewTitle">{{#str}}ui_overview, mod_gns3lab{{/str}}</h2><p data-region="overviewLead"></p></div><button class="ib" type="button" data-region="overviewClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>

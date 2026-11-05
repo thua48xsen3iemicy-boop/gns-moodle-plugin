@@ -31,8 +31,7 @@ export const STRING_KEYS = [
     'ui_canvas_title', 'ui_canvas_l4', 'ui_canvas_duplex', 'ui_canvas_chassis',
     'ui_canvas_blocked', 'ui_canvas_unknown', 'ui_canvas_disconnected', 'ui_canvas_objects',
     'ui_canvas_card_layers', 'ui_canvas_interface', 'ui_canvas_admin', 'ui_canvas_oper',
-    'ui_assignments', 'ui_assignments_empty', 'ui_canvas_practice', 'ui_canvas_nodes',
-    'ui_canvas_links', 'ui_canvas_l1_help', 'ui_canvas_l2_help', 'ui_canvas_l3_help',
+    'ui_assignments', 'ui_assignments_empty', 'ui_canvas_practice', 'ui_overview', 'ui_canvas_l1_help', 'ui_canvas_l2_help', 'ui_canvas_l3_help',
     'ui_canvas_collection_error', 'ui_canvas_empty_l2', 'ui_canvas_empty_l3', 'ui_canvas_subnet',
     'ui_canvas_domain', 'ui_canvas_interfaces', 'ui_canvas_node', 'ui_canvas_port',
     'ui_canvas_subnet_foot', 'ui_canvas_logical_link', 'ui_canvas_passing', 'ui_canvas_tag',
@@ -46,6 +45,9 @@ export const STRING_KEYS = [
     'ui_canvas_related', 'ui_canvas_members', 'ui_canvas_no_objects', 'ui_canvas_no_issues',
     'ui_canvas_no_check', 'ui_canvas_inspect_note',
 ];
+
+/** Top of the HUD controls under the layer note, in pixels of the scheme area (styles.css .hud-tools). */
+const TOOLS_TOP = 106;
 
 export class CanvasView {
     constructor(stage) {
@@ -235,7 +237,7 @@ export class CanvasView {
         const busy = [...s.model.nodes.values()].map(n => {
             const p = s.toScreen(n.cx, n.cy), r = Math.max(14, 26 * k); return {x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r};
         });
-        busy.push({x: 0, y: 0, w: Math.min(396, w), h: 168}, {x: 0, y: h - 112, w, h: 112});
+        busy.push({x: 0, y: 0, w: Math.min(396, w), h: (s.hudBottom || 168) + 8}, {x: 0, y: h - 112, w, h: 112});
         const intersects = (a, b) => a.x < b.x + b.w + 5 && a.x + a.w + 5 > b.x && a.y < b.y + b.h + 5 && a.y + a.h + 5 > b.y;
         this.subnets.forEach(x => {
             if (!x.g) return;
@@ -260,15 +262,17 @@ export class CanvasView {
     }
 
     renderHud() {
-        const s = this.stage, hud = s.r('layerSeg'), w = Math.max(220, Math.min(370, s.wrap.clientWidth - 24));
-        const nodes = s.model?.nodes.size || 0, links = s.model?.links.length || 0;
-        const key = [w, s.layer, nodes, links].join('/');
+        const s = this.stage, hud = s.r('layerSeg'), tools = s.r('hudTools'), w = Math.max(220, Math.min(370, s.wrap.clientWidth - 24));
+        // The overview, assignments and facts controls sit in the HUD under the layer buttons; the HUD grows to hold them.
+        if (tools) tools.style.width = (w - 30) + 'px';
+        const height = TOOLS_TOP - 14 + (tools ? tools.offsetHeight + 12 : 0);
+        const key = [w, s.layer, height].join('/');
+        s.hudBottom = 14 + height;
         if (this.hudKey === key) return;
         this.hudKey = key; hud.textContent = '';
-        el('rect', {x: 14, y: 14, width: w, height: 100, rx: 17, class: 'hud-bg'}, hud);
+        el('rect', {x: 14, y: 14, width: w, height, rx: 17, class: 'hud-bg'}, hud);
         const text = (cls, x, y, value) => { const t = el('text', {class: cls, x, y}, hud); t.textContent = value; return t; };
         text('hud-kicker', 29, 36, s.s('ui_canvas_title'));
-        text('hud-meta', w - 1, 36, w < 340 ? nodes + ' / ' + links : `${nodes} ${s.s('ui_canvas_nodes')} · ${links} ${s.s('ui_canvas_links')}`).setAttribute('text-anchor', 'end');
         const bw = (w - 38) / 4;
         ['l1', 'l2', 'l3', 'l4'].forEach((layer, i) => {
             const g = el('g', {class: 'layer-button' + (s.layer === layer ? ' active' : ''), tabindex: '0', role: 'button',

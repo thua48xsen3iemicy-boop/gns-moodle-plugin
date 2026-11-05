@@ -684,8 +684,6 @@ $string['ui_assignments'] = 'Assignments';
 $string['ui_assignments_empty'] = 'No instructions have been added to this activity yet.';
 
 $string['ui_canvas_practice'] = 'PRACTICE ON THE TOPOLOGY';
-$string['ui_canvas_nodes'] = 'NODES';
-$string['ui_canvas_links'] = 'LINKS';
 $string['ui_canvas_l1_help'] = 'Physical connections and interface state';
 $string['ui_canvas_l2_help'] = 'VLANs, trunks and broadcast domains';
 $string['ui_canvas_l3_help'] = 'Addresses, subnets and their members';
