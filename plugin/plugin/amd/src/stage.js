@@ -740,7 +740,9 @@ export class Stage {
             this.needFit = false;
             this.fit(false);
         }
-        if (this.lastSize && r.width && r.height) {
+        // The scheme holds on to its top left corner, so a change of the console mode only covers or uncovers its right
+        // part and the dots and nodes stay put. A phone keeps the centre (a turn of the device).
+        if (this.mobile && this.lastSize && r.width && r.height) {
             this.view.tx += (r.width - this.lastSize.w) / 2;
             this.view.ty += (r.height - this.lastSize.h) / 2;
             this.applyView();
