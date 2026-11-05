@@ -44,7 +44,8 @@ async function prototypeParity(browser, page) {
             return {palette: ['--canvas', '--panel', '--fg', '--accent', '--ico', '--line'].map(k => getComputedStyle(root).getPropertyValue(k).trim()),
                 card: {width: box.width, height: box.height, background: style.backgroundColor, border: style.borderTopColor, radius: style.borderTopLeftRadius,
                     font: style.fontFamily, titleSize: title.fontSize, titleFont: title.fontFamily, tabFill: tabs.backgroundColor, tabHeight: tabs.minHeight},
-                hud: ['width', 'height', 'rx'].map(k => hud.getAttribute(k)),
+                // The HUD is taller than in the prototype: it also holds the overview, assignments and facts controls.
+                hud: ['width', 'rx'].map(k => hud.getAttribute(k)),
                 mounted: !!card.closest('foreignObject')?.closest(isPrototype ? '#canvasUi' : '[data-region="canvasUi"]')};
         }, prototype);
         assert.deepEqual(await appearance(page, false), await appearance(reference, true));

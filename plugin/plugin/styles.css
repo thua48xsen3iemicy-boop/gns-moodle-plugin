@@ -4654,11 +4654,12 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .object-content .card-empty{padding:18px 0}
 .gns3lab-student.canvas-ui .object-content .mac-toggle{margin-bottom:10px}
 .gns3lab-student.canvas-ui .tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:#203d49;border-color:#54838a;border-radius:10px;box-shadow:var(--shadow)}
-.gns3lab-student.canvas-ui .canvas-actions{position:absolute;right:14px;top:14px;z-index:5;display:flex;gap:8px}
+.gns3lab-student.canvas-ui .hud-tools{position:absolute;left:29px;top:106px;z-index:5;display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
+.gns3lab-student.canvas-ui .canvas-actions{display:flex;gap:6px}
 .gns3lab-student.canvas-ui .canvas-actions .tasks-toggle{position:static;box-shadow:none}
-.gns3lab-student.canvas-ui .canvas-actions .btn{height:40px;background:#203d49;border-color:#54838a;border-radius:10px}
+.gns3lab-student.canvas-ui .canvas-actions .btn{height:28px;min-height:0;padding:0 10px;font-size:12px;line-height:1;background:#203d49;border-color:#3d6270;border-radius:8px}
 .gns3lab-student.canvas-ui .canvas-actions .btn[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
-.gns3lab-student.canvas-ui .canvas-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;
+.gns3lab-student.canvas-ui .canvas-panel{position:absolute;right:14px;top:14px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;
   display:flex;flex-direction:column;background:#142c39;border:1px solid #54838a;border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
 .gns3lab-student.canvas-ui .canvas-panel header{display:flex;align-items:flex-start;justify-content:space-between;padding:18px 20px 12px;gap:12px}
 .gns3lab-student.canvas-ui .canvas-panel h2{margin:0;font:600 24px var(--display)}
@@ -4680,7 +4681,7 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .overview-row:hover,
 .gns3lab-student.canvas-ui .issue-row:hover{color:var(--accent)}
 .gns3lab-student.canvas-ui .overview-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:4px 0 10px}
-.gns3lab-student.canvas-ui .fact-status{position:absolute;left:14px;top:124px;z-index:4;max-width:calc(100% - 28px);background:#102633;border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--muted);font:11px/1.4 var(--body);display:flex;align-items:center;gap:8px}
+.gns3lab-student.canvas-ui .fact-status{color:var(--muted);font:11px/1.4 var(--body);display:flex;flex-wrap:wrap;align-items:center;gap:0 8px}
 .gns3lab-student.canvas-ui .fact-status[data-state="stale"],
 .gns3lab-student.canvas-ui .fact-status[data-state="error"]{border-color:var(--warn);color:var(--warn)}
 .gns3lab-student.canvas-ui .fact-status button{color:var(--accent);font:inherit;background:transparent;border:0;cursor:pointer;padding:2px}
@@ -4692,8 +4693,8 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .object-content .section-label{margin-top:18px;font-weight:600}
 .gns3lab-student.canvas-ui .empty-surface{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:2;width:min(360px,calc(100% - 40px));padding:18px;border:1px dashed var(--line);border-radius:12px;background:#102633;color:var(--muted);text-align:center;font:13px/1.6 var(--body);pointer-events:none}
 .gns3lab-student.canvas-ui .tasks-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
-.gns3lab-student.canvas-ui .task-count{font:600 11px var(--mono);background:#102633;border-radius:5px;padding:4px 6px}
-.gns3lab-student.canvas-ui .tasks-panel{position:absolute;right:14px;top:64px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;display:flex;flex-direction:column}
+.gns3lab-student.canvas-ui .task-count{font:600 10px var(--mono);background:#102633;border-radius:4px;padding:2px 5px}
+.gns3lab-student.canvas-ui .tasks-panel{position:absolute;right:14px;top:14px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;display:flex;flex-direction:column}
 .gns3lab-student.canvas-ui .tasks-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
 .gns3lab-student.canvas-ui .tasks-progress{width:100%;height:5px;accent-color:var(--accent);margin:12px 0}
 .gns3lab-student.canvas-ui .task-item{padding:15px 0;border-top:1px solid var(--line)}
@@ -4704,15 +4705,12 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .task-targets{display:flex;gap:6px;flex-wrap:wrap;margin-left:28px}
 .gns3lab-student.canvas-ui .task-targets button{font:500 11px var(--mono);cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:#203d49;color:var(--accent)}
 @media(max-width:760px){
-.gns3lab-student.canvas-ui .canvas-actions{top:auto;bottom:60px;right:12px;gap:5px}
-.gns3lab-student.canvas-ui .canvas-actions .btn{padding-inline:9px;font-size:12px}
 .gns3lab-student.canvas-ui .canvas-panel,
 .gns3lab-student.canvas-ui .tasks-panel{top:12px;max-height:calc(100% - 126px)}
 .gns3lab-student.canvas-ui .object-card header{padding:14px 16px 10px}
 .gns3lab-student.canvas-ui .object-tabs{margin-inline:16px}
 .gns3lab-student.canvas-ui .object-content{padding-inline:16px}
-.gns3lab-student.canvas-ui .fact-status{top:124px;font-size:10px}
-.gns3lab-student.canvas-ui .canvas-actions .task-count{padding:3px}
+.gns3lab-student.canvas-ui .fact-status{font-size:10px}
 
 }
 @media(prefers-reduced-motion:reduce){
