@@ -23,12 +23,14 @@
     * openurl - URL of the full screen lab page
     * isdemo - the activity has no reference lab yet, the lab page shows a demo lab
     * courselabsurl - URL of the labs page of the course for teachers who can observe, empty for others
+    * previewjson - JSON {topology, source} of the reference lab for the small scheme, empty to show none
 
     Example context (json):
     {
         "openurl": "https://example.org/mod/gns3lab/lab.php?id=1",
         "isdemo": true,
-        "courselabsurl": "https://example.org/mod/gns3lab/course.php?id=2"
+        "courselabsurl": "https://example.org/mod/gns3lab/course.php?id=2",
+        "previewjson": ""
     }
 }}
 <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
@@ -40,3 +42,17 @@
     <p class="text-muted small mb-0 flex-grow-1">{{#str}}demonotice, mod_gns3lab{{/str}}</p>
     {{/isdemo}}
 </div>
+{{#previewjson}}
+<figure class="gns3lab-preview" id="{{uniqid}}-preview" data-json="{{previewjson}}" hidden>
+    <svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{{#str}}topology, mod_gns3lab{{/str}}" preserveAspectRatio="xMidYMid meet">
+        <defs>{{> mod_gns3lab/canvas_icons }}</defs>
+        <g data-region="scene"></g>
+    </svg>
+    <figcaption data-region="source"></figcaption>
+</figure>
+{{#js}}
+require(['mod_gns3lab/preview'], function(preview) {
+    preview.init('{{uniqid}}');
+});
+{{/js}}
+{{/previewjson}}

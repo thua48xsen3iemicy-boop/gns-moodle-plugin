@@ -4109,13 +4109,25 @@ body.gns3lab-fullscreen {
 .gns3lab-student.canvas-ui .ttl{min-width:0}
 .gns3lab-student.canvas-ui .ttl h1{margin:0;font:600 18px/1.2 var(--display);text-wrap:balance}
 .gns3lab-student.canvas-ui .meta{margin:2px 0 0;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-variant-numeric:tabular-nums}
-.gns3lab-student.canvas-ui .pill{display:inline-flex;align-items:center;gap:6px;font:600 11.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ok)}
+.gns3lab-student.canvas-ui .pill{display:inline-flex;align-items:center;gap:6px;font:600 11.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--fg)}
 .gns3lab-student.canvas-ui .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+/* Only a running lab is green, and its dot breathes softly; a lab that is not running reads in plain white. */
+.gns3lab-student.canvas-ui .pill[data-status="running"]{color:var(--ok)}
+.gns3lab-student.canvas-ui .pill[data-status="running"]::before{animation:gns3lab-live 2.4s ease-in-out infinite}
+.gns3lab-student.canvas-ui .pill[data-status="queued"],
+.gns3lab-student.canvas-ui .pill[data-status="starting"],
+.gns3lab-student.canvas-ui .pill[data-status="stopping"]{color:var(--warn)}
+.gns3lab-student.canvas-ui .pill[data-status="failed"]{color:var(--bad)}
+@keyframes gns3lab-live{0%,100%{opacity:1;box-shadow:0 0 0 0 color-mix(in srgb,currentColor 45%,transparent)}50%{opacity:.55;box-shadow:0 0 0 4px transparent}}
+@media(prefers-reduced-motion:reduce){.gns3lab-student.canvas-ui .pill[data-status="running"]::before{animation:none}}
 .gns3lab-student.canvas-ui .demo{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border:1px dashed var(--line);padding:2px 6px;border-radius:4px}
 .gns3lab-student.canvas-ui .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .gns3lab-student.canvas-ui .btn{font:500 13px/1 var(--body);height:32px;padding:0 12px;border:1px solid var(--line);background:var(--canvas);color:var(--fg);border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .gns3lab-student.canvas-ui .btn:hover{border-color:var(--wire)}
 .gns3lab-student.canvas-ui .btn.danger{color:var(--bad)}
+/* Start is green as Stop is red. */
+.gns3lab-student.canvas-ui .btn[data-region="start"]{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.gns3lab-student.canvas-ui .btn[data-region="start"]:hover{border-color:var(--ok)}
 .gns3lab-student.canvas-ui .btn:focus-visible,
 .gns3lab-student.canvas-ui .seg button:focus-visible,
 .gns3lab-student.canvas-ui .tab:focus-visible,
@@ -4819,3 +4831,41 @@ from{transform:translateY(40%);opacity:.3}
     font-display: swap;
     src: url("[[font:mod_gns3lab|IBMPlexSansCondensed-SemiBold.woff2]]") format("woff2");
 }
+
+/* Small read-only scheme of the reference lab on the activity page (preview.js), in the colours of the lab page. */
+.gns3lab-preview {
+    --ico: #2a4b5c;
+    --ico-glyph: #e9f6f7;
+    margin: 0 0 1rem;
+    border: 1px solid #2c4a56;
+    border-radius: 12px;
+    background: #101f2b;
+    overflow: hidden;
+}
+.gns3lab-preview svg {
+    display: block;
+    width: 100%;
+    height: clamp(220px, 40vw, 340px);
+}
+.gns3lab-preview .pv-wire {
+    stroke: #6d93a3;
+    stroke-width: 1.6;
+    vector-effect: non-scaling-stroke;
+}
+.gns3lab-preview .pv-name {
+    fill: #eaf3f5;
+    font: 600 13px var(--bs-body-font-family, system-ui, sans-serif);
+    text-anchor: middle;
+    dominant-baseline: hanging;
+    paint-order: stroke;
+    stroke: #101f2b;
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+.gns3lab-preview figcaption {
+    padding: 6px 12px;
+    border-top: 1px solid #2c4a56;
+    color: #9ab2bc;
+    font-size: .8125rem;
+}
+
