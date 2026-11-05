@@ -49,8 +49,11 @@ export const STRING_KEYS = [
 /** Radius of a port dot on L1, in screen pixels. */
 export const PORT_DOT = 4.5;
 
-/** From this level of detail a cable is drawn as its two directions with TX and RX (stage lodOf: 2 is "Addresses"). */
-const DUPLEX_LOD = 2;
+/**
+ * From this zoom a cable is drawn as its two directions with TX and RX. It is about two wheel notches (x1.2 each)
+ * past the start of the "Addresses" level (zoom 1.6), so that neighbouring cables have room for their labels.
+ */
+const DUPLEX_K = 2.3;
 
 /** Colours of the subnets on L3, in the order of the subnets. */
 const NET_COLORS = ['#73c7ed', '#60dfaf', '#f0bd73', '#da9fe8', '#ff9f8f', '#b7e07a', '#8bb5fa', '#f2a5c8', '#7fe0d6', '#e6d27a'];
@@ -357,7 +360,7 @@ export class CanvasView {
         s.svg.dataset.factlayer = s.layer;
         s.svg.querySelectorAll('.pdot').forEach(dot => dot.setAttribute('r', PORT_DOT * inv));
         // A cable is one line until the scheme is zoomed in well; then its two directions with TX and RX.
-        s.svg.dataset.duplex = s.lod >= DUPLEX_LOD ? 'on' : 'off';
+        s.svg.dataset.duplex = s.view.k >= DUPLEX_K ? 'on' : 'off';
         s.svg.querySelectorAll('[data-fixed-x]').forEach(g => {
             const x = Number(g.dataset.fixedX), y = Number(g.dataset.fixedY);
             g.setAttribute('transform', `translate(${x} ${y}) scale(${inv}) translate(${-x} ${-y})`);
