@@ -88,7 +88,7 @@ const UI_KEYS = [
     'ui_snip_pin', 'ui_snip_unpin', 'ui_snip_hint_run', 'ui_snip_hint_type', 'ui_snip_keys', 'ui_snip_ios_prep',
     'ui_snip_nopins', 'ui_bar_hide', 'ui_bar_show', 'ui_font', 'ui_font_smaller', 'ui_font_larger', 'ui_font_reset',
     'ui_not_connected', 'ui_term_fail', 'ui_close_console',
-    'ui_minimize', 'ui_maximize', 'ui_new_output', 'ui_grid_hint', 'ui_dive_release',
+    'ui_minimize', 'ui_maximize', 'ui_max_title', 'ui_new_output', 'ui_grid_hint', 'ui_dive_release',
     'ui_act_console', 'ui_act_console_open', 'ui_act_console_goto', 'ui_act_info', 'ui_act_info_full', 'ui_act_zoom',
     'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
     'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',

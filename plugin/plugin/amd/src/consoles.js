@@ -1008,11 +1008,11 @@ export class Consoles {
             const hd = hel('div', 'thead', t);
             hd.innerHTML = this.headHtml(c, `<button type="button" data-max title="${esc(this.s('ui_maximize'))}">${ICON_MAX}</button><button type="button" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</button>`);
             const b = hel('div', 'tbody', t);
-            hd.addEventListener('dblclick', () => t.classList.toggle('max'));
-            hd.querySelector('[data-max]').onclick = () => {
-                t.classList.toggle('max');
-                c.refit();
-            };
+            hd.title = this.s('ui_max_title');
+            hd.addEventListener('dblclick', e => {
+                if (!e.target.closest('button')) this.toggleMax(t);
+            });
+            hd.querySelector('[data-max]').onclick = () => this.toggleMax(t);
             hd.querySelector('[data-x]').onclick = () => this.close(c.n.id);
             t.addEventListener('pointerdown', () => {
                 this.active = c.n.id;
@@ -1045,8 +1045,13 @@ export class Consoles {
                     this.markFocus();
                 });
                 this.dragWin(c, hd);
+                hd.title = this.s('ui_max_title');
+                hd.addEventListener('dblclick', e => {
+                    if (!e.target.closest('button')) this.toggleMax(w);
+                });
                 new ResizeObserver(() => {
-                    if (c.win === w && w.offsetWidth) {
+                    // A window over the whole scheme keeps the size it returns to.
+                    if (c.win === w && w.offsetWidth && !w.classList.contains('max')) {
                         c.wpos.w = w.offsetWidth;
                         c.wpos.h = w.offsetHeight;
                         this.drawLinks();
@@ -1077,7 +1082,7 @@ export class Consoles {
     dragWin(c, hd) {
         let s = null;
         hd.addEventListener('pointerdown', e => {
-            if (e.target.closest('button')) return;
+            if (e.target.closest('button') || (c.win && c.win.classList.contains('max'))) return;
             s = {x: e.clientX, y: e.clientY, ox: c.wpos.x, oy: c.wpos.y};
             hd.setPointerCapture(e.pointerId);
             this.showLink(c);
@@ -1364,8 +1369,13 @@ export class Consoles {
     /* ---------------- controls ---------------- */
 
     bind() {
+        this.tabs.title = this.s('ui_max_title');
+        this.tabs.addEventListener('dblclick', e => {
+            if (this.mode === 'panel' && !e.target.closest('[data-x]')) this.toggleMax(this.r('dock'));
+        });
         this.root.querySelectorAll('[data-region="modes"] button').forEach(b => {
             b.onclick = () => {
+                this.unmax();
                 this.mode = b.dataset.mode;
                 store.set('mode', this.mode);
                 if (this.mode === 'windows') {
@@ -1380,13 +1390,7 @@ export class Consoles {
         });
         this.splitter();
         document.addEventListener('keydown', e => {
-            if (e.key === 'Escape' && !this.stage.mobile && this.mode === 'grid') {
-                const m = this.root.querySelector('.tile.max');
-                if (m) {
-                    m.classList.remove('max');
-                    this.cons.forEach(c => c.refit());
-                }
-            }
+            if (e.key === 'Escape' && !this.stage.mobile) this.unmax();
         });
         const vv = window.visualViewport;
         if (vv) {
@@ -1410,6 +1414,36 @@ export class Consoles {
                 this.exitDive(true);
             }
         }, {passive: true});
+    }
+
+    /**
+     * A double click on the title of a console (the tab bar in the panel mode) spreads it over the whole scheme; another
+     * one, Escape or a change of mode puts it back.
+     *
+     * @param {HTMLElement} el the tile, the window or the dock
+     */
+    toggleMax(el) {
+        if (this.stage.mobile) return;
+        const on = !el.classList.contains('max');
+        this.unmax();
+        el.classList.toggle('max', on);
+        this.box.classList.toggle('con-max', on);
+        requestAnimationFrame(() => {
+            this.cons.forEach(c => c.refit());
+            this.drawLinks();
+        });
+    }
+
+    /** Puts a console spread over the scheme back where it was. */
+    unmax() {
+        const maxed = this.root.querySelectorAll('.tile.max,.win.max,.dock.max');
+        if (!maxed.length) return;
+        maxed.forEach(el => el.classList.remove('max'));
+        this.box.classList.remove('con-max');
+        requestAnimationFrame(() => {
+            this.cons.forEach(c => c.refit());
+            this.drawLinks();
+        });
     }
 
     splitter() {
