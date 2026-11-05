@@ -46,6 +46,12 @@ export const STRING_KEYS = [
     'ui_canvas_no_check', 'ui_canvas_inspect_note',
 ];
 
+/** Radius of a port dot on L1, in screen pixels. */
+export const PORT_DOT = 4.5;
+
+/** From this level of detail a cable is drawn as its two directions with TX and RX (stage lodOf: 2 is "Addresses"). */
+const DUPLEX_LOD = 2;
+
 /** Colours of the subnets on L3, in the order of the subnets. */
 const NET_COLORS = ['#73c7ed', '#60dfaf', '#f0bd73', '#da9fe8', '#ff9f8f', '#b7e07a', '#8bb5fa', '#f2a5c8', '#7fe0d6', '#e6d27a'];
 
@@ -349,7 +355,9 @@ export class CanvasView {
         const s = this.stage, inv = 1 / s.view.k;
         s.svg.style.setProperty('--node-ring', clamp(s.view.k, .5, 1.1) + 'px');
         s.svg.dataset.factlayer = s.layer;
-        s.svg.querySelectorAll('.pdot').forEach(dot => dot.setAttribute('r', 3.2 * inv));
+        s.svg.querySelectorAll('.pdot').forEach(dot => dot.setAttribute('r', PORT_DOT * inv));
+        // A cable is one line until the scheme is zoomed in well; then its two directions with TX and RX.
+        s.svg.dataset.duplex = s.lod >= DUPLEX_LOD ? 'on' : 'off';
         s.svg.querySelectorAll('[data-fixed-x]').forEach(g => {
             const x = Number(g.dataset.fixedX), y = Number(g.dataset.fixedY);
             g.setAttribute('transform', `translate(${x} ${y}) scale(${inv}) translate(${-x} ${-y})`);
@@ -490,6 +498,18 @@ export class CanvasView {
         const box = e => { const r = e.getBoundingClientRect(); return {x: r.left - root.left, y: r.top - root.top, w: r.width, h: r.height}; };
         const overlaps = (a, b) => a.x < b.x + b.w + 3 && a.x + a.w + 3 > b.x && a.y < b.y + b.h + 3 && a.y + a.h + 3 > b.y;
         labels.forEach(g => { g.classList.remove('label-hidden'); g.style.translate = ''; });
+        // Interface names matter to the student: each sits on its own plate, sized to the text at this zoom.
+        svg.querySelectorAll('.plabel').forEach(t => {
+            let bg = t.previousElementSibling;
+            // The plate shares the level-of-detail classes of its text, so both appear and hide together.
+            if (!bg || !bg.classList.contains('plabel-bg')) {
+                bg = t.parentNode.insertBefore(el('rect', {class: ['plabel-bg', ...[...t.classList].filter(c => c !== 'plabel')].join(' ')}), t);
+            }
+            if (!visible(t)) { bg.setAttribute('width', 0); return; }
+            const r = t.getBBox(), px = 4 * inv, py = 1.5 * inv;
+            Object.entries({x: r.x - px, y: r.y - py, width: r.width + 2 * px, height: r.height + 2 * py, rx: 3 * inv})
+                .forEach(([k, v]) => bg.setAttribute(k, v));
+        });
         const spokes = this.spokes();
         labels.forEach(g => {
             const name = g.querySelector('.nname'), node = g.closest('.node');
