@@ -4832,15 +4832,25 @@ from{transform:translateY(40%);opacity:.3}
     src: url("[[font:mod_gns3lab|IBMPlexSansCondensed-SemiBold.woff2]]") format("woff2");
 }
 
-/* Small read-only scheme of the reference lab on the activity page (preview.js), in the colours of the lab page. */
+/* Small read-only scheme of the reference lab on the activity page (preview.js): light, in the colours of the Moodle theme. */
 .gns3lab-preview {
-    --ico: #2a4b5c;
-    --ico-glyph: #e9f6f7;
+    --pv-bg: var(--bs-body-bg, #fff);
+    --pv-fg: var(--bs-body-color, #16212b);
+    --pv-muted: var(--bs-secondary-color, #57656f);
+    --pv-line: var(--bs-border-color, #dee2e6);
+    --pv-wire: #8a9aa8;
+    --ico: #2c4a63;
+    --ico-glyph: #f4f6f8;
     margin: 0 0 1rem;
-    border: 1px solid #2c4a56;
+    border: 1px solid var(--pv-line);
     border-radius: 12px;
-    background: #101f2b;
+    background: var(--pv-bg);
     overflow: hidden;
+}
+[data-bs-theme="dark"] .gns3lab-preview {
+    --pv-wire: #8094a4;
+    --ico: #8aafcc;
+    --ico-glyph: #121a20;
 }
 .gns3lab-preview svg {
     display: block;
@@ -4848,24 +4858,24 @@ from{transform:translateY(40%);opacity:.3}
     height: clamp(220px, 40vw, 340px);
 }
 .gns3lab-preview .pv-wire {
-    stroke: #6d93a3;
+    stroke: var(--pv-wire);
     stroke-width: 1.6;
     vector-effect: non-scaling-stroke;
 }
 .gns3lab-preview .pv-name {
-    fill: #eaf3f5;
+    fill: var(--pv-fg);
     font: 600 13px var(--bs-body-font-family, system-ui, sans-serif);
     text-anchor: middle;
     dominant-baseline: hanging;
     paint-order: stroke;
-    stroke: #101f2b;
+    stroke: var(--pv-bg);
     stroke-width: 3px;
     stroke-linejoin: round;
 }
 .gns3lab-preview figcaption {
     padding: 6px 12px;
-    border-top: 1px solid #2c4a56;
-    color: #9ab2bc;
+    border-top: 1px solid var(--pv-line);
+    color: var(--pv-muted);
     font-size: .8125rem;
 }
 
