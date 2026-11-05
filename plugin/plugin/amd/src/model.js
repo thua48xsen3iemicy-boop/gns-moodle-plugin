@@ -125,6 +125,36 @@ export const portName = (node, adapter, port) => {
 };
 
 /**
+ * Whether a node is a plain host (a PC or a server): its ports are named E0, E1, ... on the scheme.
+ *
+ * @param {object} node node of the model
+ * @returns {boolean}
+ */
+export const isHost = node => ['pc', 'server'].includes(node.cat) && !node.guest
+    && !['iou', 'dynamips', 'ethernet_switch', 'ethernet_hub'].includes(node.type);
+
+/**
+ * Port name of a host as the scheme shows it: E and the number ("e0", "eth0", "Ethernet0" and "0/0" become "E0").
+ * Other nodes and names of another form are kept as they are.
+ *
+ * @param {object} node node of the model
+ * @param {string} text port name from the label, the port list or the fallback "adapter/port"
+ * @param {number} adapter adapter number
+ * @param {number} port port number
+ * @returns {string}
+ */
+export const hostPort = (node, text, adapter, port) => {
+    if (!isHost(node)) {
+        return text;
+    }
+    const m = /^(?:e|eth|ethernet)\s*(\d+)$/i.exec(String(text).trim());
+    if (m) {
+        return 'E' + m[1];
+    }
+    return text === adapter + '/' + port && !port ? 'E' + adapter : text;
+};
+
+/**
  * Link filters of GNS3 as a list for the details card: {k: title, v: value, s: short form for a label}.
  *
  * @param {object} f filters object of a link
@@ -194,9 +224,8 @@ export const buildModel = doc => {
             continue;
         }
         ends.forEach(e => {
-            if (!e.text) {
-                e.text = portName(nodes.get(e.nodeId), e.adapter, e.port);
-            }
+            const node = nodes.get(e.nodeId);
+            e.text = hostPort(node, e.text || portName(node, e.adapter, e.port), e.adapter, e.port);
         });
         links.push({
             id: l.link_id || ('link-' + links.length), a: ends[0], b: ends[1], filters: l.filters || {},

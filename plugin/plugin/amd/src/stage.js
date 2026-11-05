@@ -491,7 +491,8 @@ export class Stage {
         };
         this.renderDrawings();
         const geo = linkGeometry(m), L = this.layer, D = this.der;
-        if (L !== 'l2') m.links.forEach(l => this.drawLink(l, geo.get(l.id)));
+        // L2 draws its own segments; L3 shows only the lines to the IP subnets, not the cables.
+        if (L !== 'l2' && L !== 'l3') m.links.forEach(l => this.drawLink(l, geo.get(l.id)));
         if (L === 'l2' && D) this.canvas.renderL2();
         if (L === 'l3' && D) this.canvas.renderL3();
         this.renderNodes();
@@ -501,6 +502,9 @@ export class Stage {
         this.view.k = this.view.k || 1;
         this.applyView();
         this.cards.forEach((_, id) => this.scheduleCard(id));
+        // Labels that fade in are skipped by the layout while transparent: lay them out again once they are shown.
+        clearTimeout(this.relabelTimer);
+        this.relabelTimer = setTimeout(() => this.canvas.scheduleLabels(), 450);
     }
 
     renderDrawings() {
@@ -568,15 +572,6 @@ export class Stage {
         });
     }
 
-    subtitle(n) {
-        const f = this.fx && this.fx.nodes.get(n.id);
-        if (!f) return '';
-        const i = (f.ifs || []).find(x => x.ipv4 && x.ipv4.length);
-        if (i) return i.ipv4[0];
-        if (f.vlans && f.vlans.length) return 'VLAN ' + f.vlans.map(v => v.id).join(', ');
-        return '';
-    }
-
     renderNodes() {
         const L = this.layer;
         this.model.nodes.forEach(n => {
@@ -596,8 +591,6 @@ export class Stage {
             const title = el('text', {y: L === 'l2' ? 23 : 25, class: 'nname'}, label);
             el('tspan', {class: 'sdot', 'aria-hidden': 'true'}, title).textContent = '● ';
             el('tspan', {}, title).textContent = sil ? this.s('ui_fog_unknown') : n.name;
-            const sub = !sil && this.subtitle(n);
-            if (sub) el('text', {y: 25, dy: '1.9em', class: 'nsub l2'}, label).textContent = sub;
             const bd = el('g', {class: 'cbadge', transform: 'translate(-22 -21)'}, g);
             el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, bd);
             el('text', {y: 3}, bd).textContent = '>_';
