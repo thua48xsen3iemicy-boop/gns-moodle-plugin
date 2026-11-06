@@ -55,6 +55,9 @@ export const PORT_DOT = 4.5;
  */
 const DUPLEX_K = 2.3;
 
+/** Distance between the control points of fanned L2 lines with the same ends; the curves part by half of it. */
+const FAN = 20;
+
 /** Colours of the subnets on L3, in the order of the subnets. */
 const NET_COLORS = ['#73c7ed', '#60dfaf', '#f0bd73', '#da9fe8', '#ff9f8f', '#b7e07a', '#8bb5fa', '#f2a5c8', '#7fe0d6', '#e6d27a'];
 
@@ -123,25 +126,46 @@ export class CanvasView {
             el('text', {x: x0 + 8, y: y0 - 6}, label).textContent = n.name;
             s.grow(x0, y0 - 20, x1, y1);
         });
+        // Segments between the same two ends (parallel cables carrying one VLAN) are fanned out, or they cover each other.
+        // The side comes from the pair of ends, not from the cable: one stored B→A would otherwise land on one stored A→B.
+        const endKey = (vertex, nodeId) => vertex || 'N|' + nodeId;
+        const fans = new Map();
+        segments.forEach(segment => {
+            const ka = endKey(segment.va, segment.link.a.nodeId), kb = endKey(segment.vb, segment.link.b.nodeId);
+            const key = [ka, kb].sort().join('#');
+            if (!fans.has(key)) fans.set(key, []);
+            fans.get(key).push(segment);
+            segment.side = ka < kb ? 1 : -1;
+        });
+        fans.forEach(list => list.forEach((segment, i) => {
+            segment.fan = list.length > 1 ? (i - (list.length - 1) / 2) * FAN * segment.side : null;
+        }));
         segments.forEach(segment => {
             const {link, va, vb, vlan} = segment;
             const a = virtuals.get(va) || s.model.nodes.get(link.a.nodeId), b = virtuals.get(vb) || s.model.nodes.get(link.b.nodeId);
             const dx = b.cx - a.cx, dy = b.cy - a.cy, length = Math.hypot(dx, dy) || 1;
-            const bend = vlan == null ? 0 : segment.tag === 'u' ? -7 : 7;
+            const bend = segment.fan ?? (vlan == null ? 0 : segment.tag === 'u' ? -7 : 7);
             const mx = (a.cx + b.cx) / 2 - dy / length * bend, my = (a.cy + b.cy) / 2 + dx / length * bend;
             const d = `M${a.cx} ${a.cy} Q${mx} ${my} ${b.cx} ${b.cy}`;
-            const g = el('g', {class: 'link l2-path dimmable' + (vlan == null ? ' l2-p2p' : '') + (!segment.active ? ' down' : '') +
+            // An 802.1Q trunk carries its VLANs on one cable: each of its lines gets the trunk casing.
+            const trunk = s.der.l2.links.get(link.id)?.kind === 'trunk';
+            segment.trunk = trunk;
+            const g = el('g', {class: 'link l2-path dimmable' + (vlan == null ? ' l2-p2p' : '') + (trunk ? ' l2-trunk' : '') + (!segment.active ? ' down' : '') +
                 (segment.blocked ? ' problem' : '') + (segment.mismatch ? ' mismatch' : '') + (segment.unknown ? ' unknown' : ''),
                 'data-link': link.id, 'data-segment': segment.id, tabindex: '0', role: 'button',
-                'aria-label': s.model.nodes.get(link.a.nodeId).name + ' ↔ ' + s.model.nodes.get(link.b.nodeId).name + ' · ' + (vlan == null ? 'p2p' : 'VLAN ' + vlan)}, lines);
+                'aria-label': s.model.nodes.get(link.a.nodeId).name + ' ↔ ' + s.model.nodes.get(link.b.nodeId).name + ' · ' +
+                    (vlan == null ? 'p2p' : (trunk ? 'trunk · ' : '') + 'VLAN ' + vlan + (trunk && segment.tag === 'u' ? ' (native)' : ''))}, lines);
             g.style.setProperty('--vlan-color', color(vlan));
-            el('path', {d, class: 'hit'}, g); el('path', {d, class: 'stroke'}, g);
+            el('path', {d, class: 'hit'}, g);
+            if (trunk) el('path', {d, class: 'casing'}, g);
+            el('path', {d, class: 'stroke'}, g);
             // The colour tells the VLAN and the pill the details: a line carries a caption only for a problem.
             const caption = segment.mismatch ? `native VLAN ${va.split('|')[2]} ↔ ${vb.split('|')[2]} !`
                 : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : '';
             if (caption) {
                 const label = el('g', {class: 'auto-label', 'data-priority': 1}, g);
-                el('text', {x: mx, y: my - 7, class: 'caption'}, label).textContent = caption;
+                // On the curve itself: the control point of a fanned line is far from it.
+                el('text', {x: (a.cx + 2 * mx + b.cx) / 4, y: (a.cy + 2 * my + b.cy) / 4 - 7, class: 'caption'}, label).textContent = caption;
             }
             segment.g = g;
             segment.ends = [[link.a.nodeId, a, b], [link.b.nodeId, b, a]];
@@ -444,7 +468,11 @@ export class CanvasView {
             if (v) mark('data-node', v.orig.id);
         } else if (sel.kind === 'segment' && this.l2) {
             const p = this.l2.segments.find(p => p.id === sel.id);
-            if (p) { mark('data-segment', p.id, true); [p.link.a, p.link.b].forEach(e => nodes.add(e.nodeId)); [p.va, p.vb].forEach(id => mark('data-virtual', id)); }
+            if (p) {
+                mark('data-segment', p.id, true); [p.link.a, p.link.b].forEach(e => nodes.add(e.nodeId)); [p.va, p.vb].forEach(id => mark('data-virtual', id));
+                // The other VLANs of the same trunk cable are lit with it.
+                if (p.trunk) this.l2.segments.filter(q => q.link === p.link && q !== p && q.g).forEach(q => q.g.classList.add('on'));
+            }
         } else if (sel.kind === 'link') { links.add(sel.id); mark('data-link', sel.id, true); }
         else if (sel.kind === 'subnet') { subnets.add(sel.id); mark('data-subnet', sel.id, true); }
         else if (sel.kind === 'vlan' && D) { const d = D.l2.domains.find(d => d.id === sel.id); if (d) domains.add(d); }

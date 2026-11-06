@@ -4545,6 +4545,11 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .l2-path{cursor:pointer}
 .gns3lab-student.canvas-ui .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
 .gns3lab-student.canvas-ui .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:1.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path .casing{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-opacity:.22;stroke-width:6.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path.sel .casing,
+.gns3lab-student.canvas-ui .l2-path.on .casing{stroke-opacity:.34}
+.gns3lab-student.canvas-ui .l2-path.down .casing,
+.gns3lab-student.canvas-ui .l2-path.unknown .casing{stroke-opacity:.1}
 .gns3lab-student.canvas-ui .l2-path:focus-visible .stroke,
 .gns3lab-student.canvas-ui .l2-path.sel .stroke{stroke-width:2.4}
 .gns3lab-student.canvas-ui .link:hover .wire,
