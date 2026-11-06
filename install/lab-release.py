@@ -334,7 +334,7 @@ def slot_identity(root, entries):
     nested = read_json(Path(root) / "slot/release.json")
     require(isinstance(nested, dict) and set(nested) == {"version", "build_id", "files"},
             "Unsupported Slot manifest")
-    require(nested["version"] == "0.15.3" and isinstance(nested["build_id"], str)
+    require(nested["version"] == "0.16.0" and isinstance(nested["build_id"], str)
             and nested["build_id"] and isinstance(nested["files"], dict)
             and SLOT_REQUIRED <= nested["files"].keys(), "Incomplete Slot identity")
     require(nested["files"] == slot_projection(entries), "Nested Slot manifest disagrees with payload")
@@ -630,6 +630,7 @@ SOURCE_FILES = (
     'slot/README.md',
     'slot/api/__init__.py',
     'slot/api/auth.py',
+    'slot/api/carrier.py',
     'slot/api/cli.py',
     'slot/api/client.py',
     'slot/api/console.py',
@@ -655,6 +656,7 @@ SOURCE_FILES = (
     'slot/slot.env.example',
     'slot/tests/conftest.py',
     'slot/tests/test_admission.py',
+    'slot/tests/test_carrier.py',
     'slot/tests/test_console.py',
     'slot/tests/test_facts.py',
     'slot/tests/test_fencing.py',
