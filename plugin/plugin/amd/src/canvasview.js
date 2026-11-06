@@ -107,7 +107,7 @@ export class CanvasView {
 
     renderL2() {
         const s = this.stage, {virtuals, segments} = this.l2;
-        const zones = el('g', {}, s.L.l2), lines = el('g', {}, s.L.l2);
+        const zones = el('g', {}, s.L.l2), lines = el('g', {}, s.L.l2), pills = el('g', {}, s.L.l2);
         this.nodeLayer = el('g', {}, s.L.l2);
         const groups = new Map();
         const color = vlan => ({1: '#8ba6b4', 10: '#60dfaf', 20: '#f0bd73', 30: '#8bb5fa', 99: '#da9fe8'}[vlan] || `hsl(${(Number(vlan) * 47) % 360} 65% 70%)`);
@@ -169,6 +169,25 @@ export class CanvasView {
             }
             segment.g = g;
             segment.ends = [[link.a.nodeId, a, b], [link.b.nodeId, b, a]];
+            segment.mid = {x: (a.cx + 2 * mx + b.cx) / 4, y: (a.cy + 2 * my + b.cy) / 4};
+        });
+        // One "trunk" pill per trunk cable, amid its VLAN lines, from the middle zoom on (class l2). It keeps its size on
+        // screen, and the label layout moves it aside or hides it when it would cover another pill.
+        const trunks = new Map();
+        segments.filter(x => x.trunk).forEach(x => {
+            if (!trunks.has(x.link.id)) trunks.set(x.link.id, []);
+            trunks.get(x.link.id).push(x);
+        });
+        trunks.forEach(list => {
+            const x = list.reduce((sum, p) => sum + p.mid.x, 0) / list.length, y = list.reduce((sum, p) => sum + p.mid.y, 0) / list.length;
+            const first = list.find(p => p.tag !== 'u') || list[0];
+            const g = el('g', {class: 'l2-trunk-pill auto-label dimmable l2', 'data-priority': 3, 'data-segment': first.id,
+                'data-link': first.link.id, 'aria-hidden': 'true'}, pills);
+            g.dataset.fixedX = x;
+            g.dataset.fixedY = y;
+            el('rect', {x: x - 17, y: y - 7.5, width: 34, height: 15, rx: 7.5}, g);
+            el('text', {x, y: y + .5}, g).textContent = 'trunk';
+            list.forEach(p => { p.pill = g; });
         });
         virtuals.forEach(v => {
             const mixed = v.domain?.vlans.length > 1;
@@ -472,6 +491,7 @@ export class CanvasView {
                 mark('data-segment', p.id, true); [p.link.a, p.link.b].forEach(e => nodes.add(e.nodeId)); [p.va, p.vb].forEach(id => mark('data-virtual', id));
                 // The other VLANs of the same trunk cable are lit with it.
                 if (p.trunk) this.l2.segments.filter(q => q.link === p.link && q !== p && q.g).forEach(q => q.g.classList.add('on'));
+                if (p.pill) p.pill.classList.add('on');
             }
         } else if (sel.kind === 'link') { links.add(sel.id); mark('data-link', sel.id, true); }
         else if (sel.kind === 'subnet') { subnets.add(sel.id); mark('data-subnet', sel.id, true); }

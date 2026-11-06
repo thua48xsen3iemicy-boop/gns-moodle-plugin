@@ -4548,6 +4548,11 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .l2-path .casing{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-opacity:.22;stroke-width:6.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .l2-path.sel .casing,
 .gns3lab-student.canvas-ui .l2-path.on .casing{stroke-opacity:.34}
+.gns3lab-student.canvas-ui .l2-trunk-pill{cursor:pointer}
+.gns3lab-student.canvas-ui .l2-trunk-pill rect{fill:#173643;stroke:#5f8f9b;stroke-width:1;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-trunk-pill text{font:600 9px var(--mono);fill:#b5d9df;text-anchor:middle;dominant-baseline:central;letter-spacing:.02em}
+.gns3lab-student.canvas-ui .l2-trunk-pill.on rect{stroke:var(--accent);fill:#1d4654}
+.gns3lab-student.canvas-ui .l2-trunk-pill.on text{fill:var(--fg)}
 .gns3lab-student.canvas-ui .l2-path.down .casing,
 .gns3lab-student.canvas-ui .l2-path.unknown .casing{stroke-opacity:.1}
 .gns3lab-student.canvas-ui .l2-path:focus-visible .stroke,
