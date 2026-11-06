@@ -366,8 +366,9 @@ export class CanvasView {
             g.setAttribute('transform', `translate(${x} ${y}) scale(${inv}) translate(${-x} ${-y})`);
         });
         this.rails.forEach(({link, geometry: g, directions}) => {
-            const half = Math.max(0, g.len / 2 - Math.min(31, g.len / 4));
-            const mx = (g.ax + g.bx) / 2, my = (g.ay + g.by) / 2;
+            // The two directions run between the port dots on the node rings, as the single wire does.
+            const half = Math.max(0, Math.hypot(g.pb.x - g.pa.x, g.pb.y - g.pa.y) / 2);
+            const mx = (g.pa.x + g.pb.x) / 2, my = (g.pa.y + g.pb.y) / 2;
             directions.forEach(({line, arrow, labels, sign}) => {
                 const point = (x, y) => ({x: mx + g.dx * x - g.dy * y, y: my + g.dy * x + g.dx * y});
                 const y = -sign * 3 * inv, a = point(-sign * half, y), b = point(sign * half, y);

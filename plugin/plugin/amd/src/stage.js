@@ -96,12 +96,17 @@ export const sanitizeDrawing = src => {
     return {g, w: parseFloat(root.getAttribute('width')) || 0, h: parseFloat(root.getAttribute('height')) || 0};
 };
 
+/** Radius of the ring around a node: the port dots of its cables sit on it. */
+const NODE_R = 31;
+
 /**
  * Parallel links between one pair of nodes are spread by 16 px.
  * The side is taken from the pair, not from the link: a cable stored B→A would otherwise land on the one stored A→B.
+ * The port dots sit on the node ring, and the wire runs between them: it does not cross the dot into the node.
  *
  * @param {object} m model
- * @returns {Map} link id → {ax, ay, bx, by, dx, dy, len}
+ * @returns {Map} link id → {ax, ay, bx, by, dx, dy, len, pa, pb, t}: the offset centre line, its direction and length,
+ *     the two dots and how far along the line from its end they are
  */
 const linkGeometry = m => {
     const groups = {}, out = new Map();
@@ -117,7 +122,16 @@ const linkGeometry = m => {
         dy /= len;
         const side = String(l.a.nodeId) < String(l.b.nodeId) ? 1 : -1;
         const off = (i - (list.length - 1) / 2) * 16 * side, nx = -dy * off, ny = dx * off;
-        out.set(l.id, {ax: A.cx + nx, ay: A.cy + ny, bx: B.cx + nx, by: B.cy + ny, dx, dy, len});
+        // Where the offset line meets the ring; a far outer cable of a wide bundle keeps its dot on the ring too.
+        let t = Math.sqrt(Math.max(0, NODE_R * NODE_R - off * off)), lift = off;
+        if (Math.abs(off) > NODE_R * .8) {
+            const k = NODE_R / Math.hypot(NODE_R * .6, off);
+            t = NODE_R * .6 * k;
+            lift = off * k;
+        }
+        const qx = -dy * lift, qy = dx * lift;
+        out.set(l.id, {ax: A.cx + nx, ay: A.cy + ny, bx: B.cx + nx, by: B.cy + ny, dx, dy, len, t,
+            pa: {x: A.cx + qx + dx * t, y: A.cy + qy + dy * t}, pb: {x: B.cx + qx - dx * t, y: B.cy + qy - dy * t}});
     }));
     return out;
 };
@@ -550,8 +564,8 @@ export class Stage {
         const name = `${m.nodes.get(a.nodeId).name} ${a.text} — ${m.nodes.get(b.nodeId).name} ${b.text}`;
         const G = el('g', {class: 'link' + (l.suspend ? ' suspended' : '') + (down ? ' down' : '') + (unknown ? ' unknown' : ''), 'data-link': l.id, tabindex: '0', role: 'button',
             'aria-label': fill(this.s('ui_link_aria'), name)}, this.L.links);
-        el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'hit'}, G);
-        el('line', {x1: g.ax, y1: g.ay, x2: g.bx, y2: g.by, class: 'wire'}, G);
+        el('line', {x1: g.pa.x, y1: g.pa.y, x2: g.pb.x, y2: g.pb.y, class: 'hit'}, G);
+        el('line', {x1: g.pa.x, y1: g.pa.y, x2: g.pb.x, y2: g.pb.y, class: 'wire'}, G);
         if (unknown) el('title', {}, G).textContent = this.s('ui_l1_unknown');
         this.canvas.duplex(l, g, G);
         const fl = fmtFilters(l.filters);
@@ -564,13 +578,14 @@ export class Stage {
             el('title', {}, f).textContent = fill(this.s('ui_filter_on'), fl.map(x => x.k).join(', '));
         }
         const d = Math.min(58, g.len * 0.36);
-        [[a, ia, g.ax, g.ay, g.dx, g.dy], [b, ib, g.bx, g.by, -g.dx, -g.dy]].forEach(([e, ifc, x, y, ux, uy]) => {
+        [[a, ia, g.pa, g.dx, g.dy], [b, ib, g.pb, -g.dx, -g.dy]].forEach(([e, ifc, dot, ux, uy]) => {
             const portState = endState(this.der, e);
             const bad = this.endDown(e);
             const old = (portState && portState.live ? portState.unknown : this.factsFailed(e.nodeId)) ? ' fstale' : '';
-            el('circle', {cx: x + ux * 31, cy: y + uy * 31, r: PORT_DOT, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
+            el('circle', {cx: dot.x, cy: dot.y, r: PORT_DOT, class: 'pdot l1' + (bad ? ' down' : '') + old}, G);
             if (!this.endShown(e)) return;
-            const px = x + ux * d, py = y + uy * d;
+            // The name sits on the wire, `d` from the node centre (the dot is `t` from it).
+            const px = dot.x + ux * (d - g.t), py = dot.y + uy * (d - g.t);
             el('text', {x: px, y: py + 3, class: 'plabel l1'}, G).textContent = e.text;
             if (ifc && ifc.ipv4 && ifc.ipv4.length) el('text', {x: px, y: py + 3, dy: '1.35em', class: 'pip l2' + old}, G).textContent = ifc.ipv4[0];
         });
@@ -589,7 +604,7 @@ export class Stage {
                 'data-node': n.id, tabindex: '0', role: 'button', 'aria-label': ''}, this.canvas.nodeLayer || this.L.nodes);
             n.g = g;
             g.setAttribute('aria-label', this.nodeLabel(n));
-            el('circle', {r: 31, class: 'halo'}, g);
+            el('circle', {r: NODE_R, class: 'halo'}, g);
             el('use', {href: `#${this.prefix}-ico-${sil ? 'unknown' : n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
             const label = el('g', {class: 'auto-label', 'data-priority': 0}, g);
             const title = el('text', {y: L === 'l2' ? 23 : 25, class: 'nname'}, label);
