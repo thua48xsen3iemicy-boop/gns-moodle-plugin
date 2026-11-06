@@ -732,6 +732,7 @@ class Facts:
         self.epoch = 0  # bumped by reset(): results of an attempt that started earlier are dropped
         self.force = False
         self.last_refresh = float("-inf")
+        self.soon = {}  # (project_id, node_id) -> monotonic time the slot asked to read that guest again
         self.wake = asyncio.Event()
         self.task = asyncio.create_task(self.run())
 
@@ -744,6 +745,7 @@ class Facts:
         self.confirmed.clear()
         self.families.clear()
         self.snapshots.clear()
+        self.soon.clear()
 
     def request_refresh(self):
         now = time.monotonic()
@@ -755,11 +757,19 @@ class Facts:
     def collect_soon(self, project_id, node_id):
         """One guest changed under the slot's own hand (its carrier): read it again on the next round.
 
-        Not the plugin's rate-limited refresh: only the collectors of this node become due."""
+        Not the plugin's rate-limited refresh: only the collectors of this node become due. An attempt
+        already under way read the guest before the change: it schedules the next one at once (`later`)."""
+        self.soon[(project_id, node_id)] = time.monotonic()
         for key in self.next_due:
             if key[0] == project_id and key[1] == node_id:
                 self.next_due[key] = 0
         self.wake.set()
+
+    def later(self, key, started, delay):
+        """When an attempt that started at `started` makes its collector due again."""
+        if self.soon.get(key[:2], float("-inf")) >= started:
+            return 0  # the guest changed while it was being read: what was read may already be old
+        return time.monotonic() + delay
 
     def snapshot(self, project_id):
         lab = self.lc.get("lab", project_id)
@@ -797,7 +807,7 @@ class Facts:
             del self.next_due[key]
         for memory in (self.absent, self.confirmed):
             memory.difference_update([k for k in memory if k[0] not in labs])
-        for memory in (self.families, self.snapshots):
+        for memory in (self.families, self.snapshots, self.soon):
             for key in [k for k in memory if k[0] not in labs]:
                 del memory[key]
         if not self.lc.claimed:
@@ -830,7 +840,7 @@ class Facts:
     async def attempt_each(self, due):
         """The collectors of one node one after another: they share a QGA channel, and an attempt
         that finds it taken by a sibling would be skipped as busy."""
-        epoch = self.epoch
+        epoch, started = self.epoch, time.monotonic()
         for key, node, collector in [d for d in due if d[2].local is not None]:
             if epoch != self.epoch:
                 return
@@ -856,7 +866,7 @@ class Facts:
                 return
             if family is None:  # cannot be asked now (stopped, no answer): publish nothing, ask again later
                 for key, _, _ in due:
-                    self.next_due[key] = time.monotonic() + self.interval
+                    self.next_due[key] = self.later(key, started, self.interval)
                 return
             self.families[(project_id, node_id)] = family
         for key, node, collector in due:
@@ -908,7 +918,7 @@ class Facts:
                 del nodes[node_id]
 
     async def attempt(self, key, node, collector):
-        epoch = self.epoch
+        epoch, started = self.epoch, time.monotonic()
         async with self.slots:
             failure = None
             data = None
@@ -945,7 +955,7 @@ class Facts:
                 failure = (classify(exc), f"{type(exc).__name__}: {exc}"[:MESSAGE_LIMIT])
         if epoch != self.epoch:
             return
-        self.next_due[key] = time.monotonic() + self.interval
+        self.next_due[key] = self.later(key, started, self.interval)
         if absent:
             self.absent.add(key)
             self.confirmed.discard(key)

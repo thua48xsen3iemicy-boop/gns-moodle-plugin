@@ -214,8 +214,44 @@ def test_collect_soon_makes_only_that_node_due_and_wakes_the_loop():
 
     service = Facts.__new__(Facts)
     service.next_due = {("p", "pc", "linux.net"): 1e12, ("p", "other", "linux.net"): 1e12, ("q", "pc", "linux.net"): 1e12}
-    service.wake = asyncio.Event()
+    service.wake, service.soon = asyncio.Event(), {}
     service.collect_soon("p", "pc")
     assert service.next_due == {("p", "pc", "linux.net"): 0, ("p", "other", "linux.net"): 1e12,
                                 ("q", "pc", "linux.net"): 1e12}
     assert service.wake.is_set()
+
+
+def test_a_read_under_way_when_the_carrier_changes_is_repeated_at_once():
+    """The read that began before the change sampled the old oper: it must not push the next one 30 s away."""
+    from api.facts import COLLECTORS, Facts
+
+    async def scenario():
+        gate, entered = asyncio.Event(), asyncio.Event()
+
+        async def exec_(node_id, command, **options):
+            entered.set()
+            await gate.wait()
+            return {"exit_code": 0, "stdout": '{"addr": [], "route": []}'}
+
+        lc = SimpleNamespace(qga=SimpleNamespace(exec=exec_))
+        service = Facts.__new__(Facts)
+        service.lc, service.interval, service.timeout, service.tick = lc, 30.0, 1.0, 2.0
+        service.slots, service.epoch, service.wake = asyncio.Semaphore(1), 0, asyncio.Event()
+        service.results, service.next_due, service.soon = {}, {}, {}
+        service.absent, service.confirmed, service.families, service.snapshots = set(), set(), {}, {}
+        collector = next(c for c in COLLECTORS if c.name == "linux.net")
+        node = {"node_id": "pc", "name": "pc", "status": "started", "properties": {}}
+        key = ("p", "pc", "linux.net")
+        task = asyncio.create_task(service.attempt(key, node, collector))
+        await entered.wait()
+        service.collect_soon("p", "pc")  # the slot dropped the carrier while the guest was being read
+        gate.set()
+        await task
+        assert service.next_due[key] == 0
+        # A read that starts after the change keeps the regular schedule.
+        entered.clear()
+        task = asyncio.create_task(service.attempt(key, node, collector))
+        await entered.wait()
+        await task
+        assert service.next_due[key] > time.monotonic() + 20
+    asyncio.run(scenario())
