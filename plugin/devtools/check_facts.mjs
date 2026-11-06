@@ -296,6 +296,46 @@ check('IOL L1: ports work without a saved configuration', () => {
     assert.equal(endState(result.der, model.links[0].a).live, true);
 });
 
+check('IOL L1: the IOL end of a Cisco-QEMU cable', () => {
+    const model = lab(SW1, PC1);
+    model.nodes.get(SW1).type = 'iou';
+    const live = (state, reason) => ({ok: true, observed_at: new Date().toISOString(), ttl: 15,
+        ports: [{port: {adapter: 0, port: 0}, state, reason}]});
+    const cisco = node([ifc('Ethernet0/0', 0)]), guest = node([ifc('ens4', 1)]);
+    const nodes = {[SW1]: cisco, [PC1]: guest};
+    const now = () => derive(model, doc(nodes)).der;
+    const ends = der => [model.links[0].a, model.links[0].b].map(e => endState(der, e).down);
+    // An unsaved shutdown: the saved configuration says up, the IOL port no longer answers.
+    cisco.l1_ports = live('down', 'no_rx');
+    let der = now();
+    assert.equal(der.l1.links.get('l1').down, true);
+    assert.deepEqual(ends(der), [true, true]);
+    assert.match(der.l1.links.get('l1').why.join(), /соединение недоступно \(L1\)/);
+    // An unsaved `no shutdown`: the saved configuration still says shutdown, the port answers.
+    cisco.interfaces[0].admin = 'down';
+    cisco.l1_ports = live('up', 'responding');
+    der = now();
+    assert.equal(der.l1.links.get('l1').down, false);
+    assert.deepEqual(ends(der), [false, false]);
+    // Unknown (guest port not up yet, no reply yet) keeps the old rules and is never grey.
+    cisco.l1_ports = live('unknown', 'peer_not_ready');
+    der = now();
+    assert.equal(der.l1.links.get('l1').down, true); // the saved shutdown
+    assert.equal(der.l1.links.get('l1').unknown, false);
+    cisco.interfaces[0].admin = 'up';
+    guest.interfaces[0].admin = 'down';
+    assert.equal(now().l1.links.get('l1').down, true); // the guest explains it itself
+    guest.interfaces[0].admin = 'up';
+    cisco.l1_ports = live('up', 'responding');
+    cisco.l1_ports.observed_at = new Date(Date.now() - 60000).toISOString();
+    der = now();
+    assert.equal(der.l1.links.get('l1').down, false); // stale: back to the saved configuration
+    assert.equal(der.l1.links.get('l1').unknown, false);
+    guest.status = 'stopped';
+    cisco.l1_ports = live('up', 'responding');
+    assert.equal(now().l1.links.get('l1').down, true);
+});
+
 if (failures.length) {
     console.log(`\n${failures.length} failed`);
     process.exit(1);
