@@ -225,7 +225,10 @@ export const buildModel = doc => {
         }
         ends.forEach(e => {
             const node = nodes.get(e.nodeId);
-            e.text = hostPort(node, e.text || portName(node, e.adapter, e.port), e.adapter, e.port);
+            // A link created through the API gets the label GNS3 makes itself, "adapter/port" (the slot creates the
+            // live links so): the device port name ("e0/0") is the one the student knows. A label of its own stays.
+            const generated = e.text === e.adapter + '/' + e.port;
+            e.text = hostPort(node, (!generated && e.text) || portName(node, e.adapter, e.port), e.adapter, e.port);
         });
         links.push({
             id: l.link_id || ('link-' + links.length), a: ends[0], b: ends[1], filters: l.filters || {},

@@ -350,6 +350,23 @@ check('L1: a QEMU guest whose far end is off shows no link at once', () => {
     assert.deepEqual([model.links[0].a, model.links[0].b].map(e => endState(up, e).down), [false, false]);
 });
 
+check('Port labels: the "adapter/port" label GNS3 makes for an API link gives way to the port name', () => {
+    const ports = names => names.map(([adapter, port, short]) => ({adapter_number: adapter, port_number: port, name: short, short_name: short}));
+    const m = buildModel({name: 'labels', topology: {nodes: [
+        {node_id: SW1, name: 'SW1', node_type: 'iou', x: 0, y: 0, properties: {}, ports: ports([[0, 0, 'e0/0'], [0, 1, 'e0/1']])},
+        {node_id: SW2, name: 'SW2', node_type: 'iou', x: 200, y: 0, properties: {}},
+        {node_id: PC1, name: 'PC1', node_type: 'qemu', x: 0, y: 200, properties: {}, ports: ports([[0, 0, 'e0']])},
+    ], links: [
+        {link_id: 'gen', nodes: [{node_id: SW1, adapter_number: 0, port_number: 1, label: {text: '0/1'}},
+                                 {node_id: SW2, adapter_number: 0, port_number: 0, label: {text: '0/0'}}]},
+        {link_id: 'own', nodes: [{node_id: SW1, adapter_number: 0, port_number: 0, label: {text: 'uplink'}},
+                                 {node_id: PC1, adapter_number: 0, port_number: 0, label: {text: '0/0'}}]},
+    ]}});
+    const text = id => [m.links.find(l => l.id === id).a.text, m.links.find(l => l.id === id).b.text];
+    assert.deepEqual(text('gen'), ['e0/1', '0/0']); // SW2 has no port list: nothing better than the label
+    assert.deepEqual(text('own'), ['uplink', 'E0']); // a label of the author's own stays; a host port is E0
+});
+
 if (failures.length) {
     console.log(`\n${failures.length} failed`);
     process.exit(1);
