@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from api import uplink
+from api.carrier import Carrier
 
 LOG = logging.getLogger("uvicorn.error.l1")
 HEADER = struct.Struct("!HHBBBB")
@@ -209,6 +210,7 @@ class Keepalives:
         self.channels = {}
         self.pairs = {}
         self.singles = {}
+        self.carrier = Carrier()
         self.epoch = 0
         self.problem = None
         self.results = {}
@@ -221,6 +223,7 @@ class Keepalives:
         self.channels.clear()
         self.pairs.clear()
         self.singles.clear()
+        self.carrier.reset()
         self.results.clear()
 
     def publish(self, pid, nodes, links):
@@ -324,6 +327,10 @@ class Keepalives:
                 self.channels[node_id] = Channel(self.directory, app)
 
     def guest_ready(self, pid, side):
+        return self.guest_admin(pid, side) == "up"
+
+    def guest_admin(self, pid, side):
+        """`admin` of one guest port from fresh, successful facts; None when it is not known."""
         records = self.lc.facts.results.get(pid, {}).get(side["node_id"], {}).get("collectors", {})
         # switch.net describes bridge ports that linux.net deliberately omits.
         for name in ("switch.net", "windows.net", "routeros.net", "linux.net"):
@@ -331,17 +338,17 @@ class Keepalives:
             if record is None:
                 continue
             if not record.get("ok"):
-                return False
+                return None
             try:
                 observed = datetime.fromisoformat(record["observed_at"].replace("Z", "+00:00")).timestamp()
             except (KeyError, TypeError, ValueError):
-                return False
+                return None
             if not 0 <= time.time() - observed <= self.fact_age:
-                return False
+                return None
             for interface in (record.get("data") or {}).get("interfaces", []):
                 if interface.get("port") == {"adapter": side["adapter_number"], "port": side["port_number"]}:
-                    return interface.get("admin") == "up"
-        return False  # unknown, failed and stale facts never supply carrier
+                    return interface.get("admin")
+        return None  # unknown, failed and stale facts never supply carrier
 
     async def probe(self, ends, epoch, pid):
         by_node = {}
@@ -391,6 +398,7 @@ class Keepalives:
             self.pairs.clear()
             self.singles.clear()
             self.publish(pid, nodes, links)
+            await self.mirror(pid, by_id, links, epoch)
             return
         self.prepare(iols.values())
         pairs, probes, singles = {}, set(), {}
@@ -440,6 +448,28 @@ class Keepalives:
                     pair.recovered(peer, replies)
         if self.allowed(epoch, pid):
             self.publish(pid, nodes, links)
+            await self.mirror(pid, by_id, links, epoch)
+
+    def far_down(self, pid, side, node):
+        """Whether the far end of a QEMU NIC is known to be down (its node is started)."""
+        kind = node.get("node_type")
+        if kind == "iou":
+            try:
+                single = self.singles.get((pid, endpoint(side)))
+            except L1Error:
+                return False
+            return bool(single and single.down(self.miss_limit))
+        if kind == "qemu":
+            return self.guest_admin(pid, side) == "down"
+        return False
+
+    async def mirror(self, pid, by_id, links, epoch):
+        """QEMU NICs follow the far end of their cable; a change asks the facts to look again soon."""
+        changed = await self.carrier.apply(
+            by_id, links, lambda side, node: self.far_down(pid, side, node), lambda: self.allowed(epoch, pid))
+        refresh = getattr(getattr(self.lc, "facts", None), "request_refresh", None)
+        if changed and refresh:
+            refresh()
 
     async def run(self):
         while True:

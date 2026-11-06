@@ -309,7 +309,10 @@ check('IOL L1: the IOL end of a Cisco-QEMU cable', () => {
     cisco.l1_ports = live('down', 'no_rx');
     let der = now();
     assert.equal(der.l1.links.get('l1').down, true);
-    assert.deepEqual(ends(der), [true, true]);
+    assert.deepEqual(ends(der), [true, false]); // the guest end shows the guest's own view
+    guest.interfaces[0].oper = 'down'; // the slot dropped its carrier: NO-CARRIER in the guest
+    assert.deepEqual(ends(now()), [true, true]);
+    guest.interfaces[0].oper = 'up';
     assert.match(der.l1.links.get('l1').why.join(), /соединение недоступно \(L1\)/);
     // An unsaved `no shutdown`: the saved configuration still says shutdown, the port answers.
     cisco.interfaces[0].admin = 'down';
