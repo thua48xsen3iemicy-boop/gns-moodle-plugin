@@ -2009,7 +2009,9 @@ function linkGeometry(m){
   Object.values(groups).forEach(list => list.forEach((l, i) => {
     const A = m.nodes.get(l.a.nodeId), B = m.nodes.get(l.b.nodeId);
     let dx = B.cx - A.cx, dy = B.cy - A.cy; const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
-    const off = (i - (list.length - 1) / 2) * 16, nx = -dy * off, ny = dx * off;
+    /* сторону берём от пары, а не от линка: кабель B→A иначе ляжет на кабель A→B */
+    const side = String(l.a.nodeId) < String(l.b.nodeId) ? 1 : -1;
+    const off = (i - (list.length - 1) / 2) * 16 * side, nx = -dy * off, ny = dx * off;
     out.set(l.id, { ax: A.cx + nx, ay: A.cy + ny, bx: B.cx + nx, by: B.cy + ny, dx, dy, len });
   }));
   return out;
