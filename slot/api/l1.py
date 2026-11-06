@@ -2,6 +2,7 @@
 
 An IOL probe also supplies carrier. For an IOL/IOL pair, wait on the endpoint that
 stopped replying and leave its peer silent. Probe the peer again only on recovery.
+The IOL end of a link to another kind of node is followed on its own.
 Replies establish responsiveness, not a definitive diagnosis of `shutdown`.
 """
 
@@ -80,6 +81,24 @@ class Pair:
         else:
             self.confirmed = False
             self.waiting = peer
+
+
+@dataclass
+class Single:
+    """The IOL end of a link whose peer is not an IOL: only this end can answer."""
+
+    misses: int = 0
+    confirmed: bool = False
+
+    def observe(self, replied, limit):
+        self.misses = 0 if replied else self.misses + 1
+        if replied:
+            self.confirmed = True
+        elif self.misses >= limit:
+            self.confirmed = False
+
+    def down(self, limit):
+        return self.misses >= limit
 
 
 class Channel:
@@ -189,6 +208,7 @@ class Keepalives:
         self.directory = Path(f"/tmp/netl1{os.geteuid()}")
         self.channels = {}
         self.pairs = {}
+        self.singles = {}
         self.epoch = 0
         self.problem = None
         self.results = {}
@@ -200,19 +220,23 @@ class Keepalives:
             channel.close()
         self.channels.clear()
         self.pairs.clear()
+        self.singles.clear()
         self.results.clear()
 
     def publish(self, pid, nodes, links):
         """Publish a passive view of the pair controller, not a second probe loop."""
         by_id = {n["node_id"]: n for n in nodes}
         ports = {node_id: [] for node_id in self.results.get(pid, {}) if node_id in by_id}
+        def managed(s):
+            return (by_id.get(s["node_id"], {}).get("node_type") == "iou"
+                    and (by_id[s["node_id"]].get("properties") or {}).get("l1_keepalives"))
+
         for link in links:
             sides = link.get("nodes", [])
-            if len(sides) != 2 or not all(
-                by_id.get(s["node_id"], {}).get("node_type") == "iou"
-                and (by_id[s["node_id"]].get("properties") or {}).get("l1_keepalives")
-                for s in sides
-            ):
+            if len(sides) != 2:
+                continue
+            if not all(managed(s) for s in sides):
+                self.publish_single(pid, by_id, link, sides, managed, ports)
                 continue
             ends = tuple(sorted(endpoint(s) for s in sides))
             pair = self.pairs.get((pid, ends))
@@ -242,6 +266,33 @@ class Keepalives:
                                       "ports": entries}},
             }}}
         self.results = {pid: results}
+
+    def publish_single(self, pid, by_id, link, sides, managed, ports):
+        """The IOL end of a link to a QEMU or other non-IOL node: whether this one port answers."""
+        cisco = [s for s in sides if managed(s)]
+        if len(cisco) != 1:
+            return
+        peer = next(s for s in sides if s is not cisco[0])
+        if by_id.get(peer["node_id"], {}).get("node_type") == "iou":
+            return  # an IOL peer without keepalives: a mixed pair is not supported
+        end = endpoint(cisco[0])
+        single = self.singles.get((pid, end))
+        if link.get("suspend"):
+            state, reason = "down", "suspended"
+        elif any(by_id[s["node_id"]].get("status") != "started" for s in sides):
+            state, reason = "down", "node_stopped"
+        elif single is None:
+            state, reason = "unknown", "peer_not_ready"  # the guest port is not known to be up: no keepalives
+        elif single.down(self.miss_limit):
+            state, reason = "down", "no_rx"
+        elif single.confirmed:
+            state, reason = "up", "responding"
+        else:
+            state, reason = "unknown", "probing"
+        ports.setdefault(cisco[0]["node_id"], []).append({
+            "port": {"adapter": cisco[0]["adapter_number"], "port": cisco[0]["port_number"]},
+            "state": state, "reason": reason,
+        })
 
     def allowed(self, epoch, pid):
         lab = self.lc.get("lab", pid)
@@ -338,10 +389,11 @@ class Keepalives:
                 channel.close()
             self.channels.clear()
             self.pairs.clear()
+            self.singles.clear()
             self.publish(pid, nodes, links)
             return
         self.prepare(iols.values())
-        pairs, probes = {}, set()
+        pairs, probes, singles = {}, set(), {}
         occupied = set()
         for link in links:
             sides = link.get("nodes", [])
@@ -367,10 +419,15 @@ class Keepalives:
                 # A mixed IOL pair has no observable peer state: do not invent carrier.
                 if kind not in ("qemu", "iou") or (kind == "qemu" and self.guest_ready(pid, peer)):
                     probes.update(ends)
+                    # Not probed this round (the guest port is not up): the next probing starts afresh.
+                    singles[(pid, ends[0])] = self.singles.get((pid, ends[0])) or Single()
         self.pairs = pairs
+        self.singles = singles
         replies = await self.probe(probes, epoch, pid)
         if not self.allowed(epoch, pid):
             return
+        for (_, end), single in singles.items():
+            single.observe(end in replies, self.miss_limit)
         recovered = []
         for pair in pairs.values():
             peer = pair.observe(replies, self.miss_limit)

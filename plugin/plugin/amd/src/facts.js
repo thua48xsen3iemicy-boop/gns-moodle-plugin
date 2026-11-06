@@ -125,20 +125,32 @@ function deriveL1(m, fx){
     let cfg = false;                                   // причина в настройке устройства, а не в состоянии лабы
     let halted = !!l.suspend;                          // линк приостановлен или нода любого конца остановлена
     if (l.suspend) hard.push("линк приостановлен в GNS3");
+    const iou = [l.a, l.b].map(e => m.nodes.get(e.nodeId).type === 'iou');
+    let guestDown = -1;                                // Cisco–QEMU: the IOL end that stopped answering
     [l.a, l.b].forEach((e, k) => {
       const N = m.nodes.get(e.nodeId), f = fx.nodes.get(e.nodeId), i = endIf(fx, e);
-      const live = m.nodes.get(l.a.nodeId).type === 'iou' && m.nodes.get(l.b.nodeId).type === 'iou'
-        ? fx.byL1.get(endKey(e)) : null;
+      // Cisco–Cisco: the live pair state. Cisco–QEMU: only what the IOL end itself answers; until it is known
+      // (the guest port is not up yet, no reply yet) the saved configuration and the guest facts stay in charge.
+      let live = iou[0] && iou[1] ? fx.byL1.get(endKey(e)) : null;
+      if (iou[k] && !iou[1 - k]) {
+        const own = fx.byL1.get(endKey(e));
+        live = own && own.state !== 'unknown' ? own : null;
+      }
       liveEnd[k] = !!live;
       mir[k] = !!(i && i.mirror); own[k] = false;
       if (f && NODE_OFF[f.status]) { hard.push(`${N.name} ${NODE_OFF[f.status]}`); halted = true; }
       else if (live) {
         uncertain[k] = live.state === 'unknown';
-        if (live.state === 'down') { soft.push(`${N.name} ${e.text}: соединение недоступно (L1)`); own[k] = true; }
+        if (live.state === 'down') {
+          soft.push(`${N.name} ${e.text}: соединение недоступно (L1)`); own[k] = true;
+          if (!iou[1 - k]) guestDown = k;
+        }
       }
       else if (i && !mir[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = true; }
       else if (i && !mir[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
     });
+    // As on a Cisco–Cisco cable, the far end of a silent IOL port has no link either.
+    if (guestDown >= 0) own[1 - guestDown] = true;
     const why = hard.length ? hard : soft;
     if (!hard.length && soft.length) cfg = true;
     const unknown = !why.length && uncertain.some(Boolean);
