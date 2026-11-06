@@ -80,7 +80,8 @@ const scenarios = [
         {[SW1]: node([ifc('p0', 0, {switchport: {mode: 'access', vlan: 10}, mirror: true})]), [SW2]: node([], 'stopped')}, 'down', 'down', true, /SW2 остановлен/],
     ['9 link suspended', link.suspended, {[PC1]: host(), [SW1]: sw()}, 'down', 'down', true, /приостановлен/],
     // A switch the student manages is not a mirror: its own shutdown / carrier still drop the link, as before.
-    ['10 managed switch port admin down', link.host, {[PC1]: host(), [SW1]: managed({admin: 'down'})}, 'up', 'down', true, /SW1 e1: shutdown/],
+    // Since slot 0.16.0 the host's carrier goes with it (QEMU set_link off), and the scheme shows it at once.
+    ['10 managed switch port admin down', link.host, {[PC1]: host(), [SW1]: managed({admin: 'down'})}, 'down', 'down', true, /SW1 e1: shutdown/],
     ['10b managed switch port oper down', link.host, {[PC1]: host(), [SW1]: managed({oper: 'down'})}, 'up', 'down', true, /SW1 e1: нет несущей/],
     ['10c managed switch - appliance switch, managed port admin down', link.swsw,
         {[SW1]: node([ifc('p0', 0, {admin: 'down', switchport: {mode: 'access', vlan: 10}})]), [SW2]: sw()}, 'down', 'down', true, /SW1 p0: shutdown/],
@@ -309,10 +310,7 @@ check('IOL L1: the IOL end of a Cisco-QEMU cable', () => {
     cisco.l1_ports = live('down', 'no_rx');
     let der = now();
     assert.equal(der.l1.links.get('l1').down, true);
-    assert.deepEqual(ends(der), [true, false]); // the guest end shows the guest's own view
-    guest.interfaces[0].oper = 'down'; // the slot dropped its carrier: NO-CARRIER in the guest
-    assert.deepEqual(ends(now()), [true, true]);
-    guest.interfaces[0].oper = 'up';
+    assert.deepEqual(ends(der), [true, true]); // the slot drops the guest's carrier: shown before its facts say so
     assert.match(der.l1.links.get('l1').why.join(), /соединение недоступно \(L1\)/);
     // An unsaved `no shutdown`: the saved configuration still says shutdown, the port answers.
     cisco.interfaces[0].admin = 'down';
@@ -325,9 +323,12 @@ check('IOL L1: the IOL end of a Cisco-QEMU cable', () => {
     der = now();
     assert.equal(der.l1.links.get('l1').down, true); // the saved shutdown
     assert.equal(der.l1.links.get('l1').unknown, false);
+    assert.deepEqual(ends(der), [true, true]); // right after start: the guest end is off at once, too
     cisco.interfaces[0].admin = 'up';
     guest.interfaces[0].admin = 'down';
-    assert.equal(now().l1.links.get('l1').down, true); // the guest explains it itself
+    der = now();
+    assert.equal(der.l1.links.get('l1').down, true); // the guest explains it itself
+    assert.deepEqual(ends(der), [false, true]); // its own admin=down does not take the Cisco port's carrier
     guest.interfaces[0].admin = 'up';
     cisco.l1_ports = live('up', 'responding');
     cisco.l1_ports.observed_at = new Date(Date.now() - 60000).toISOString();
@@ -337,6 +338,16 @@ check('IOL L1: the IOL end of a Cisco-QEMU cable', () => {
     guest.status = 'stopped';
     cisco.l1_ports = live('up', 'responding');
     assert.equal(now().l1.links.get('l1').down, true);
+});
+
+check('L1: a QEMU guest whose far end is off shows no link at once', () => {
+    const model = lab(PC1, SW1);
+    const a = node([ifc('ens4', 0)]), b = node([ifc('ens4', 1, {admin: 'down'})]);
+    const der = derive(model, doc({[PC1]: a, [SW1]: b})).der;
+    assert.deepEqual([model.links[0].a, model.links[0].b].map(e => endState(der, e).down), [true, true]);
+    b.interfaces[0].admin = 'up';
+    const up = derive(model, doc({[PC1]: a, [SW1]: b})).der;
+    assert.deepEqual([model.links[0].a, model.links[0].b].map(e => endState(up, e).down), [false, false]);
 });
 
 if (failures.length) {

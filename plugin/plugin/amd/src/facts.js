@@ -121,7 +121,7 @@ export const portEnd = (der, f, i) => {
 function deriveL1(m, fx){
   const links = new Map(), ends = new Map(), issues = [];
   m.links.forEach(l => {
-    const hard = [], soft = [], mir = [], own = [], uncertain = [], liveEnd = [];
+    const hard = [], soft = [], mir = [], own = [], uncertain = [], liveEnd = [], off = [];
     let cfg = false;                                   // причина в настройке устройства, а не в состоянии лабы
     let halted = !!l.suspend;                          // линк приостановлен или нода любого конца остановлена
     if (l.suspend) hard.push("линк приостановлен в GNS3");
@@ -140,12 +140,16 @@ function deriveL1(m, fx){
       if (f && NODE_OFF[f.status]) { hard.push(`${N.name} ${NODE_OFF[f.status]}`); halted = true; }
       else if (live) {
         uncertain[k] = live.state === 'unknown';
-        if (live.state === 'down') { soft.push(`${N.name} ${e.text}: соединение недоступно (L1)`); own[k] = true; }
+        if (live.state === 'down') { soft.push(`${N.name} ${e.text}: соединение недоступно (L1)`); own[k] = off[k] = true; }
       }
-      else if (i && !mir[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = true; }
+      else if (i && !mir[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = off[k] = true; }
       else if (i && !mir[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
     });
-    // Cisco–QEMU: the guest end shows what the guest sees; the slot drops its carrier (oper) while the IOL port is silent.
+    // A QEMU NIC whose far end is off (silent IOL port, shutdown, a guest port admin down) has no carrier: the slot
+    // drops it (slot 0.16.0). Shown at once, not when the guest's own facts arrive; a fresh live L1 `up` comes first.
+    [l.a, l.b].forEach((e, k) => {
+      if (m.nodes.get(e.nodeId).type === 'qemu' && !mir[k] && off[1 - k]) own[k] = true;
+    });
     const why = hard.length ? hard : soft;
     if (!hard.length && soft.length) cfg = true;
     const unknown = !why.length && uncertain.some(Boolean);
