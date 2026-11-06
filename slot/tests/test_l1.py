@@ -131,6 +131,66 @@ def test_l1_facts_follow_pair_and_preserve_saved_configuration(monkeypatch, tmp_
     asyncio.run(scenario())
 
 
+def test_l1_facts_for_the_iol_end_of_a_guest_link(monkeypatch, tmp_path):
+    from api.facts import Facts
+
+    async def scenario():
+        service, sent, disabled, topology, _ = await harness(
+            monkeypatch, tmp_path, [node("a", 1), node("guest")],
+            [{"nodes": [side("guest", 2), side("a", 1, 3)]}]
+        )
+        facts = Facts.__new__(Facts)
+        facts.lc = service.lc
+        service.lc.l1 = service
+        facts.results = {"p": {}}
+        interface = {"port": {"adapter": 2, "port": 0}, "admin": "up"}
+        record = {"ok": True, "observed_at": datetime.now(timezone.utc).isoformat(),
+                  "data": {"interfaces": [interface]}}
+
+        def ports(node_id="a"):
+            return facts.snapshot("p")["nodes"][node_id]["collectors"]["iol.l1"]["data"]["l1_ports"]["ports"]
+
+        def state():
+            entry, = ports()
+            assert entry["port"] == {"adapter": 1, "port": 3}
+            return entry["state"], entry["reason"]
+
+        try:
+            await service.cycle()
+            assert not sent and state() == ("unknown", "peer_not_ready")
+            service.lc.facts.results = {"p": {"guest": {"collectors": {"linux.net": record}}}}
+            await service.cycle()
+            assert sent == [(1, 0x31)] and state() == ("up", "responding")
+            assert "guest" not in facts.snapshot("p")["nodes"]  # only the IOL end is published
+            disabled.add((1, 0x31))  # an unsaved shutdown: the port stops answering
+            await service.cycle()
+            assert state() == ("up", "responding")  # one miss is not enough
+            await service.cycle()
+            assert state() == ("down", "no_rx")
+            disabled.clear()
+            await service.cycle()
+            assert state() == ("up", "responding")
+            interface["admin"] = "down"
+            await service.cycle()
+            assert state() == ("unknown", "peer_not_ready")
+            interface["admin"] = "up"
+            await service.cycle()
+            assert state() == ("up", "responding")
+            topology["links"][0]["suspend"] = True
+            await service.cycle()
+            assert state() == ("down", "suspended")
+            topology["links"][0]["suspend"] = False
+            topology["nodes"][1]["status"] = "stopped"
+            await service.cycle()
+            assert state() == ("down", "node_stopped")
+            topology["links"].clear()
+            await service.cycle()
+            assert ports() == []
+        finally:
+            await service.stop()
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("disabled_ends", [set(), {(1, 0)}, {(2, 0)}, {(1, 0), (2, 0)}])
 def test_four_initial_states_and_single_missed_reply(monkeypatch, tmp_path, disabled_ends):
     async def scenario():
