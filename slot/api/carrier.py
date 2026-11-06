@@ -105,9 +105,10 @@ class Carrier:
         return not far_down(peer, node)
 
     async def apply(self, by_id, links, far_down, allowed):
-        """Bring every QEMU NIC on a link to the state of the far end; returns True if one changed."""
+        """Bring every QEMU NIC on a link to the state of the far end; returns the nodes whose carrier changed."""
+        changed = set()
         if not enabled():
-            return False
+            return changed
         wanted = {}
         for link in links:
             sides = link.get("nodes", [])
@@ -123,7 +124,6 @@ class Carrier:
             for key in list(table):
                 if key not in wanted:
                     del table[key]
-        changed = False
         now = time.monotonic()
         for key, (node, up) in wanted.items():
             known = self.applied.get(key)
@@ -143,7 +143,8 @@ class Carrier:
                 self.report(key, now, "CARRIER_SET_FAILED", str(exc) or type(exc).__name__)
                 continue
             if known is None or known[0] != up:
-                changed = True
+                if known is not None or not up:  # first sight with the carrier up changes nothing in the guest
+                    changed.add(key[0])
                 LOG.info("L1_CARRIER node=%s adapter=%s state=%s", key[0], key[1], "on" if up else "off")
             self.applied[key] = (up, now)
             self.retry.pop(key, None)

@@ -464,12 +464,14 @@ class Keepalives:
         return False
 
     async def mirror(self, pid, by_id, links, epoch):
-        """QEMU NICs follow the far end of their cable; a change asks the facts to look again soon."""
+        """QEMU NICs follow the far end of their cable; a guest whose carrier changed is read again at once,
+        so that its own facts (oper) show it within seconds, not at the next regular round."""
         changed = await self.carrier.apply(
             by_id, links, lambda side, node: self.far_down(pid, side, node), lambda: self.allowed(epoch, pid))
-        refresh = getattr(getattr(self.lc, "facts", None), "request_refresh", None)
-        if changed and refresh:
-            refresh()
+        soon = getattr(getattr(self.lc, "facts", None), "collect_soon", None)
+        for node_id in sorted(changed):
+            if soon:
+                soon(pid, node_id)
 
     async def run(self):
         while True:

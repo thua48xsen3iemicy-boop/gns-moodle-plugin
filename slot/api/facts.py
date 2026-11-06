@@ -752,6 +752,15 @@ class Facts:
             self.force = True
             self.wake.set()
 
+    def collect_soon(self, project_id, node_id):
+        """One guest changed under the slot's own hand (its carrier): read it again on the next round.
+
+        Not the plugin's rate-limited refresh: only the collectors of this node become due."""
+        for key in self.next_due:
+            if key[0] == project_id and key[1] == node_id:
+                self.next_due[key] = 0
+        self.wake.set()
+
     def snapshot(self, project_id):
         lab = self.lc.get("lab", project_id)
         nodes = {}

@@ -51,7 +51,7 @@ async def harness(monkeypatch, nodes, links):
 
     refreshes = []
     lc = SimpleNamespace(claimed=True, get=lambda *args: lab, all=lambda kind: [lab], api=api,
-                         facts=SimpleNamespace(results={"p": {}}, request_refresh=lambda: refreshes.append(1)))
+                         facts=SimpleNamespace(results={"p": {}}, collect_soon=lambda pid, node: refreshes.append((pid, node))))
     service = l1.Keepalives(lc)
     service.task.cancel()
     await asyncio.gather(service.task, return_exceptions=True)
@@ -72,6 +72,7 @@ def test_iol_silence_drops_the_carrier_of_the_guest_and_restores_it(monkeypatch,
         try:
             await service.cycle()
             assert calls == [(4000, "gns3-0", "on")]  # first sight: the known state is set once
+            assert refreshes == []  # ... and it changes nothing in the guest
             calls.clear()
             await service.cycle()
             assert calls == []  # unchanged: nothing is sent again
@@ -79,7 +80,7 @@ def test_iol_silence_drops_the_carrier_of_the_guest_and_restores_it(monkeypatch,
             await service.cycle()
             assert calls == []  # one miss is not enough
             await service.cycle()
-            assert calls == [(4000, "gns3-0", "off")] and refreshes
+            assert calls == [(4000, "gns3-0", "off")] and refreshes == [("p", "pc")]  # the guest is read again now
             calls.clear()
             await service.cycle()
             assert calls == []
@@ -206,3 +207,15 @@ def test_set_link_speaks_the_hmp_monitor(reply, error):
             await server.wait_closed()
         assert received[0] == (b"set_link gns3-9 off\n" if error else b"set_link gns3-0 off\n")
     asyncio.run(scenario())
+
+
+def test_collect_soon_makes_only_that_node_due_and_wakes_the_loop():
+    from api.facts import Facts
+
+    service = Facts.__new__(Facts)
+    service.next_due = {("p", "pc", "linux.net"): 1e12, ("p", "other", "linux.net"): 1e12, ("q", "pc", "linux.net"): 1e12}
+    service.wake = asyncio.Event()
+    service.collect_soon("p", "pc")
+    assert service.next_due == {("p", "pc", "linux.net"): 0, ("p", "other", "linux.net"): 1e12,
+                                ("q", "pc", "linux.net"): 1e12}
+    assert service.wake.is_set()
