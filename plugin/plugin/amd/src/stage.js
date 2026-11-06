@@ -98,6 +98,7 @@ export const sanitizeDrawing = src => {
 
 /**
  * Parallel links between one pair of nodes are spread by 16 px.
+ * The side is taken from the pair, not from the link: a cable stored B→A would otherwise land on the one stored A→B.
  *
  * @param {object} m model
  * @returns {Map} link id → {ax, ay, bx, by, dx, dy, len}
@@ -114,7 +115,8 @@ const linkGeometry = m => {
         const len = Math.hypot(dx, dy) || 1;
         dx /= len;
         dy /= len;
-        const off = (i - (list.length - 1) / 2) * 16, nx = -dy * off, ny = dx * off;
+        const side = String(l.a.nodeId) < String(l.b.nodeId) ? 1 : -1;
+        const off = (i - (list.length - 1) / 2) * 16 * side, nx = -dy * off, ny = dx * off;
         out.set(l.id, {ax: A.cx + nx, ay: A.cy + ny, bx: B.cx + nx, by: B.cy + ny, dx, dy, len});
     }));
     return out;
