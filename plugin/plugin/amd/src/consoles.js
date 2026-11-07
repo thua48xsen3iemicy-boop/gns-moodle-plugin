@@ -51,7 +51,7 @@ const ICON_LIST = '<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></s
 export const FONT_STEPS = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
 
 /** Font size before the student chooses one, px. */
-const FONT_DESKTOP = 12;
+const FONT_DESKTOP = 9;
 const FONT_MOBILE = 13;
 
 /** Most remembered console font choices; the oldest are dropped. */
@@ -1050,7 +1050,7 @@ export class Consoles {
                 w.dataset.con = c.n.id;
                 c.win = w;
                 if (!c.wpos) {
-                    const W = Math.min(480, r.width * 0.4), H = Math.min(290, r.height * 0.42);
+                    const W = Math.min(620, r.width * 0.5), H = Math.min(300, r.height * 0.44);
                     c.wpos = {x: Math.max(8, r.width - W - 16 - i * 26), y: clamp(16 + i * 30, 8, Math.max(8, r.height - H - 60)), w: W, h: H};
                 }
                 Object.assign(w.style, {left: c.wpos.x + 'px', top: c.wpos.y + 'px', width: c.wpos.w + 'px', height: c.wpos.h + 'px', zIndex: ++this.zTop});
@@ -1145,10 +1145,17 @@ export class Consoles {
         this.drawLinks();
     }
 
+    /**
+     * Where the line meets the window: always a top corner, the one nearer the node. A window right of the node is
+     * joined at its top left corner, a window left of it at its top right one, so the end stays put while it moves.
+     *
+     * @param {object} c console
+     * @param {{x: number, y: number}} p node on screen
+     * @returns {{x: number, y: number}}
+     */
     winAnchor(c, p) {
-        const {x, y, w, h} = c.wpos;
-        const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
-        return inside ? {x: x + w / 2, y: y + 16} : {x: clamp(p.x, x, x + w), y: clamp(p.y, y, y + h)};
+        const {x, y, w} = c.wpos;
+        return {x: p.x <= x + w / 2 ? x : x + w, y};
     }
 
     /** A dashed line from a console window to its node; typed input runs to the node, the answer runs back. */
