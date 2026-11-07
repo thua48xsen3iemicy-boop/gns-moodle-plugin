@@ -328,7 +328,10 @@ check('IOL L1: the IOL end of a Cisco-QEMU cable', () => {
     guest.interfaces[0].admin = 'down';
     der = now();
     assert.equal(der.l1.links.get('l1').down, true); // the guest explains it itself
-    assert.deepEqual(ends(der), [false, true]); // its own admin=down does not take the Cisco port's carrier
+    assert.deepEqual(ends(der), [true, true]); // the slot stops the keepalives: the IOL port loses carrier too
+    delete cisco.l1_ports;
+    assert.deepEqual(ends(now()), [false, true]); // an IOL without keepalives (no iol.l1 record) keeps its carrier
+    cisco.l1_ports = live('unknown', 'peer_not_ready');
     guest.interfaces[0].admin = 'up';
     cisco.l1_ports = live('up', 'responding');
     cisco.l1_ports.observed_at = new Date(Date.now() - 60000).toISOString();

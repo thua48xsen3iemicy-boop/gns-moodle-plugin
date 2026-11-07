@@ -145,10 +145,15 @@ function deriveL1(m, fx){
       else if (i && !mir[k] && i.admin === "down") { hard.push(`${N.name} ${i.name}: shutdown`); cfg = true; own[k] = off[k] = true; }
       else if (i && !mir[k] && i.oper === "down") { soft.push(`${N.name} ${i.name}: нет несущей`); own[k] = true; }
     });
-    // A QEMU NIC whose far end is off (silent IOL port, shutdown, a guest port admin down) has no carrier: the slot
-    // drops it (slot 0.16.0). Shown at once, not when the guest's own facts arrive; a fresh live L1 `up` comes first.
+    // An end whose far end is off (silent IOL port, shutdown, a guest port admin down) has no carrier either:
+    // - a QEMU NIC: the slot drops its carrier (slot 0.16.0); shown at once, not when the guest's own facts arrive;
+    // - an IOL port the slot keeps alive (it has an iol.l1 record): the slot stops the keepalives while the guest
+    //   port is down, and the IOL loses carrier ("line protocol down"), whatever its saved configuration says.
+    // A fresh live L1 `up` comes first: such an end is not off.
     [l.a, l.b].forEach((e, k) => {
-      if (m.nodes.get(e.nodeId).type === 'qemu' && !mir[k] && off[1 - k]) own[k] = true;
+      const type = m.nodes.get(e.nodeId).type;
+      const carrier = type === 'qemu' || (type === 'iou' && fx.byL1.has(endKey(e)));
+      if (carrier && !mir[k] && off[1 - k] && !(liveEnd[k] && fx.byL1.get(endKey(e)).state === 'up')) own[k] = true;
     });
     const why = hard.length ? hard : soft;
     if (!hard.length && soft.length) cfg = true;
