@@ -19,7 +19,8 @@ from .images import PORT_NAMES
 
 SEGMENT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
 SUBNET_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$")
-SEGMENT_KEYS = {"name", "vlan", "subnet", "gateway", "members"}
+SEGMENT_KEYS = {"name", "vlan", "subnet", "gateway", "members", "configure"}
+CONFIGURE = ("manager", "student")  # Who sets the segment up; "student": an expectation of the auto-checks only
 MEMBER_KEYS = {"node", "adapter", "port", "host"}
 MAX_SEGMENTS = 100
 MAX_MEMBERS = 100
@@ -209,6 +210,10 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
         for key in sorted(set(seg) - SEGMENT_KEYS):
             problem(f"{path}.{key}", "unknown_field")
         norm, sound = {}, True
+        student = seg.get("configure") == "student"
+        if "configure" in seg and seg["configure"] not in CONFIGURE:
+            problem(f"{path}.configure", "out_of_range", " or ".join(CONFIGURE))
+            sound = False
         name = seg.get("name")
         if not isinstance(name, str) or not SEGMENT_NAME_RE.fullmatch(name):
             problem(f"{path}.name", "required" if name is None else "bad_name", SEGMENT_NAME_RE.pattern)
@@ -304,7 +309,7 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                     problem(f"{mpath}.host", "bad_type", "integer")
                     member.pop("host")
                     sound = False
-                if not images[nodes[member["node"]]["image"]].preconfig:
+                if not student and not images[nodes[member["node"]]["image"]].preconfig:
                     problem(mpath, "unsupported_image", images[nodes[member["node"]]["image"]].id)
                     sound = False
                 port = (member["node"], member["adapter"], member["port"])
@@ -335,7 +340,7 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                 else:
                     problem(f"{path}.members[{where}]", code, f"1..{usable(network)}" if code == "host_out_of_range"
                             else f"host {hosts[where]}")
-        if gateway is not None and images[nodes[gateway["node"]]["image"]].kind != "iou":
+        if not student and gateway is not None and images[nodes[gateway["node"]]["image"]].kind != "iou":
             warn(f"{path}.gateway", "gateway_not_configured", "the router is set by the student")
 
         if fabric is not None and sound and "subnet" in norm and "name" in norm:
@@ -350,7 +355,7 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
                     lost = True
             if not lost:
                 traced.append((i, norm.get("vlan"), passed))
-                if norm.get("vlan"):
+                if norm.get("vlan") and not student:
                     left = sorted(name for name in fabric.tree([key for _, key in keys], passed)[0]
                                   if images[nodes[name]["image"]].kind != "iou")
                     if left:
@@ -359,7 +364,7 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
         if sound and "subnet" in norm and "name" in norm and "members" in norm:
             out.append({"name": norm["name"], **({"vlan": norm["vlan"]} if "vlan" in norm else {}),
                         "subnet": norm["subnet"], **({"gateway": norm["gateway"]} if "gateway" in norm else {}),
-                        "members": norm["members"]})
+                        "members": norm["members"], **({"configure": "student"} if student else {})})
 
     if fabric is not None:
         for port, owners in gateways.items():
@@ -380,10 +385,15 @@ def check(raw, *, nodes: dict, known: set, images: dict, links: list, port_error
     return out
 
 
+def managed(definition: dict) -> list:
+    """The segments the manager sets up (not `configure: student`)."""
+    return [seg for seg in definition.get("segments", []) if seg.get("configure", "manager") == "manager"]
+
+
 def assignments(definition: dict) -> list[Assignment]:
-    """Addresses of all members of a checked definition (lab/1: none), in segment and member order."""
+    """Addresses of the members the manager sets up (lab/1: none), in segment and member order."""
     result = []
-    for seg in definition.get("segments", []):
+    for seg in managed(definition):
         network = ipaddress.IPv4Network(seg["subnet"]["fixed"])
         gateway = seg.get("gateway")
         hosts = [m.get("host") for m in seg["members"]]
@@ -416,7 +426,7 @@ def ios_plans(definition: dict, images: dict) -> dict:
     iol = {name for name, node in nodes.items() if images[node["image"]].kind == "iou"}
     plans = {}
     ports = {}  # (switch, adapter, port) -> [trunk?, VLANs, number of end ports of segments cabled to it]
-    for seg in definition.get("segments", []):
+    for seg in managed(definition):
         tagged = "vlan" in seg
         vlan = seg["vlan"]["fixed"] if tagged else 1
         gateway = seg.get("gateway")

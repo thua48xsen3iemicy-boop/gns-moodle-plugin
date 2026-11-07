@@ -303,7 +303,7 @@ async def test_the_state_follows_the_slot(tmp_path, dsn):
             slot.facts_enabled = True
         sid, slot, pid, ids = await started(env)
         s = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
-        assert s["features"] == ["consoles", "facts"]  # the slot answered: facts are on offer
+        assert s["features"] == ["consoles", "facts", "checks"]  # the slot answered: facts (and checks) are on offer
 
         r = await state(env, sid)
         assert r.status_code == 200

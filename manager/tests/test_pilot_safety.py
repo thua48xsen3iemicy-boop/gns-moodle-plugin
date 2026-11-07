@@ -161,9 +161,9 @@ async def test_leader_connection_loss_cancels_and_joins_session_tasks():
         lost.set()
         await asyncio.Event().wait()
     store = NS(next_epoch=AsyncMock(return_value=1), live_sessions=AsyncMock(return_value=[s]),
-               session=AsyncMock(return_value=s))
+               session=AsyncMock(return_value=s), fail_orphan_check_runs=AsyncMock())
     agent = NS(status=status, stop=AsyncMock())
-    orch = Orchestrator(NS(worker_interval=0.001), store,
+    orch = Orchestrator(NS(worker_interval=0.001, check_timeout=120), store,
                         NS(find_ct_node=AsyncMock(return_value="pve1")), agent, {}, None, sleep=pause)
     orch._claim = AsyncMock()
     class Connection:

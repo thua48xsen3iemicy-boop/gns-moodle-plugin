@@ -1,11 +1,11 @@
-"""Lab catalog on RO CephFS: LABS_DIR/<lab_ref>/{lab.gns3, ticket.json, meta.json, checks/}.
+"""Lab catalog on RO CephFS: LABS_DIR/<lab_ref>/{lab.gns3, ticket.json, meta.json}.
 
 lab.gns3    reference topology for the preview (served as is)
 ticket.json DeployTicket for Lab Slot (slot/api/models.py); the slot validates it fully,
             the manager checks that its nodes match lab.gns3 and sets name/project_id
-meta.json   {"title", "description", "resources"?: {"cores", "memory_mb"}}: the slot CT is
-            sized to these before start (slots are generic executors)
-checks/     auto-check scripts (later)
+meta.json   {"title", "description", "resources"?: {"cores", "memory_mb"}, "checks"?: gns3lab.checks/1}: the slot
+            CT is sized to these before start (slots are generic executors); `checks` describes the auto-checks
+            (CONTRACTS 2.9, checks.check_definition)
 """
 
 import copy
@@ -13,6 +13,8 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from . import checks as checks_mod
 
 LAB_REF_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 MAX_FILE = 8 * 1024 * 1024
@@ -34,6 +36,7 @@ class Lab:
     resources: dict | None  # {"cores": int, "memory_mb": int} or None: keep the CT as configured
     topology: dict
     ticket: dict
+    checks: dict | None = None  # Normalized gns3lab.checks/1 of meta.json, None without one
 
 
 def _load_json(path: Path):
@@ -95,6 +98,9 @@ def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str
               and 1 <= res.get("cores", 1) <= 128 and 256 <= res.get("memory_mb", 256) <= 1024 * 1024)
         if not ok:
             problems.append("meta.json resources must be {cores: 1..128, memory_mb: 256..1048576}")
+    if "checks" in meta:
+        _, found = checks_mod.check_definition(meta["checks"], set(gns3_names))
+        problems += [f"meta.json {p['path']}: {p['code']} {p['message']}".rstrip() for p in found]
     return problems
 
 
@@ -120,8 +126,11 @@ class Catalog:
         problems = validate(lab_ref, topology, ticket, meta)
         if problems:
             raise LabError("; ".join(problems))
+        checks = None
+        if "checks" in meta:
+            checks = checks_mod.check_definition(meta["checks"], {n["name"] for n in topology["topology"]["nodes"]})[0]
         return Lab(lab_ref, meta["title"].strip(), str(meta.get("description", "")),
-                   meta.get("resources"), topology, ticket)
+                   meta.get("resources"), topology, ticket, checks)
 
     def list(self) -> list[dict]:
         labs = []

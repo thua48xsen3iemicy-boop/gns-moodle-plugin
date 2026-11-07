@@ -504,6 +504,8 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 
 ### 2.9. 🆕 Автопроверки: `/sessions/{id}/checks`
 
+Менеджер 0.17.0 (этап 1 проекта).
+
 Проект — [`docs/autochecks/README.md`](../../docs/autochecks/README.md): правила, классы находок, первопричины, оценка.
 Есть, только когда в `info.features` есть `checks`. В `session.features` возможность `checks` появляется вместе с `facts`:
 без фактов проверять нечего. Авторизация — как у остальных маршрутов §2.4; права студента и преподавателя проверяет Moodle.
@@ -589,7 +591,7 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 | `result.outcome` | `graded` — оценка поставлена; `incomplete` — не проверен объект правила из `focus` лабы по причине системы (проект §3): `mark: null`, студенту — «повторите проверку» |
 | `result.mark` | оценка по `grading`; `null` при `incomplete` |
 | `result.counts` | находки с `counted: true` по классам; `note` считается, но в оценку не идёт |
-| `result.rules[]` | каждое правило лабы: `status` — `pass` · `fail` · `skipped` (с `reason`: `no_collector`, `stale_facts`, `collect_failed`, `no_expectation`, `unsupported_os`) · `off` (выключено в `checks.rules`) |
+| `result.rules[]` | каждое правило лабы: `status` — `pass` · `fail` · `skipped` (с `reason`: `no_collector`, `stale_facts`, `collect_failed`, `no_expectation`, `unsupported_os`, `port_unknown` — интерфейс гостя не сопоставлен с портом GNS3) · `off` (выключено в `checks.rules`) |
 | `result.findings[]` | находки: `code`, `group`, `class` (после профиля, `overrides` и `focus`), `base_class` (по профилю), `counted` (`false` у следствий и у `note`), `caused_by` — `id` находки-первопричины или `null`, `nodes` — имена нод, `ifaces` — `{node, iface}` (имя интерфейса на устройстве), `message` — по-русски |
 
 - **Свежесть.** Перед расчётом менеджер просит слот собрать факты (`POST …/facts/refresh`) и ждёт до `CHECK_FACTS_WAIT`
@@ -605,13 +607,13 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 
 | Поле | Правило |
 |---|---|
-| `checks` | объект `gns3lab.checks/1` (проект §4): `format` — ровно `gns3lab.checks/1`; остальные поля необязательны. Входит в `lab_def` |
+| `checks` | объект `gns3lab.checks/1` (проект §4): `format` — ровно `gns3lab.checks/1`; остальные поля необязательны. `scripts` (этап 4) пока не принимается — `unknown_field`. Входит в `lab_def` |
 | `segments[].configure` | `manager` (по умолчанию) или `student`. `student` — компилятор не настраивает ни участников, ни шлюз, ни коммутаторы на пути, предупреждения `gateway_not_configured` и `switch_not_configured` для сегмента не выдаются; адреса раздаются по тем же правилам и становятся ожиданием проверок. Входит в `lab_def` |
 
 Новые `code` в `problems` `validate` (путь вида `checks.groups.explicit[0].members[1]`): `unknown_rule` (код в
 `checks.rules` или `overrides` не из каталога), `group_overlap` (узел в двух группах `explicit`), `bad_range` (элемент
-`addresses.allowed` — не `rfc1918` и не сеть IPv4), а также общие `required`, `unknown_field`, `bad_type`, `unknown_node`,
-`out_of_range`. Эталонная лаба с неверным `meta.json.checks` — `409 lab_invalid`, как с другими ошибками каталога.
+`addresses.allowed` — не `rfc1918` и не сеть IPv4), а также общие `required`, `unknown_field`, `bad_type`, `bad_name`,
+`duplicate_name` (имя группы), `unknown_node`, `out_of_range` (в том числе `segments[i].configure`). Эталонная лаба с неверным `meta.json.checks` — `409 lab_invalid`, как с другими ошибками каталога.
 
 ### 2.5. Коды ошибок
 
