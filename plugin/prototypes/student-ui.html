@@ -1429,7 +1429,7 @@ class Con {
   ensureTerm(){
     if (this.term) return;
     if (!window.Terminal || !window.FitAddon) { this.viewport.innerHTML = '<p class="tfail">Не загрузилась xterm.js с cdn.jsdelivr.net. Превью консоли на схеме работает, ввод — нет.</p>'; return; }
-    this.term = new Terminal({ fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: mobile ? 13 : 13.5, lineHeight: 1.15,
+    this.term = new Terminal({ fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: mobile ? 13 : 9, lineHeight: 1.15,
       cursorBlink: true, scrollback: mobile ? 1000 : 3000, theme: termTheme() });
     this.fit = new FitAddon.FitAddon(); this.term.loadAddon(this.fit);
     this.term.open(this.viewport);
@@ -1568,7 +1568,7 @@ function renderWindows(){
     if (!c.win) {
       const w = hel("div", "win", layer); w.dataset.id = c.n.id; c.win = w;
       if (!c.wpos) {
-        const W = Math.min(480, r.width * 0.4), H = Math.min(290, r.height * 0.42);
+        const W = Math.min(620, r.width * 0.5), H = Math.min(300, r.height * 0.44);
         c.wpos = { x: Math.max(8, r.width - W - 16 - i * 26), y: clamp(16 + i * 30, 8, Math.max(8, r.height - H - 60)), w: W, h: H };
       }
       Object.assign(w.style, { left: c.wpos.x + "px", top: c.wpos.y + "px", width: c.wpos.w + "px", height: c.wpos.h + "px", zIndex: ++zTop });
@@ -1609,10 +1609,10 @@ function dragWin(c, hd){
 let linked = null;
 const flows = new Map();
 function showLink(c){ linked = c; drawLinks(); }
+/* the line meets the window at a top corner: top left when the window is right of the node, top right when left of it */
 function winAnchor(c, p){
-  const { x, y, w, h } = c.wpos;
-  const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
-  return inside ? { x: x + w / 2, y: y + 16 } : { x: clamp(p.x, x, x + w), y: clamp(p.y, y, y + h) };
+  const { x, y, w } = c.wpos;
+  return { x: p.x <= x + w / 2 ? x : x + w, y };
 }
 /* dashed line from a console window to its node; while the student types, dots run to the node, the answer runs back */
 function drawLinks(){
