@@ -479,7 +479,8 @@ Proxmox, тот же Idempotency-Key у слота, статус лабы пер
 
 ## 10. Позже (схема и API это не блокируют)
 
-- **Автопроверки** (🆕 проект — `docs/autochecks/README.md`, формат — `CONTRACTS.md` §2.9): миграция со следующим
+- **Автопроверки** (✅ этапы 1–3, менеджер 0.17.0–0.18.0; что осталось — `docs/autochecks/README.md` §13; формат —
+  `CONTRACTS.md` §2.9): миграция со следующим
   свободным номером (`check_runs`: `run_id`, `session_id` → `sessions` `ON DELETE CASCADE`, `status`, `requested_by_user_id`,
   `facts_rev`, `checks_def`, `grading jsonb`, `result jsonb`, `error jsonb`, времена; не больше одного прогона
   `queued`/`running` на сессию — частичный уникальный индекс), маршруты `POST/GET /api/v1/sessions/{id}/checks`.
