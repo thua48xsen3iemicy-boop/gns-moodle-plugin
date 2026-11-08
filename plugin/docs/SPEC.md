@@ -114,6 +114,9 @@ Moodle никогда не держит WebSocket и не видит токен�
 Таблица `gns3lab_seat` (0.12.0): «кто ведёт лабу студента сейчас» — `gns3labid`, `userid`, `sessionkey` (SHA-256 от id сеанса Moodle),
 `tabid` (случайный id страницы), `timeclaimed`, `timemodified`; уникальный индекс `(gns3labid, userid)`, строка живёт 90 с после
 последнего признака жизни держателя. Не состояние лабы, а право ей управлять.
+Автопроверки (0.19.0, `docs/autochecks.md`): поля `grade` (журнал оценок), `checksenabled`, `checksprofile`, `checksthresholds`,
+`checksfailmark`, `checksoverrides`, `checksattempts`, `checksreport`, `checksreportdate`; таблица `gns3lab_check_runs` — прогоны
+студентов (кто, `runid` менеджера, итог, оценка, счётчики по классам), по ней считаются попытки и оценка; находки остаются у менеджера.
 Таблица `gns3lab_reveal` (0.9.0): что студент открыл на схеме в режимах `seen` и `fog` — `gns3labid`, `userid`, `nodeid` (пусто у кабеля),
 `kind` (`node`, `known`, `iface`, `group`, `link`), `item` (имя интерфейса, группа `l1` / `l2` / `l3` / `routes`, id кабеля), `timecreated`;
 уникальный индекс на пять первых полей. Только идентификаторы и имена, значений нет (`docs/lab-constructor/README.md` §2.1, §12.2).
@@ -143,9 +146,13 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_reveal` | `cmid`, `userid=0` | view; как у `get_facts`: чужой `userid` — observe + группы | `{"items": [{"nodeid","kind","item"}]}` — маска студента (§5.1, `gns3lab_reveal`) |
 | `mod_gns3lab_get_course_overview` | `courseid`, `groupid=0` | validate_context курса; для каждой лабы observe (лаба без права не попадает в ответ, нет ни одной — отказ); группа — из доступных пользователю; ячейка «студент × лаба» только при `can_observe_user()` | `{labs:[{cmid,name,error}], students:[{userid,fullname,pictureurl}], cells:[{cmid,userid,observable,session}]}`: `session` — сводка (`status`, `startedat`, `expiresat`, `facts`: yes/no/unknown) или `null`; id сессии и топологии нет; список сессий лабы кэшируется 10 с (MUC `activitysessions`); недоступный менеджер даёт `error` только у своей лабы (`docs/teacher-dashboard.md`) |
 | `mod_gns3lab_claim_seat` | `cmid`, `tabid`, `takeover=false` | use; место только владельца лабы, другого пользователя назвать нельзя | `{"status","mode","idle","beat"}`: `status` — `held`, `othertab`, `otherlogin` (`docs/seat.md`); страница спрашивает при открытии (`takeover=true`) и раз в `beat` секунд |
+| `mod_gns3lab_get_checks` | `cmid`, `userid=0` | view; чужой `userid` — observe + группы | настройки проверок для страницы, попытки и прогоны (`docs/autochecks.md` §3) |
+| `mod_gns3lab_start_check` | `cmid`, `tabid` | use, только своя лаба; проверки включены, `checks` у менеджера и сессии, `running`, место, попытки | как `get_checks`; `grading` — из настроек элемента |
+| `mod_gns3lab_get_check_run` | `cmid`, `runid`, `userid=0` | как `get_checks`; прогон этого пользователя в этой активности | прогон с отчётом; находки студенту — по настройке `checksreport` (решает сервер) |
 | `mod_gns3lab_reveal` | `cmid`, `items` (до 500) | use; владелец запущенной сессии, другого пользователя назвать нельзя | `{"added"}`; `nodeid` и id кабеля — из живой топологии сессии, иначе отказ; только добавление, до 5000 строк на пользователя и активность (`revealfull`); строки удалённого проекта удаляются при записи |
 
-Вызовы, которыми студент ведёт свою лабу — `start_session`, `stop_session`, `get_console_ticket` (не для наблюдателя) и `reveal` —
+Вызовы, которыми студент ведёт свою лабу — `start_session`, `stop_session`, `get_console_ticket` (не для наблюдателя), `reveal` и
+`start_check` (проверка тратит попытку и меняет оценку) —
 принимают ещё `tabid` (id страницы, по умолчанию пусто) и пропускают только держателя места (`seat::require_seat`): другой вход
 под той же учётной записью получает `seatotherlogin`, другая страница того же входа в режиме `tab` — `seatothertab`; отказ
 другому входу пишется событием `seat_denied`. Чтение состояния место не охраняет. Подробно — `docs/seat.md`.
@@ -252,7 +259,9 @@ H.264 через WebCodecs) ломает Babel-шаг `grunt amd`, теперь 
   `factsview` и `fogstart`, таблица `gns3lab_reveal`, `mod_gns3lab_get_reveal` / `_reveal`, модуль `amd/src/reveal.js`.
 - ~~noVNC для графических консолей~~ — сделано в 0.7.0 (без просмотра экрана преподавателем).
 - ~~Страница преподавателя «Лабы курса»: студенты × лабы, живые статусы и сводка фактов~~ — сделано в 0.14.0 (`docs/teacher-dashboard.md`).
-- Сниппеты из настроек активности, оценка и автопроверка, LTI-вариант.
+- ~~Оценка и автопроверка~~ — этап 2 проекта автопроверок сделан в 0.19.0 (`docs/autochecks.md`): настройки элемента, кнопка
+  «Проверка» на странице лабы, отчёт, попытки, журнал оценок. Дальше — свои скрипты преподавателя (этап 4 проекта).
+- Сниппеты из настроек активности, LTI-вариант.
 
 ## 7. Безопасность — чек-лист для ревью
 

@@ -32,6 +32,17 @@
 - POST /api/v1/sessions/{id}/state/refresh — 202 без тела (409 session_not_running у неживой); не чаще раза в 10 с
   действительно «собирает»: rev растёт, снимок переключается между facts.json и facts-broken.json.
 
+Автопроверки (CONTRACTS §2.9 менеджера 0.17):
+- info: feature "checks"; у running-сессии features ["consoles", "facts", "checks"];
+- POST /api/v1/sessions/{id}/checks {"requested_by_user_id", "grading"?} — 202 прогон queued (неизвестное поле — 400
+  unsupported_field, неизвестный код в overrides или неверные пороги — 400 invalid_request, сессия не running — 409
+  session_not_running, прогон уже идёт — 409 check_in_progress с run_id); прогон идёт queued → running → done за ~4 с;
+- GET …/checks — {"runs": [...]} без findings и rules; GET …/checks/{run_id} — прогон целиком, чужой — 404 check_not_found;
+- результат зависит от снимка фактов сессии: верный конфиг — одна мелкая находка и одна прощённая (оценка 5),
+  конфиг с ошибками (после «Обновить сейчас») — vlan_wrong со следствиями и address_missing; оценка — по grading запроса.
+    curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'  # следующий прогон: incomplete
+    curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'      # следующий прогон: failed
+
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
 консоль (шлюз отдаст браузеру 4000). Остановленная нода не пускает в консоль. Режимы IOS (enable, configure terminal,
@@ -388,6 +399,7 @@ class Session:
         self.facts_rev = 1  # rev of the facts once the lab runs; 0 is reported before that
         self.facts_variant = "ok"  # fixture shown: ok or broken, switched by a refresh
         self.facts_refreshed = None  # time of the last refresh that really collected
+        self.check_runs = []  # check runs of the session (CONTRACTS §2.9), oldest first
 
     def status(self):
         return self.state()[0]
@@ -430,6 +442,7 @@ class Manager:
         self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
+        self.check_next = None  # "incomplete" or "failed": the outcome of the next check run
         self.capture_fail = os.environ.get('MOCK_CAPTURE_FAIL') == '1'
         self.stale = False
         self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
@@ -488,7 +501,7 @@ class Manager:
     def present(self, s):
         body = self.summary(s)
         status = body["status"]
-        body["features"] = ["consoles", "facts"] if status == "running" else []
+        body["features"] = ["consoles", "facts", "checks"] if status == "running" else []
         if status == "running":
             lab = self.labs[s.key]
             doc = json.loads(json.dumps(lab["doc"]))
@@ -566,7 +579,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -941,6 +954,188 @@ async def mock_stale(request):
     return web.json_response({"nodes_stale": request.app["m"].stale})
 
 
+# ---------------------------------------------------------------- автопроверки (CONTRACTS §2.9)
+CHECK_QUEUED_FOR, CHECK_RUNNING_FOR = 1.0, 3.0  # seconds
+CHECK_CLASSES = ("critical", "major", "minor", "note")
+CHECK_RULES = {  # code -> (group, classes by profile lenient/standard/strict); a part of RULES of lab_manager/checks.py
+    "node_stopped": ("l1", ("major", "critical", "critical")), "port_shutdown": ("l1", ("major", "major", "critical")),
+    "link_down": ("l1", ("minor", "major", "major")), "segment_split": ("l2", ("major", "critical", "critical")),
+    "vlan_wrong": ("l2", ("minor", "major", "major")), "vlan_extra": ("l2", ("note", "minor", "minor")),
+    "address_missing": ("addressing", ("major", "major", "critical")),
+    "address_extra": ("addressing", ("minor", "major", "major")),
+    "gateway_wrong": ("gateways", ("major", "critical", "critical")),
+    "unreachable": ("routing", ("major", "critical", "critical")),
+    "hostname_wrong": ("host", ("note", "minor", "major")), "trunk_not_pruned": ("l2", ("note", "minor", "major")),
+}
+CHECK_ALL_CODES = set(CHECK_RULES) | {  # every code of the catalog takes an override
+    "config_not_saved", "link_suspended", "unused_port_up", "segments_merged", "member_isolated", "vlan_mismatch",
+    "tag_not_allowed", "vlan_name_wrong", "vlan_extra_used", "mgmt_vlan_missing", "address_wrong", "mask_wrong",
+    "address_misplaced", "address_apipa", "address_not_private", "address_duplicate", "subnet_overlap", "subnet_mixed",
+    "address_not_saved", "config_not_applied", "gateway_missing", "forwarding_off", "forwarding_on_host"}
+CHECK_DEFAULT_THRESHOLDS = [{"mark": 5, "critical": 0, "major": 0, "minor": 1},
+                            {"mark": 4, "critical": 0, "major": 1, "minor": 3},
+                            {"mark": 3, "critical": 0, "major": 3, "minor": None}]
+
+
+def normalize_grading(raw):
+    """Like checks.normalize_grading of the manager: defaults for what is missing, ValueError for what is wrong."""
+    raw = raw or {}
+    profile = raw.get("profile", "standard")
+    if profile not in ("lenient", "standard", "strict"):
+        raise ValueError("grading.profile")
+    overrides = raw.get("overrides", {}) or {}
+    if not isinstance(overrides, dict):
+        raise ValueError("grading.overrides")
+    for code, cls in overrides.items():
+        if code not in CHECK_ALL_CODES or cls not in CHECK_CLASSES:
+            raise ValueError(f"grading.overrides.{code}")
+    thresholds = raw.get("thresholds", CHECK_DEFAULT_THRESHOLDS)
+    if not isinstance(thresholds, list) or not 1 <= len(thresholds) <= 10:
+        raise ValueError("grading.thresholds")
+    previous = None
+    for row in thresholds:
+        if not isinstance(row, dict) or set(row) - {"mark", "critical", "major", "minor"}:
+            raise ValueError("grading.thresholds")
+        if not is_int(row.get("mark")) or not 0 <= row["mark"] <= 100 or (previous is not None and row["mark"] >= previous):
+            raise ValueError("grading.thresholds.mark")
+        for cls in ("critical", "major", "minor"):
+            if row.get(cls) is not None and (not is_int(row[cls]) or row[cls] < 0):
+                raise ValueError(f"grading.thresholds.{cls}")
+        previous = row["mark"]
+    fail = raw.get("fail_mark", 2)
+    if not is_int(fail) or not 0 <= fail < previous:
+        raise ValueError("grading.fail_mark")
+    return {"profile": profile, "overrides": overrides,
+            "thresholds": [{k: row.get(k) for k in ("mark", "critical", "major", "minor")} for row in thresholds],
+            "fail_mark": fail}
+
+
+def check_findings(m, s, grading):
+    """Plausible findings for the facts the session shows now: right config or the broken one."""
+    names = [n["name"] for n in m.labs[s.key]["doc"]["topology"]["nodes"]] or ["PC1"]
+    a, b = names[0], names[1 % len(names)]
+    if s.facts_variant == "broken":
+        raw = [
+            ("f1", "vlan_wrong", None, [b], [{"node": b, "iface": "Ethernet0/1"}],
+             f"{b}: порт Ethernet0/1 в VLAN 1, а должен быть в VLAN 10 (сегмент LAN1)"),
+            ("f2", "segment_split", "f1", [a, b], [],
+             f"Сегмент LAN1: {a} и {b} в разных L2-доменах"),
+            ("f3", "unreachable", "f1", [a], [], f"{a}: нет пути до сегмента LAN2"),
+            ("f4", "address_missing", None, [a], [{"node": a, "iface": "eth0"}],
+             f"{a}: на eth0 нет адреса 192.168.10.2/24 (кабель к {b})"),
+            ("f5", "hostname_wrong", None, [a], [], f"{a}: hostname «localhost», а должен быть «{a}»"),
+        ]
+    else:
+        raw = [
+            ("f1", "vlan_extra", None, [b], [], f"{b}: создан VLAN 99, которого нет в задании"),
+            ("f2", "address_extra", None, [a], [{"node": a, "iface": "eth1"}],
+             f"{a}: лишний адрес 10.0.0.5/24 на неподключённом интерфейсе eth1"),
+        ]
+    level = ("lenient", "standard", "strict").index(grading["profile"])
+    findings = []
+    for fid, code, cause, nodes, ifaces, message in raw:
+        group, classes = CHECK_RULES[code]
+        base = classes[level]
+        cls = grading["overrides"].get(code, base)
+        findings.append({"id": fid, "code": code, "group": group, "class": cls, "base_class": base,
+                         "counted": cause is None and cls != "note", "caused_by": cause, "nodes": nodes,
+                         "ifaces": ifaces, "message": message})
+    return findings
+
+
+def check_result(m, s, run):
+    if run["_outcome"] == "incomplete":
+        return {"outcome": "incomplete", "mark": None, "counts": dict.fromkeys(CHECK_CLASSES, 0),
+                "rules": [{"code": "vlan_wrong", "group": "l2", "status": "skipped", "reason": "stale_facts"}], "findings": []}
+    findings = check_findings(m, s, run["grading"])
+    counts = dict.fromkeys(CHECK_CLASSES, 0)
+    for f in findings:
+        if f["caused_by"] is None:
+            counts[f["class"]] += 1
+    mark = run["grading"]["fail_mark"]
+    for row in run["grading"]["thresholds"]:
+        if all(row[c] is None or counts[c] <= row[c] for c in ("critical", "major", "minor")):
+            mark = row["mark"]
+            break
+    failed = {f["code"] for f in findings}
+    rules = [{"code": code, "group": group, "status": "fail" if code in failed else "pass"}
+             for code, (group, _) in CHECK_RULES.items()]
+    rules.append({"code": "address_not_saved", "group": "addressing", "status": "skipped", "reason": "no_collector"})
+    return {"outcome": "graded", "mark": mark, "counts": counts, "rules": rules, "findings": findings}
+
+
+def present_run(m, s, run, full=True):
+    now = time.time()
+    age = now - run["_created"]
+    if s.status() != "running" and age < CHECK_QUEUED_FOR + CHECK_RUNNING_FOR and run["_final"] is None:
+        run["_final"] = ("failed", {"code": "CHECK_FAILED", "message": "Сессия остановлена во время проверки"}, None)
+    if run["_final"] is None and age >= CHECK_QUEUED_FOR + CHECK_RUNNING_FOR:
+        if run["_outcome"] == "failed":
+            run["_final"] = ("failed", {"code": "SLOT_UNAVAILABLE", "message": "Слот не ответил"}, None)
+        else:
+            run["_final"] = ("done", None, check_result(m, s, run))
+    if run["_final"] is not None:
+        status, err, result = run["_final"]
+    else:
+        status, err, result = ("queued" if age < CHECK_QUEUED_FOR else "running"), None, None
+    finished = run["_created"] + CHECK_QUEUED_FOR + CHECK_RUNNING_FOR if run["_final"] is not None else None
+    if result is not None and not full:
+        result = {k: v for k, v in result.items() if k not in ("findings", "rules")}
+    return {"schema": "gns3lab.check-run/1", "run_id": run["run_id"], "session_id": s.id, "status": status,
+            "requested_by_user_id": run["requested_by_user_id"], "requested_at": iso(run["_created"]),
+            "started_at": iso(run["_created"] + CHECK_QUEUED_FOR) if age >= CHECK_QUEUED_FOR else None,
+            "finished_at": iso(finished) if finished else None, "facts_rev": s.facts_rev,
+            "checks_def": None, "grading": run["grading"], "result": result, "error": err}
+
+
+async def start_check(request):
+    m: Manager = request.app["m"]
+    s = own(request, site_of(request))
+    try:
+        body = await read_body(request, {"requested_by_user_id": 1,
+                                         "grading": {"profile": 1, "overrides": 1, "thresholds": 1, "fail_mark": 1}})
+        by = body["requested_by_user_id"]
+        if not is_int(by) or by <= 0:
+            raise ValueError("requested_by_user_id")
+        grading = normalize_grading(body.get("grading"))
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        return error(400, "invalid_request", f"Invalid fields: {exc}")
+    if s.status() != "running":
+        return error(409, "session_not_running", "Session is not running")
+    active = next((r for r in s.check_runs if present_run(m, s, r)["status"] in ("queued", "running")), None)
+    if active:
+        return error(409, "check_in_progress", "Проверка уже идёт", run_id=active["run_id"])
+    run = {"run_id": "c-" + secrets.token_hex(8), "requested_by_user_id": by, "grading": grading,
+           "_created": time.time(), "_outcome": m.check_next or "graded", "_final": None}
+    m.check_next = None
+    s.check_runs.append(run)
+    log.info("session %s: check %s by %s, %s", s.id, run["run_id"], by, run["_outcome"])
+    return web.json_response(present_run(m, s, run), status=202)
+
+
+async def list_checks(request):
+    m: Manager = request.app["m"]
+    s = own(request, site_of(request))
+    return web.json_response({"runs": [present_run(m, s, r, full=False) for r in reversed(s.check_runs)]})
+
+
+async def get_check(request):
+    m: Manager = request.app["m"]
+    s = own(request, site_of(request))
+    run = next((r for r in s.check_runs if r["run_id"] == request.match_info["run"]), None)
+    return web.json_response(present_run(m, s, run)) if run else error(404, "check_not_found", "Unknown check run")
+
+
+async def mock_check_next(request):
+    body = await request.json() if (await request.text()).strip() else {}
+    m: Manager = request.app["m"]
+    outcome = body.get("outcome")
+    m.check_next = outcome if outcome in ("incomplete", "failed") else None
+    return web.json_response({"check_next": m.check_next})
+
+
 # ---------------------------------------------------------------- поддельный экран VNC (RFB 3.8)
 class ProtocolError(Exception):
     pass
@@ -1268,6 +1463,10 @@ def make_apps():
     api.router.add_post("/api/v1/sessions/{sid}/console-tickets", console_ticket)
     api.router.add_get("/api/v1/sessions/{sid}/state", session_facts)
     api.router.add_post("/api/v1/sessions/{sid}/state/refresh", refresh_facts)
+    api.router.add_post("/api/v1/sessions/{sid}/checks", start_check)
+    api.router.add_get("/api/v1/sessions/{sid}/checks", list_checks)
+    api.router.add_get("/api/v1/sessions/{sid}/checks/{run}", get_check)
+    api.router.add_post("/mock/checks/next", mock_check_next)
     api.router.add_post("/mock/nodes/{node}/{action:stop|start}", mock_node)
     api.router.add_post("/mock/fail-next", mock_fail_next)
     api.router.add_post("/mock/stale/{mode:on|off}", mock_stale)
