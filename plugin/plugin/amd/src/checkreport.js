@@ -49,6 +49,13 @@ export const isPending = run => !!run && PENDING.includes(run.status);
 export const groupFindings = findings => {
     const list = Array.isArray(findings) ? findings : [];
     const ids = new Set(list.map(f => f.id).filter(Boolean));
+    // The first finding with an id, as list.find() would give it.
+    const findingById = new Map();
+    list.forEach(f => {
+        if (f.id && !findingById.has(f.id)) {
+            findingById.set(f.id, f);
+        }
+    });
     const roots = [];
     const byId = new Map();
     list.forEach(f => {
@@ -70,7 +77,7 @@ export const groupFindings = findings => {
             const seen = new Set();
             while (id && !byId.has(id) && !seen.has(id)) {
                 seen.add(id);
-                id = (list.find(x => x.id === id) || {}).causedby;
+                id = (findingById.get(id) || {}).causedby;
             }
             if (byId.has(id)) {
                 byId.get(id).consequences.push(f);
