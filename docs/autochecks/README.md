@@ -306,7 +306,7 @@
 | 0 | Этот документ, контракт (`CONTRACTS.md` §2.9, §3.1, §7) | — | агент | — |
 | 1 | ✅ (менеджер 0.17.0) Движок: модель L1/L2/L3 на Python, правила §8 без `host` и `persistence: saved`, первопричины, оценка, `check_runs`, маршруты, `configure: student` в компиляторе | менеджер | агент | 0 |
 | 2 | Настройки проверок и оценки в элементе курса, кнопка «Проверить», отчёт, журнал оценок, попытки | плагин | исполнитель | 0 (по контракту, на mock-менеджере) |
-| 3 | Коллекторы: `linux.config/1` (ifupdown: `ifquery`, `ifup --no-act`), hostname и `ip_forward` (`linux.sys/1`), `hostname` и `ip route` в `ios.config` | слот | исполнитель | 0 |
+| 3 | ✅ (слот 0.17.0, менеджер 0.18.0) Коллекторы: `linux.config/1` (ifupdown: `ifquery`, `ifup --no-act`), hostname и `ip_forward` (`linux.sys/1`), `hostname` и `routes` в `ios.config`, `hostname` у Windows и RouterOS; правила `host` и `persistence: saved` в менеджере | слот, менеджер | исполнитель, агент | 0 |
 | 4 | Свои скрипты (§7), библиотека фрагментов, проверка на эталоне | менеджер, плагин | — | 1, 2 |
 | 5 | Калибровка по истории autochck (§5.4) | `tools/` | агент | 1 |
 
@@ -345,3 +345,22 @@
 Linux-коммутатором и маршрутизатор); выполнить задание верно — оценка 5 без находок; затем по одной ошибке: порт узла в
 чужом VLAN (одна находка `vlan_wrong`, остальное — следствия), адрес на втором интерфейсе, неверный шлюз, IOL без
 `write memory`. Сверить тексты находок с тем, что видно в консолях.
+
+## 12. Как сделано на этапе 3 (слот 0.17.0, менеджер 0.18.0)
+
+Слот (`CONTRACTS.md` §4.6): `linux.sys/1` — `hostname`, `ip_forward`, `dns`; `linux.config/1` — `net_saved`
+(`mechanism`, `ok`, `message`, `interfaces[]` с `method`, `ipv4`, `gateway`, `routes`; ifupdown читается самим ifupdown,
+netplan/networkd/NetworkManager пока `supported: false`); `hostname` в `windows.net/1` и `routeros.sys/1`; `ios.config/1`
+даёт `hostname` и `routes` (подключённые сети и `ip route`, у L2 — `ip default-gateway`).
+
+Менеджер:
+- `hostname_wrong` — имя узла без учёта регистра или FQDN, начинающийся с имени. У Cisco без строки `hostname` (слот
+  0.17.0+) — «имя не задано». Служебные ноды и IOL без сохранённой конфигурации не проверяются.
+- `forwarding_off` / `forwarding_on_host` — по `ip_forward` и роли ноды. Выключенная пересылка на Linux-маршрутизаторе
+  по пути делает `unreachable` её следствием.
+- `persistence` ноды: `checks.nodes.<имя>`, иначе `checks.persistence`, иначе по образу (`net_config` ifupdown,
+  networkmanager, netplan, networkd — `saved`, иначе `runtime`); у эталонной лабы образ неизвестен — `runtime`, если
+  гость сообщил `mechanism: "none"`, иначе `saved`. В `saved`: живой адрес или шлюз без записи в конфиге —
+  `address_not_saved` (адреса интерфейса с `method: dhcp` не сверяются); адрес или шлюз конфига, которого нет вживую,
+  и `net_saved.ok: false` — `config_not_applied`. `supported: false` — правило `skipped` (`unsupported_os`).
+- Связность через Cisco считается по `routes` из `ios.config`.
