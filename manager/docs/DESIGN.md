@@ -479,10 +479,14 @@ Proxmox, тот же Idempotency-Key у слота, статус лабы пер
 
 ## 10. Позже (схема и API это не блокируют)
 
-- **Автопроверки**: миграция со следующим свободным номером (`check_runs`: session_id, check_id, status, result
-  jsonb, времена), маршруты `POST/GET /api/v1/sessions/{id}/checks`. Главная запись — в PostgreSQL,
-  копия JSON — в отдельном дереве `results/<key>/` (пишет менеджер, §5). Moodle получает
-  результат через API менеджера и БД менеджера не читает.
+- **Автопроверки** (🆕 проект — `docs/autochecks/README.md`, формат — `CONTRACTS.md` §2.9): миграция со следующим
+  свободным номером (`check_runs`: `run_id`, `session_id` → `sessions` `ON DELETE CASCADE`, `status`, `requested_by_user_id`,
+  `facts_rev`, `checks_def`, `grading jsonb`, `result jsonb`, `error jsonb`, времена; не больше одного прогона
+  `queued`/`running` на сессию — частичный уникальный индекс), маршруты `POST/GET /api/v1/sessions/{id}/checks`.
+  Движок — чистые функции над снимком фактов и топологией (модель L1/L2/L3 как в `plugin/docs/live-state.md` §4), без
+  ввода-вывода: тесты на фикстурах. Прогон выполняет лидер, как опрос фактов. Главная запись — в PostgreSQL, копия JSON —
+  в отдельном дереве `results/<key>/` (пишет менеджер, §5). Moodle получает результат через API менеджера и БД менеджера
+  не читает.
 - **Факты о нодах**: маршруты `GET …/state?since_rev=`, `POST …/state/refresh` — `CONTRACTS.md` §2.7; сбор слотом и
   хранение истории — §6.7. Ключи — `node_id` запущенного проекта, они уже есть в `sessions.topology`.
 

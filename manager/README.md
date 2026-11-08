@@ -1,4 +1,12 @@
-# Lab Manager — 0.16.2
+# Lab Manager — 0.17.0
+
+Автопроверки, этап 1 (`../docs/autochecks/README.md`, `docs/CONTRACTS.md` §2.9): `POST/GET /api/v1/sessions/{id}/checks`,
+возможность `checks` в `info` и в сессии с фактами. Прогон просит слот собрать факты, ждёт свежих до `CHECK_FACTS_WAIT` и
+считает правила над снимком: модель L1/L2/L3 (`lab_manager/netmodel.py`, как слои плагина), ожидания из сегментов
+`gns3lab.lab/2` и групп узлов, первопричины и оценку по профилю строгости (`lab_manager/checks.py`). Результат — в таблице
+`check_runs` (миграция `011_check_runs.sql`: после обновления — `lab-manager-admin migrate`). Описание проверок — поле
+`checks` определения `lab/2` и `meta.json` эталонной лабы; сегмент с `configure: "student"` не преднастраивается, он только
+задаёт ожидание. Cisco IOL без сохранённой конфигурации проверяется так, как загрузится (находка `config_not_saved`).
 
 Образ с `net_config: "routeros"` получает в каталоге (`GET /api/v1/images`) поле `guest: "routeros"`; менеджер переносит его в
 ноды эталонной топологии лабы и в `session.topology` по имени ноды, как `symbol`. По нему плагин 0.18.2 показывает у ноды
@@ -227,6 +235,7 @@ Uvicorn работает в один процесс: оркестратор жи
 | `GATEWAY_INTERNAL_URL`, `GATEWAY_INTERNAL_KEY`, `GATEWAY_PUBLIC_URL` | `/internal/tickets` шлюза, его `GW_INTERNAL_KEY`, `wss://` для браузера |
 | `DEFAULT_MAX_DURATION`, `MAX_DURATION_LIMIT` | длительность сессии по умолчанию и предел для `options.max_duration` от плагина, минуты |
 | `FACTS_POLL_INTERVAL`, `FACTS_TTL` | как часто читать факты лабы у слота 0.6.0+ (15 с) и `ttl` снимка для плагина (90 с = три периода сбора слота). История хранится в БД: `docs/DESIGN.md` §6.7 |
+| `CHECK_FACTS_WAIT`, `CHECK_TIMEOUT` | сколько прогон автопроверки ждёт свежих фактов всех нод (20 с) и через сколько незавершённый прогон получает `failed` с `TIMEOUT` (120 с), `docs/CONTRACTS.md` §2.9 |
 
 ## 5. Токен Proxmox
 

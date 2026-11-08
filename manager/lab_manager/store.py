@@ -559,6 +559,62 @@ class Store:
                 (sid, min_gap),
             )
 
+    # ------------------------------------------------------------------ auto-checks (CONTRACTS 2.9)
+    async def create_check_run(self, sid, requested_by, grading):
+        """A queued run, or None if the session already has one in progress (the unique index decides)."""
+        run_id = "c-" + secrets.token_hex(8)
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "INSERT INTO check_runs (id, session_id, status, requested_by_user_id, grading)"
+                " VALUES (%s, %s, 'queued', %s, %s) ON CONFLICT DO NOTHING RETURNING *",
+                (run_id, sid, requested_by, Jsonb(grading)))
+            return await cur.fetchone()
+
+    async def check_runs(self, sid):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM check_runs WHERE session_id = %s ORDER BY requested_at DESC, id DESC", (sid,))
+            return await cur.fetchall()
+
+    async def check_run(self, sid, run_id):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("SELECT * FROM check_runs WHERE session_id = %s AND id = %s", (sid, run_id))
+            return await cur.fetchone()
+
+    async def active_check_run(self, sid):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM check_runs WHERE session_id = %s AND status IN ('queued', 'running')", (sid,))
+            return await cur.fetchone()
+
+    async def start_check_run(self, run_id):
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "UPDATE check_runs SET status = 'running', started_at = now() WHERE id = %s AND status = 'queued'"
+                " RETURNING *", (run_id,))
+            return await cur.fetchone()
+
+    async def finish_check_run(self, run_id, *, result=None, error=None, facts_rev=None, checks_def=None):
+        """done with a result, or failed with an error. Only a run still in progress changes."""
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE check_runs SET status = %s, finished_at = now(), result = %s, error = %s, facts_rev = %s,"
+                " checks_def = %s WHERE id = %s AND status IN ('queued', 'running')",
+                ("failed" if error is not None else "done", Jsonb(result) if result is not None else None,
+                 Jsonb(error) if error is not None else None, facts_rev, checks_def, run_id))
+
+    async def fail_orphan_check_runs(self, timeout_seconds):
+        """Runs in progress whose session is no longer running, or that took longer than the timeout."""
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE check_runs c SET status = 'failed', finished_at = now(), error = CASE"
+                " WHEN s.status = 'running' THEN %s::jsonb ELSE %s::jsonb END"
+                " FROM sessions s WHERE s.id = c.session_id AND c.status IN ('queued', 'running')"
+                " AND (s.status <> 'running' OR c.requested_at < now() - make_interval(secs => %s))",
+                (Jsonb({"code": "TIMEOUT", "message": "Проверка не завершилась вовремя"}),
+                 Jsonb({"code": "CHECK_FAILED", "message": "Лаба остановлена до окончания проверки"}),
+                 timeout_seconds))
+
     # ------------------------------------------------------------------ events
     async def event(self, session_id, vmid, kind, detail=None):
         async with self.pool.connection() as conn, conn.transaction():

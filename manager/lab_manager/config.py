@@ -181,6 +181,8 @@ class Settings:
     worker_interval: float = 2.0
     facts_poll_interval: float = 15.0  # Seconds between reads of a running lab's facts from its slot
     facts_ttl: int = 90  # Seconds after which the plugin treats facts as stale (3 collection periods)
+    check_facts_wait: int = 20  # Seconds a check run waits for fresh facts of every node (CONTRACTS 2.9)
+    check_timeout: int = 120  # Seconds after which a check run still in progress fails with TIMEOUT
     slot_scheme: str = "https"
     slot_ca_file: Path | None = None
     allow_plaintext_slots: bool = False
@@ -336,6 +338,8 @@ def load(env=None, check_mode=True) -> Settings:
         worker_interval=float(_int(env, "WORKER_INTERVAL", 2, 1, 60)),
         facts_poll_interval=float(_int(env, "FACTS_POLL_INTERVAL", 15, 1, 300)),
         facts_ttl=_int(env, "FACTS_TTL", 90, 30, 3600),
+        check_facts_wait=_int(env, "CHECK_FACTS_WAIT", 20, 3, 120),
+        check_timeout=_int(env, "CHECK_TIMEOUT", 120, 30, 3600),
         slot_scheme=env.get("SLOT_SCHEME", "https"),
         slot_ca_file=Path(env["SLOT_CA_FILE"]) if env.get("SLOT_CA_FILE") else None,
         allow_plaintext_slots=env.get("ALLOW_PLAINTEXT_SLOTS", "0") == "1",

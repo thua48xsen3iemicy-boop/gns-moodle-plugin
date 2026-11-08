@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 
 from . import iosconfig, netconfig
+from . import checks as checks_mod
 from . import segments as segments_mod
 from .images import PORTS_PER_ADAPTER, VPCS_MEMORY_MB
 
@@ -34,7 +35,7 @@ MAX_NODES = 100  # DeployTicket of the slot
 MAX_LINKS = 1000
 COORD = 100_000
 TOP_KEYS = {"format", "title", "nodes", "links"}
-TOP_KEYS_2 = TOP_KEYS | {"segments"}
+TOP_KEYS_2 = TOP_KEYS | {"segments", "checks"}
 NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port"}
 ENDPOINT_KEYS = {"node", "adapter", "port"}
 CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "duplicate_name", "unknown_image",
@@ -46,6 +47,8 @@ CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "dup
          "host_in_use", "multiple_gateways", "duplicate_segment",
          # lab/2, stage 3
          "gateway_port_conflict",
+         # lab/2, auto-checks (CONTRACTS 2.9)
+         "unknown_rule", "group_overlap", "bad_range",
          # uplink node
          "too_many_uplinks", "uplink_port_in_use")
 
@@ -263,6 +266,12 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
             images=images, links=out_links, port_error=port_error, problem=problem, warn=warn,
             connected=not problems)
 
+    out_checks = None
+    if fmt == FORMAT_2 and "checks" in lab:
+        out_checks, found = checks_mod.check_definition(
+            lab["checks"], {n.get("name") for n in nodes if isinstance(n, dict) and isinstance(n.get("name"), str)})
+        problems.extend(found)
+
     if problems:
         raise LabInvalid(problems)
     resources = resources_of(out_nodes, images, overhead_mb)
@@ -275,6 +284,9 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
     definition = {"format": fmt, "title": title, "nodes": out_nodes, "links": out_links}
     if out_segments is not None:
         definition["segments"] = out_segments
+    if out_checks is not None:
+        definition["checks"] = out_checks
+    if out_segments is not None:
         try:
             segments_mod.setup(definition, images)  # The scripts and configurations must fit the slot's ticket
         except (netconfig.ScriptTooLarge, iosconfig.ConfigTooLarge) as exc:

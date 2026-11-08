@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import VERSION, labdef
+from . import VERSION, checks as checks_mod, labdef
 from .derived import DerivedImages, register_routes
 from .agent_client import AgentClient, start_budget_warnings
 from .db import latest_version, make_pool, schema_version
@@ -69,6 +69,25 @@ class TicketRequest(Strict):
     node_id: str = Field(min_length=1, max_length=64)
     readonly: bool = False
     issued_for_user_id: int | None = Field(default=None, gt=0)
+
+
+class Threshold(Strict):
+    mark: int = Field(ge=0, le=100, strict=True)
+    critical: int | None = Field(default=None, ge=0, strict=True)
+    major: int | None = Field(default=None, ge=0, strict=True)
+    minor: int | None = Field(default=None, ge=0, strict=True)
+
+
+class Grading(Strict):
+    profile: str | None = None
+    overrides: dict[str, str] | None = None
+    thresholds: list[Threshold] | None = None
+    fail_mark: int | None = Field(default=None, ge=0, le=100, strict=True)
+
+
+class CheckRequest(Strict):
+    requested_by_user_id: int = Field(gt=0)
+    grading: Grading | None = None
 
 
 class StopRequest(Strict):
@@ -236,7 +255,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         body = summary(s)
         body["features"] = ["consoles"] if s["status"] == "running" else []
         if s["status"] == "running" and s["facts_polled_at"] is not None:
-            body["features"].append("facts")  # The slot of this session serves facts (CONTRACTS 2.7)
+            body["features"] += ["facts", "checks"]  # The slot of this session serves facts (CONTRACTS 2.7, 2.9)
         if s["status"] == "running" and s["topology"]:
             body["topology"] = s["topology"]
             body["nodes"], stale = await services.orchestrator.live_nodes(s)
@@ -296,7 +315,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
 
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
-        features = ["consoles", "observer", "resume", "facts"]  # resume: the next session continues the project
+        # resume: the next session continues the project; checks: CONTRACTS 2.9
+        features = ["consoles", "observer", "resume", "facts", "checks"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -470,6 +490,48 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         await store.request_facts_refresh(s["id"])
         services.orchestrator.wake()
         return Response(status_code=202)
+
+    # ------------------------------------------------------------------ auto-checks (CONTRACTS 2.9)
+    def present_run(r, full=True):
+        body = {"schema": "gns3lab.check-run/1", "run_id": r["id"], "session_id": r["session_id"],
+                "status": r["status"], "requested_by_user_id": r["requested_by_user_id"],
+                "requested_at": iso_or_none(r["requested_at"]), "started_at": iso_or_none(r["started_at"]),
+                "finished_at": iso_or_none(r["finished_at"]), "facts_rev": r["facts_rev"],
+                "checks_def": r["checks_def"], "grading": r["grading"], "result": r["result"], "error": r["error"]}
+        if not full and body["result"] is not None:
+            body["result"] = {k: v for k, v in body["result"].items() if k not in ("findings", "rules")}
+        return body
+
+    @app.post("/api/v1/sessions/{session_id}/checks", status_code=202)
+    async def start_check(session_id: str, body: CheckRequest, site=Depends(site_of)):
+        s = await own_session(session_id, site)
+        if s["status"] != "running":
+            raise ApiError(409, "session_not_running", "Session is not running")
+        try:
+            grading = checks_mod.normalize_grading(body.grading.model_dump(exclude_none=True) if body.grading else None)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_request", str(exc)) from exc
+        run = await store.create_check_run(s["id"], body.requested_by_user_id, grading)
+        if run is None:
+            active = await store.active_check_run(s["id"])
+            raise ApiError(409, "check_in_progress", "Проверка уже идёт", run_id=active["id"] if active else None)
+        await store.event(s["id"], s["slot_vmid"], "check_requested",
+                          {"run_id": run["id"], "user_id": body.requested_by_user_id})
+        services.orchestrator.wake()
+        return JSONResponse(status_code=202, content=present_run(run))
+
+    @app.get("/api/v1/sessions/{session_id}/checks")
+    async def list_checks(session_id: str, site=Depends(site_of)):
+        s = await own_session(session_id, site)
+        return {"runs": [present_run(r, full=False) for r in await store.check_runs(s["id"])]}
+
+    @app.get("/api/v1/sessions/{session_id}/checks/{run_id}")
+    async def get_check(session_id: str, run_id: str, site=Depends(site_of)):
+        s = await own_session(session_id, site)
+        run = await store.check_run(s["id"], run_id)
+        if run is None:
+            raise ApiError(404, "check_not_found", "Unknown check run")
+        return present_run(run)
 
     @app.post("/api/v1/sessions/{session_id}/console-tickets")
     async def console_ticket(session_id: str, body: TicketRequest, site=Depends(site_of)):

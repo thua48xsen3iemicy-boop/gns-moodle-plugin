@@ -204,7 +204,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `POST /api/v1/sessions/{id}/stop` | тело необязательно: `{"requested_by_user_id": 17}` — кто остановил (только журнал); если это не сам студент, причина «преподаватель» и текст «Лаба остановлена преподавателем». Ответ — сессия со `status: "stopping"` |
 | `POST /api/v1/sessions/{id}/console-tickets` | `{"node_id", "readonly", "issued_for_user_id"}` → `{"ticket", "gateway_url", "expires_in"}`. `gateway_url` есть всегда: `ws://` или `wss://` (в бою `wss://`), хост, порт, путь, **без `/` на конце**; плагин дописывает `/console/<node_id>?ticket=…`. К ноде, которая по живым статусам не `started`, — `409 node_not_running` (при `nodes_stale` билет выдаётся). К ноде, чей образ в каталоге объявлен с `console_type: "none"` (например, Linux-коммутатор), — `403 console_disabled`: для всех, и для наблюдателя (`readonly`) тоже; образ узла берётся из билета развёртывания рабочей области по имени файла, поэтому правило одинаково для лаб из Moodle и эталонных. Если лабу сессии уже не разобрать (образ убран из каталога), — `503 console_unavailable`: менеджер не выдаёт консоль, пока не знает, что она разрешена. 🆕 К ноде с `console_type: "vnc"` (§2.6) билет выдаётся только владельцу сессии: билет с `readonly: true` — `403 console_disabled` (экран студента преподаватель не видит). Ответ тот же; тип консоли плагин знает из `session.nodes[].console_type` |
 
-Состояние лабы — `/sessions/{id}/state` (§2.7, ✅ менеджер 0.8.0). Маршруты `/sessions/{id}/checks` появятся
+Состояние лабы — `/sessions/{id}/state` (§2.7, ✅ менеджер 0.8.0). 🆕 Автопроверки — `/sessions/{id}/checks` (§2.9),
 вместе с возможностью `checks`.
 
 ### 2.6. ✅ Лабы из Moodle: образы, определение, проверка
@@ -502,12 +502,125 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 `CAPTURE_BASE_MISMATCH` (backing диска или хеш базы не совпали; нет), `CAPTURE_TOO_LARGE` (> `IMAGE_MAX_BYTES`; нет),
 `STUDENT_DIR_BUSY` (§2.5; нет), `AGENT_REJECTED` (нет), `TIMEOUT` и `INTERNAL` (да).
 
+### 2.9. 🆕 Автопроверки: `/sessions/{id}/checks`
+
+Менеджер 0.17.0 (этап 1 проекта).
+
+Проект — [`docs/autochecks/README.md`](../../docs/autochecks/README.md): правила, классы находок, первопричины, оценка.
+Есть, только когда в `info.features` есть `checks`. В `session.features` возможность `checks` появляется вместе с `facts`:
+без фактов проверять нечего. Авторизация — как у остальных маршрутов §2.4; права студента и преподавателя проверяет Moodle.
+
+**Что проверяется.** Описание ожидания — документ `gns3lab.checks/1` (проект §4): у лабы из Moodle — поле `checks`
+определения `gns3lab.lab/2` (§2.6), у эталонной — поле `checks` в `meta.json` (§3.1). Оно входит в `lab_def` (у эталонной —
+в ревизию): сессия проверяется по той версии, с которой создан проект. Нет описания — работают только правила, которым
+ожидание не нужно (проект §8, «Без ожиданий»).
+
+| Запрос | Ответ |
+|---|---|
+| `POST /api/v1/sessions/{id}/checks` | тело ниже → `202`, прогон (`status: "queued"`). Сессия не `running` — `409 session_not_running`; у сессии уже есть прогон `queued`/`running` — `409 check_in_progress` с `run_id` этого прогона в теле |
+| `GET /api/v1/sessions/{id}/checks` | `{"runs": [...]}` — прогоны сессии, новые первыми, без `result.findings` и `result.rules`; `[]` — прогонов не было |
+| `GET /api/v1/sessions/{id}/checks/{run_id}` | прогон целиком. Неизвестный `run_id` или прогон другой сессии — `404 check_not_found` |
+
+Тело `POST`:
+
+```json
+{
+  "requested_by_user_id": 42,
+  "grading": {
+    "profile": "standard",
+    "overrides": {"hostname_wrong": "note"},
+    "thresholds": [
+      {"mark": 5, "critical": 0, "major": 0, "minor": 1},
+      {"mark": 4, "critical": 0, "major": 1, "minor": 3},
+      {"mark": 3, "critical": 0, "major": 3, "minor": null}
+    ],
+    "fail_mark": 2
+  }
+}
+```
+
+| Поле | Обяз. | Правило |
+|---|---|---|
+| `requested_by_user_id` | да | int > 0, кто запустил (студент или преподаватель); только журнал и `run` |
+| `grading` | нет | настройки оценки элемента курса; нет поля или любого вложенного — значения по умолчанию (проект §5) |
+| `grading.profile` | нет | `lenient` · `standard` (по умолчанию) · `strict` |
+| `grading.overrides` | нет | `{"<код правила>": "critical" \| "major" \| "minor" \| "note"}`; неизвестный код — `400 invalid_request` |
+| `grading.thresholds` | нет | 1…10 строк, `mark` — int 0…100, строго по убыванию; `critical`/`major`/`minor` — int ≥ 0 или `null` (любое число). Оценка — `mark` первой строки, условия которой выполнены |
+| `grading.fail_mark` | нет | int 0…100, меньше всех `mark` строк; оценка, если ни одна строка не подошла. По умолчанию 2 |
+
+Неизвестное поле — `400 unsupported_field`, как у `POST /sessions`.
+
+**Прогон** (`gns3lab.check-run/1`):
+
+```json
+{
+  "schema": "gns3lab.check-run/1",
+  "run_id": "c-7d1e0a9b3c4f5a62",
+  "session_id": "s-3f9a1c0d2b4e5f60",
+  "status": "done",
+  "requested_by_user_id": 42,
+  "requested_at": "2026-11-07T10:00:00Z",
+  "started_at": "2026-11-07T10:00:01Z",
+  "finished_at": "2026-11-07T10:00:09Z",
+  "facts_rev": 118,
+  "checks_def": "sha256:…",
+  "grading": {"profile": "standard", "overrides": {}, "thresholds": [], "fail_mark": 2},
+  "result": {
+    "outcome": "graded",
+    "mark": 4,
+    "counts": {"critical": 0, "major": 1, "minor": 2, "note": 1},
+    "rules": [{"code": "segment_split", "group": "l2", "status": "fail"},
+              {"code": "address_not_saved", "group": "addressing", "status": "skipped", "reason": "no_collector"}],
+    "findings": [
+      {"id": "f3", "code": "address_misplaced", "group": "addressing", "class": "major", "base_class": "major",
+       "counted": true, "caused_by": null, "nodes": ["PC1"], "ifaces": [{"node": "PC1", "iface": "ens4"}],
+       "message": "PC1: адрес 192.168.10.1/24 стоит на ens4, а должен быть на ens3 (кабель к SW1 e0/1)"}
+    ]
+  },
+  "error": null
+}
+```
+
+| Поле | Смысл |
+|---|---|
+| `run_id` | `c-` + 16 hex-символов |
+| `status` | `queued` · `running` · `done` · `failed`. `failed` — сбой менеджера или слота, `error` = `{"code", "message"}` (`CHECK_FAILED`, `SLOT_UNAVAILABLE`, `INTERNAL`), `result: null`. Прогон не завершился за `CHECK_TIMEOUT` — `failed` с `TIMEOUT` |
+| `facts_rev` | снимок фактов (§2.7), по которому посчитан результат: оценку можно воспроизвести |
+| `checks_def` | `sha256:` канонического JSON описания `gns3lab.checks/1`; `null` — описания нет |
+| `grading` | настройки оценки после подстановки значений по умолчанию — все поля |
+| `result.outcome` | `graded` — оценка поставлена; `incomplete` — не проверен объект правила из `focus` лабы по причине системы (проект §3): `mark: null`, студенту — «повторите проверку» |
+| `result.mark` | оценка по `grading`; `null` при `incomplete` |
+| `result.counts` | находки с `counted: true` по классам; `note` считается, но в оценку не идёт |
+| `result.rules[]` | каждое правило лабы: `status` — `pass` · `fail` · `skipped` (с `reason`: `no_collector`, `stale_facts`, `collect_failed`, `no_expectation`, `unsupported_os`, `port_unknown` — интерфейс гостя не сопоставлен с портом GNS3) · `off` (выключено в `checks.rules`) |
+| `result.findings[]` | находки: `code`, `group`, `class` (после профиля, `overrides` и `focus`), `base_class` (по профилю), `counted` (`false` у следствий и у `note`), `caused_by` — `id` находки-первопричины или `null`, `nodes` — имена нод, `ifaces` — `{node, iface}` (имя интерфейса на устройстве), `message` — по-русски |
+
+- **Свежесть.** Перед расчётом менеджер просит слот собрать факты (`POST …/facts/refresh`) и ждёт до `CHECK_FACTS_WAIT`
+  (по умолчанию 20 с), пока у каждой запущенной ноды результаты коллекторов не станут новее `requested_at`. Не дождался —
+  объекты этой ноды получают `skipped` с `stale_facts`. Остановленная нода задания — находка `node_stopped`, а не `skipped`.
+- **Хранение.** Таблица `check_runs` менеджера (DESIGN §10), удаляется вместе с сессией. Пересчёт старого прогона по
+  новым правилам не делается: прогон хранит то, что показали студенту.
+- **Видимость.** Менеджер отдаёт прогон целиком; что показывать студенту (все находки, только счётчики, после срока сдачи),
+  решает плагин.
+- Прогоны студента в элементе курса, лимит попыток и запись в журнал оценок Moodle — забота плагина.
+
+**Поля определения `gns3lab.lab/2` для проверок** (только при `checks` в `info.features`; иначе — `unknown_field`):
+
+| Поле | Правило |
+|---|---|
+| `checks` | объект `gns3lab.checks/1` (проект §4): `format` — ровно `gns3lab.checks/1`; остальные поля необязательны. `scripts` (этап 4) пока не принимается — `unknown_field`. Входит в `lab_def` |
+| `segments[].configure` | `manager` (по умолчанию) или `student`. `student` — компилятор не настраивает ни участников, ни шлюз, ни коммутаторы на пути, предупреждения `gateway_not_configured` и `switch_not_configured` для сегмента не выдаются; адреса раздаются по тем же правилам и становятся ожиданием проверок. Входит в `lab_def` |
+
+Новые `code` в `problems` `validate` (путь вида `checks.groups.explicit[0].members[1]`): `unknown_rule` (код в
+`checks.rules` или `overrides` не из каталога), `group_overlap` (узел в двух группах `explicit`), `bad_range` (элемент
+`addresses.allowed` — не `rfc1918` и не сеть IPv4), а также общие `required`, `unknown_field`, `bad_type`, `bad_name`,
+`duplicate_name` (имя группы), `unknown_node`, `out_of_range` (в том числе `segments[i].configure`). Эталонная лаба с неверным `meta.json.checks` — `409 lab_invalid`, как с другими ошибками каталога.
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -554,7 +667,7 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 | `lab.gns3` | эталон для превью, отдаётся плагину как есть | менеджер → плагин |
 | `ticket.json` | топология для запуска: `nodes`, `links` (формат `NodeSpec`/`LinkSpec` слота) | менеджер → `manifest` слота |
 | `meta.json` | описание лабы и требования | менеджер |
-| `checks/` | скрипты автопроверки (позже) | менеджер |
+| `checks/` | 🆕 не используется: описание проверок — поле `checks` в `meta.json` (§2.9), свои скрипты — в нём же (`docs/autochecks/README.md` §7) | — |
 
 ### 3.1. `meta.json`
 
@@ -569,7 +682,7 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
   "resources": {"cores": 8, "memory_mb": 16384},
   "requires": ["qga", "iol-cli"],
   "ui": {"layers": ["l1", "l2", "l3"]},
-  "checks": [],
+  "checks": {"format": "gns3lab.checks/1"},
   "extensions": {}
 }
 ```
@@ -579,7 +692,7 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 | `resources` | размер CT слота; по нему менеджер выбирает узел и ставит `cores`/`memory` |
 | `requires` | возможности слота, без которых лабу не запустить (§7); попадают в билет слота |
 | `ui` | подсказки плагину для отрисовки; менеджер передаёт их без разбора (кандидат в `session`) |
-| `checks` | описание автопроверок; формат — на этапе «Автопроверки» |
+| `checks` | 🆕 описание автопроверок `gns3lab.checks/1` (§2.9, `docs/autochecks/README.md` §4); входит в ревизию лабы |
 
 ### 3.2. Ревизия лабы
 
@@ -1071,7 +1184,7 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | `consoles` | менеджер (`info`, `session`) | билеты консолей через шлюз |
 | `observer` | менеджер | консоли только для чтения для преподавателя |
 | `facts` | менеджер | ✅ `/sessions/{id}/state` (§2.7, live-state.md); в `session.features`, когда слот отдаёт факты |
-| `checks` | менеджер | 🆕 `/sessions/{id}/checks` |
+| `checks` | менеджер | 🆕 `/sessions/{id}/checks` (§2.9), поле `checks` и `segments[].configure` в `gns3lab.lab/2`, `checks` в `meta.json`; в `session.features` — вместе с `facts` |
 | `reset` | менеджер | 🆕 `options.reset` |
 | `resume` | менеджер | следующий запуск продолжает проект студента (всегда, с менеджера 0.5.1) |
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
@@ -1108,6 +1221,8 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 4. ✅ Слот добавляет `student-state` (0.4.0). Менеджер 0.5.1 всегда продолжает проект студента.
 5. ✅ Слот 0.6.0 собирает факты (§4.6), менеджер 0.8.0 хранит их и отдаёт `/sessions/{id}/state` (§2.7).
    Плагин начинает читать `state`, когда в `session.features` есть `facts`.
+6. 🆕 Менеджер объявляет `checks` (§2.9). Плагин показывает настройки проверок и кнопку «Проверить» только при ней;
+   новые коллекторы слота (`docs/autochecks/README.md` §9, этап 3) добавляют правила, но не меняют формат прогона.
 
 ## 9. Открытые вопросы
 
@@ -1122,4 +1237,6 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 6. ✅ Факты (§2.7, §4.6): результаты автопроверок лежат отдельно от журнала наблюдений (`check_runs`, DESIGN §10).
    Результат проверки ссылается на снимок, по которому посчитан (`facts_rev`), чтобы оценку можно было воспроизвести.
 7. ✅ Факты: состав коллекторов и период пока задаёт слот (по умолчанию `linux.net`, 30 с). Настройка лабой
-   появится вместе с `checks`: проверка объявит, какие коллекторы ей нужны.
+   появится вместе с `checks`: проверка объявит, какие коллекторы ей нужны. 🆕 Предложение (`docs/autochecks/README.md`):
+   проверка коллекторы не объявляет — слот собирает всё, что умеет для ноды, а правило без нужных данных получает
+   `skipped` с `no_collector` (§2.9).

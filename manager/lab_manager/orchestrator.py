@@ -50,8 +50,9 @@ import psycopg
 
 from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotStopped, AgentQuarantined,
                            AgentRejected, AgentSourceMissing, AgentUncertain, AgentWrongNode)
+from . import checks as checks_mod
 from . import labdef
-from .facts import parse_slot_facts
+from .facts import build_state, parse_slot_facts
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotOwnerLost, SlotUnavailable
@@ -248,6 +249,10 @@ class Orchestrator:
             if task.done() and not task.cancelled() and task.exception() is not None:
                 exc = task.exception()
                 log.error("Session task failed", exc_info=(type(exc), exc, exc.__traceback__))
+        try:
+            await self.store.fail_orphan_check_runs(self.settings.check_timeout)
+        except psycopg.Error as exc:
+            log.warning("Check runs were not swept: %s", type(exc).__name__)
         for session in await self.store.live_sessions():
             task = self._tasks.get(session["id"])
             if task is None or task.done():
@@ -940,6 +945,7 @@ class Orchestrator:
             return await self._goto(s, "lab_stop", msg, status="stopping", slot_state="releasing",
                                     stop_requested=True, stop_reason=reason)
         await self._poll_facts(s)
+        await self._check_step(s)
         last = self._health_checked.get(s["id"], 0)
         if time.monotonic() - last < 30:
             return False
@@ -987,6 +993,70 @@ class Orchestrator:
                 log.warning("Facts of session %s: %s", sid, exc)
         except psycopg.Error as exc:
             log.warning("Facts of session %s were not stored: %s", sid, type(exc).__name__)
+
+    async def _check_step(self, s):
+        """Advance the session's auto-check run, if it has one (CONTRACTS 2.9). Never fails the session.
+
+        queued: ask the slot to collect now. running: wait (up to check_facts_wait) until every started node has a
+        collection attempted after the start, reading the slot every few seconds; then grade the snapshot.
+        """
+        sid, mono = s["id"], time.monotonic()
+        try:
+            run = await self.store.active_check_run(sid)
+            if run is None:
+                return
+            if run["status"] == "queued":
+                if await self.store.start_check_run(run["id"]) is None:
+                    return
+                try:
+                    await self._slot(s).refresh_facts(str(s["project_id"]))
+                except SlotOwnerLost:
+                    raise
+                except SlotError as exc:
+                    log.warning("Check %s: facts refresh failed: %s", run["id"], exc)
+                self._facts_next[sid] = mono + 3  # Time for the slot to collect
+                return
+            rows = await self.store.facts_rows(sid)
+            nodes, _ = await self.live_nodes(s)
+            statuses = {node_id: n["status"] for node_id, n in nodes.items()}
+            latest = {}
+            for row in rows:
+                latest[row["node_id"]] = max(latest.get(row["node_id"], row["attempted_at"]), row["attempted_at"])
+            stale = {nid for nid, at in latest.items() if at < run["started_at"] and statuses.get(nid) == "started"}
+            if stale and (now() - run["started_at"]).total_seconds() < self.settings.check_facts_wait:
+                self._facts_next[sid] = min(self._facts_next.get(sid, mono + 3), mono + 3)
+                return
+            fresh = await self.store.session(sid)
+            try:
+                result, checks_def = await self._grade_checks(s, run, rows, statuses, stale, nodes)
+            except Exception:  # noqa: BLE001 - a broken run must not break the session
+                log.exception("Check %s of session %s failed", run["id"], sid)
+                await self.store.finish_check_run(run["id"], error={"code": "CHECK_FAILED",
+                                                                    "message": "Проверка не выполнена из-за ошибки"})
+                return
+            await self.store.finish_check_run(run["id"], result=result, facts_rev=fresh["facts_rev"],
+                                              checks_def=checks_def)
+        except SlotOwnerLost:
+            raise
+        except psycopg.Error as exc:
+            log.warning("Check run of session %s: %s", sid, type(exc).__name__)
+
+    async def _grade_checks(self, s, run, rows, statuses, stale, nodes):
+        """(result, checks_def) of a run over the stored facts of the session."""
+        definition, images, checks = None, {}, None
+        if s["lab_def"]:
+            ws = await self.store.workspace(s["workspace_id"])
+            definition = ws["definition"]
+            images = await self.derived.catalog(s["site"]) if self.derived else dict(self.settings.images or {})
+            checks = definition.get("checks")
+        else:
+            checks = (await asyncio.to_thread(self.catalog.get, s["lab_ref"])).checks
+        state = build_state(0, rows, statuses, self.settings.facts_ttl)
+        result = await asyncio.to_thread(
+            checks_mod.run_checks, topology=s["topology"], state=state, statuses=statuses, definition=definition,
+            images=images, checks=checks, grading=run["grading"], stale=stale, now=now(),
+            consoles={node_id: n.get("console_type") for node_id, n in nodes.items()})
+        return result, checks_mod.digest(checks)
 
     # ------------------------------------------------------------------ stopping
     async def _stage_lab_stop(self, s):
