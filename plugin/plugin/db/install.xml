@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="mod/gns3lab/db" VERSION="20261031" COMMENT="XMLDB file for Moodle mod_gns3lab"
+<XMLDB PATH="mod/gns3lab/db" VERSION="20261108" COMMENT="XMLDB file for Moodle mod_gns3lab"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
 >
@@ -17,6 +17,15 @@
         <FIELD NAME="factsview" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="live" SEQUENCE="false" COMMENT="What the scheme shows a student: live, seen or fog"/>
         <FIELD NAME="fogstart" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Names of the nodes a fog starts from as a JSON list; empty means every node is a silhouette"/>
         <FIELD NAME="seatmode" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="tab" SEQUENCE="false" COMMENT="Who may drive a student's lab at the same time: tab (one browser page), login (one Moodle login) or off"/>
+        <FIELD NAME="grade" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Gradebook: maximum points if positive, minus the scale id if negative, 0 for no grade"/>
+        <FIELD NAME="checksenabled" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Students may run auto-checks of their lab"/>
+        <FIELD NAME="checksprofile" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="standard" SEQUENCE="false" COMMENT="Strictness profile: lenient, standard or strict"/>
+        <FIELD NAME="checksthresholds" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Grade thresholds as a JSON list of {mark, critical, major, minor}; empty means the defaults"/>
+        <FIELD NAME="checksfailmark" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="2" SEQUENCE="false" COMMENT="Mark when no threshold row fits"/>
+        <FIELD NAME="checksoverrides" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Class of single rules as a JSON object code: class"/>
+        <FIELD NAME="checksattempts" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Most graded attempts of a student, 0 for unlimited"/>
+        <FIELD NAME="checksreport" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="full" SEQUENCE="false" COMMENT="What a student sees of a run: full, counts or after (counts until checksreportdate)"/>
+        <FIELD NAME="checksreportdate" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="From when the findings are shown in the after mode"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
@@ -103,6 +112,39 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="oneseat" UNIQUE="true" FIELDS="gns3labid, userid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="gns3lab_check_runs" COMMENT="Auto-check runs of the students: who, which run of the lab manager, outcome and mark (docs/autochecks.md); the findings stay on the manager">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="gns3labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Activity"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Owner of the lab"/>
+        <FIELD NAME="sessionid" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Session of the run on the lab manager"/>
+        <FIELD NAME="runid" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Run id on the lab manager"/>
+        <FIELD NAME="requestedby" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="User who asked for the check"/>
+        <FIELD NAME="status" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="queued" SEQUENCE="false" COMMENT="queued, running, done or failed"/>
+        <FIELD NAME="outcome" TYPE="char" LENGTH="12" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="graded or incomplete for a done run"/>
+        <FIELD NAME="mark" TYPE="int" LENGTH="5" NOTNULL="false" SEQUENCE="false" COMMENT="Mark of a graded run"/>
+        <FIELD NAME="topmark" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Top mark of the thresholds the run was graded with"/>
+        <FIELD NAME="failmark" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Fail mark the run was graded with"/>
+        <FIELD NAME="critical" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Counted critical findings"/>
+        <FIELD NAME="major" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Counted major findings"/>
+        <FIELD NAME="minor" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Counted minor findings"/>
+        <FIELD NAME="note" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Forgiven findings"/>
+        <FIELD NAME="errorcode" TYPE="char" LENGTH="32" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Why a failed run failed"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timefinished" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the run ended"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="gns3labid" TYPE="foreign" FIELDS="gns3labid" REFTABLE="gns3lab" REFFIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="labrun" UNIQUE="true" FIELDS="gns3labid, runid"/>
+        <INDEX NAME="labuser" UNIQUE="false" FIELDS="gns3labid, userid"/>
+        <INDEX NAME="status" UNIQUE="false" FIELDS="status"/>
       </INDEXES>
     </TABLE>
   </TABLES>

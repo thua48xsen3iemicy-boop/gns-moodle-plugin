@@ -23,6 +23,7 @@ use core_privacy\local\request\contextlist;
 use core_privacy\local\request\transform;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
+use mod_gns3lab\local\check_runs;
 use mod_gns3lab\local\reveal;
 use mod_gns3lab\local\seat;
 
@@ -38,6 +39,9 @@ use mod_gns3lab\local\seat;
  * The seat (which login and page drive the lab of a student, docs/seat.md) lives a minute and a half after the last
  * sign of life; it is declared and deleted with the user's data, but not exported: it holds a hash and a random id of
  * a page that mean nothing outside the running page.
+ * The auto-check runs of a student (who, which run, outcome, mark and counts; docs/autochecks.md) belong to the student
+ * and activity: exported and deleted with the user's data there. The findings stay on the lab manager with the session;
+ * the grade they gave lives in the gradebook, which has its own privacy provider.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -62,6 +66,7 @@ class provider implements
             'imagetitle' => 'privacy:metadata:gns3labmanager:imagetitle',
             'imagedescription' => 'privacy:metadata:gns3labmanager:imagedescription',
             'imagedisk' => 'privacy:metadata:gns3labmanager:imagedisk',
+            'requestedby' => 'privacy:metadata:gns3labmanager:requestedby',
         ], 'privacy:metadata:gns3labmanager');
         $collection->add_database_table('gns3lab_labs', [
             'name' => 'privacy:metadata:gns3lab_labs:name',
@@ -91,6 +96,14 @@ class provider implements
             'timeclaimed' => 'privacy:metadata:gns3lab_seat:timeclaimed',
             'timemodified' => 'privacy:metadata:gns3lab_seat:timemodified',
         ], 'privacy:metadata:gns3lab_seat');
+        $collection->add_database_table('gns3lab_check_runs', [
+            'gns3labid' => 'privacy:metadata:gns3lab_check_runs:gns3labid',
+            'userid' => 'privacy:metadata:gns3lab_check_runs:userid',
+            'requestedby' => 'privacy:metadata:gns3lab_check_runs:requestedby',
+            'status' => 'privacy:metadata:gns3lab_check_runs:status',
+            'mark' => 'privacy:metadata:gns3lab_check_runs:mark',
+            'timecreated' => 'privacy:metadata:gns3lab_check_runs:timecreated',
+        ], 'privacy:metadata:gns3lab_check_runs');
         return $collection;
     }
 
@@ -119,10 +132,18 @@ class provider implements
                JOIN {course_modules} cm2 ON cm2.id = c2.instanceid AND c2.contextlevel = :contextlevel2
                JOIN {modules} m2 ON m2.id = cm2.module AND m2.name = :modname2
                JOIN {gns3lab_seat} s ON s.gns3labid = cm2.instance
-              WHERE s.userid = :userid2',
+              WHERE s.userid = :userid2
+             UNION
+             SELECT c3.id
+               FROM {context} c3
+               JOIN {course_modules} cm3 ON cm3.id = c3.instanceid AND c3.contextlevel = :contextlevel3
+               JOIN {modules} m3 ON m3.id = cm3.module AND m3.name = :modname3
+               JOIN {gns3lab_check_runs} k ON k.gns3labid = cm3.instance
+              WHERE k.userid = :userid3',
             [
                 'contextlevel' => CONTEXT_MODULE, 'modname' => 'gns3lab', 'userid' => $userid,
                 'contextlevel2' => CONTEXT_MODULE, 'modname2' => 'gns3lab', 'userid2' => $userid,
+                'contextlevel3' => CONTEXT_MODULE, 'modname3' => 'gns3lab', 'userid3' => $userid,
             ]
         );
         return $contextlist;
@@ -154,6 +175,15 @@ class provider implements
                   WHERE cm.id = :cmid',
                 ['modname' => 'gns3lab', 'cmid' => $context->instanceid]
             );
+            $userlist->add_from_sql(
+                'userid',
+                'SELECT k.userid
+                   FROM {course_modules} cm
+                   JOIN {modules} m ON m.id = cm.module AND m.name = :modname
+                   JOIN {gns3lab_check_runs} k ON k.gns3labid = cm.instance
+                  WHERE cm.id = :cmid',
+                ['modname' => 'gns3lab', 'cmid' => $context->instanceid]
+            );
             return;
         }
         if ($context->contextlevel != CONTEXT_SYSTEM) {
@@ -176,6 +206,7 @@ class provider implements
                 self::export_labs($userid);
             } else if ($context->contextlevel == CONTEXT_MODULE) {
                 self::export_reveal($userid, $context);
+                self::export_check_runs($userid, $context);
             }
         }
     }
@@ -204,6 +235,34 @@ class provider implements
                 [get_string('privacy:reveal', 'gns3lab')],
                 (object) ['uncovered' => $items]
             );
+        }
+    }
+
+    /**
+     * Exports the auto-check runs of the user in an activity.
+     *
+     * @param int $userid user id
+     * @param \context $context module context
+     */
+    protected static function export_check_runs(int $userid, \context $context): void {
+        $runs = [];
+        foreach (array_reverse(check_runs::rows(self::instance_of($context), $userid)) as $row) {
+            $runs[] = [
+                'run' => $row->runid,
+                'status' => $row->status,
+                'outcome' => $row->outcome,
+                'mark' => $row->mark,
+                'critical' => (int) $row->critical,
+                'major' => (int) $row->major,
+                'minor' => (int) $row->minor,
+                'note' => (int) $row->note,
+                'requestedbyyou' => transform::yesno((int) $row->requestedby === $userid),
+                'timecreated' => transform::datetime($row->timecreated),
+                'timefinished' => $row->timefinished ? transform::datetime($row->timefinished) : '',
+            ];
+        }
+        if ($runs) {
+            writer::with_context($context)->export_data([get_string('privacy:checkruns', 'gns3lab')], (object) ['runs' => $runs]);
         }
     }
 
@@ -243,6 +302,7 @@ class provider implements
         if ($context->contextlevel == CONTEXT_MODULE) {
             reveal::delete(self::instance_of($context));
             seat::delete(self::instance_of($context));
+            check_runs::delete(self::instance_of($context));
             return;
         }
         if ($context->contextlevel != CONTEXT_SYSTEM) {
@@ -267,6 +327,7 @@ class provider implements
             } else if ($context->contextlevel == CONTEXT_MODULE) {
                 reveal::delete(self::instance_of($context), [$userid]);
                 seat::delete(self::instance_of($context), [$userid]);
+                check_runs::delete(self::instance_of($context), [$userid]);
             }
         }
     }
@@ -284,6 +345,7 @@ class provider implements
         } else if ($context->contextlevel == CONTEXT_MODULE) {
             reveal::delete(self::instance_of($context), $userids);
             seat::delete(self::instance_of($context), $userids);
+            check_runs::delete(self::instance_of($context), $userids);
         }
     }
 

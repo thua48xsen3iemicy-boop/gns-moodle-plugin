@@ -119,6 +119,73 @@ class fake_manager {
         ];
     }
 
+    /** Checks route of the running session (CONTRACTS §2.9). */
+    public const CHECKS = '/api/v1/sessions/s-3f9a1c0d2b4e5f60/checks';
+
+    /** Run id of check_run(). */
+    public const RUN = 'c-7d1e0a9b3c4f5a62';
+
+    /**
+     * Answers like manager 0.17 with auto-checks: info and session with the feature, the check routes.
+     *
+     * @param array $run the run that POST starts and GET returns, check_run() by default
+     */
+    public function with_checks(?array $run = null): void {
+        $this->with_info(['consoles', 'observer', 'resume', 'facts', 'checks']);
+        $session = self::session();
+        $session['features'] = ['consoles', 'facts', 'checks'];
+        $this->on('GET', '/api/v1/sessions', 200, $session);
+        $run = $run ?? self::check_run('queued');
+        $this->on('POST', self::CHECKS, 202, $run);
+        $this->on('GET', self::CHECKS . '/' . $run['run_id'], 200, $run);
+    }
+
+    /**
+     * A check run gns3lab.check-run/1 of the running session.
+     *
+     * @param string $status queued, running, done or failed
+     * @param string $outcome graded or incomplete, for a done run
+     * @param int $mark mark of a graded run
+     * @return array
+     */
+    public static function check_run(string $status = 'done', string $outcome = 'graded', int $mark = 4): array {
+        $done = $status === 'done';
+        return [
+            'schema' => 'gns3lab.check-run/1',
+            'run_id' => self::RUN,
+            'session_id' => 's-3f9a1c0d2b4e5f60',
+            'status' => $status,
+            'requested_by_user_id' => 42,
+            'requested_at' => '2026-11-07T10:00:00Z',
+            'started_at' => $status === 'queued' ? null : '2026-11-07T10:00:01Z',
+            'finished_at' => in_array($status, ['done', 'failed'], true) ? '2026-11-07T10:00:09Z' : null,
+            'facts_rev' => 118,
+            'checks_def' => null,
+            'grading' => ['profile' => 'standard', 'overrides' => new \stdClass(), 'fail_mark' => 2, 'thresholds' => [
+                ['mark' => 5, 'critical' => 0, 'major' => 0, 'minor' => 1],
+                ['mark' => 4, 'critical' => 0, 'major' => 1, 'minor' => 3],
+                ['mark' => 3, 'critical' => 0, 'major' => 3, 'minor' => null],
+            ]],
+            'result' => !$done ? null : [
+                'outcome' => $outcome,
+                'mark' => $outcome === 'graded' ? $mark : null,
+                'counts' => ['critical' => 0, 'major' => 1, 'minor' => 2, 'note' => 1],
+                'rules' => [['code' => 'address_not_saved', 'group' => 'addressing', 'status' => 'skipped',
+                    'reason' => 'no_collector']],
+                'findings' => [
+                    ['id' => 'f3', 'code' => 'address_misplaced', 'group' => 'addressing', 'class' => 'major',
+                        'base_class' => 'major', 'counted' => true, 'caused_by' => null, 'nodes' => ['PC1'],
+                        'ifaces' => [['node' => 'PC1', 'iface' => 'ens4']],
+                        'message' => 'PC1: адрес 192.168.10.1/24 стоит на ens4, а должен быть на ens3'],
+                    ['id' => 'f4', 'code' => 'subnet_mixed', 'group' => 'addressing', 'class' => 'major',
+                        'base_class' => 'major', 'counted' => false, 'caused_by' => 'f3', 'nodes' => ['PC1'],
+                        'ifaces' => [], 'message' => 'В домене SW1 две подсети'],
+                ],
+            ],
+            'error' => $status === 'failed' ? ['code' => 'SLOT_UNAVAILABLE', 'message' => 'slot'] : null,
+        ];
+    }
+
     /**
      * Requests to a path, in order.
      *

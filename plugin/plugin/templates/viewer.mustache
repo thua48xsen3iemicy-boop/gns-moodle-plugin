@@ -130,6 +130,7 @@
                 <div class="canvas-actions" data-region="canvasActions">
                     <button class="btn" type="button" data-region="overview" aria-expanded="false" aria-controls="{{uniqid}}-overview">{{#str}}ui_overview, mod_gns3lab{{/str}} <span class="task-count" data-region="issueCount">0</span></button>
                     <button class="btn tasks-toggle" type="button" data-region="assignmentsOpen" aria-expanded="false" aria-controls="{{uniqid}}-assignments">{{#str}}ui_assignments, mod_gns3lab{{/str}}</button>
+                    <button class="btn" type="button" data-region="checksOpen" aria-expanded="false" aria-controls="{{uniqid}}-checks" hidden>{{#str}}chk_open, mod_gns3lab{{/str}} <span class="task-count" data-region="checksMark" hidden></span></button>
                 </div>
                 <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
             </div>
@@ -137,6 +138,10 @@
             <aside class="canvas-panel" data-region="overviewPanel" id="{{uniqid}}-overview" aria-labelledby="{{uniqid}}-overview-title" hidden>
                 <header><div><h2 id="{{uniqid}}-overview-title" data-region="overviewTitle">{{#str}}ui_overview, mod_gns3lab{{/str}}</h2><p data-region="overviewLead"></p></div><button class="ib" type="button" data-region="overviewClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>
                 <div class="panel-body" data-region="overviewBody"></div>
+            </aside>
+            <aside class="canvas-panel checks-panel" data-region="checksPanel" id="{{uniqid}}-checks" aria-labelledby="{{uniqid}}-checks-title" hidden>
+                <header><div><h2 id="{{uniqid}}-checks-title">{{#str}}chk_title, mod_gns3lab{{/str}}</h2><p data-region="checksLead"></p></div><button class="ib" type="button" data-region="checksClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>
+                <div class="panel-body" data-region="checksBody"></div>
             </aside>
             <aside class="tasks-panel" data-region="assignments" id="{{uniqid}}-assignments" aria-labelledby="{{uniqid}}-assignments-title" hidden>
                 <header><div><span class="kicker">{{#str}}ui_canvas_practice, mod_gns3lab{{/str}}</span><h2 id="{{uniqid}}-assignments-title">{{#str}}ui_assignments, mod_gns3lab{{/str}}</h2></div><button class="ib" type="button" data-region="assignmentsClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>

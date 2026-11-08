@@ -4944,3 +4944,47 @@ from{transform:translateY(40%);opacity:.3}
     background: color-mix(in srgb, var(--accent) 75%, transparent);
     border-radius: 3px;
 }
+
+/* Auto-checks panel (docs/autochecks.md): mark, counts by class, findings with their consequences, earlier runs. */
+.gns3lab-student.canvas-ui .checks-panel .chk-start{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:6px 0 14px}
+.gns3lab-student.canvas-ui .checks-panel .chk-start small{color:var(--muted);font-size:12px}
+.gns3lab-student.canvas-ui .checks-panel .chk-note{font-size:12px}
+.gns3lab-student.canvas-ui .checks-panel .chk-error{color:var(--bad)}
+.gns3lab-student.canvas-ui .checks-panel .chk-warn{color:var(--warn)}
+.gns3lab-student.canvas-ui .checks-panel .chk-ok{color:var(--ok)}
+.gns3lab-student.canvas-ui .checks-panel .chk-run{border-top:1px solid var(--line);padding-top:10px}
+.gns3lab-student.canvas-ui .checks-panel .chk-when{font:11px var(--mono)}
+.gns3lab-student.canvas-ui .checks-panel .chk-progress{display:flex;align-items:center;gap:8px;color:var(--fg)}
+.gns3lab-student.canvas-ui .checks-panel .chk-spin{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:gns3lab-chk-spin .9s linear infinite;flex:none}
+@keyframes gns3lab-chk-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.gns3lab-student.canvas-ui .checks-panel .chk-spin{animation:none}}
+.gns3lab-student.canvas-ui .checks-panel .chk-mark{display:flex;align-items:baseline;gap:10px;margin:4px 0 8px}
+.gns3lab-student.canvas-ui .checks-panel .chk-mark-label{color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-mark-value{font:600 34px/1 var(--display);color:var(--accent)}
+.gns3lab-student.canvas-ui .checks-panel .chk-counts{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.gns3lab-student.canvas-ui .checks-panel .chk-chip{font:600 11px var(--mono);border:1px solid var(--line);border-radius:6px;padding:3px 7px;color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-chip.critical,
+.gns3lab-student.canvas-ui .checks-panel .chk-class.critical{color:var(--bad);border-color:var(--bad)}
+.gns3lab-student.canvas-ui .checks-panel .chk-chip.major,
+.gns3lab-student.canvas-ui .checks-panel .chk-class.major{color:var(--warn);border-color:var(--warn)}
+.gns3lab-student.canvas-ui .checks-panel .chk-chip.minor,
+.gns3lab-student.canvas-ui .checks-panel .chk-class.minor{color:var(--fg)}
+.gns3lab-student.canvas-ui .checks-panel .chk-findings{list-style:none;margin:0;padding:0}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding{padding:9px 0;border-top:1px solid var(--line)}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding:focus{outline:2px solid var(--accent);outline-offset:2px}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted{border-left:3px solid var(--bad);padding-left:10px}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted.minor{border-left-color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted.major{border-left-color:var(--warn)}
+.gns3lab-student.canvas-ui .checks-panel .chk-line{display:flex;gap:8px;align-items:baseline}
+.gns3lab-student.canvas-ui .checks-panel .chk-class{flex:none;font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.04em;
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-msg{overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+.gns3lab-student.canvas-ui .checks-panel .chk-forgiven{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.gns3lab-student.canvas-ui .checks-panel .chk-consequences{list-style:none;margin:6px 0 0 14px;padding:0}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding.consequence{opacity:.85;font-size:12px;padding:6px 0}
+.gns3lab-student.canvas-ui .checks-panel .chk-tag{font:600 10px var(--mono);color:var(--muted);margin-right:6px}
+.gns3lab-student.canvas-ui .checks-panel .chk-toroot{font-size:11px;color:var(--accent)}
+.gns3lab-student.canvas-ui .checks-panel .chk-h{font:600 13px var(--body);margin:16px 0 4px}
+.gns3lab-student.canvas-ui .checks-panel .chk-history{list-style:none;margin:0;padding:0}
+.gns3lab-student.canvas-ui .checks-panel .chk-history .issue-row.current{color:var(--accent)}
