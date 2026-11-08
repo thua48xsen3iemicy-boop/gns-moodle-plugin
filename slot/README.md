@@ -1,4 +1,4 @@
-# Lab Slot — 0.16.2
+# Lab Slot — 0.17.0
 
 **Новый обязательный протокол:** до изменяющих запросов менеджер вызывает
 `POST /v1/fence` с `{epoch,generation}`; команды содержат `X-Lab-Epoch` и
@@ -280,8 +280,8 @@ stop/resume и смена владельца. Сверять `show interfaces st
 (`GET /v1/labs/{project_id}/facts`) и хранит историю. Контракт — `manager/docs/CONTRACTS.md` §4.6,
 хранение — `manager/docs/DESIGN.md` §6.7, формат фактов — `plugin/docs/live-state.md`.
 
-- **Коллектор** — одна гостевая команда и разбор её вывода (`api/facts.py`). Сейчас шесть, пять из них для QEMU-нод
-  с QGA, шестой (`ios.config/1`) читает файлы IOU-ноды; список отдаёт `GET /v1/capabilities`. `linux.net/1` выполняет `ip -j -d addr` и `ip -j route`
+- **Коллектор** — одна гостевая команда и разбор её вывода (`api/facts.py`). Сейчас девять, восемь из них для QEMU-нод
+  с QGA, девятый (`ios.config/1`) читает файлы IOU-ноды; список отдаёт `GET /v1/capabilities`. `linux.net/1` выполняет `ip -j -d addr` и `ip -j route`
   одним `exec` и отдаёт `interfaces` и `routes`. Описаны loopback, физические интерфейсы и подинтерфейсы
   802.1Q; мосты, bond и туннели пропускаются. В `data` попадают только значения состояния: сроки аренды
   DHCP/SLAAC, `expires` и счётчики отбрасываются, иначе каждый опрос выглядел бы изменением.
@@ -314,6 +314,24 @@ stop/resume и смена владельца. Сверять `show interfaces st
   `Get-NetAdapter`, `Get-NetIPAddress`, `Get-NetRoute`. `data` — `interfaces` и `routes` в том же формате,
   что у `linux.net`; `Disconnected` даёт `oper: down` при `admin: up`, `Disabled` — `admin: down`.
   Правила — `manager/docs/CONTRACTS.md` §4.6.
+- 🆕 **Коллекторы `linux.sys/1` и `linux.config/1`** (0.17.0, `api/linux_facts.py`) — каждому Linux-гостю (семейство
+  `posix`, как у `linux.net`; Linux-коммутатору тоже: роль ноды заранее неизвестна, лишние поля менеджер не читает).
+  По одному `exec` `/bin/sh`, только чтение. `linux.sys` отдаёт `hostname` (`/proc/sys/kernel/hostname`), `ip_forward`
+  (`/proc/sys/net/ipv4/ip_forward`) и `dns: {servers, search}` из `/etc/resolv.conf`; если там только заглушка
+  systemd-resolved (`127.0.0.53`), `servers` — из `/run/systemd/resolve/resolv.conf` и `resolver: "systemd-resolved"`.
+  `linux.config` отдаёт `net_saved` — сохранённую настройку сети, с которой гость поднимется после перезагрузки
+  (`persistence: saved`). Механизм выбирается так же, как в преднастройке менеджера (`netconfig.py`): NetworkManager →
+  netplan → networkd → ifupdown → `none`. Читается пока только **ifupdown**, и его же средствами: `ifquery --list -a`
+  и `--allow=hotplug` (что поднимается при загрузке; `source`/`source-directory` разворачивает сам ifupdown),
+  `ifquery <iface>` (параметры), `ifup --no-act --force` (применится ли), `--no-mappings` везде. Метод (`static`,
+  `dhcp`, …) берётся из строк `iface <имя> inet <метод>` тех файлов, которые назвал `ifquery -v`. Сломанная
+  настройка — факт, а не сбой: `net_saved.ok: false` с текстом ifupdown, запись коллектора `ok: true`. Для
+  NetworkManager, netplan и networkd — только `{"mechanism": …, "supported": false}`. Два коллектора, а не один:
+  разные журналы у менеджера и разная цена (у `linux.config` — дюжина коротких процессов), сбой `ifquery` не
+  отнимает у ноды `hostname`. Формат — `manager/docs/CONTRACTS.md` §4.6.
+- 🆕 **Имя узла у Windows и RouterOS** (0.17.0). `windows.net/1` отдаёт ещё `hostname`
+  (`[System.Net.Dns]::GetHostName()` в том же запуске PowerShell: второй запуск дорог). У RouterOS — отдельный
+  коллектор `routeros.sys/1`: `:put [/system identity get name]` → `hostname`.
 - **Коллектор `ios.config/1`** — Cisco IOL, по сохранённой конфигурации (`api/ios_config.py`). Гостя не спрашивает:
   читает файлы из каталога ноды (`/opt/gns3/projects/<project_id>/project-files/iou/<node_id>/`, его же отдаёт GNS3
   в `node_directory`; `SLOT_PROJECTS_DIR` меняет корень). Нода может быть остановлена, QGA ей не нужен, при
@@ -331,7 +349,11 @@ stop/resume и смена владельца. Сверять `show interfaces st
      не меняет и работает для уже созданных проектов.
   Разбор — только блоки `interface` и `vlan` (`interfaces`: имя, вид, порт GNS3 по точному имени, `admin`, `ipv4`,
   `switchport` у коммутатора, то есть при `spanning-tree mode …`; `vlans` — только при `vtp mode transparent|off`).
-  Нет `oper`, `routes`, `ospf`: конфигурация их не знает. Тексты баннеров и макросов пропускаются. Файл перечитывается,
+  Нет `oper` и `ospf`: конфигурация их не знает. 🆕 С 0.17.0 — `hostname` (строка `hostname`) и `routes`: таблица, с
+  которой устройство загрузится. Подключённые сети адресов невыключенных интерфейсов (`proto: connected`, `metric: 0`)
+  и, если устройство маршрутизирует, `ip route` (`proto: static`, `metric` — административное расстояние); у L2-коммутатора
+  без `ip routing` вместо них — `ip default-gateway` как `default`. Маршрутизирует: маршрутизатор без `no ip routing`,
+  коммутатор (`spanning-tree mode`) только с `ip routing`. VRF и непонятные строки пропускаются. Тексты баннеров и макросов пропускаются. Файл перечитывается,
   только если изменились размер или время (или порты ноды), даже испорченный не разбирается заново. Сырой текст
   (в нём пароли) наружу не уходит, в сообщениях об ошибках только имена интерфейсов. Нет сохранённой конфигурации
   (нет файла, NVRAM пуст) — записи нет; запись была, а сохранённой конфигурации больше нет (`write erase`, файл
@@ -485,6 +507,12 @@ QCOW2 или runtime-производительность. Проверка эт
 L1 проверяется локальными Unix datagram-сокетами и имитацией ответов; точное поведение
 IOL при загрузке/`shutdown` и тайм-аут падения необходимо подтвердить на стенде.
 Автоматическая оценка задания, reset файлов и UI не реализованы.
+
+## Версия 0.17.0: факты для автопроверок
+
+Новые коллекторы `linux.sys/1`, `linux.config/1`, `routeros.sys/1`, `hostname` в `windows.net/1`, `hostname` и `routes`
+в `ios.config/1` (раздел «Факты о нодах»). Схемы прежних коллекторов не меняются: новые поля необязательны
+(`manager/docs/CONTRACTS.md` §1.1). На стенде не проверено.
 
 ## Версия 0.15.2: прогресс новой операции с нуля
 

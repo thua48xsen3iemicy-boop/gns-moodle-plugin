@@ -160,7 +160,10 @@ def test_a_switch_is_described_by_its_ports():
     assert by_name["Vlan1"] == {"name": "Vlan1", "kind": "svi", "vlan": 1, "admin": "down", "ipv4": []}
     assert by_name["Vlan10"] == {"name": "Vlan10", "kind": "svi", "vlan": 10, "admin": "up", "ipv4": ["10.0.10.2/24"]}
     assert all("oper" not in i and "ospf" not in i and "mac" not in i for i in data["interfaces"])
-    assert set(data) == {"interfaces"}
+    assert set(data) == {"interfaces", "routes", "hostname"}
+    assert data["hostname"] == "SW1"
+    # No `ip routing` on a switch: the SVI's network is connected, there is no default gateway saved.
+    assert data["routes"] == [{"dst": "10.0.10.0/24", "dev": "Vlan10", "proto": "connected", "metric": 0}]
 
 
 def test_the_text_of_a_banner_is_not_configuration():
@@ -345,9 +348,120 @@ def test_nothing_secret_leaves_the_parser():
     assert "5ecr3t-hash" not in str(caught.value) and "255.0.0.255" not in str(caught.value)
 
 
+# --- parser: hostname and routes --------------------------------------------------------------------------------
+
+# A router as IOL L3 saves it, with static routes of every form IOS writes.
+ROUTER = """\
+!
+version 15.4
+hostname EDGE-1
+!
+interface Loopback0
+ ip address 1.1.1.1 255.255.255.255
+!
+interface Ethernet0/0
+ ip address 10.0.12.1 255.255.255.252
+!
+interface Ethernet0/1
+ no ip address
+!
+interface Ethernet0/1.10
+ encapsulation dot1Q 10
+ ip address 10.1.10.1 255.255.255.0
+ ip address 10.1.11.1 255.255.255.0 secondary
+!
+interface Ethernet0/2
+ ip address 10.2.0.1 255.255.255.0
+ shutdown
+!
+interface Ethernet0/3
+ ip address dhcp
+!
+interface Ethernet1/0
+ no ip address
+ shutdown
+!
+interface Ethernet1/0.20
+ encapsulation dot1Q 20
+ ip address 10.3.0.1 255.255.255.0
+!
+ip forward-protocol nd
+!
+ip route 0.0.0.0 0.0.0.0 10.0.12.2
+ip route 0.0.0.0 0.0.0.0 10.9.9.9 250
+ip route 10.20.0.0 255.255.0.0 Ethernet0/0
+ip route 10.30.0.0 255.255.255.0 Ethernet0/0 10.0.12.2 5 name TO-BRANCH tag 7
+ip route 10.40.0.0 255.255.0.0 10.2.0.9
+ip route 10.41.0.0 255.255.0.0 Ethernet0/2 10.2.0.9
+ip route 10.50.0.7 255.255.255.0 10.1.10.254 permanent
+ip route 192.0.2.0 255.255.255.0 Null0
+ip route vrf MGMT 0.0.0.0 0.0.0.0 172.16.0.1
+ip route 0.0.0.0 0.0.0.0 dhcp
+ip route 10.60.0.0 255.255.0.0 10.0.12.2 track 3
+ip route 10.70.0.0 255.255.0.0 10.0.12.2 multicast
+ip route 10.80.0.0 255.0.255.0 10.0.12.2
+ip default-gateway 10.0.12.9
+!
+end
+"""
+
+
+def test_a_router_boots_with_its_connected_and_static_routes():
+    data = parse_ios_config(ROUTER, PORTS)
+    assert data["hostname"] == "EDGE-1"
+    assert data["routes"] == [
+        {"dst": "1.1.1.1/32", "dev": "Loopback0", "proto": "connected", "metric": 0},
+        {"dst": "10.0.12.0/30", "dev": "Ethernet0/0", "proto": "connected", "metric": 0},
+        {"dst": "10.1.10.0/24", "dev": "Ethernet0/1.10", "proto": "connected", "metric": 0},
+        {"dst": "10.1.11.0/24", "dev": "Ethernet0/1.10", "proto": "connected", "metric": 0},
+        # Ethernet0/2 is shut down, Ethernet1/0.20 sits on a parent that is: no connected route, nor through them
+        {"dst": "10.20.0.0/16", "dev": "Ethernet0/0", "proto": "static", "metric": 1},
+        {"dst": "10.30.0.0/24", "via": "10.0.12.2", "dev": "Ethernet0/0", "proto": "static", "metric": 5},
+        {"dst": "10.40.0.0/16", "via": "10.2.0.9", "proto": "static", "metric": 1},  # no connected network holds it
+        {"dst": "10.50.0.0/24", "via": "10.1.10.254", "dev": "Ethernet0/1.10", "proto": "static", "metric": 1},
+        {"dst": "10.60.0.0/16", "via": "10.0.12.2", "dev": "Ethernet0/0", "proto": "static", "metric": 1},
+        {"dst": "192.0.2.0/24", "dev": "Null0", "proto": "static", "metric": 1},
+        {"dst": "default", "via": "10.0.12.2", "dev": "Ethernet0/0", "proto": "static", "metric": 1},
+        {"dst": "default", "via": "10.9.9.9", "proto": "static", "metric": 250},  # a floating static route
+    ]
+    # left out: the VRF route, `dhcp`, an unknown option, a broken mask and `ip default-gateway` of a router
+
+
+def test_a_switch_without_routing_uses_its_default_gateway():
+    text = L2 + "ip default-gateway 10.0.10.1\nip default-gateway 10.0.10.254\nip route 10.9.0.0 255.255.0.0 10.0.10.7\n"
+    assert parse_ios_config(text, PORTS)["routes"] == [
+        {"dst": "10.0.10.0/24", "dev": "Vlan10", "proto": "connected", "metric": 0},
+        {"dst": "default", "via": "10.0.10.254", "dev": "Vlan10", "proto": "static", "metric": 1},  # the last one
+    ]
+
+
+def test_ip_routing_decides_which_routes_count():
+    routed_switch = L2 + "ip routing\nip default-gateway 10.0.10.1\nip route 10.9.0.0 255.255.0.0 10.0.10.7\n"
+    assert parse_ios_config(routed_switch, PORTS)["routes"][1:] == [
+        {"dst": "10.9.0.0/16", "via": "10.0.10.7", "dev": "Vlan10", "proto": "static", "metric": 1},
+    ]
+    host_router = "no ip routing\ninterface Ethernet0/0\n ip address 10.0.0.2 255.255.255.0\n" \
+                  "ip default-gateway 10.0.0.1\nip route 10.9.0.0 255.255.0.0 10.0.0.7\n"
+    assert parse_ios_config(host_router, PORTS)["routes"] == [
+        {"dst": "10.0.0.0/24", "dev": "Ethernet0/0", "proto": "connected", "metric": 0},
+        {"dst": "default", "via": "10.0.0.1", "dev": "Ethernet0/0", "proto": "static", "metric": 1},
+    ]
+
+
+def test_routes_and_hostname_do_not_depend_on_the_order_of_lines():
+    lines = ROUTER.splitlines()
+    first = lines.index("ip route 0.0.0.0 0.0.0.0 10.0.12.2")
+    shuffled = lines[:first] + list(reversed(lines[first : first + 13])) + lines[first + 13 :]
+    assert parse_ios_config("\n".join(shuffled), PORTS) == parse_ios_config(ROUTER, PORTS)
+
+
+def test_no_hostname_line_is_no_hostname():
+    assert "hostname" not in parse_ios_config("interface Ethernet0/0\n no ip address\n", PORTS)
+
+
 def test_an_empty_configuration_is_not_a_failure():
-    assert parse_ios_config("", {}) == {"interfaces": []}
-    assert parse_ios_config("!\n! just comments\n!\nend\n", {}) == {"interfaces": []}
+    assert parse_ios_config("", {}) == {"interfaces": [], "routes": []}
+    assert parse_ios_config("!\n! just comments\n!\nend\n", {}) == {"interfaces": [], "routes": []}
 
 
 @pytest.mark.parametrize(
@@ -757,7 +871,7 @@ def test_the_saved_configuration_is_published_without_a_guest_or_a_console(monke
         record = saved_of(facts)
         assert record["schema"] == "ios.config/1" and record["ok"] is True and record["error"] is None
         assert record["attempted_at"] == record["observed_at"] and record["attempted_at"].endswith("Z")
-        assert set(record["data"]) == {"interfaces"}
+        assert set(record["data"]) == {"interfaces", "routes", "hostname"} and record["data"]["hostname"] == "R1"
         assert record["data"]["interfaces"][0] == {
             "name": "Ethernet0/0", "kind": "physical", "port": {"adapter": 0, "port": 0}, "admin": "up",
             "ipv4": ["10.0.12.1/30"],
@@ -951,7 +1065,7 @@ def test_other_collectors_are_not_touched_by_the_new_one(monkeypatch, projects_d
         config_path(projects_dir).write_text(L3)
         await facts.cycle()
         nodes = facts.snapshot("p1")["nodes"]
-        assert list(nodes["n1"]["collectors"]) == ["linux.net"]  # the QEMU node has no ios.config
+        assert list(nodes["n1"]["collectors"]) == ["linux.net", "linux.sys", "linux.config"]  # no ios.config
         assert list(nodes["n2"]["collectors"]) == ["ios.config"]  # the IOU node has no guest collector
         assert isinstance(lifecycle.qga, FakeQga)
 
@@ -1009,7 +1123,8 @@ def test_no_configuration_and_a_configuration_without_interfaces_are_told_apart(
         assert "n2" not in facts.snapshot("p1")["nodes"]  # never anything saved: no record at all
         path.write_bytes(nvram_of("!\nhostname R1\nend\n"))
         await facts.cycle()
-        assert saved_of(facts)["data"] == {"interfaces": []}  # a configuration that has no interfaces
+        # a configuration that has no interfaces
+        assert saved_of(facts)["data"] == {"interfaces": [], "routes": [], "hostname": "R1"}
         path.write_bytes(bytes(4096))
         await facts.cycle()
         assert saved_of(facts)["data"] == {}  # no configuration at all

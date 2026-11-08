@@ -6,7 +6,8 @@
 
 - `main.py` — FastAPI-приложение и `POST /v1/fence`; `api/` — маршруты и логика:
   `labs.py`, `lifecycle.py`, `nodes.py`, `console.py`, `health.py`, `auth.py`, `models.py`, `qga.py`,
-  `facts.py` (сбор фактов, коллекторы), `ios_config.py` (коллектор `ios.config/1`: файлы IOL-ноды и разбор IOS).
+  `facts.py` (сбор фактов, коллекторы), `ios_config.py` (коллектор `ios.config/1`: файлы IOL-ноды и разбор IOS),
+  `linux_facts.py` (коллекторы `linux.sys/1` и `linux.config/1`: команды и разбор).
 - `release.py`, `release.json` — проверка выпуска и версия; `tools/check_slot.py` — проверка слота на стенде.
 
 ## Правила

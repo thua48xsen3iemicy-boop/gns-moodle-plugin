@@ -1,4 +1,5 @@
-"""Guest facts: the linux.net, switch.net, switch.fdb and windows.net collectors, background collection and the /facts routes.
+"""Guest facts: the linux.net, switch.net, switch.fdb, windows.net, linux.sys, linux.config and routeros.sys collectors,
+background collection and the /facts routes.
 
 The ios.config collector (saved configuration of IOL nodes) is in test_ios_config.py.
 """
@@ -18,6 +19,7 @@ from api.facts import (
     COLLECTORS,
     LINUX_NET_COMMAND,
     ROUTEROS_NET_COMMAND,
+    ROUTEROS_SYS_COMMAND,
     SWITCH_FDB_COMMAND,
     SWITCH_NET_COMMAND,
     WINDOWS_NET_COMMAND,
@@ -32,6 +34,7 @@ from api.facts import (
     parse_switch_net,
     parse_windows_net,
 )
+from api.linux_facts import LINUX_CONFIG_COMMAND, LINUX_SYS_COMMAND
 from api.qga import Priority, QgaBusy, QgaCommandError, QgaTimeout, QgaUnavailable
 
 HEADERS = {"Authorization": "Bearer test-token"}
@@ -540,6 +543,16 @@ def test_the_fdb_command_hands_over_an_error_envelope(tmp_path):
 NOT_A_SWITCH = {"exit_code": 127, "stdout": "", "stderr": ""}  # no switchctl in the guest
 
 
+LINUX_SYS_SUCCESS = {
+    "exit_code": 0,
+    "stdout": "@@gns3lab hostname\nPC1\n@@gns3lab ip_forward\n0\n@@gns3lab resolv\nnameserver 10.0.0.53\n\n",
+    "stderr": "",
+}
+LINUX_SYS_DATA = {"hostname": "PC1", "ip_forward": False, "dns": {"servers": ["10.0.0.53"], "search": []}}
+LINUX_CONFIG_NONE = {"exit_code": 0, "stdout": "@@gns3lab mechanism none\n", "stderr": ""}
+LINUX_CONFIG_DATA = {"net_saved": {"mechanism": "none", "ok": True, "interfaces": []}}
+LINUX_COLLECTORS = ["linux.net", "linux.sys", "linux.config"]  # what an ordinary Linux host gets
+ROUTEROS_IDENTITY = {"exit_code": 0, "stdout": "R1\r\n", "stderr": ""}
 DEBIAN = {"id": "debian", "name": "Debian GNU/Linux", "kernel-release": "6.1.0"}
 WINDOWS = {"id": "mswindows", "name": "Microsoft Windows", "version": "Microsoft Windows 10 Pro"}
 
@@ -558,6 +571,9 @@ class FakeQga:
         self.osinfo = osinfo
         self.windows_reply = None
         self.routeros_reply = None
+        self.routeros_sys_reply = ROUTEROS_IDENTITY
+        self.sys_reply = LINUX_SYS_SUCCESS  # linux.sys and linux.config of every Linux guest
+        self.config_reply = LINUX_CONFIG_NONE
         self.switch_by_node = {}  # node_id -> reply: a lab with a switch next to ordinary hosts
         self.fdb_by_node = {}  # the same for the MAC table
         self.calls = []  # exec only
@@ -584,6 +600,12 @@ class FakeQga:
             reply = self.windows_reply
         if command == ROUTEROS_NET_COMMAND:
             reply = self.routeros_reply
+        if command == ROUTEROS_SYS_COMMAND:
+            reply = self.routeros_sys_reply
+        if command == LINUX_SYS_COMMAND:
+            reply = self.sys_reply
+        if command == LINUX_CONFIG_COMMAND:
+            reply = self.config_reply
         if isinstance(reply, BaseException):
             raise reply
         return reply
@@ -727,7 +749,7 @@ def test_a_stopped_node_is_reported_without_touching_the_guest(monkeypatch):
         await facts.cycle()
         assert lifecycle.qga.calls == [] and lifecycle.qga.osinfo_calls == []
         assert collector_of(facts)["error"]["code"] == "stopped"
-        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == LINUX_COLLECTORS
 
     scenario(monkeypatch, body)
 
@@ -836,7 +858,7 @@ def test_a_switch_is_published_next_to_linux_net_with_the_broker_priority_that_y
         add_switch(lifecycle, labs)
         await facts.cycle()
         collectors = facts.snapshot("p1")["nodes"]["n3"]["collectors"]
-        assert list(collectors) == ["linux.net", "switch.net", "switch.fdb"]
+        assert list(collectors) == ["linux.net", "switch.net", "switch.fdb", "linux.sys", "linux.config"]
         record = collectors["switch.net"]
         assert record["schema"] == "switch.net/1" and record["ok"] is True and record["error"] is None
         assert record["attempted_at"] == record["observed_at"] and record["attempted_at"].endswith("Z")
@@ -856,7 +878,7 @@ def test_an_ordinary_host_is_asked_once_and_never_gets_a_record(monkeypatch):
         assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 3  # linux.net goes on as before
         assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 1  # the guest said it is no switch
         assert facts.absent == HOST_ABSENT and facts.confirmed == set()
-        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == LINUX_COLLECTORS
 
     scenario(monkeypatch, body)
 
@@ -999,7 +1021,7 @@ def test_the_collectors_of_a_node_share_its_channel_and_run_one_after_another(mo
         lifecycle.qga.exec = watched
         await facts.cycle()
         assert peak == {"n1": 1, "n3": 1}  # a second exec at once would be refused as busy
-        assert len(lifecycle.qga.calls) == 6 and switch_of(facts)["ok"] is True
+        assert len(lifecycle.qga.calls) == 10 and switch_of(facts)["ok"] is True  # five collectors on each Linux node
 
     scenario(monkeypatch, body)
 
@@ -1041,7 +1063,7 @@ def test_the_mac_table_is_a_collector_of_its_own_next_to_switch_net(monkeypatch)
         add_switch(lifecycle, labs)
         await facts.cycle()
         collectors = facts.snapshot("p1")["nodes"]["n3"]["collectors"]
-        assert list(collectors) == ["linux.net", "switch.net", "switch.fdb"]
+        assert list(collectors) == ["linux.net", "switch.net", "switch.fdb", "linux.sys", "linux.config"]
         record = collectors["switch.fdb"]
         assert record["schema"] == "switch.fdb/1" and record["ok"] is True and record["error"] is None
         assert record["attempted_at"] == record["observed_at"] and record["attempted_at"].endswith("Z")
@@ -1060,7 +1082,7 @@ def test_an_ordinary_host_is_asked_for_the_mac_table_once_and_never_gets_a_recor
             await facts.cycle()
         assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 1  # the guest said it has no switchctl
         assert ("p1", "n1", "switch.fdb") in facts.absent
-        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == LINUX_COLLECTORS
 
     scenario(monkeypatch, body)
 
@@ -1321,7 +1343,7 @@ def test_a_linux_guest_keeps_its_collectors_and_is_never_asked_for_windows(monke
         await facts.cycle()
         assert lifecycle.qga.asked(WINDOWS_NET_COMMAND) == []
         assert lifecycle.qga.asked(LINUX_NET_COMMAND)[0][2]["shell"] == "sh"
-        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["linux.net"]
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == LINUX_COLLECTORS
 
     scenario(monkeypatch, body)
 
@@ -1529,14 +1551,15 @@ def test_a_routeros_guest_gets_routeros_net_through_a_routeros_script_and_only_t
         lifecycle.qga.routeros_reply = {"exit_code": 0, "stdout": routeros_output(), "stderr": ""}
         for _ in range(2):
             await facts.cycle()
-        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["routeros.net"]
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["routeros.net", "routeros.sys"]
         record = routeros_of(facts)
         assert record["schema"] == "routeros.net/1" and record["ok"] is True
         assert set(record["data"]) == {"interfaces", "routes"}
         asked = lifecycle.qga.asked(ROUTEROS_NET_COMMAND)
         assert len(asked) == 2 and asked[0][2]["shell"] == "routeros"
         assert asked[0][2]["priority"] is Priority.METRICS and asked[0][2]["wait"] is False
-        for command in (LINUX_NET_COMMAND, SWITCH_NET_COMMAND, SWITCH_FDB_COMMAND, WINDOWS_NET_COMMAND):
+        for command in (LINUX_NET_COMMAND, SWITCH_NET_COMMAND, SWITCH_FDB_COMMAND, WINDOWS_NET_COMMAND,
+                        LINUX_SYS_COMMAND, LINUX_CONFIG_COMMAND):
             assert lifecycle.qga.asked(command) == []
         assert facts.families == {("p1", "n1"): "routeros"}
 
@@ -1552,8 +1575,127 @@ def test_a_routeros_guest_gets_routeros_net_through_a_routeros_script_and_only_t
     scenario(monkeypatch, body)
 
 
+# --- hostname of Windows and RouterOS guests ---------------------------------------------------------------------
+
+
+def test_windows_net_carries_the_hostname_when_the_guest_names_it():
+    data = parse_windows_net(windows_document(hostname="WS-01"), MACS)
+    assert data["hostname"] == "WS-01" and data["interfaces"][1]["name"] == "Ethernet"
+    for missing in ({}, {"hostname": ""}, {"hostname": None}):
+        assert "hostname" not in parse_windows_net(windows_document(**missing), MACS)
+    assert "GetHostName()" in WINDOWS_NET_COMMAND and "hostname = $hostname" in WINDOWS_NET_COMMAND
+
+
+def test_a_routeros_guest_gets_its_identity_as_the_hostname(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        lifecycle.qga.osinfo = ROUTEROS
+        lifecycle.qga.routeros_reply = {"exit_code": 0, "stdout": routeros_output(), "stderr": ""}
+        await facts.cycle()
+        record = facts.snapshot("p1")["nodes"]["n1"]["collectors"]["routeros.sys"]
+        assert record["schema"] == "routeros.sys/1" and record["ok"] is True and record["data"] == {"hostname": "R1"}
+        (call,) = lifecycle.qga.asked(ROUTEROS_SYS_COMMAND)
+        assert call[2]["shell"] == "routeros" and call[2]["priority"] is Priority.METRICS and call[2]["wait"] is False
+        lifecycle.qga.routeros_sys_reply = {"exit_code": 0, "stdout": "R1\nR2\n", "stderr": ""}
+        await facts.cycle()
+        record = facts.snapshot("p1")["nodes"]["n1"]["collectors"]["routeros.sys"]
+        assert record["error"]["code"] == "failed" and record["data"] == {"hostname": "R1"}
+        assert routeros_of(facts)["ok"] is True  # the interfaces do not suffer
+
+    scenario(monkeypatch, body)
+
+
+# --- linux.sys and linux.config collection ------------------------------------------------------------------------
+
+
+def linux_of(facts, name, node_id="n1"):
+    return facts.snapshot("p1")["nodes"][node_id]["collectors"].get(name)
+
+
+BROKEN_CONFIG = {
+    "exit_code": 0,
+    "stdout": "@@gns3lab mechanism ifupdown\n@@gns3lab list 1\n"
+              "ifquery: /etc/network/interfaces:3: misplaced option\n@@gns3lab list 1\n"
+              "ifquery: /etc/network/interfaces:3: misplaced option\n@@gns3lab methods\n"
+              "@@gns3lab apply\n@@gns3lab rc 0\n",
+    "stderr": "",
+}
+
+
+def test_a_linux_guest_gets_its_system_facts_and_saved_configuration(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        await facts.cycle()
+        sys_record, config_record = linux_of(facts, "linux.sys"), linux_of(facts, "linux.config")
+        assert sys_record["schema"] == "linux.sys/1" and sys_record["ok"] is True
+        assert sys_record["data"] == LINUX_SYS_DATA
+        assert config_record["schema"] == "linux.config/1" and config_record["data"] == LINUX_CONFIG_DATA
+        for command in (LINUX_SYS_COMMAND, LINUX_CONFIG_COMMAND):
+            (call,) = lifecycle.qga.asked(command)
+            assert call[0] == "n1" and call[2]["shell"] == "sh" and call[2]["priority"] is Priority.METRICS
+            assert call[2]["wait"] is False and call[2]["max_age"] == 2
+        # no field of one collector is in another: the manager merges `data` into the node
+        fields = [set(linux_of(facts, name)["data"]) for name in LINUX_COLLECTORS]
+        assert sum(len(f) for f in fields) == len(set().union(*fields))
+
+    scenario(monkeypatch, body)
+
+
+def test_a_broken_saved_configuration_keeps_the_record_healthy(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        lifecycle.qga.config_reply = BROKEN_CONFIG
+        await facts.cycle()
+        record = linux_of(facts, "linux.config")
+        assert record["ok"] is True and record["error"] is None  # the node's facts are not in error
+        assert record["data"] == {"net_saved": {
+            "mechanism": "ifupdown", "ok": False, "message": "/etc/network/interfaces:3: misplaced option",
+            "interfaces": [],
+        }}
+
+    scenario(monkeypatch, body)
+
+
+@pytest.mark.parametrize(
+    "failure, code",
+    [
+        (QgaTimeout("slow"), "timeout"),
+        ({"exit_code": 1, "stdout": "", "stderr": "cat: /proc/sys/kernel/hostname: No such file"}, "failed"),
+        ({"exit_code": 127, "stdout": "", "stderr": "sh: not found"}, "unsupported"),
+        ({"exit_code": 0, "stdout": "secret-looking garbage", "stderr": ""}, "failed"),
+    ],
+)
+def test_linux_sys_and_linux_config_fail_on_their_own(monkeypatch, failure, code):
+    async def body(facts, lifecycle, labs):
+        await facts.cycle()
+        lifecycle.qga.sys_reply = failure
+        await facts.cycle()
+        record = linux_of(facts, "linux.sys")
+        assert record["ok"] is False and record["error"]["code"] == code
+        assert record["data"] == LINUX_SYS_DATA  # the last known facts stay
+        assert "garbage" not in record["error"]["message"]  # the guest's output does not leave the slot
+        assert linux_of(facts, "linux.net")["ok"] is True and linux_of(facts, "linux.config")["ok"] is True
+        lifecycle.qga.sys_reply = LINUX_SYS_SUCCESS
+        lifecycle.qga.config_reply = failure
+        await facts.cycle()
+        assert linux_of(facts, "linux.config")["error"]["code"] == code
+        assert linux_of(facts, "linux.config")["data"] == LINUX_CONFIG_DATA
+        assert linux_of(facts, "linux.sys")["ok"] is True
+
+    scenario(monkeypatch, body)
+
+
+def test_a_windows_guest_is_never_asked_for_linux_facts(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        add_windows(lifecycle)
+        await facts.cycle()
+        assert lifecycle.qga.asked(LINUX_SYS_COMMAND) == [] and lifecycle.qga.asked(LINUX_CONFIG_COMMAND) == []
+        assert lifecycle.qga.asked(ROUTEROS_SYS_COMMAND) == []
+        assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == ["windows.net"]
+
+    scenario(monkeypatch, body)
+
+
 def test_the_registry_matches_the_capabilities():
-    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1"]
+    ids = ["linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1",
+           "linux.sys/1", "linux.config/1", "routeros.sys/1"]
     assert [c.schema for c in COLLECTORS] == ids
     assert facts_module.COLLECTOR_IDS == ids + ["iol.l1/1"]  # passive provider, not a guest command
 
@@ -1576,6 +1718,10 @@ def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH, fdb_reply=NO
         calls.append(node_id)
         if command == SWITCH_FDB_COMMAND:
             return fdb_reply
+        if command == LINUX_SYS_COMMAND:
+            return LINUX_SYS_SUCCESS
+        if command == LINUX_CONFIG_COMMAND:
+            return LINUX_CONFIG_NONE
         return switch_reply if command == SWITCH_NET_COMMAND else reply
 
     async def call_(self, node_id, command, args=None, **options):
@@ -1616,13 +1762,15 @@ def test_facts_route_serves_the_latest_results(fast_facts, mock_server, monkeypa
     unknown = client.get("/v1/labs/%s/facts" % uuid4(), headers=HEADERS)
     assert unknown.status_code == 200 and unknown.json()["nodes"] == {}  # not running: empty, not 404
     pid, calls = deployed(client, monkeypatch, success())
-    body = wait_for_facts(client, pid, lambda b: b["nodes"])
+    body = wait_for_facts(  # the collectors of a node run one after another: wait for the last one
+        client, pid, lambda b: any("linux.config" in n["collectors"] for n in b["nodes"].values())
+    )
     assert body["schema"] == "gns3lab.slot-facts/1" and body["project_id"] == pid
     (node,) = body["nodes"].values()
     assert node["name"] == "D1"
     record = node["collectors"]["linux.net"]
     assert record["ok"] is True and record["data"]["routes"][-1]["dst"] == "default"
-    assert list(node["collectors"]) == ["linux.net"]  # an ordinary host has no switch.net record
+    assert list(node["collectors"]) == LINUX_COLLECTORS  # an ordinary host has no switch.net record
     assert "raw" not in record and "raw_sha256" not in record  # no raw output leaves the slot
     # Stopping the lab removes its facts: the Manager must not store a dead lab as current.
     stopped = client.post(f"/v1/labs/{pid}/stop", headers=HEADERS)
@@ -1634,10 +1782,10 @@ def test_facts_route_serves_the_switch_ports(fast_facts, mock_server, monkeypatc
     client, _projects, _nodes = mock_server
     pid, _calls = deployed(client, monkeypatch, success(), switch_reply=switch_success(), fdb_reply=fdb_success())
     body = wait_for_facts(
-        client, pid, lambda b: any("switch.fdb" in n["collectors"] for n in b["nodes"].values())
+        client, pid, lambda b: any("linux.config" in n["collectors"] for n in b["nodes"].values())
     )
     (node,) = body["nodes"].values()
-    assert list(node["collectors"]) == ["linux.net", "switch.net", "switch.fdb"]
+    assert list(node["collectors"]) == ["linux.net", "switch.net", "switch.fdb", "linux.sys", "linux.config"]
     table = node["collectors"]["switch.fdb"]
     assert table["schema"] == "switch.fdb/1" and table["ok"] is True and table["data"] == LEARNED
     record = node["collectors"]["switch.net"]
@@ -1667,6 +1815,7 @@ def test_capabilities_announce_the_collectors(mock_server):
     body = client.get("/v1/capabilities", headers=HEADERS).json()
     assert "collectors" in body["features"]
     assert body["collectors"] == [
-        "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1", "iol.l1/1",
+        "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1",
+        "linux.sys/1", "linux.config/1", "routeros.sys/1", "iol.l1/1",
     ]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"
