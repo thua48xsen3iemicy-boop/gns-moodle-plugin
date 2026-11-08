@@ -100,9 +100,9 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
         $table->add_field('gns3labid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
         $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('nodeid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('nodeid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null);
         $table->add_field('kind', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('item', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('item', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null);
         $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
         $table->add_key('gns3labid', XMLDB_KEY_FOREIGN, ['gns3labid'], 'gns3lab', ['id']);
@@ -129,7 +129,7 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         $table->add_field('gns3labid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
         $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
         $table->add_field('sessionkey', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('tabid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('tabid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null);
         $table->add_field('timeclaimed', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
@@ -171,7 +171,7 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         $table->add_field('runid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
         $table->add_field('requestedby', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('status', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, 'queued');
-        $table->add_field('outcome', XMLDB_TYPE_CHAR, '12', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('outcome', XMLDB_TYPE_CHAR, '12', null, XMLDB_NOTNULL, null);
         $table->add_field('mark', XMLDB_TYPE_INTEGER, '5', null, null, null, null);
         $table->add_field('topmark', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('failmark', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
@@ -179,7 +179,7 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         $table->add_field('major', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('minor', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('note', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
-        $table->add_field('errorcode', XMLDB_TYPE_CHAR, '32', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('errorcode', XMLDB_TYPE_CHAR, '32', null, XMLDB_NOTNULL, null);
         $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('timefinished', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');

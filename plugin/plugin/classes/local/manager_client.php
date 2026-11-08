@@ -279,11 +279,21 @@ class manager_client {
         return $this->expect_session($this->request('POST', '/api/v1/sessions', $body));
     }
 
-    /** Finds the latest authoring session of the current Moodle author. */
+    /**
+     * Finds the latest authoring session of the current Moodle author.
+     *
+     * @param int $userid author
+     * @param int $labid library lab id
+     * @return \stdClass|null the session, null if there is none
+     */
     public function find_authoring_session(int $userid, int $labid): ?\stdClass {
         try {
-            return $this->expect_session($this->request('GET', '/api/v1/sessions', null,
-                ['user_id' => $userid, 'library_lab_id' => $labid]));
+            return $this->expect_session($this->request(
+                'GET',
+                '/api/v1/sessions',
+                null,
+                ['user_id' => $userid, 'library_lab_id' => $labid]
+            ));
         } catch (manager_exception $e) {
             if ($e->is_not_found()) {
                 return null;
@@ -292,7 +302,14 @@ class manager_client {
         }
     }
 
-    /** Starts an authoring session using the ordinary manager session lifecycle. */
+    /**
+     * Starts an authoring session using the ordinary manager session lifecycle.
+     *
+     * @param int $userid author
+     * @param int $labid library lab id
+     * @param array $definition lab definition
+     * @return \stdClass the session
+     */
     public function create_authoring_session(int $userid, int $labid, array $definition): \stdClass {
         return $this->expect_session($this->request('POST', '/api/v1/sessions', [
             'user_id' => $userid, 'library_lab_id' => $labid, 'lab' => $definition,
@@ -300,18 +317,39 @@ class manager_client {
         ]));
     }
 
-    /** Starts asynchronous image capture. */
+    /**
+     * Starts asynchronous image capture.
+     *
+     * @param string $sessionid authoring session
+     * @param array $nodes nodes to capture
+     * @param bool $force capture without a confirmed guest shutdown
+     * @return \stdClass the capture state
+     */
     public function capture_images(string $sessionid, array $nodes, bool $force = false): \stdClass {
-        return $this->expect_object($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/capture',
-            ['nodes' => $nodes, 'force' => $force]));
+        return $this->expect_object($this->request(
+            'POST',
+            '/api/v1/sessions/' . rawurlencode($sessionid) . '/capture',
+            ['nodes' => $nodes, 'force' => $force]
+        ));
     }
 
-    /** Reads the durable capture result. */
+    /**
+     * Reads the durable capture result.
+     *
+     * @param string $sessionid authoring session
+     * @return \stdClass the capture state
+     */
     public function capture_state(string $sessionid): \stdClass {
         return $this->expect_object($this->request('GET', '/api/v1/sessions/' . rawurlencode($sessionid) . '/capture'));
     }
 
-    /** Changes the presentation of a derived image; permission is checked by the external function. */
+    /**
+     * Changes the presentation of a derived image; permission is checked by the external function.
+     *
+     * @param string $imageid image id
+     * @param array $changes fields to change
+     * @return \stdClass the changed image
+     */
     public function patch_image(string $imageid, array $changes): \stdClass {
         $result = $this->expect_object($this->request('PATCH', '/api/v1/images/' . rawurlencode($imageid), $changes));
         $this->get_images(true);
@@ -446,8 +484,10 @@ class manager_client {
      */
     protected function expect_run(mixed $data): \stdClass {
         $run = $this->expect_object($data);
-        if (!is_string($run->run_id ?? null) || !preg_match('/^[A-Za-z0-9_-]{1,64}$/', $run->run_id)
-                || !is_string($run->status ?? null)) {
+        if (
+            !is_string($run->run_id ?? null) || !preg_match('/^[A-Za-z0-9_-]{1,64}$/', $run->run_id)
+            || !is_string($run->status ?? null)
+        ) {
             throw new manager_exception('badresponse', 200, 'check run without run_id or status');
         }
         return $run;

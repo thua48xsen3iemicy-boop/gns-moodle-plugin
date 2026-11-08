@@ -16,6 +16,8 @@
 
 namespace mod_gns3lab\local;
 
+use mod_gns3lab\tests\course_actions;
+
 /**
  * Tests of the seat: who may drive the lab of a student right now (docs/seat.md).
  *
@@ -219,11 +221,10 @@ final class seat_test extends \advanced_testcase {
     }
 
     public function test_deleting_the_activity_deletes_its_seats(): void {
-        global $CFG, $DB;
-        require_once($CFG->dirroot . '/course/lib.php');
+        global $DB;
         seat::claim($this->lab, (int) $this->student->id, 'p', true, 'login-A', self::NOW);
 
-        course_delete_module($this->lab->cmid);
+        course_actions::delete_module($this->lab->cmid);
 
         $this->assertSame(0, $DB->count_records('gns3lab_seat'));
     }

@@ -16,6 +16,7 @@
 
 namespace mod_gns3lab\local;
 
+use mod_gns3lab\tests\course_actions;
 use mod_gns3lab\tests\fake_manager;
 
 /**
@@ -86,7 +87,7 @@ final class reveal_test extends \advanced_testcase {
             ]);
         }
 
-        course_delete_module($one->cmid);
+        course_actions::delete_module($one->cmid);
 
         $this->assertSame(0, $DB->count_records('gns3lab_reveal', ['gns3labid' => $one->id]));
         $this->assertSame(1, $DB->count_records('gns3lab_reveal', ['gns3labid' => $two->id]));

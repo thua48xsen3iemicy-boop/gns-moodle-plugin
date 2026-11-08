@@ -151,7 +151,9 @@ export class Checks {
         this.error = '';
         const runs = overview.runs || [];
         const latest = runs[0] || null;
-        if (latest && (isPending(latest) || !this.runId || this.runId === latest.runid || !runs.some(r => r.runid === this.runId))) {
+        const followLatest = latest && (isPending(latest) || !this.runId || this.runId === latest.runid
+            || !runs.some(r => r.runid === this.runId));
+        if (followLatest) {
             this.show(latest.runid);
         } else {
             this.render();

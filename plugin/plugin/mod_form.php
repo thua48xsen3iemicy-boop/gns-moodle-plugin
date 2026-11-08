@@ -179,8 +179,12 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         $mform->addHelpButton('checksattempts', 'checksattempts', 'gns3lab');
         $mform->hideIf('checksattempts', 'checksenabled');
 
-        $mform->addElement('textarea', 'checksoverridestext', get_string('checksoverrides', 'gns3lab'),
-            ['rows' => 4, 'cols' => 48, 'spellcheck' => 'false']);
+        $mform->addElement(
+            'textarea',
+            'checksoverridestext',
+            get_string('checksoverrides', 'gns3lab'),
+            ['rows' => 4, 'cols' => 48, 'spellcheck' => 'false']
+        );
         $mform->setType('checksoverridestext', PARAM_RAW_TRIMMED);
         $mform->addHelpButton('checksoverridestext', 'checksoverrides', 'gns3lab');
         $mform->hideIf('checksoverridestext', 'checksenabled');
@@ -287,7 +291,11 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         }
         [, $bad] = \mod_gns3lab\local\checks::parse_overrides((string) ($data['checksoverridestext'] ?? ''));
         if ($bad) {
-            $errors['checksoverridestext'] = get_string('checksoverridesinvalid', 'gns3lab', implode(', ', array_slice($bad, 0, 5)));
+            $errors['checksoverridestext'] = get_string(
+                'checksoverridesinvalid',
+                'gns3lab',
+                implode(', ', array_slice($bad, 0, 5))
+            );
         }
         if (($data['checksreport'] ?? '') === \mod_gns3lab\local\checks::REPORT_AFTER && empty($data['checksreportdate'])) {
             $errors['checksreportdate'] = get_string('required');

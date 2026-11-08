@@ -81,9 +81,9 @@
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="gns3labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Activity"/>
         <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Owner of the lab"/>
-        <FIELD NAME="nodeid" TYPE="char" LENGTH="64" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Node of the live project; empty for a link"/>
+        <FIELD NAME="nodeid" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Node of the live project; empty for a link"/>
         <FIELD NAME="kind" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="node, known, iface, group or link"/>
-        <FIELD NAME="item" TYPE="char" LENGTH="100" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Interface name, data group (l1, l2, l3, routes) or link id; empty for node and known"/>
+        <FIELD NAME="item" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Interface name, data group (l1, l2, l3, routes) or link id; empty for node and known"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
       <KEYS>
@@ -101,7 +101,7 @@
         <FIELD NAME="gns3labid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Activity"/>
         <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Owner of the lab"/>
         <FIELD NAME="sessionkey" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="SHA-256 of the Moodle session id of the holder: tells one login from another, cannot be turned back into the session id"/>
-        <FIELD NAME="tabid" TYPE="char" LENGTH="64" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Random id of the holder's page load; empty from a page that sends none"/>
+        <FIELD NAME="tabid" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Random id of the holder's page load; empty from a page that sends none"/>
         <FIELD NAME="timeclaimed" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the seat last changed hands"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Last sign of life of the holder"/>
       </FIELDS>
@@ -123,7 +123,7 @@
         <FIELD NAME="runid" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Run id on the lab manager"/>
         <FIELD NAME="requestedby" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="User who asked for the check"/>
         <FIELD NAME="status" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="queued" SEQUENCE="false" COMMENT="queued, running, done or failed"/>
-        <FIELD NAME="outcome" TYPE="char" LENGTH="12" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="graded or incomplete for a done run"/>
+        <FIELD NAME="outcome" TYPE="char" LENGTH="12" NOTNULL="true" SEQUENCE="false" COMMENT="graded or incomplete for a done run"/>
         <FIELD NAME="mark" TYPE="int" LENGTH="5" NOTNULL="false" SEQUENCE="false" COMMENT="Mark of a graded run"/>
         <FIELD NAME="topmark" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Top mark of the thresholds the run was graded with"/>
         <FIELD NAME="failmark" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Fail mark the run was graded with"/>
@@ -131,7 +131,7 @@
         <FIELD NAME="major" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Counted major findings"/>
         <FIELD NAME="minor" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Counted minor findings"/>
         <FIELD NAME="note" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Forgiven findings"/>
-        <FIELD NAME="errorcode" TYPE="char" LENGTH="32" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Why a failed run failed"/>
+        <FIELD NAME="errorcode" TYPE="char" LENGTH="32" NOTNULL="true" SEQUENCE="false" COMMENT="Why a failed run failed"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timefinished" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the run ended"/>
