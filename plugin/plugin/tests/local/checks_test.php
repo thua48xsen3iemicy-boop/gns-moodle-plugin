@@ -47,10 +47,14 @@ final class checks_test extends \basic_testcase {
         $this->assertSame('checksfailmarkhigh', checks::thresholds_error($rows, 4));
         $this->assertSame('checksthresholdsorder', checks::thresholds_error(array_reverse($rows), 2));
         $this->assertSame('checksthresholdsnone', checks::thresholds_error([], 2));
-        $this->assertSame('checksthresholdsmark',
-            checks::thresholds_error(checks::clean_thresholds([['mark' => 'x']]), 2));
-        $this->assertSame('checksthresholdslimit',
-            checks::thresholds_error(checks::clean_thresholds([['mark' => 5, 'minor' => '-1']]), 2));
+        $this->assertSame(
+            'checksthresholdsmark',
+            checks::thresholds_error(checks::clean_thresholds([['mark' => 'x']]), 2)
+        );
+        $this->assertSame(
+            'checksthresholdslimit',
+            checks::thresholds_error(checks::clean_thresholds([['mark' => 5, 'minor' => '-1']]), 2)
+        );
     }
 
     public function test_grading_of_an_activity(): void {

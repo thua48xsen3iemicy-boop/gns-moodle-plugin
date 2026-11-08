@@ -414,9 +414,10 @@ final class reveal_test extends \advanced_testcase {
 
     public function test_the_other_modes_do_not_close_a_console(): void {
         global $DB;
+        // One login for both modes: setUser() again would start a new login, which the one-seat rule refuses.
+        $this->setUser($this->student);
         foreach (['live', 'seen'] as $mode) {
             $DB->set_field('gns3lab', 'factsview', $mode, ['id' => $this->lab->id]);
-            $this->setUser($this->student);
 
             $this->assertSame('t-1', $this->ticket(fake_manager::NODE_TELNET)['ticket'], $mode);
         }

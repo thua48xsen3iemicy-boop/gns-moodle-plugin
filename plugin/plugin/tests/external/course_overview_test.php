@@ -12,10 +12,12 @@
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 namespace mod_gns3lab\external;
 
 use core_external\external_api;
+use mod_gns3lab\tests\course_actions;
 use mod_gns3lab\tests\fake_manager;
 
 /**
@@ -124,9 +126,7 @@ final class course_overview_test extends \advanced_testcase {
      * @param \stdClass $lab activity
      */
     protected function separate_groups(\stdClass $lab): void {
-        global $CFG;
-        require_once($CFG->dirroot . '/course/lib.php');
-        set_coursemodule_groupmode($lab->cmid, SEPARATEGROUPS);
+        course_actions::set_groupmode((int) $lab->cmid, SEPARATEGROUPS);
         rebuild_course_cache($this->course->id, true);
     }
 
@@ -247,6 +247,7 @@ final class course_overview_test extends \advanced_testcase {
         $this->setUser($this->teacher);
 
         $result = $this->overview();
+        $this->assertDebuggingCalled();
 
         $this->assertSame([(int) $this->lab->cmid, (int) $second->cmid], array_column($result['labs'], 'cmid'));
         $this->assertSame('', $result['labs'][0]['error']);

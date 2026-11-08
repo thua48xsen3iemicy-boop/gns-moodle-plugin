@@ -16,6 +16,7 @@
 
 namespace mod_gns3lab\local;
 
+use mod_gns3lab\tests\course_actions;
 use mod_gns3lab\tests\fake_manager;
 
 /**
@@ -140,7 +141,7 @@ final class lab_library_test extends \advanced_testcase {
             $this->assertSame('labinuse', $e->errorcode);
         }
 
-        course_delete_module($activity->cmid);
+        course_actions::delete_module($activity->cmid);
         lab_library::delete_lab($labid);
         $this->assertFalse($DB->record_exists('gns3lab_lab_versions', ['labid' => $labid]));
     }

@@ -58,7 +58,13 @@ class check_runs {
      * @param int $requestedby user who asked for the check
      * @return \stdClass row
      */
-    public static function record(\stdClass $instance, int $userid, string $sessionid, \stdClass $run, int $requestedby): \stdClass {
+    public static function record(
+        \stdClass $instance,
+        int $userid,
+        string $sessionid,
+        \stdClass $run,
+        int $requestedby
+    ): \stdClass {
         global $DB;
 
         $row = $DB->get_record(self::TABLE, ['gns3labid' => $instance->id, 'runid' => $run->run_id]);

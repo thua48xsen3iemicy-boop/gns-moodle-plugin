@@ -406,8 +406,10 @@ class fake_manager {
         }
         [$status, $body] = $route;
         parse_str($request->getUri()->getQuery(), $query);
-        if (str_ends_with($request->getUri()->getPath(), '/state') && is_array($body) && isset($query['since_rev'])
-                && (int) $query['since_rev'] === ($body['rev'] ?? null)) {
+        if (
+            str_ends_with($request->getUri()->getPath(), '/state') && is_array($body) && isset($query['since_rev'])
+            && (int) $query['since_rev'] === ($body['rev'] ?? null)
+        ) {
             return new Response(304);
         }
         return new Response($status, ['Content-Type' => 'application/json'], is_string($body) ? $body : json_encode($body));

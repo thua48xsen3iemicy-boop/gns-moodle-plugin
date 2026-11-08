@@ -20,9 +20,19 @@ use core_external\external_multiple_structure;
 use core_external\external_single_structure;
 use core_external\external_value;
 
-/** Typed public catalog data; the manager's file paths and slot options never reach AJAX. */
+/**
+ * Typed public catalog data; the manager's file paths and slot options never reach AJAX.
+ *
+ * @package    mod_gns3lab
+ * @copyright  2026 mod_gns3lab contributors
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 class image_data {
-    /** Catalog result schema. */
+    /**
+     * Catalog result schema.
+     *
+     * @return external_multiple_structure
+     */
     public static function structure(): external_multiple_structure {
         $range = fn() => new external_single_structure([
             'default' => new external_value(PARAM_INT, 'Default'),
@@ -39,7 +49,7 @@ class image_data {
             'ram_mb' => $range(), 'cpus' => $range(), 'adapters' => $range(),
             'port_name' => new external_value(PARAM_TEXT, 'Port name format'),
             'ports_per_adapter' => new external_value(PARAM_INT, 'Ports per adapter'),
-            'preconfig' => new external_value(PARAM_BOOL, 'Network can be configured'),
+            'preconfig' => new external_value(PARAM_BOOL, 'Network can be configured', VALUE_DEFAULT, false),
             'capture' => new external_value(PARAM_BOOL, 'Capture allowed'),
             'uplink_port' => new external_value(PARAM_INT, 'Reserved external adapter', VALUE_OPTIONAL),
             'authorname' => new external_value(PARAM_TEXT, 'Moodle display name', VALUE_DEFAULT, ''),
@@ -63,7 +73,12 @@ class image_data {
         ]), 'Public images', VALUE_OPTIONAL);
     }
 
-    /** Add the local display names requested by the library UI. */
+    /**
+     * Adds the local display names requested by the library UI.
+     *
+     * @param \stdClass[] $images catalog images from the manager
+     * @return array images ready for the external function result
+     */
     public static function export(array $images): array {
         $names = [];
         foreach ($images as $image) {

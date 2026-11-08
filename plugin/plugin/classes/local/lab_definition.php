@@ -148,8 +148,10 @@ class lab_definition {
         if (isset($raw['checks'])) {
             // The content is the lab manager's to check (POST /labs/validate); here only the shape and the size.
             $checks = $raw['checks'];
-            if (!is_array($checks) || array_is_list($checks) || ($checks['format'] ?? null) !== self::CHECKS_FORMAT
-                    || strlen(json_encode($checks)) > self::CHECKS_MAX) {
+            if (
+                !is_array($checks) || array_is_list($checks) || ($checks['format'] ?? null) !== self::CHECKS_FORMAT
+                || strlen(json_encode($checks)) > self::CHECKS_MAX
+            ) {
                 throw self::invalid('checks');
             }
             $def['format'] = self::FORMAT_2;

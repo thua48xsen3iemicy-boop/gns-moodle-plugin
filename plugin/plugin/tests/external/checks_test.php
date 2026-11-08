@@ -98,7 +98,7 @@ final class checks_test extends \advanced_testcase {
      * @param int $userid whose lab
      * @return array
      */
-    protected function run(int $userid = 0): array {
+    protected function read_run(int $userid = 0): array {
         return external_api::clean_returnvalue(
             get_check_run::execute_returns(),
             get_check_run::execute($this->lab->cmid, fake_manager::RUN, $userid)
@@ -112,8 +112,12 @@ final class checks_test extends \advanced_testcase {
      * @param string $outcome graded or incomplete
      */
     protected function finish(int $mark = 4, string $outcome = 'graded'): void {
-        $this->manager->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 200,
-            fake_manager::check_run('done', $outcome, $mark));
+        $this->manager->on(
+            'GET',
+            fake_manager::CHECKS . '/' . fake_manager::RUN,
+            200,
+            fake_manager::check_run('done', $outcome, $mark)
+        );
     }
 
     public function test_student_starts_a_check_with_the_grading_of_the_activity(): void {
@@ -150,8 +154,12 @@ final class checks_test extends \advanced_testcase {
     }
 
     public function test_check_in_progress_of_the_manager_is_recorded(): void {
-        $this->manager->on('POST', fake_manager::CHECKS, 409,
-            ['error' => 'check_in_progress', 'message' => 'busy', 'run_id' => fake_manager::RUN]);
+        $this->manager->on(
+            'POST',
+            fake_manager::CHECKS,
+            409,
+            ['error' => 'check_in_progress', 'message' => 'busy', 'run_id' => fake_manager::RUN]
+        );
         $this->manager->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 200, fake_manager::check_run('running'));
         $this->setUser($this->student);
 
@@ -168,7 +176,7 @@ final class checks_test extends \advanced_testcase {
         $this->start();
         $this->finish(4);
 
-        $run = $this->run();
+        $run = $this->read_run();
 
         $this->assertSame('done', $run['status']);
         $this->assertSame('graded', $run['outcome']);
@@ -192,7 +200,7 @@ final class checks_test extends \advanced_testcase {
         $this->start();
         $this->finish(0, 'incomplete');
 
-        $run = $this->run();
+        $run = $this->read_run();
 
         $this->assertSame('incomplete', $run['outcome']);
         $this->assertSame(-1, $run['mark']);
@@ -203,7 +211,7 @@ final class checks_test extends \advanced_testcase {
         $this->manager->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 200, fake_manager::check_run('failed'));
         check_runs::delete((int) $this->lab->id);
         $this->start();
-        $run = $this->run();
+        $run = $this->read_run();
         $this->assertSame('failed', $run['status']);
         $this->assertSame('SLOT_UNAVAILABLE', $run['errorcode']);
         $this->assertSame(0, $this->overview()['attempts']['used']);
@@ -215,7 +223,7 @@ final class checks_test extends \advanced_testcase {
         $this->setUser($this->student);
         $this->start();
         $this->finish(5);
-        $this->run();
+        $this->read_run();
 
         try {
             $this->start();
@@ -233,7 +241,7 @@ final class checks_test extends \advanced_testcase {
         $this->setUser($this->student);
         $this->start();
         $this->finish(5);
-        $this->run();
+        $this->read_run();
         // A second run of the same session, graded lower.
         $second = fake_manager::check_run('queued');
         $second['run_id'] = 'c-0000000000000002';
@@ -252,11 +260,15 @@ final class checks_test extends \advanced_testcase {
     public function test_counts_only_strips_the_findings_for_the_student_not_the_teacher(): void {
         global $DB;
         $DB->set_field('gns3lab', 'checksreport', checks::REPORT_COUNTS, ['id' => $this->lab->id]);
+        // The non-editing teacher sees the student in separate groups only through a shared group.
+        $group = $this->getDataGenerator()->create_group(['courseid' => $this->course->id]);
+        $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->student->id]);
+        $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->teacher->id]);
         $this->setUser($this->student);
         $this->start();
         $this->finish(4);
 
-        $run = $this->run();
+        $run = $this->read_run();
 
         $this->assertFalse($run['detailed']);
         $this->assertSame([], $run['findings']);
@@ -265,7 +277,7 @@ final class checks_test extends \advanced_testcase {
         $this->assertSame(4, $run['mark']);
 
         $this->setUser($this->teacher);
-        $run = $this->run((int) $this->student->id);
+        $run = $this->read_run((int) $this->student->id);
         $this->assertTrue($run['detailed']);
         $this->assertCount(2, $run['findings']);
     }
@@ -278,10 +290,10 @@ final class checks_test extends \advanced_testcase {
         $this->start();
         $this->finish(4);
 
-        $this->assertFalse($this->run()['detailed']);
+        $this->assertFalse($this->read_run()['detailed']);
 
         $DB->set_field('gns3lab', 'checksreportdate', time() - 1, ['id' => $this->lab->id]);
-        $this->assertTrue($this->run()['detailed']);
+        $this->assertTrue($this->read_run()['detailed']);
     }
 
     public function test_disabled_checks_refuse_without_the_manager(): void {
@@ -353,7 +365,7 @@ final class checks_test extends \advanced_testcase {
 
         $this->expectException(\moodle_exception::class);
         $this->expectExceptionMessage(get_string('checknotfound', 'gns3lab'));
-        $this->run();
+        $this->read_run();
     }
 
     public function test_teacher_outside_the_group_gets_nothing(): void {
@@ -390,10 +402,14 @@ final class checks_test extends \advanced_testcase {
         global $DB;
         $this->setUser($this->student);
         $this->start();
-        $this->manager->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 404,
-            ['error' => 'session_not_found', 'message' => 'gone']);
+        $this->manager->on(
+            'GET',
+            fake_manager::CHECKS . '/' . fake_manager::RUN,
+            404,
+            ['error' => 'session_not_found', 'message' => 'gone']
+        );
 
-        $run = $this->run();
+        $run = $this->read_run();
 
         $this->assertSame('failed', $run['status']);
         $this->assertSame(check_runs::LOST, $run['errorcode']);
