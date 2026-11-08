@@ -37,6 +37,15 @@ class lab_definition {
     /** Format with segments (lab constructor). */
     public const FORMAT_2 = 'gns3lab.lab/2';
 
+    /** Format of the checks document of a lab/2 (CONTRACTS §2.9, docs/autochecks/README.md §4). */
+    public const CHECKS_FORMAT = 'gns3lab.checks/1';
+
+    /** Who sets up a segment (CONTRACTS §2.9): the lab manager (the default) or the student. */
+    public const CONFIGURE = ['manager', 'student'];
+
+    /** Longest checks document as JSON: far more than any real lab needs. */
+    public const CHECKS_MAX = 65536;
+
     /** Most segments in a lab, as in the lab manager. */
     public const MAX_SEGMENTS = 100;
 
@@ -136,6 +145,17 @@ class lab_definition {
             $def['format'] = self::FORMAT_2;
             $def['segments'] = $segments;
         }
+        if (isset($raw['checks'])) {
+            // The content is the lab manager's to check (POST /labs/validate); here only the shape and the size.
+            $checks = $raw['checks'];
+            if (!is_array($checks) || array_is_list($checks) || ($checks['format'] ?? null) !== self::CHECKS_FORMAT
+                    || strlen(json_encode($checks)) > self::CHECKS_MAX) {
+                throw self::invalid('checks');
+            }
+            $def['format'] = self::FORMAT_2;
+            $def['segments'] = $segments;
+            $def['checks'] = self::checks_objects($checks);
+        }
         return $def;
     }
 
@@ -172,6 +192,14 @@ class lab_definition {
             $clean['subnet'] = ['fixed' => $subnet];
             if (isset($segment['gateway'])) {
                 $clean['gateway'] = self::port($segment['gateway'], $names, "segments[{$i}].gateway");
+            }
+            if (isset($segment['configure'])) {
+                if (!in_array($segment['configure'], self::CONFIGURE, true)) {
+                    throw self::invalid("segments[{$i}].configure");
+                }
+                if ($segment['configure'] === 'student') {
+                    $clean['configure'] = 'student';
+                }
             }
             $members = $segment['members'] ?? [];
             if (!is_array($members) || !array_is_list($members) || count($members) > self::MAX_MEMBERS) {
@@ -242,7 +270,36 @@ class lab_definition {
      */
     public static function decode(string $json): array {
         $def = json_decode($json, true);
+        if (is_array($def) && is_array($def['checks'] ?? null)) {
+            $def['checks'] = self::checks_objects($def['checks']);
+        }
         return is_array($def) ? $def : self::empty('');
+    }
+
+    /**
+     * Turns the empty objects of a checks document back into objects.
+     *
+     * The definition is decoded into arrays, and an empty JSON object would go to the lab manager as an empty list,
+     * which it refuses (bad_type). The objects of gns3lab.checks/1 are known: the document itself, nodes and each node
+     * in it, addresses, groups, switches and rules.
+     *
+     * @param array $checks checks document decoded into arrays
+     * @return array
+     */
+    public static function checks_objects(array $checks): array {
+        foreach (['nodes', 'addresses', 'groups', 'switches', 'rules'] as $key) {
+            if (isset($checks[$key]) && $checks[$key] === []) {
+                $checks[$key] = new \stdClass();
+            }
+        }
+        if (is_array($checks['nodes'] ?? null)) {
+            foreach ($checks['nodes'] as $name => $node) {
+                if ($node === []) {
+                    $checks['nodes'][$name] = new \stdClass();
+                }
+            }
+        }
+        return $checks;
     }
 
     /**

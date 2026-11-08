@@ -72,6 +72,9 @@ export const init = (prefix) => {
   const maxNodes = Math.min(100, (D.limits && D.limits.max_nodes) || 100);
   /* the manager announces the lab constructor: segments can be edited (otherwise stored ones are only kept) */
   const withSegments = !!D.labconstructor;
+  /* the manager also checks labs (CONTRACTS §2.9): segments set up by the student and the `checks` document */
+  const withChecks = withSegments && !!D.labchecks;
+  const CHECKS_FORMAT = "gns3lab.checks/1";
 
   const def = D.definition || {};
   const st = {
@@ -79,6 +82,7 @@ export const init = (prefix) => {
       nodes: Array.isArray(def.nodes) ? def.nodes : [],
       links: Array.isArray(def.links) ? def.links : [],
       segments: Array.isArray(def.segments) ? def.segments : [],
+      checks: def.checks && typeof def.checks === "object" && !Array.isArray(def.checks) ? def.checks : null,
     },
     sel: null,
     adding: false,
@@ -172,8 +176,10 @@ export const init = (prefix) => {
       }
     }
   };
-  const definition = () => JSON.stringify(st.lab.segments.length
-    ? {format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments}
+  /* a lab with segments or checks is lab/2; the checks are kept even when this manager does not take them */
+  const definition = () => JSON.stringify(st.lab.segments.length || st.lab.checks
+    ? Object.assign({format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments},
+      st.lab.checks ? {checks: st.lab.checks} : {})
     : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links});
 
   /* ---------- изменения и отмена ---------- */
@@ -612,8 +618,10 @@ export const init = (prefix) => {
     st.problems.map(p => {
       const text = S["problem_" + p.code] || str("ed_problem", p.code);
       const attr = p.place ? ` data-goto="${p.place.kind}:${p.place.i}"` : "";
+      /* a problem of the checks document names its path: there is no object of the scheme to go to */
+      const where = !p.place && typeof p.path === "string" && p.path.startsWith("checks") ? p.path : placeName(p.place);
       return `<li><button type="button" class="rowbtn"${attr} title="${esc(p.message)}"><span>` +
-        `<b>${esc(placeName(p.place))}</b>: ${esc(text)}</span></button></li>`;
+        `<b>${esc(where)}</b>: ${esc(text)}</span></button></li>`;
     }).join("") + "</ul>";
 
   const warningsHTML = () => !st.warnings.length ? "" : `<h3>${esc(str("ed_warnings"))}</h3><ul class="ed-problems warn">` +
@@ -684,9 +692,14 @@ export const init = (prefix) => {
           value="${Number.isInteger(g.gateway.host) ? g.gateway.host : ""}" placeholder="${
             pl && pl.gateway ? esc(pl.gateway) : ""}"></label>` : "");
     /* which IOL devices the lab manager sets up for this segment: the student need not touch them */
-    const managed = withSegments ? Seg.managedNodes(st.lab, images, i) : [];
+    const byStudent = g.configure === "student";
+    const managed = withSegments && !byStudent ? Seg.managedNodes(st.lab, images, i) : [];
     const managedHTML = managed.length
       ? `<p class="ed-note" data-region="managed">${esc(str("ed_managed", managed.join(", ")))}</p>` : "";
+    /* a segment of the task: the student sets it up, its address plan is what the checks expect */
+    const configureHTML = withChecks ? `<label class="ed-field ed-check"><input type="checkbox" data-seg="configure"${
+      byStudent ? " checked" : ""}> <span>${esc(str("ed_segconfigure"))}</span><small>${
+      esc(str("ed_segconfigure_help"))}</small></label>` : "";
     const rows = g.members.map((m, j) => {
       const node = byName(m.node), ip = pl && pl.members[j] ? `${pl.members[j]}/${net.prefix}` : "";
       return `<tr class="${bad.members.has(j) ? "bad" : ""}"><td><button type="button" class="rowbtn" data-select-node="${
@@ -719,6 +732,7 @@ export const init = (prefix) => {
           esc((g.subnet || {}).fixed || "")}"
           placeholder="192.168.10.0/24" autocomplete="off" spellcheck="false"></label>
       ${gwHTML}
+      ${configureHTML}
       ${managedHTML}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
       <h3>${esc(str("ed_members"))}</h3>
@@ -790,12 +804,25 @@ export const init = (prefix) => {
       ${problemsHTML()}`;
   };
 
+  /* the `checks` document of the lab (docs/autochecks/README.md §4) as JSON; the lab manager checks it on "Check" */
+  const checksHTML = () => {
+    if (!withChecks && !st.lab.checks) {
+      return "";
+    }
+    const text = st.lab.checks ? JSON.stringify(st.lab.checks, null, 2) : "";
+    return `<h3>${esc(str("ed_checks"))}</h3>
+      <label class="ed-field"><textarea class="form-control form-control-sm mono" data-checks rows="8" spellcheck="false"
+        placeholder='{"format": "${CHECKS_FORMAT}"}'${withChecks ? "" : " readonly"}>${esc(text)}</textarea>
+        <small>${esc(str(withChecks ? "ed_checks_help" : "ed_checkskept"))}</small></label>
+      <p class="ed-error" data-region="fielderror" role="alert" hidden></p>`;
+  };
+
   const labHTML = () => {
     const res = st.resources ? `<p class="ed-ok">${esc(str("ed_valid", {
       memory: fmtMem(st.resources.memorymb), cores: st.resources.cores}))}</p>` : "";
     return `<div class="ph"><div><p class="eyebrow">${esc(str("ed_lab"))}</p>
       <h2>${esc(str("ed_summary", {nodes: st.lab.nodes.length, links: st.lab.links.length}))}</h2></div></div>
-      ${res}${segmentsListHTML()}${problemsHTML()}${warningsHTML()}${previewHTML()}
+      ${res}${segmentsListHTML()}${checksHTML()}${problemsHTML()}${warningsHTML()}${previewHTML()}
       ${D.canpublish ? "" : `<p class="ed-note">${esc(str("ed_cannotpublish"))}</p>`}
       <p class="muted">${esc(str("ed_hint"))}</p>`;
   };
@@ -1090,6 +1117,27 @@ export const init = (prefix) => {
     const v = Number(raw);
     return Number.isInteger(v) && v >= min && v <= max ? v : undefined;
   };
+  const checksChange = t => {
+    const raw = t.value.trim();
+    let value = null;
+    if (raw !== "") {
+      try {
+        value = JSON.parse(raw);
+      } catch (err) {
+        value = undefined;
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value) || value.format !== CHECKS_FORMAT) {
+        fieldError(str("ed_checksinvalid", CHECKS_FORMAT));
+        return;
+      }
+    }
+    if (JSON.stringify(value) === JSON.stringify(st.lab.checks)) {
+      return;
+    }
+    change(() => {
+      st.lab.checks = value;
+    });
+  };
   const segmentChange = t => {
     const i = st.sel.i, g = st.lab.segments[i];
     if (t.dataset.pick !== undefined) {
@@ -1112,6 +1160,16 @@ export const init = (prefix) => {
       return;
     }
     const field = t.dataset.seg;
+    if (field === "configure") {
+      change(() => {
+        if (t.checked) {
+          g.configure = "student";
+        } else {
+          delete g.configure;
+        }
+      });
+      return;
+    }
     if (field === "name") {
       const name = t.value.trim();
       if (name === g.name) {
@@ -1177,6 +1235,9 @@ export const init = (prefix) => {
   props.addEventListener("change", e => {
     const s = st.sel, t = e.target;
     if (!s) {
+      if (t.dataset.checks !== undefined && withChecks) {
+        checksChange(t);
+      }
       return;
     }
     if (s.kind === "segment") {

@@ -42,6 +42,7 @@ $images = [];
 $limits = null;
 $canpublish = false;
 $constructor = false;
+$labchecks = false;
 $imagecapture = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
@@ -53,6 +54,7 @@ if (!manager_client::is_configured()) {
         $limits = $client->get_info()->limits;
         $canpublish = $client->supports_lab_definitions();
         $constructor = $client->supports_lab_constructor();
+        $labchecks = $constructor && $client->has_feature('checks');
         $imagecapture = $client->has_feature('image_capture');
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
@@ -76,6 +78,7 @@ $keys = [
     'ed_nopreconfig_switch', 'ed_nogateway_norouter', 'ed_pickport',
     'ed_addport', 'ed_managed', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
     'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
+    'ed_segconfigure', 'ed_segconfigure_help', 'ed_checks', 'ed_checks_help', 'ed_checkskept', 'ed_checksinvalid',
 ];
 $keys = array_merge($keys, ['stoplab', 'ed_save']);
 foreach (array_keys(get_string_manager()->load_component_strings('gns3lab', current_language())) as $key) {
@@ -89,6 +92,7 @@ $codes = [
     'limit_exceeded', 'too_large', 'segment_not_connected', 'segment_overlap', 'member_in_two_segments',
     'gateway_not_router', 'unsupported_image', 'subnet_too_small', 'bad_subnet', 'vlan_out_of_range',
     'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment', 'gateway_port_conflict',
+    'unknown_rule', 'group_overlap', 'bad_range',
 ];
 $warningcodes = ['gateway_not_configured', 'switch_not_configured', 'hostname_not_set'];
 foreach ($keys as $key) {
@@ -115,6 +119,7 @@ $data = [
     'limits' => $limits,
     'canpublish' => $canpublish,
     'labconstructor' => $constructor,
+    'labchecks' => $labchecks,
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];
