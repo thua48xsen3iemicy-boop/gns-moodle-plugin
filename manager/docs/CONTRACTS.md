@@ -923,7 +923,8 @@ QGA не присылает успешный ответ на guest-shutdown; п�
 | владелец | слот собирает только для лабы текущего владельца; при смене владельца результаты сбрасываются |
 
 Коллектор — одна гостевая команда и разбор её вывода, он живёт в коде слота, и версия растёт вместе с
-выпуском слота. Первый — `linux.net`: QEMU-ноды с `qga` (`ip -j addr`, `ip -j route`). У IOL гостевой команды нет:
+выпуском слота. 🆕 Слот 0.17.0 добавил `linux.sys/1`, `linux.config/1`, `routeros.sys/1`, `hostname` в `windows.net/1`,
+`hostname` и `routes` в `ios.config/1` (ниже): данные правил `host` и `persistence: saved` автопроверок. Первый — `linux.net`: QEMU-ноды с `qga` (`ip -j addr`, `ip -j route`). У IOL гостевой команды нет:
 коллектор `ios.config/1` (ниже) читает сохранённую конфигурацию из файлов ноды. Proxmox добавится тем же форматом позже. Слот собирает факты лабы только после того, как она
 перешла в `READY`: пока ноды грузятся, недоступный агент QGA — не ошибка сбора. Состав коллекторов и период (по умолчанию `linux.net`
 каждые 30 с у запущенных QEMU-нод с QGA) выбирает слот; настройка лабой появится вместе с `checks`.
@@ -996,6 +997,8 @@ QGA не присылает успешный ответ на guest-shutdown; п�
 | `ipv4` | все IPv4-адреса адаптера с маской, по возрастанию. Адрес в состоянии `Duplicate` не используется и не входит; остальные (в том числе `Tentative` и 169.254.x.x от APIPA, а также адрес на адаптере без кабеля) — то, что настроено. Сроки аренды DHCP не копируются |
 | `routes` | `Get-NetRoute`: `0.0.0.0/0` → `default`, `NextHop 0.0.0.0` → без `via`, `dev` — имя адаптера, `proto` — `Protocol` в нижнем регистре (`local`, `netmgmt`, `dhcp`), `metric` — `RouteMetric + InterfaceMetric` (как в `route print`, у Linux метрика только маршрута). Не входят то, чего нет в `ip route`: хост-маршруты `Local` с /32 (свои адреса, широковещание), мультикаст `224.0.0.0/4`, маршруты loopback. `gateway` интерфейса — по правилу `linux.net`: `default` с наименьшей метрикой |
 
+| 🆕 `hostname` | слот 0.17.0: имя узла, `[System.Net.Dns]::GetHostName()` в том же запуске PowerShell (второй запуск ради одного поля дорог: холодный PowerShell стартует секунды). Пустое или недоступное — поля нет. Слоты до 0.17.0 его не отдают. Необязательное поле, версия коллектора не меняется (§1.1). Пересылки (`ip_forward`) у Windows нет. Не проверено на стенде |
+
 #### 🆕 Коллектор `routeros.net/1` (гость MikroTik RouterOS)
 
 Слот 0.15.0. Тот же формат `data`, что у `linux.net/1`: `interfaces` и `routes`. Слот отдаёт его вместо `linux.net`, `switch.net` и
@@ -1013,6 +1016,72 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | сбои | как у `linux.net` после того, как семейство известно: ошибка скрипта — `failed` с текстом RouterOS, прежние `data` остаются |
 | проверено | вывод четырёх таблиц и коды ошибок — на CHR 7.25.1 под QEMU с параметрами канала QGA слота. Лаба в GNS3 и совпадение MAC `etherN` с адаптерами — проверить на стенде |
 
+#### 🆕 Коллектор `routeros.sys/1` (имя гостя RouterOS)
+
+Слот 0.17.0. Ноды семейства `routeros` (правило «какая ОС» у `windows.net/1`). Один скрипт RouterOS через брокер (`METRICS`,
+`wait=False`, `max_age`): `:put [/system identity get name]` (есть в RouterOS 6 и 7). `data` — только `{"hostname": "<identity>"}`.
+Вывод не из одной непустой строки — `failed`, прежние `data` остаются. Отдельный коллектор, а не поле `routeros.net`: сбой
+скрипта не отнимает у ноды интерфейсы. Не проверено на стенде.
+
+#### 🆕 Коллектор `linux.sys/1` (имя, пересылка и DNS гостя Linux)
+
+Слот 0.17.0. `api/linux_facts.py`. Поля ноды `hostname`, `ip_forward`, `dns` (`live-state.md` §3) — для правил `hostname_wrong`,
+`forwarding_off`, `forwarding_on_host` (`docs/autochecks/README.md` §8).
+
+```json
+"linux.sys": {"schema": "linux.sys/1", "ok": true, "error": null,
+  "attempted_at": "2026-11-08T10:00:30Z", "observed_at": "2026-11-08T10:00:30Z",
+  "data": {"hostname": "BUH-1", "ip_forward": false,
+           "dns": {"servers": ["10.0.0.1", "1.1.1.1"], "search": ["lab.local"], "resolver": "systemd-resolved"}}}
+```
+
+| Правило | Что значит |
+|---|---|
+| ноды | QEMU-ноды с `qga` семейства `posix` — те же, что у `linux.net` (пока семейство неизвестно, записи нет). Linux-коммутатор (`switch.net`) тоже: роль ноды заранее неизвестна, а запись, опубликованная до `switch.net`, осталась бы навсегда (менеджер не удаляет строки коллекторов). Для коммутатора менеджер эти поля просто не читает |
+| команда | один `exec` `/bin/sh` через брокер (`METRICS`, `wait=False`, `max_age`): `cat /proc/sys/kernel/hostname`, `cat /proc/sys/net/ipv4/ip_forward`, `head -c 65536` файлов `/etc/resolv.conf` и `/run/systemd/resolve/resolv.conf` (каждый — только если читается). Ничего не меняет |
+| `hostname` | имя ядра как есть (FQDN, если так задано). Сравнение с именем узла (регистр, FQDN) — дело правила менеджера |
+| `ip_forward` | `true`, если значение `ip_forward` не `0` |
+| `dns.servers` | строки `nameserver` `/etc/resolv.conf` по порядку, без повторов, IPv4 и IPv6; нечитаемый адрес пропускается (как у glibc). Все строки, не только три, которыми пользуется glibc |
+| `dns.search` | слова последней строки `search` или `domain` (у glibc побеждает последняя); нет строк — `[]` |
+| systemd-resolved | все `nameserver` — заглушки `127.0.0.53`/`127.0.0.54`, и `/run/systemd/resolve/resolv.conf` читается: `servers` — оттуда (куда resolved пересылает запросы, может быть `[]`), `search` — из `/etc/resolv.conf`, `resolver: "systemd-resolved"`. Файла с вышестоящими серверами нет — `servers: ["127.0.0.53"]` без `resolver` (resolved, скорее всего, не работает) |
+| нет `/etc/resolv.conf` | `dns: {"servers": [], "search": []}` |
+| сбои | как у `linux.net` после того, как семейство известно: `cat` не прочитал `/proc` — `failed` с текстом `stderr`; непонятный вывод — `failed` («Unexpected output of …» без текста гостя), прежние `data` остаются; код 127 — `unsupported` |
+| проверено на стенде | нет. Разбор проверен на выводе команды в контейнере разработки (Ubuntu 24.04) и на примерах `resolv.conf` systemd-resolved |
+
+#### 🆕 Коллектор `linux.config/1` (сохранённая настройка сети гостя Linux)
+
+Слот 0.17.0. `api/linux_facts.py`. Поле ноды `net_saved` (`live-state.md` §3) — для `persistence: saved` (правила `address_not_saved`,
+`config_not_applied`, `docs/autochecks/README.md` §4.4): с чем гость поднимет сеть после перезагрузки.
+
+```json
+"linux.config": {"schema": "linux.config/1", "ok": true, "error": null,
+  "attempted_at": "2026-11-08T10:00:30Z", "observed_at": "2026-11-08T10:00:30Z",
+  "data": {"net_saved": {"mechanism": "ifupdown", "ok": true, "interfaces": [
+    {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"], "gateway": "10.0.0.254",
+     "routes": [{"dst": "192.168.5.0/24", "via": "10.0.0.2"}]},
+    {"name": "ens4", "method": "dhcp", "ipv4": []},
+    {"name": "lo", "method": "loopback", "ipv4": []}]}}}
+```
+
+| Правило | Что значит |
+|---|---|
+| ноды | те же, что у `linux.sys/1` (коммутатор тоже, менеджер поле не читает) |
+| отдельный коллектор | не поле `linux.sys`: чтение дороже (около дюжины коротких процессов), меняется по другим причинам, а менеджер пишет `data` коллектора в журнал целиком. Сбой этой команды не отнимает у ноды `hostname` |
+| механизм | выбирается так же, как в преднастройке менеджера (`manager/lab_manager/netconfig.py`, туда же она пишет файлы): активен NetworkManager → `networkmanager`; есть `netplan` и активен systemd-networkd → `netplan`; активен systemd-networkd → `networkd`; есть `ifquery` и `ifup` → `ifupdown`; иначе `none` (`systemctl is-active` только читает) |
+| команда | один `exec` `/bin/sh` через брокер (`METRICS`, `wait=False`, `max_age`). Для ifupdown — средствами самого ifupdown, без своего разбора файлов: `ifquery --no-mappings --list -a` и `--list --allow=hotplug` (что поднимается при загрузке; `source`/`source-directory` разворачивает ifupdown), `ifquery --no-mappings <iface>` для каждого, `ifup --no-act --force --no-mappings --no-scripts <все>` (применится ли). `--no-act` ничего не настраивает, не берёт замки и не меняет состояние ifupdown (проверено на ifupdown 0.8.41); `--no-mappings` — скрипты `mapping` не запускаются. Метода в выводе `ifquery` нет, его дают строки `iface <имя> inet <метод>` в `/etc/network/interfaces` и файлах, которые назвал `ifquery -v` |
+| `mechanism` | `"ifupdown"`, `"none"` — прочитано; `"networkmanager"`, `"netplan"`, `"networkd"` — пока не читаются: `net_saved` = `{"mechanism": "<имя>", "supported": false}` без `ok` и `interfaces`. Менеджер в этом случае пропускает правила `saved` (как без коллектора) |
+| `none` | механизма нет (ifupdown удалён намеренно, сеть только через `ip`): `{"mechanism": "none", "ok": true, "interfaces": []}` — сохранённой настройки нет |
+| `ok`, `message` | `ok: false` — ifupdown не поднимет сеть, как написано: файл не читается (`ifquery --list` с ошибкой — тогда `interfaces: []`), `auto` без `iface` (`unknown interface ens9`), не хватает обязательного параметра метода (`ifup --no-act` с ошибкой), адрес или маска не разбираются. `message` — текст ifupdown без префикса `ifquery:`/`ifup:` (строки `ifup` склеены через `; `, «failed to bring up» отброшено) или `<iface>: bad address …`, до 200 символов. Это факт, а не сбой сбора: запись коллектора остаётся `ok: true`, ошибка не становится `error` всей ноды |
+| `interfaces` | интерфейсы `auto` и `allow-hotplug` (то, что поднимается при загрузке), по имени (натуральный порядок). Стансы без `auto`/`allow-hotplug` не входят. `lo` ifupdown добавляет сам — он есть всегда, `method: "loopback"`. `name` — как в госте (как `interfaces[].name` у `linux.net`); алиас `eth0:1` — как написан |
+| `method` | метод первой стансы `inet` интерфейса: `static`, `dhcp`, `manual`, `loopback`, … как в файле. Только `inet6` — поля нет |
+| `ipv4` | `address` всех стансов `inet` интерфейса (ifupdown 0.8 допускает несколько) с маской: `address A/N` ifquery печатает как `address A` + `netmask M`, `netmask` пишется отдельно — тоже `A/N`; адрес без маски — маска класса, как её ставит ifupdown. По возрастанию. `inet6` не входит. Метод `dhcp` — `[]` |
+| `gateway` | первый IPv4 `gateway` интерфейса; нет — поля нет |
+| `routes` | необязательное: статические маршруты из строк `up`/`post-up` (ifquery печатает обе как `up`), только узнаваемые точно: `ip [-4] route add\|replace\|append <dst> via <ip> [dev <if>] [metric N] [onlink] [proto P] [src S]` и `route add [-net\|-host] <dst> [netmask M] gw <ip> [dev <if>] [metric N]`, хвост `\|\| true` допускается. Каждый — `{"dst": "A/N" \| "default", "via", "dev"?}`; `metric` не переносится. Без `via`, с другой таблицей (`table`), переменными или другой оболочкой — не маршрут для коллектора. Нет таких строк — поля нет; `gateway` в `routes` не повторяется |
+| стабильность | порядок строк в файлах не влияет на `data`; одна и та же настройка — одни и те же `data` |
+| секреты | вывод `ifquery` (там могут быть, например, `wpa-psk`) наружу не уходит, в `data` только поля выше |
+| сбои | как у `linux.net`: код 127 — `unsupported`; непонятный вывод — `failed` («Unexpected output of the saved network configuration: …» без текста гостя) |
+| проверено на стенде | нет. Вывод `ifquery`/`ifup --no-act` для примеров в тестах снят с ifupdown 0.8.41 (пакет Ubuntu 24.04) на файлах с `source`, несколькими стансами, `inet6`, ошибками |
+
 #### Коллектор `ios.config/1` (сохранённая конфигурация IOL)
 
 Решение владельца: у Cisco авторитетна **сохранённая** конфигурация — то, с чем устройство загрузится после
@@ -1028,7 +1097,7 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | когда читать | при каждом сборе (период 30 с, «Обновить сейчас») слот сравнивает размер и время изменения источника (файла или NVRAM) с прошлым чтением и разбирает его, только если они изменились. Чтение — локальный файл, в брокер QGA и в очередь консоли не попадает. IOL может писать NVRAM в момент чтения: если разбор не удался, а размер или время источника после чтения уже другие, сбой не публикуется (запись и `attempted_at` не меняются), источник перечитывается на следующем сборе. `failed` — только когда источник между чтениями не менялся |
 | нет сохранённой конфигурации | ни непустого `startup-config.cfg`, ни NVRAM с конфигурацией (файлов ещё нет, NVRAM пуст, устройство ничего не сохраняло): записи `ios.config` нет (у ноды просто нет фактов). Это не ошибка. Запись уже была, а сохранённой конфигурации больше нет (`write erase`, источник пропал или опустел): `ok: true`, `data: {}` — устройство загрузится без конфигурации, и схема показывает «нет сохранённой конфигурации», как до первого `write memory`, а не прежнюю настройку. Это не сбой. Различать: конфигурация есть, но интерфейсов в ней нет — `interfaces: []`; конфигурации нет — `data` без полей |
 | сбой | файл не читается или не разбирается (неизвестная структура, неверная маска), NVRAM не выгружается — `ok: false`, `error.code = failed`, прежние `data` остаются. Слот не нашёл код экспорта NVRAM у `gns3server` (путь к `iou_export.py` задаёт `SLOT_IOU_EXPORT`) — `unsupported`. Пустая конфигурация — не сбой: `interfaces: []` |
-| `data` | `interfaces` и `vlans` (`plugin/docs/live-state.md` §3). Других полей нет; в частности нет `routes`, `router_id`, `adjacencies`, `mac_table` и `oper` (ниже) |
+| `data` | `interfaces` и `vlans` (`plugin/docs/live-state.md` §3), 🆕 со слота 0.17.0 ещё `hostname` и `routes` (ниже, «Поля ноды вне блоков»). Других полей нет; в частности нет `router_id`, `adjacencies`, `mac_table` и `oper` (ниже) |
 | стабильность | в `data` только то, что задано конфигурацией. Комментарии (`!`, в том числе `Last configuration change at …`, `NVRAM config last updated at …`) и порядок блоков не влияют: тот же сохранённый конфиг даёт тот же `data`, повторный `write memory` без изменений не создаёт строку журнала менеджера |
 | секреты | `startup-config` содержит пароли и хэши (`enable secret`, `username`, ключи). В `data` попадают только поля из этой таблицы; сырой текст слот не отдаёт и не пишет в журнал |
 
@@ -1051,6 +1120,13 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 только в `vlan.dat`: тогда поля `vlans` нет, пока слот не умеет читать `vlan.dat` (`SLOT_REQUESTS.md` §8). Слои L2
 строятся по `switchport` портов, `vlans` — только для подписей (`live-state.md` §3), поэтому без `vlan.dat` схема не
 ломается; не видно лишь, что порт назначен в несуществующую VLAN.
+
+🆕 Поля ноды вне блоков `interface` (слот 0.17.0; необязательные, схема остаётся `ios.config/1` по §1.1):
+
+| Поле | Откуда |
+|---|---|
+| `hostname` | слово строки `hostname` (последней, если их несколько); нет строки — поля нет |
+| `routes` | формат `live-state.md` §3.3: таблица, с которой устройство загрузится, насколько её знает конфигурация. Подключённые: сети адресов `ipv4` интерфейсов, которые не `shutdown` (у `subif` — и родитель не `shutdown`), `{"dst", "dev", "proto": "connected", "metric": 0}`. Статические — только если устройство маршрутизирует (ниже): `ip route <сеть> <маска> {<IP> \| <интерфейс> [<IP>]} [<расстояние>] [name …] [tag …] [track …] [permanent]` → `{"dst": "A/N" \| "default", "via"?, "dev"?, "proto": "static", "metric": <расстояние, по умолчанию 1>}`. `dev` — интерфейс из строки, иначе интерфейс с подключённой сетью, где лежит `via` (самая длинная маска); маршрут через выключенный интерфейс не ставится; `Null0` — как написан. Рекурсивное разрешение `via` не проверяется. Не маршрутизирует (L2-коммутатор) — вместо `ip route` берётся `ip default-gateway X` (последняя строка) как `{"dst": "default", "via": X, "dev"?, "proto": "static", "metric": 1}`. Маршрутизирует: маршрутизатор без `no ip routing` и коммутатор (`spanning-tree mode`) только с `ip routing`; побеждает последняя строка. Пропускаются: `ip route vrf …`, `dhcp`, неизвестные слова, неверная маска. Конфигурация без интерфейсов — `routes: []`. Не проверено на стенде, в том числе: сохраняет ли IOL L2 `ip routing`/`no ip routing` явно |
 
 Коммутатор — нода, в конфигурации которой есть строка `spanning-tree mode …` (у образов IOL L2 она есть в
 конфигурации по умолчанию, у L3 — нет; исполнитель проверяет на стенде на образах каталога). У маршрутизатора
@@ -1196,7 +1272,7 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `vnc` | слот | 🆕 `NodeSpec.console: "vnc"` и сырой поток RFB в консольном WS (§4.2); слот объявляет её в `features` (0.8.0); когда появится `requires`, лабы с такими узлами будут требовать её |
-| `collectors` | слот | ✅ (0.6.0) слот собирает факты о нодах: `GET /v1/labs/{project_id}/facts` и список `collectors` в `capabilities` (§4.6) |
+| `collectors` | слот | ✅ (0.6.0) слот собирает факты о нодах: `GET /v1/labs/{project_id}/facts` и список `collectors` в `capabilities` (§4.6). 🆕 Слот 0.17.0 добавляет в список `linux.sys/1`, `linux.config/1`, `routeros.sys/1`; менеджер список не читает, новые поля приходят в `data` |
 | `iol-cli` | слот | provisioning IOL через CLI (`cli_prompt`) |
 | `routeros` | слот | 🆕 (0.15.0) гость MikroTik RouterOS (CHR): готовность без `serial-getty`, `provisioning` и `qga/exec` — скрипты RouterOS, коллектор `routeros.net/1` (§4.2, §4.6). Нужна для образов с `net_config: "routeros"`; менеджер и слот выпускаются вместе |
 | `iol-nvram` | слот | 🆕 `NodeSpec.nvram_config`: `startup-config` IOL кладётся в NVRAM при создании проекта, до первого старта (§4.2) |
