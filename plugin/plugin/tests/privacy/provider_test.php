@@ -134,4 +134,42 @@ final class provider_test extends \core_privacy\tests\provider_testcase {
         provider::delete_data_for_all_users_in_context($context);
         $this->assertSame(0, $DB->count_records('gns3lab_seat'));
     }
+
+    public function test_the_check_runs_of_a_student_in_an_activity(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $gen = $this->getDataGenerator();
+        $course = $gen->create_course();
+        $lab = $gen->create_module('gns3lab', ['course' => $course->id]);
+        $student = $gen->create_and_enrol($course, 'student');
+        $other = $gen->create_and_enrol($course, 'student');
+        $context = \context_module::instance($lab->cmid);
+        $row = fn($user, string $runid) => (object) [
+            'gns3labid' => $lab->id, 'userid' => $user->id, 'sessionid' => 's-1', 'runid' => $runid,
+            'requestedby' => $user->id, 'status' => 'done', 'outcome' => 'graded', 'mark' => 4, 'topmark' => 5,
+            'failmark' => 2, 'critical' => 0, 'major' => 1, 'minor' => 0, 'note' => 0, 'errorcode' => '',
+            'timecreated' => 1790000000, 'timemodified' => 1790000000, 'timefinished' => 1790000009,
+        ];
+        $DB->insert_records('gns3lab_check_runs', [$row($student, 'c-1'), $row($other, 'c-2')]);
+
+        $contextids = array_map('intval', provider::get_contexts_for_userid($student->id)->get_contextids());
+        $this->assertSame([(int) $context->id], $contextids);
+        $userlist = new userlist($context, 'mod_gns3lab');
+        provider::get_users_in_context($userlist);
+        $this->assertEqualsCanonicalizing([(int) $student->id, (int) $other->id], array_map('intval', $userlist->get_userids()));
+
+        provider::export_user_data(new approved_contextlist($student, 'mod_gns3lab', [$context->id]));
+        $data = writer::with_context($context)->get_data([get_string('privacy:checkruns', 'gns3lab')]);
+        $this->assertCount(1, $data->runs);
+        $this->assertSame('c-1', $data->runs[0]['run']);
+
+        provider::delete_data_for_user(new approved_contextlist($student, 'mod_gns3lab', [$context->id]));
+        $this->assertSame(0, $DB->count_records('gns3lab_check_runs', ['userid' => $student->id]));
+        $this->assertSame(1, $DB->count_records('gns3lab_check_runs', ['userid' => $other->id]));
+        provider::delete_data_for_users(new approved_userlist($context, 'mod_gns3lab', [$other->id]));
+        $this->assertSame(0, $DB->count_records('gns3lab_check_runs'));
+        $DB->insert_record('gns3lab_check_runs', $row($student, 'c-3'));
+        provider::delete_data_for_all_users_in_context($context);
+        $this->assertSame(0, $DB->count_records('gns3lab_check_runs'));
+    }
 }

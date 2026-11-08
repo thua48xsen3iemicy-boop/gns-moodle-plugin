@@ -99,7 +99,7 @@ define([], function() {
                 consoletype: n.console_type || 'none',
             })) : [],
             nodesstale: false,
-            features: running ? (cfg.nofacts ? ['consoles'] : ['consoles', 'facts']) : [],
+            features: running ? (cfg.nofacts ? ['consoles'] : ['consoles', 'facts', 'checks']) : [],
         };
     };
 
@@ -209,6 +209,53 @@ define([], function() {
         return {available: true, changed, rev, generatedat: now(), ttl: 90, facts: changed ? JSON.stringify(doc) : ''};
     };
 
+    // Auto-checks (classes/external/get_checks.php, start_check.php, get_check_run.php): runs in memory, a run takes
+    // two seconds (?fast: half a second); the report depends on the facts variant like the mock manager. ?checksreport=counts
+    // or =after hides the findings like the server does, ?checksmax=N limits the attempts (0: unlimited).
+    const checks = {runs: [], next: null};
+    const checkFindings = () => facts.variant === 'broken' ? [
+        {id: 'f1', code: 'vlan_wrong', group: 'l2', class: 'major', baseclass: 'major', counted: true, causedby: '',
+            nodes: ['SW1'], ifaces: [{node: 'SW1', iface: 'Ethernet0/1'}], message: 'SW1: порт Ethernet0/1 в VLAN 1, а должен быть в VLAN 10'},
+        {id: 'f2', code: 'segment_split', group: 'l2', class: 'critical', baseclass: 'critical', counted: false, causedby: 'f1',
+            nodes: ['PC1', 'PC2'], ifaces: [], message: 'Сегмент LAN1: PC1 и PC2 в разных L2-доменах'},
+        {id: 'f3', code: 'address_missing', group: 'addressing', class: 'major', baseclass: 'major', counted: true, causedby: '',
+            nodes: ['PC1'], ifaces: [{node: 'PC1', iface: 'eth0'}], message: 'PC1: на eth0 нет адреса 192.168.10.2/24 <b>'},
+        {id: 'f4', code: 'hostname_wrong', group: 'host', class: 'note', baseclass: 'minor', counted: false, causedby: '',
+            nodes: ['PC1'], ifaces: [], message: 'PC1: hostname «localhost»'},
+    ] : [
+        {id: 'f1', code: 'vlan_extra', group: 'l2', class: 'minor', baseclass: 'minor', counted: true, causedby: '',
+            nodes: ['SW1'], ifaces: [], message: 'SW1: создан VLAN 99, которого нет в задании'},
+    ];
+    const checkRun = r => {
+        const age = Date.now() - r.at, span = cfg.fast ? 500 : 2000;
+        if (r.status !== 'done' && r.status !== 'failed') {
+            r.status = age < span / 4 ? 'queued' : age < span ? 'running' : (r.outcome === 'failed' ? 'failed' : 'done');
+            if (r.status === 'done') {
+                r.findings = r.outcome === 'graded' ? checkFindings() : [];
+                const counts = {critical: 0, major: 0, minor: 0, note: 0};
+                r.findings.filter(f => !f.causedby).forEach(f => { counts[f.class]++; });
+                r.counts = counts;
+                r.mark = r.outcome !== 'graded' ? -1 : counts.critical ? 2 : counts.major > 1 ? 3 : counts.major ? 4 : 5;
+                r.finishedat = now();
+            }
+            if (r.status === 'failed') {
+                r.errorcode = 'SLOT_UNAVAILABLE';
+                r.finishedat = now();
+            }
+        }
+        return r;
+    };
+    const checkSummary = r => ({runid: r.runid, status: r.status, outcome: r.status === 'done' ? r.outcome : '', mark: r.mark,
+        counts: r.counts, errorcode: r.errorcode, requestedat: r.requestedat, finishedat: r.finishedat});
+    const checksOverview = () => {
+        checks.runs.forEach(checkRun);
+        const used = checks.runs.filter(r => r.status === 'done' && r.outcome === 'graded').length;
+        const left = cfg.checksmax ? Math.max(0, cfg.checksmax - used) : -1;
+        return {enabled: true, available: true, canstart: !cfg.observer && left !== 0, report: cfg.checksreport,
+            detailsfrom: cfg.observer || cfg.checksreport === 'full' ? 0 : cfg.checksreport === 'counts' ? -1 : now() + 86400,
+            attempts: {max: cfg.checksmax || 0, used, left}, runs: checks.runs.slice().reverse().map(checkSummary)};
+    };
+
     const handlers = {
         mod_gns3lab_authoring: async args => {
             const response = await fetch('/authoring-api', {method: 'POST',
@@ -216,6 +263,37 @@ define([], function() {
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || result.error);
             return result;
+        },
+        mod_gns3lab_get_checks: async() => checksOverview(),
+        mod_gns3lab_start_check: async args => {
+            needSeat(args, 'start_check');
+            const s = await view();
+            if (!s || s.status !== 'running') {
+                throw new Error('The lab is not running.');
+            }
+            const o = checksOverview();
+            if (o.attempts.left === 0) {
+                throw new Error('You have no check attempts left.');
+            }
+            if (!checks.runs.some(r => r.status === 'queued' || r.status === 'running')) {
+                checks.runs.push({runid: 'c-' + Math.random().toString(16).slice(2, 18).padEnd(16, '0'), status: 'queued',
+                    outcome: checks.next || 'graded', mark: -1, counts: {critical: 0, major: 0, minor: 0, note: 0}, errorcode: '',
+                    requestedat: now(), finishedat: 0, at: Date.now(), findings: []});
+                checks.next = null;
+            }
+            return checksOverview();
+        },
+        mod_gns3lab_get_check_run: async args => {
+            const r = checks.runs.find(x => x.runid === args.runid);
+            if (!r) {
+                throw new Error('This check is not known in this activity.');
+            }
+            checkRun(r);
+            const o = checksOverview();
+            const detailed = o.detailsfrom === 0 && r.status === 'done';
+            return {...checkSummary(r), detailed, detailsfrom: o.detailsfrom, gone: false,
+                findings: detailed ? r.findings : [],
+                rules: detailed ? [{code: 'address_not_saved', group: 'addressing', status: 'skipped', reason: 'no_collector'}] : []};
         },
         mod_gns3lab_get_course_overview: courseOverview,
         mod_gns3lab_get_state: async args => {
@@ -444,6 +522,15 @@ define([], function() {
         },
         get session() {
             return session;
+        },
+        // Auto-checks: the runs, and the outcome of the next run ('incomplete' or 'failed').
+        checks: {
+            get runs() {
+                return checks.runs;
+            },
+            next: outcome => {
+                checks.next = outcome;
+            },
         },
         // Calls an external function the way the page does, for a test.
         call: (name, args) => handlers[name](args),

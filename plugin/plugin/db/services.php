@@ -95,6 +95,27 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_get_checks' => [
+        'classname' => \mod_gns3lab\external\get_checks::class,
+        'description' => 'Auto-check settings, attempts and runs of the user or of an observed student in an activity.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_start_check' => [
+        'classname' => \mod_gns3lab\external\start_check::class,
+        'description' => 'Starts an auto-check of the running lab of the current user.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_get_check_run' => [
+        'classname' => \mod_gns3lab\external\get_check_run::class,
+        'description' => 'One auto-check run with its report.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_save_lab_draft' => [
         'classname' => \mod_gns3lab\external\save_lab_draft::class,
         'description' => 'Saves the draft of a library lab from the lab editor.',

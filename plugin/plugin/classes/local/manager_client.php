@@ -405,6 +405,55 @@ class manager_client {
     }
 
     /**
+     * Starts a check of a running session (CONTRACTS §2.9).
+     *
+     * A session that is not running is session_not_running; a session with a run in progress is check_in_progress
+     * with run_id in the details of the exception.
+     *
+     * @param string $sessionid session id
+     * @param int $requestedby id of the Moodle user who asked for the check
+     * @param array $grading grading of the activity (checks::grading())
+     * @return \stdClass the run, normally queued
+     */
+    public function start_check(string $sessionid, int $requestedby, array $grading): \stdClass {
+        return $this->expect_run($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/checks', [
+            'requested_by_user_id' => $requestedby,
+            'grading' => $grading,
+        ]));
+    }
+
+    /**
+     * A check run with its result, findings and rules (CONTRACTS §2.9).
+     *
+     * An unknown run or a run of a deleted session is a manager_exception with is_not_found().
+     *
+     * @param string $sessionid session id
+     * @param string $runid run id
+     * @return \stdClass
+     */
+    public function get_check(string $sessionid, string $runid): \stdClass {
+        return $this->expect_run($this->request(
+            'GET',
+            '/api/v1/sessions/' . rawurlencode($sessionid) . '/checks/' . rawurlencode($runid)
+        ));
+    }
+
+    /**
+     * Checks the fields every check run must have.
+     *
+     * @param mixed $data decoded JSON
+     * @return \stdClass
+     */
+    protected function expect_run(mixed $data): \stdClass {
+        $run = $this->expect_object($data);
+        if (!is_string($run->run_id ?? null) || !preg_match('/^[A-Za-z0-9_-]{1,64}$/', $run->run_id)
+                || !is_string($run->status ?? null)) {
+            throw new manager_exception('badresponse', 200, 'check run without run_id or status');
+        }
+        return $run;
+    }
+
+    /**
      * Sends one request and decodes the JSON answer.
      *
      * @param string $method HTTP method

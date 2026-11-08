@@ -143,5 +143,58 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         upgrade_mod_savepoint(true, 2026103100, 'gns3lab');
     }
 
+    if ($oldversion < 2026110800) {
+        // Auto-checks (docs/autochecks.md): the settings of an activity, its grade and the runs of the students.
+        $table = new xmldb_table('gns3lab');
+        $fields = [
+            new xmldb_field('grade', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'seatmode'),
+            new xmldb_field('checksenabled', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'grade'),
+            new xmldb_field('checksprofile', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, 'standard', 'checksenabled'),
+            new xmldb_field('checksthresholds', XMLDB_TYPE_TEXT, null, null, null, null, null, 'checksprofile'),
+            new xmldb_field('checksfailmark', XMLDB_TYPE_INTEGER, '3', null, XMLDB_NOTNULL, null, '2', 'checksthresholds'),
+            new xmldb_field('checksoverrides', XMLDB_TYPE_TEXT, null, null, null, null, null, 'checksfailmark'),
+            new xmldb_field('checksattempts', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0', 'checksoverrides'),
+            new xmldb_field('checksreport', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, 'full', 'checksattempts'),
+            new xmldb_field('checksreportdate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'checksreport'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        $table = new xmldb_table('gns3lab_check_runs');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('gns3labid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('sessionid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('runid', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('requestedby', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('status', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, 'queued');
+        $table->add_field('outcome', XMLDB_TYPE_CHAR, '12', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('mark', XMLDB_TYPE_INTEGER, '5', null, null, null, null);
+        $table->add_field('topmark', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('failmark', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('critical', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('major', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('minor', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('note', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('errorcode', XMLDB_TYPE_CHAR, '32', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timefinished', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_key('gns3labid', XMLDB_KEY_FOREIGN, ['gns3labid'], 'gns3lab', ['id']);
+        $table->add_key('userid', XMLDB_KEY_FOREIGN, ['userid'], 'user', ['id']);
+        $table->add_index('labrun', XMLDB_INDEX_UNIQUE, ['gns3labid', 'runid']);
+        $table->add_index('labuser', XMLDB_INDEX_NOTUNIQUE, ['gns3labid', 'userid']);
+        $table->add_index('status', XMLDB_INDEX_NOTUNIQUE, ['status']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026110800, 'gns3lab');
+    }
+
     return true;
 }

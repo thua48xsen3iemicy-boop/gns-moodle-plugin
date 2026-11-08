@@ -410,9 +410,11 @@ def skip_text(rest, lines):
 
 
 def blocks_of(text):
-    """(interfaces, vlans, switch, vtp mode) by the structure of the text: blocks start in column 0, their
-    commands are indented, `!` separates. Text of banners and macros is skipped: it may look like anything."""
-    interfaces, vlans, switch, vtp = {}, {}, False, None
+    """(interfaces, vlans, switch, vtp mode, global lines) by the structure of the text: blocks start in column 0,
+    their commands are indented, `!` separates. Text of banners and macros is skipped: it may look like anything.
+    Global lines are the column-0 commands this module reads beyond blocks: `hostname`, `ip route`, `ip routing`,
+    `ip default-gateway`."""
+    interfaces, vlans, switch, vtp, top = {}, {}, False, None, []
     current = None  # the commands of the open interface block, or the VLANs (dicts) of the open `vlan` block
     lines = iter(text.splitlines())
     for line in lines:
@@ -439,33 +441,160 @@ def blocks_of(text):
             switch = True
         elif words[:2] == ["vtp", "mode"] and len(words) > 2:
             vtp = words[2]
+        elif words[0] == "hostname" or words[:2] in (["ip", "route"], ["ip", "routing"], ["ip", "default-gateway"]) \
+                or words[:3] == ["no", "ip", "routing"]:
+            top.append(words)
         elif words[0] == "banner" and len(words) > 2:
             skip_text(stripped.split(None, 2)[2], lines)
         elif words[:2] == ["macro", "name"]:
             for macro_line in lines:
                 if macro_line.strip() == "@":
                     break
-    return interfaces, vlans, switch, vtp
+    return interfaces, vlans, switch, vtp, top
 
 
 def natural(name):
     return tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name))
 
 
+ROUTE_OPTIONS = {"name": 1, "tag": 1, "track": 1, "permanent": 0}  # words after the next hop and distance
+
+
+def hostname_of(top):
+    names = [words[1] for words in top if words[0] == "hostname" and len(words) == 2]
+    return names[-1] if names else None
+
+
+def routing_of(top, switch):
+    """Whether the device routes. IOS saves `no ip routing` when routing is off on a router; a Catalyst-like switch
+    routes only with `ip routing` saved. The last line wins."""
+    routing = not switch
+    for words in top:
+        if words == ["ip", "routing"]:
+            routing = True
+        elif words == ["no", "ip", "routing"]:
+            routing = False
+    return routing
+
+
+def static_route(words):
+    """`ip route <net> <mask> {<ip> | <iface> [<ip>]} [<distance>] [name N] [tag T] [track N] [permanent]` ->
+    (dst, via, dev, distance), or None for what is not understood: VRFs, `dhcp`, other options."""
+    rest = words[2:]
+    try:
+        network = ipaddress.IPv4Network(f"{rest[0]}/{prefix_length(rest[1], 'ip route')}", strict=False)
+        rest = rest[2:]
+        via = dev = None
+        try:
+            via = str(ipaddress.IPv4Address(rest[0]))
+            rest = rest[1:]
+        except ValueError:
+            if not re.fullmatch(r"[A-Za-z][A-Za-z-]*\d+(?:[/.:]\d+)*", rest[0]):
+                return None  # vrf, dhcp, a keyword...: not a next hop
+            dev, rest = rest[0], rest[1:]
+            if rest:
+                try:
+                    via = str(ipaddress.IPv4Address(rest[0]))
+                    rest = rest[1:]
+                except ValueError:
+                    pass
+        distance = 1
+        if rest and rest[0].isdigit():
+            distance, rest = int(rest[0]), rest[1:]
+            if not 1 <= distance <= 255:
+                return None
+        while rest:
+            size = ROUTE_OPTIONS.get(rest[0])
+            if size is None or len(rest) <= size:
+                return None
+            rest = rest[1 + size :]
+    except (IndexError, ValueError, ConfigError):
+        return None
+    dst = "default" if network.prefixlen == 0 else str(network)
+    return dst, via, dev, distance
+
+
+def routes_of(interfaces, top, switch):
+    """The routing table the device boots with (live-state.md 3.3), as far as the configuration tells it.
+
+    Connected: the networks of the addresses of interfaces that are not shut down (nor is the parent of a subinterface),
+    `proto: connected`, metric 0. Static, when the device routes: `ip route` lines, `proto: static`, the metric is the
+    administrative distance (1 unless given); a route through an interface that is shut down is not installed. A static
+    route to a next hop only gets `dev` when the next hop lies in a connected network; whether IOS would resolve it
+    recursively is left to the reader. When it does not route (an L2 switch): `ip default-gateway` as a `default`
+    route. VRF routes and lines this parser does not understand are left out.
+    """
+    by_name = {entry["name"]: entry for entry in interfaces}
+
+    def up(name):
+        entry = by_name.get(name)
+        if entry is None or entry.get("admin") == "down":
+            return False
+        return entry.get("kind") != "subif" or by_name.get(entry.get("parent"), {}).get("admin") != "down"
+
+    routes, connected = [], []
+    for entry in interfaces:
+        if not up(entry["name"]):
+            continue
+        for address in entry.get("ipv4") or []:
+            network = ipaddress.IPv4Interface(address).network
+            connected.append((network, entry["name"]))
+            routes.append({"dst": str(network), "dev": entry["name"], "proto": "connected", "metric": 0})
+
+    def device_of(via):
+        hop = ipaddress.IPv4Address(via)
+        matches = [(network.prefixlen, name) for network, name in connected if hop in network]
+        return max(matches)[1] if matches else None
+
+    routing = routing_of(top, switch)
+    for words in top:
+        if routing and words[:2] == ["ip", "route"]:
+            parsed = static_route(words)
+            if parsed is None:
+                continue
+            dst, via, dev, distance = parsed
+            if dev is not None and dev in by_name and not up(dev):
+                continue
+            route = {"dst": dst}
+            if via is not None:
+                route["via"] = via
+            dev = dev or (device_of(via) if via is not None else None)
+            if dev is not None:
+                route["dev"] = dev
+            route.update(proto="static", metric=distance)
+            if route not in routes:
+                routes.append(route)
+        elif not routing and words[:2] == ["ip", "default-gateway"] and len(words) == 3:
+            try:
+                via = str(ipaddress.IPv4Address(words[2]))
+            except ValueError:
+                continue
+            routes = [r for r in routes if r["dst"] != "default"]  # the last line wins
+            route = {"dst": "default", "via": via}
+            if (dev := device_of(via)) is not None:
+                route["dev"] = dev
+            route.update(proto="static", metric=1)
+            routes.append(route)
+    return sorted(routes, key=lambda r: (r["dst"], r["metric"], r.get("via", ""), r.get("dev", "")))
+
+
 def parse_ios_config(text, ports):
     """Turn a saved IOS configuration into the fragment of a live-state.md node that `ios.config/1` owns.
 
-    Only what the configuration sets is kept (CONTRACTS.md 4.6): no `oper`, no routes, no OSPF. Comments and
-    the order of the blocks do not matter, so the same saved configuration always gives the same `data`.
+    Only what the configuration sets is kept (CONTRACTS.md 4.6): no `oper`, no OSPF; routes are the table the
+    device would boot with (`routes_of`). Comments and the order of the blocks do not matter, so the same saved
+    configuration always gives the same `data`.
     """
     try:
-        found, vlans, switch, vtp = blocks_of(text)
+        found, vlans, switch, vtp, top = blocks_of(text)
         interfaces = [
             entry
             for name in sorted(found, key=natural)
             if (entry := interface_entry(name, found[name], ports, switch)) is not None
         ]
-        data = {"interfaces": interfaces}
+        data = {"interfaces": interfaces, "routes": routes_of(interfaces, top, switch)}
+        if (hostname := hostname_of(top)) is not None:
+            data["hostname"] = hostname
         # The VLAN database sits in the configuration only in VTP transparent and off modes; in server and
         # client mode it is vlan.dat, which this collector does not read (SLOT_REQUESTS.md 8).
         if vtp in ("transparent", "off"):

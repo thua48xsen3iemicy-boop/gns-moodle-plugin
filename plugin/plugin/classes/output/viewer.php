@@ -20,6 +20,7 @@ use core\output\renderable;
 use core\output\renderer_base;
 use core\output\templatable;
 use core\url;
+use mod_gns3lab\local\checks;
 use mod_gns3lab\local\demo;
 use mod_gns3lab\local\lab_preview;
 use mod_gns3lab\local\reveal;
@@ -77,6 +78,8 @@ class viewer implements renderable, templatable {
         $data->fogstart = reveal::start_names($this->instance);
         // Who may drive the lab at the same time (docs/seat.md): the page claims the seat unless the mode is `off`.
         $data->seatmode = seat::mode($this->instance);
+        // Auto-checks (docs/autochecks.md): the page asks for the details (mod_gns3lab_get_checks) only when they are on.
+        $data->checks = checks::enabled($this->instance);
         $mode = $data->factsview;
         $back = $this->fromcourse && $this->observed
             ? new url('/mod/gns3lab/course.php', ['id' => $this->cm->course])

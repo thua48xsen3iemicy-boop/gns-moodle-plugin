@@ -44,6 +44,7 @@ import {
     MAX_PER_CALL, MODES, applyReveal, emptyMask, maskAdd, maskFromItems, maskItems, revealByCommand, sendable, settleReveal,
 } from 'mod_gns3lab/reveal';
 import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
+import {Checks, STRING_KEYS as CHECK_KEYS} from 'mod_gns3lab/checks';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
@@ -231,6 +232,21 @@ class LabPage {
             this.seat = new Seat(root, {cmid, strings, onChange: held => this.seatChanged(held)});
             this.seat.start();
         }
+        // Auto-checks (docs/autochecks.md): the panel asks the server whether the activity has them.
+        this.checks = null;
+        if (this.data.checks && !this.data.authoring) {
+            this.checks = new Checks(root, {
+                cmid, userid, api: this.api, strings, toast: (text, ms) => this.toast(text, ms),
+                onOpen: () => {
+                    this.details.hide();
+                    if (this.hideAssignments) {
+                        this.hideAssignments();
+                    }
+                },
+            });
+            this.checks.setSession(this.session && this.session.session);
+            this.checks.load();
+        }
         this.bindAsStudent(region('asStudent'));
         if (this.uncovering && controllable) {
             this.loadMask();
@@ -258,6 +274,9 @@ class LabPage {
             details: sel => {
                 if (this.hideAssignments) {
                     this.hideAssignments();
+                }
+                if (this.checks) {
+                    this.checks.close();
                 }
                 details.show(sel);
             },
@@ -315,6 +334,9 @@ class LabPage {
             open.onclick = () => {
                 const show = assignments.hidden;
                 this.details.hide();
+                if (this.checks) {
+                    this.checks.close();
+                }
                 if (show) {
                     this.stage.select(null);
                 }
@@ -330,7 +352,13 @@ class LabPage {
                 if (e.key === 'Escape') { e.stopPropagation(); hideAssignments(); open.focus(); }
             });
         }
-        region('overview').onclick = () => { hideAssignments(); this.details.toggleSummary(); };
+        region('overview').onclick = () => {
+            hideAssignments();
+            if (this.checks) {
+                this.checks.close();
+            }
+            this.details.toggleSummary();
+        };
         const refresh = region('canvasRefresh');
         if (refresh) {
             refresh.onclick = async() => {
@@ -373,6 +401,9 @@ class LabPage {
      */
     stateChanged(state, before) {
         const s = state.session;
+        if (this.checks) {
+            this.checks.setSession(s);
+        }
         const running = !!s && s.status === 'running';
         if (!running || (before && before.sessionid !== s.sessionid)) {
             this.consoles.closeAll();
@@ -948,7 +979,9 @@ export const init = async(prefix, cmid, userid = 0) => {
         return;
     }
     root.dataset.labReady = '1';
-    const keys = [...new Set([...UI_KEYS, ...SESSION_KEYS, ...SEAT_KEYS, ...CONSOLE_KEYS, ...VNC_KEYS, ...SNIPPET_KEYS])];
+    const keys = [...new Set([
+        ...UI_KEYS, ...SESSION_KEYS, ...SEAT_KEYS, ...CONSOLE_KEYS, ...VNC_KEYS, ...SNIPPET_KEYS, ...CHECK_KEYS,
+    ])];
     const values = await getStrings(keys.map(key => ({key, component: 'mod_gns3lab'})));
     const strings = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
     new LabPage(root, {prefix, cmid, userid, strings});

@@ -152,6 +152,13 @@ for (const lang of ['en', 'ru']) {
     }
 }
 
+// Auto-checks (docs/autochecks.md): index.<lang>.checks.html is an activity with them switched on; the stub answers
+// mod_gns3lab_get_checks, _start_check and _get_check_run (?checksreport=counts|after, ?checksmax=N).
+for (const lang of ['en', 'ru']) {
+    const body = page(lang, {datajson: JSON.stringify({...data, checks: true})});
+    fs.writeFileSync(path.join(dist, `index.${lang}.checks.html`), shell(lang, '', body));
+}
+
 // The seat (classes/local/seat.php, docs/seat.md): the activity lets one browser page drive the lab, index.<lang>.seat.html;
 // ?seat=othertab or ?seat=otherlogin opens it with the seat held by somebody else.
 for (const lang of ['en', 'ru']) {

@@ -21,7 +21,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api import ios_config
+from api import ios_config, linux_facts
 from api.client import get_lifecycle
 from api.qga import Priority, QgaBusy, QgaCommandError, QgaError, QgaTimeout, QgaUnavailable
 
@@ -195,7 +195,8 @@ try {
     $routes = @(Get-NetRoute -AddressFamily IPv4 | ForEach-Object {
         [pscustomobject]@{ Index = [int]$_.InterfaceIndex; Dst = [string]$_.DestinationPrefix; Next = [string]$_.NextHop; Metric = [int]$_.RouteMetric + [int]$_.InterfaceMetric; Proto = [string]$_.Protocol }
     })
-    $json = [pscustomobject]@{ adapters = $adapters; addresses = $addresses; routes = $routes } | ConvertTo-Json -Depth 4 -Compress
+    $hostname = try { [string][System.Net.Dns]::GetHostName() } catch { '' }
+    $json = [pscustomobject]@{ adapters = $adapters; addresses = $addresses; routes = $routes; hostname = $hostname } | ConvertTo-Json -Depth 4 -Compress
     [regex]::Replace($json, '[^\x00-\x7F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
 } catch {
     [Console]::Error.WriteLine($_.Exception.Message)
@@ -292,7 +293,11 @@ def parse_windows_net(stdout, macs):
             "failed", f"Unexpected output of Get-NetAdapter: {type(exc).__name__}"
         ) from exc
     set_gateway(interfaces, routes)
-    return {"interfaces": interfaces, "routes": routes}
+    data = {"interfaces": interfaces, "routes": routes}
+    hostname = document.get("hostname")
+    if isinstance(hostname, str) and hostname.strip():  # the DNS host name; older slots did not ask for it
+        data["hostname"] = hostname.strip()
+    return data
 
 
 def guest_is_windows(info):
@@ -447,6 +452,17 @@ def parse_routeros_net(stdout, macs):
         raise FactError("failed", f"Unexpected output of RouterOS: {type(exc).__name__}") from exc
     set_gateway(interfaces, routes)
     return {"interfaces": interfaces, "routes": routes}
+
+
+# The identity of a RouterOS guest is its hostname: one line, `/system identity` exists in RouterOS 6 and 7.
+ROUTEROS_SYS_COMMAND = ":put [/system identity get name]"
+
+
+def parse_routeros_sys(stdout):
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise FactError("failed", "Unexpected output of /system identity")
+    return {"hostname": lines[0]}
 
 
 # Linux switch (images/linux-switch): one exec asks the guest API twice. No switchctl means the node
@@ -686,7 +702,54 @@ IOS_CONFIG = Collector(
     applies=lambda node, spec: node.get("node_type") == "iou",
     local=ios_config.collect,
 )
-COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET, ROUTEROS_NET, IOS_CONFIG)
+
+
+def guest_parser(parse, what):
+    """A parser of api/linux_facts.py as a collector's: its errors become `failed` without the guest's text."""
+
+    def run(stdout, node):
+        try:
+            return parse(stdout)
+        except linux_facts.ParseError as exc:
+            raise FactError("failed", f"Unexpected output of {what}: {exc}"[:MESSAGE_LIMIT]) from exc
+        except (ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
+            raise FactError("failed", f"Unexpected output of {what}: {type(exc).__name__}") from exc
+
+    return run
+
+
+# Every Linux guest, the Linux switch included: what the node says about itself (api/linux_facts.py).
+LINUX_SYS = Collector(
+    name="linux.sys",
+    schema="linux.sys/1",
+    command=linux_facts.LINUX_SYS_COMMAND,
+    applies=LINUX_NET.applies,
+    parse=guest_parser(linux_facts.parse_linux_sys, "the hostname, ip_forward and resolv.conf"),
+    missing="The guest has no /proc/sys",
+)
+# The saved network configuration (persistence: saved). Its own collector: a heavier read whose failure must not
+# take the hostname with it, and a separate journal in the manager. A broken configuration is a fact, not a
+# failure: `net_saved.ok` is false and the record stays healthy.
+LINUX_CONFIG = Collector(
+    name="linux.config",
+    schema="linux.config/1",
+    command=linux_facts.LINUX_CONFIG_COMMAND,
+    applies=LINUX_NET.applies,
+    parse=guest_parser(linux_facts.parse_linux_config, "the saved network configuration"),
+    missing="The guest has no usable /bin/sh",
+)
+ROUTEROS_SYS = Collector(
+    name="routeros.sys",
+    schema="routeros.sys/1",
+    command=ROUTEROS_SYS_COMMAND,
+    applies=LINUX_NET.applies,
+    parse=lambda stdout, node: parse_routeros_sys(stdout),
+    missing="The guest has no /system identity",
+    family="routeros",
+    shell="routeros",
+)
+COLLECTORS = (LINUX_NET, SWITCH_NET, SWITCH_FDB, WINDOWS_NET, ROUTEROS_NET, IOS_CONFIG, LINUX_SYS, LINUX_CONFIG,
+              ROUTEROS_SYS)
 COLLECTOR_IDS = [collector.schema for collector in COLLECTORS] + ["iol.l1/1"]
 
 

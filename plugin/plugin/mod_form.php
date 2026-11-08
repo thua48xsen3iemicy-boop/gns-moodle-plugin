@@ -97,8 +97,106 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         $mform->setDefault('seatmode', \mod_gns3lab\local\seat::TAB);
         $mform->addHelpButton('seatmode', 'seatmode', 'gns3lab');
 
+        if (self::manager_offers_checks()) {
+            $this->checks_elements();
+        }
+
         $this->standard_coursemodule_elements();
+        // A new activity has no grade: only the auto-checks give one (docs/autochecks.md), and not every lab has them.
+        if ($mform->elementExists('grade') && empty($this->current->instance)) {
+            $mform->setDefault('grade', 0);
+        }
         $this->add_action_buttons();
+    }
+
+    /**
+     * Whether the lab manager offers auto-checks (CONTRACTS §2.9): GET /api/v1/info, cached by the client.
+     *
+     * @return bool
+     */
+    protected static function manager_offers_checks(): bool {
+        if (!\mod_gns3lab\local\manager_client::is_configured()) {
+            return false;
+        }
+        try {
+            return \core\di::get(\mod_gns3lab\local\manager_client::class)->has_feature('checks');
+        } catch (\mod_gns3lab\local\manager_exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * The auto-check settings (docs/autochecks.md): strictness, thresholds, attempts, class overrides and the report.
+     */
+    protected function checks_elements(): void {
+        $mform = $this->_form;
+        $mform->addElement('header', 'checkssettings', get_string('checkssettings', 'gns3lab'));
+        $mform->addElement('advcheckbox', 'checksenabled', get_string('checksenabled', 'gns3lab'));
+        $mform->addHelpButton('checksenabled', 'checksenabled', 'gns3lab');
+
+        $profiles = [];
+        foreach (\mod_gns3lab\local\checks::PROFILES as $profile) {
+            $profiles[$profile] = get_string('checksprofile_' . $profile, 'gns3lab');
+        }
+        $mform->addElement('select', 'checksprofile', get_string('checksprofile', 'gns3lab'), $profiles);
+        $mform->setDefault('checksprofile', \mod_gns3lab\local\checks::DEFAULT_PROFILE);
+        $mform->addHelpButton('checksprofile', 'checksprofile', 'gns3lab');
+        $mform->hideIf('checksprofile', 'checksenabled');
+
+        $defaults = \mod_gns3lab\local\checks::DEFAULT_THRESHOLDS;
+        $labels = [
+            'mark' => get_string('checksthrmark', 'gns3lab'),
+            'critical' => get_string('checksthrcritical', 'gns3lab'),
+            'major' => get_string('checksthrmajor', 'gns3lab'),
+            'minor' => get_string('checksthrminor', 'gns3lab'),
+        ];
+        for ($i = 0; $i < \mod_gns3lab\local\checks::THRESHOLD_ROWS; $i++) {
+            $group = [];
+            foreach ($labels as $field => $label) {
+                $name = "checksthr{$i}{$field}";
+                $group[] = $mform->createElement('static', "{$name}label", '', $label);
+                $group[] = $mform->createElement('text', $name, $label, ['size' => 3, 'inputmode' => 'numeric']);
+                $mform->setType($name, PARAM_RAW_TRIMMED);
+                $value = $defaults[$i][$field] ?? null;
+                $mform->setDefault($name, $value === null ? '' : (string) $value);
+            }
+            $mform->addGroup($group, "checksthr{$i}", get_string('checksthreshold', 'gns3lab', $i + 1), ' ', false);
+            $mform->hideIf("checksthr{$i}", 'checksenabled');
+            if ($i === 0) {
+                $mform->addHelpButton("checksthr{$i}", 'checksthreshold', 'gns3lab');
+            }
+        }
+
+        $mform->addElement('text', 'checksfailmark', get_string('checksfailmark', 'gns3lab'), ['size' => 3]);
+        $mform->setType('checksfailmark', PARAM_INT);
+        $mform->setDefault('checksfailmark', \mod_gns3lab\local\checks::DEFAULT_FAIL_MARK);
+        $mform->addHelpButton('checksfailmark', 'checksfailmark', 'gns3lab');
+        $mform->hideIf('checksfailmark', 'checksenabled');
+
+        $mform->addElement('text', 'checksattempts', get_string('checksattempts', 'gns3lab'), ['size' => 3]);
+        $mform->setType('checksattempts', PARAM_INT);
+        $mform->setDefault('checksattempts', 0);
+        $mform->addHelpButton('checksattempts', 'checksattempts', 'gns3lab');
+        $mform->hideIf('checksattempts', 'checksenabled');
+
+        $mform->addElement('textarea', 'checksoverridestext', get_string('checksoverrides', 'gns3lab'),
+            ['rows' => 4, 'cols' => 48, 'spellcheck' => 'false']);
+        $mform->setType('checksoverridestext', PARAM_RAW_TRIMMED);
+        $mform->addHelpButton('checksoverridestext', 'checksoverrides', 'gns3lab');
+        $mform->hideIf('checksoverridestext', 'checksenabled');
+
+        $mform->addElement('select', 'checksreport', get_string('checksreport', 'gns3lab'), [
+            \mod_gns3lab\local\checks::REPORT_FULL => get_string('checksreport_full', 'gns3lab'),
+            \mod_gns3lab\local\checks::REPORT_COUNTS => get_string('checksreport_counts', 'gns3lab'),
+            \mod_gns3lab\local\checks::REPORT_AFTER => get_string('checksreport_after', 'gns3lab'),
+        ]);
+        $mform->setDefault('checksreport', \mod_gns3lab\local\checks::REPORT_FULL);
+        $mform->addHelpButton('checksreport', 'checksreport', 'gns3lab');
+        $mform->hideIf('checksreport', 'checksenabled');
+
+        $mform->addElement('date_time_selector', 'checksreportdate', get_string('checksreportdate', 'gns3lab'));
+        $mform->hideIf('checksreportdate', 'checksenabled');
+        $mform->hideIf('checksreportdate', 'checksreport', 'neq', \mod_gns3lab\local\checks::REPORT_AFTER);
     }
 
     /**
@@ -111,6 +209,22 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         $names = \mod_gns3lab\local\reveal::parse_names($defaultvalues['fogstart'] ?? '');
         $field = $this->_form->getElement('fogstart');
         $defaultvalues['fogstart'] = $field->getType() === 'select' ? $names : implode(', ', $names);
+        if (!empty($defaultvalues['instance']) && $this->_form->elementExists('checksenabled')) {
+            $instance = (object) $defaultvalues;
+            $rows = \mod_gns3lab\local\checks::thresholds($instance);
+            for ($i = 0; $i < \mod_gns3lab\local\checks::THRESHOLD_ROWS; $i++) {
+                foreach (['mark', 'critical', 'major', 'minor'] as $key) {
+                    $value = $rows[$i][$key] ?? null;
+                    $defaultvalues["checksthr{$i}{$key}"] = $value === null ? '' : (string) $value;
+                }
+            }
+            $defaultvalues['checksoverridestext'] = \mod_gns3lab\local\checks::format_overrides(
+                \mod_gns3lab\local\checks::overrides($instance)
+            );
+            if (empty($defaultvalues['checksreportdate'])) {
+                unset($defaultvalues['checksreportdate']);
+            }
+        }
     }
 
     /**
@@ -129,11 +243,54 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         if (isset($data['maxduration']) && (int) $data['maxduration'] < 0) {
             $errors['maxduration'] = get_string('maxdurationinvalid', 'gns3lab');
         }
+        if (!empty($data['checksenabled'])) {
+            $errors += $this->checks_errors($data);
+        }
         if (($data['factsview'] ?? '') === \mod_gns3lab\local\reveal::FOG) {
             $error = $this->fogstart_error($data);
             if ($error !== '') {
                 $errors['fogstart'] = $error;
             }
+        }
+        return $errors;
+    }
+
+    /**
+     * Checks the auto-check settings by the rules of the lab manager (CONTRACTS §2.9), so it never refuses them.
+     *
+     * @param array $data submitted data
+     * @return array errors keyed by field name
+     */
+    protected function checks_errors(array $data): array {
+        $errors = [];
+        $rows = [];
+        for ($i = 0; $i < \mod_gns3lab\local\checks::THRESHOLD_ROWS; $i++) {
+            $row = [];
+            foreach (['mark', 'critical', 'major', 'minor'] as $key) {
+                $row[$key] = trim((string) ($data["checksthr{$i}{$key}"] ?? ''));
+            }
+            if ($row['mark'] === '' && ($row['critical'] !== '' || $row['major'] !== '' || $row['minor'] !== '')) {
+                $errors["checksthr{$i}"] = get_string('checksthresholdsmark', 'gns3lab');
+            }
+            $rows[] = $row;
+        }
+        $failmark = (int) ($data['checksfailmark'] ?? 0);
+        if ($failmark < 0 || $failmark > \mod_gns3lab\local\checks::MAX_MARK) {
+            $errors['checksfailmark'] = get_string('checksfailmarkinvalid', 'gns3lab');
+        }
+        $error = \mod_gns3lab\local\checks::thresholds_error(\mod_gns3lab\local\checks::clean_thresholds($rows), $failmark);
+        if ($error !== '' && !$errors) {
+            $errors[$error === 'checksfailmarkhigh' ? 'checksfailmark' : 'checksthr0'] = get_string($error, 'gns3lab');
+        }
+        if ((int) ($data['checksattempts'] ?? 0) < 0) {
+            $errors['checksattempts'] = get_string('checksattemptsinvalid', 'gns3lab');
+        }
+        [, $bad] = \mod_gns3lab\local\checks::parse_overrides((string) ($data['checksoverridestext'] ?? ''));
+        if ($bad) {
+            $errors['checksoverridestext'] = get_string('checksoverridesinvalid', 'gns3lab', implode(', ', array_slice($bad, 0, 5)));
+        }
+        if (($data['checksreport'] ?? '') === \mod_gns3lab\local\checks::REPORT_AFTER && empty($data['checksreportdate'])) {
+            $errors['checksreportdate'] = get_string('required');
         }
         return $errors;
     }

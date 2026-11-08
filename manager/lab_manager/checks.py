@@ -71,7 +71,8 @@ RULES = {
     "forwarding_on_host": ("host", ("minor", "major", "major"), False),
 }
 # Rules whose data no collector gives yet (stage 3): always skipped with no_collector.
-NOT_COLLECTED = {"hostname_wrong", "forwarding_off", "forwarding_on_host", "address_not_saved", "config_not_applied"}
+NOT_COLLECTED: set = set()  # Every rule has its data since slot 0.17.0 (linux.sys, linux.config, hostname, IOS routes)
+SAVED_MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")  # net_config of an image that saves addresses
 
 # Layers for the root cause: a finding is explained only by a finding of a lower layer that shares an object with it
 # and whose code is in CAUSES of the finding's code.
@@ -93,7 +94,8 @@ CAUSES = {
     "address_duplicate": {"node_stopped", "config_not_saved", "address_wrong", "address_misplaced"},
     "gateway_missing": {"node_stopped", "config_not_saved"},
     "gateway_wrong": L1 | L2_PORT | L2_DOMAIN | ADDRESS,
-    "unreachable": L1 | L2_PORT | L2_DOMAIN | ADDRESS | {"gateway_missing", "gateway_wrong", "subnet_mixed"},
+    "unreachable": L1 | L2_PORT | L2_DOMAIN | ADDRESS | {"gateway_missing", "gateway_wrong", "subnet_mixed",
+                                                        "forwarding_off"},
 }
 ORDER = list(RULES)  # Findings are reported in catalog order: lower layers first
 
@@ -566,7 +568,7 @@ class Run:
 
 
 def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, stale: set,
-             unsaved: set = frozenset()) -> tuple[list, list]:
+             unsaved: set = frozenset(), persistence: dict | None = None) -> tuple[list, list]:
     """(rules, findings) of a lab: rules = [{"code", "group", "status"[, "reason"]}], findings as in the run document."""
     checks = checks or {}
     run = Run()
@@ -1141,6 +1143,9 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                         return ("fail", f"{names(nid)} → {hop}: {hop} не в одном L2-домене с {names(nid)}", path)
                     return ("fail", f"{names(nid)} → {hop}: узла с адресом {hop} нет в сегменте", path)
                 nid = near[0].node_id
+                if model.nodes[nid]["facts"].get("ip_forward") is False and \
+                        not any(a.ip == dst for i in model.ifaces.get(nid, []) for a in i.addrs):
+                    return ("fail", f"на {names(nid)} выключена пересылка пакетов (ip_forward)", path + [nid])
             return ("fail", "слишком длинный путь", path)
 
         def primary(nid, exp=None):
@@ -1193,10 +1198,133 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
     else:
         run.skip("unreachable", "no_expectation")
 
+    # ---------------------------------------------------------------- the node itself
+    run.ran("hostname_wrong", "forwarding_off", "forwarding_on_host")
+    for nid in sorted(model.nodes, key=names):
+        if nid in ignored or nid in unsaved:
+            continue
+        reason = availability(nid)
+        if reason is not None:
+            if reason:
+                for code in ("hostname_wrong", "forwarding_off", "forwarding_on_host"):
+                    run.skip(code, reason)
+            continue
+        facts = model.nodes[nid]["facts"]
+        hostname = facts.get("hostname")
+        # ios.config of slot 0.17.0+ always gives `routes`; without a `hostname` line the device has no name of its own.
+        if isinstance(hostname, str) or (model.nodes[nid]["type"] == "iou" and "routes" in facts):
+            want = names(nid).lower()
+            have = (hostname or "").strip()
+            if have.lower() != want and not have.lower().startswith(want + "."):
+                run.add("hostname_wrong", f"{names(nid)}: имя узла «{have}», должно быть {names(nid)}." if have
+                        else f"{names(nid)}: имя узла не задано (hostname), должно быть {names(nid)}.",
+                        nodes=[names(nid)], objects={f"node:{nid}"})
+        else:
+            run.skip("hostname_wrong", "no_collector")
+        forward = facts.get("ip_forward")
+        if not isinstance(forward, bool):
+            if model.nodes[nid]["type"] == "qemu":
+                run.skip("forwarding_off", "no_collector")
+                run.skip("forwarding_on_host", "no_collector")
+        elif roles.get(nid) == "router" and not forward:
+            run.add("forwarding_off", f"{names(nid)}: маршрутизатор не пересылает пакеты (net.ipv4.ip_forward = 0).",
+                    nodes=[names(nid)], objects={f"node:{nid}"})
+        elif roles.get(nid) == "host" and forward:
+            run.add("forwarding_on_host", f"{names(nid)}: на узле включена пересылка пакетов (net.ipv4.ip_forward = 1), "
+                                          f"а это не маршрутизатор.", nodes=[names(nid)], objects={f"node:{nid}"})
+
+    # ---------------------------------------------------------------- saved network configuration (Linux)
+    run.ran("address_not_saved", "config_not_applied")
+    for nid in sorted(model.nodes, key=names):
+        mode = (persistence or {}).get(nid)
+        if nid in ignored or mode == "runtime":
+            continue
+        reason = availability(nid)
+        if reason is not None:
+            if reason and mode == "saved":
+                run.skip("address_not_saved", reason)
+                run.skip("config_not_applied", reason)
+            continue
+        facts = model.nodes[nid]["facts"]
+        saved = facts.get("net_saved")
+        if not isinstance(saved, dict):
+            if mode == "saved" and model.nodes[nid]["type"] == "qemu" and "interfaces" in facts and \
+                    "switchport" not in str(facts.get("interfaces")):
+                run.skip("address_not_saved", "no_collector")
+                run.skip("config_not_applied", "no_collector")
+            continue
+        if mode is None:  # A lab of the catalog: the image is unknown, the guest tells whether it saves addresses
+            mode = "runtime" if saved.get("mechanism") == "none" else "saved"
+            if mode == "runtime":
+                continue
+        if saved.get("supported") is False:
+            run.skip("address_not_saved", "unsupported_os")
+            run.skip("config_not_applied", "unsupported_os")
+            continue
+        node_obj = {f"node:{nid}"}
+        if saved.get("ok") is False:
+            run.add("config_not_applied", f"{names(nid)}: сохранённая настройка сети не применится: "
+                                          f"{str(saved.get('message') or 'ошибка в конфигурации')[:200]}.",
+                    nodes=[names(nid)], objects=node_obj)
+        stored = {}
+        for item in saved.get("interfaces") or []:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                stored[item["name"]] = item
+        mechanism = saved.get("mechanism") or "—"
+        live_gw = set()
+        routes = facts.get("routes") if isinstance(facts.get("routes"), list) else []
+        for r in routes:
+            if isinstance(r, dict) and r.get("dst") in ("default", "0.0.0.0/0") and r.get("via") and r.get("proto") != "dhcp":
+                live_gw.add(str(r["via"]))
+        saved_gw = {str(item["gateway"]) for item in stored.values() if item.get("gateway")}
+        for i in model.ifaces[nid]:
+            if i.kind == "loopback":
+                continue
+            entry = stored.get(i.name)
+            dhcp = bool(entry and entry.get("method") == "dhcp")
+            kept = {str(x) for x in (entry or {}).get("ipv4") or []}
+            objects = node_obj | ({f"port:{(nid, *i.port)}"} if i.port else set())
+            for a in i.addrs:
+                if a.ip in APIPA or dhcp or str(a) in kept:
+                    continue
+                run.add("address_not_saved", f"{i.label}: адрес {a} задан только в работающей системе, в конфигурации "
+                                             f"сети ({mechanism}) его нет — после перезагрузки он пропадёт.",
+                        nodes=[i.node], ifaces=[iface_ref(i)], objects=objects)
+            live = {str(a) for a in i.addrs}
+            for text in sorted(kept - live):
+                run.add("config_not_applied", f"{i.label}: адрес {text} есть в конфигурации сети ({mechanism}), "
+                                              f"но в работающей системе его нет.",
+                        nodes=[i.node], ifaces=[iface_ref(i)], objects=objects)
+        dhcp_any = any(item.get("method") == "dhcp" for item in stored.values())
+        for gw in sorted(live_gw - saved_gw):
+            if not dhcp_any:
+                run.add("address_not_saved", f"{names(nid)}: шлюз по умолчанию {gw} задан только в работающей системе, "
+                                             f"в конфигурации сети ({mechanism}) его нет.", nodes=[names(nid)],
+                        objects=node_obj)
+        for gw in sorted(saved_gw - live_gw):
+            run.add("config_not_applied", f"{names(nid)}: шлюз {gw} есть в конфигурации сети ({mechanism}), "
+                                          f"но в работающей системе его нет.", nodes=[names(nid)], objects=node_obj)
+
     for code in NOT_COLLECTED:
         run.skip(code, "no_collector")
 
     return finish(run, checks)
+
+
+def persistence_of(model: Model, definition: dict | None, images: dict, checks: dict | None) -> dict:
+    """node_id -> saved | runtime | None (decide from the guest: a lab of the catalog) for the Linux guests (§4.4)."""
+    checks = checks or {}
+    images_of = {n["name"]: images.get(n.get("image")) for n in (definition or {}).get("nodes", [])}
+    out = {}
+    for nid, node in model.nodes.items():
+        explicit = ((checks.get("nodes") or {}).get(node["name"]) or {}).get("persistence") or checks.get("persistence")
+        if explicit:
+            out[nid] = explicit
+        elif node["name"] in images_of and images_of[node["name"]] is not None:
+            out[nid] = "saved" if images_of[node["name"]].net_config in SAVED_MECHANISMS else "runtime"
+        else:
+            out[nid] = None
+    return out
 
 
 def finish(run: Run, checks: dict):
@@ -1280,7 +1408,8 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
     if unsaved:
         model = Model(topology, state, statuses, now, consoles)
     expected = build_expected(model, roles, definition, checks)
-    rules, findings = evaluate(model, roles=roles, expected=expected, checks=checks, stale=stale, unsaved=unsaved)
+    rules, findings = evaluate(model, roles=roles, expected=expected, checks=checks, stale=stale, unsaved=unsaved,
+                               persistence=persistence_of(model, definition, images, checks))
     return grade(rules, findings, grading, checks)
 
 

@@ -444,3 +444,103 @@ def test_an_unsaved_cisco_switch_is_checked_as_it_would_boot():
     assert {f["code"] for f in result["findings"] if f["caused_by"] == by_code["config_not_saved"]["id"]} >= {
         "vlan_wrong", "segments_merged"}
     assert codes(result, counted=True) == ["config_not_saved"]
+
+
+# ---------------------------------------------------------------------- slot 0.17.0 facts: the node and the saved config
+
+
+def saved(*ifaces, ok=True, mechanism="ifupdown", message=None):
+    out = {"mechanism": mechanism, "ok": ok, "interfaces": [
+        {"name": n, "method": m, "ipv4": list(a), **({"gateway": g} if g else {})} for n, m, a, g in ifaces]}
+    if message:
+        out["message"] = message
+    return out
+
+
+def test_hostname_and_forwarding():
+    facts = good_facts()
+    facts["PC1"]["hostname"] = "pc1.lab.local"  # The name of the node, as an FQDN: right
+    facts["PC2"]["hostname"] = "debian"
+    facts["PC3"]["ip_forward"] = True
+    facts["R1"]["ip_forward"] = False
+    result = run(facts)
+    found = {f["code"]: f for f in result["findings"]}
+    assert "PC2: имя узла «debian», должно быть PC2." == found["hostname_wrong"]["message"]
+    assert len([f for f in result["findings"] if f["code"] == "hostname_wrong"]) == 1
+    assert found["forwarding_on_host"]["nodes"] == ["PC3"]
+    assert found["forwarding_off"]["nodes"] == ["R1"]
+    unreachable = found["unreachable"]
+    assert "выключена пересылка" in unreachable["message"] and unreachable["caused_by"] == found["forwarding_off"]["id"]
+    assert rule(result, "hostname_wrong")["status"] == "fail"
+
+
+def test_saved_and_runtime_addresses():
+    facts = good_facts()
+    facts["PC1"]["net_saved"] = saved(("ens3", "static", ["192.168.10.1/24"], "192.168.10.254"))
+    facts["PC2"]["net_saved"] = saved()  # Set with `ip` only: nothing in /etc/network/interfaces
+    facts["PC3"]["net_saved"] = saved(("ens3", "static", ["192.168.20.9/24"], None), ok=False,
+                                      message="missing required variable: netmask")
+    result = run(facts)
+    msgs = [(f["code"], f["nodes"], f["message"]) for f in result["findings"]]
+    assert ("address_not_saved", ["PC2"], "PC2 ens3: адрес 192.168.10.2/24 задан только в работающей системе, в "
+            "конфигурации сети (ifupdown) его нет — после перезагрузки он пропадёт.") in msgs
+    assert any(c == "address_not_saved" and n == ["PC2"] and "шлюз по умолчанию" in m for c, n, m in msgs)
+    assert any(c == "config_not_applied" and n == ["PC3"] and "missing required variable" in m for c, n, m in msgs)
+    assert any(c == "config_not_applied" and n == ["PC3"] and "192.168.20.9/24" in m for c, n, m in msgs)
+    assert not any(n == ["PC1"] for c, n, _ in msgs)
+
+    runtime = copy.deepcopy(DEFINITION)
+    runtime["checks"]["nodes"] = {"PC2": {"persistence": "runtime"}}
+    assert not any(f["nodes"] == ["PC2"] for f in run(facts, runtime)["findings"])
+    facts["PC2"]["net_saved"] = saved(("ens3", "dhcp", [], None))
+    assert not any(f["nodes"] == ["PC2"] for f in run(facts)["findings"])  # DHCP keeps whatever it gets
+    facts["PC2"]["net_saved"] = {"mechanism": "netplan", "supported": False}
+    result = run(facts)
+    assert not any(f["nodes"] == ["PC2"] for f in result["findings"])
+    assert rule(result, "address_not_saved")["status"] == "fail"  # PC3 still counts
+
+
+def test_catalog_labs_ask_the_guest_whether_it_saves():
+    facts = {"BUH-1": host("192.168.10.1/24", "192.168.10.254"), "BUH-2": host("192.168.10.2/24", "192.168.10.254"),
+             "ADM-1": host("192.168.20.1/24", "192.168.20.254"), "SW1": switch([10, 20, 10, 10, 20]), "R1": router()}
+    facts["BUH-1"]["net_saved"] = saved(mechanism="none")  # An image without ifupdown: `ip` is the task
+    facts["BUH-2"]["net_saved"] = saved()
+    state = {"nodes": {nid(n): {"name": n, "status": "started", **f} for n, f in facts.items()}}
+    result = run_checks(topology=topology(GNODES, GLINKS), state=state,
+                        statuses={nid(n): "started" for n, _, _ in GNODES}, definition=None, images={},
+                        checks={"format": "gns3lab.checks/1", "groups": {"by_name": True}}, grading=GRADING, stale=set())
+    assert {f["nodes"][0] for f in result["findings"] if f["code"] == "address_not_saved"} == {"BUH-2"}
+
+
+def test_unreachable_is_traced_through_a_cisco_router():
+    nodes = [("R1", "cisco-iou-l3"), ("PC1", "debian12"), ("PC2", "debian12")]
+    links = [(("PC1", 0, 0), ("R1", 0, 0)), (("PC2", 0, 0), ("R1", 0, 1))]
+    topo = {"topology": {
+        "nodes": [{"node_id": nid(n), "name": n, "node_type": IMAGES[i].kind, "console_type": "telnet"} for n, i in nodes],
+        "links": [{"link_id": f"l{k}", "nodes": [{"node_id": nid(a[0]), "adapter_number": a[1], "port_number": a[2]},
+                                                 {"node_id": nid(b[0]), "adapter_number": b[1], "port_number": b[2]}]}
+                  for k, (a, b) in enumerate(links)]}}
+    r1 = {"hostname": "R1", "interfaces": [
+        {"name": f"Ethernet0/{p}", "kind": "physical", "port": {"adapter": 0, "port": p}, "admin": "up", "ipv4": [a]}
+        for p, a in ((0, "192.168.10.254/24"), (1, "192.168.20.254/24"))],
+        "routes": [{"dst": "192.168.10.0/24", "dev": "Ethernet0/0", "proto": "connected"},
+                   {"dst": "192.168.20.0/24", "dev": "Ethernet0/1", "proto": "connected"}]}
+    definition = {"nodes": [{"name": n, "image": i} for n, i in nodes], "segments": [
+        {"name": "A", "subnet": {"fixed": "192.168.10.0/24"}, "gateway": {"node": "R1", "adapter": 0, "port": 0},
+         "members": [{"node": "PC1"}]},
+        {"name": "B", "subnet": {"fixed": "192.168.20.0/24"}, "gateway": {"node": "R1", "adapter": 0, "port": 1},
+         "members": [{"node": "PC2"}]}]}
+
+    def result(pc2_gw):
+        facts = {"R1": r1, "PC1": host("192.168.10.1/24", "192.168.10.254"), "PC2": host("192.168.20.1/24", pc2_gw)}
+        state = {"nodes": {nid(n): {"name": n, "status": "started", **f} for n, f in facts.items()}}
+        return run_checks(topology=topo, state=state, statuses={nid(n): "started" for n, _ in nodes},
+                          definition=definition, images=IMAGES, grading=GRADING, stale=set(),
+                          checks={"format": "gns3lab.checks/1", "reachability": "segments"})
+
+    good = result("192.168.20.254")
+    assert good["findings"] == [] and rule(good, "unreachable")["status"] == "pass"
+    bad = result(None)
+    assert codes(bad, counted=True) == ["gateway_missing"]
+    assert [f["message"] for f in bad["findings"] if f["code"] == "unreachable"] == [
+        "Нет связи A ↔ B: у PC2 нет маршрута к 192.168.10.1."]

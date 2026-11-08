@@ -361,5 +361,6 @@ def test_capabilities(mock_server):
         "vnc", "iol-nvram", "guest-shutdown", "routeros",
     }
     assert body["collectors"] == [
-        "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1", "iol.l1/1",
+        "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1",
+        "linux.sys/1", "linux.config/1", "routeros.sys/1", "iol.l1/1",
     ]

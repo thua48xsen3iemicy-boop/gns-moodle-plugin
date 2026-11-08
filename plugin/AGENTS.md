@@ -61,7 +61,9 @@ docs/          SPEC.md и прочая документация
   (снимает команды и вывод с буфера xterm), `reveal.js` (режимы `seen` и `fog`: маска открытого, что открывают команды и
   факты, видимая модель и отфильтрованные факты, без DOM, `../docs/lab-constructor/README.md` §2), `model.js` (модель
   `.gns3`), `preview.js` (небольшая схема эталонной лабы на странице активности `view.php`, без фактов и щелчков; данные —
-  `classes/local/lab_preview.php`, общий с `lab.php`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
+  `classes/local/lab_preview.php`, общий с `lab.php`), `checks.js` (панель автопроверок: кнопка «Проверить», ход прогона, отчёт, прошлые прогоны, `docs/autochecks.md`),
+  `checkreport.js` (отчёт без DOM: находки по первопричинам, состояние кнопки, период опроса; проверка — `devtools/check_checkreport.mjs`,
+  в браузере — `devtools/ui-harness/check_checks.js`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
   настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники).
   Страница преподавателя «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`): `course.js` (таблица «студенты × лабы», карточка, опрос) и
   `coursefacts.js` (сводка ячейки и данные карточки из `model.buildModel` + `facts.derive`, без DOM; проверка — `devtools/check_coursefacts.mjs`,
@@ -84,9 +86,12 @@ docs/          SPEC.md и прочая документация
   живут теперь в `facts.js` и `details.js`, консоль — в `console.js` и `consoles.js`. Редактор лаб (`editor.js`) ещё
   опирается на разметку и стили вьюера.
 - Одно место на лабу (0.12.0, `docs/seat.md`): `classes/local/seat.php` решает, кто ведёт лабу студента; `claim_seat` — захват и биение;
-  `start_session`, `stop_session`, `get_console_ticket` (свою лабу) и `reveal` зовут `seat::require_seat` и принимают `tabid`.
+  `start_session`, `stop_session`, `get_console_ticket` (свою лабу), `reveal` и `start_check` зовут `seat::require_seat` и принимают `tabid`.
   Новый вызов, которым студент **меняет** свою лабу или открывает консоль, обязан делать то же и отдавать странице `tabid`
   (`seat.js` `tabId()`, ошибку — в `reportRefusal`). Чтение место не охраняет. Контракт менеджера не затронут.
+- Автопроверки (0.19.0, `docs/autochecks.md`): настройки и каталог кодов правил — `classes/local/checks.php`, прогоны студентов,
+  попытки и оценки журнала — `classes/local/check_runs.php` (таблица `gns3lab_check_runs`), задача `task/sync_check_runs`.
+  Оценку ставит менеджер (CONTRACTS §2.9); что студент видит из отчёта, решает сервер плагина (`get_check_run`), не JS.
 - Шлюз консолей ведёт менеджер: `../manager/gateway/` в этом же репозитории (MANAGER_REQUESTS §12). Контракт
   браузер ↔ шлюз (билеты, кадры, коды закрытия) меняется только по договорённости с менеджером.
 

@@ -175,6 +175,20 @@ curl -X POST localhost:8090/mock/facts/stall/off
 Без Moodle то же видно в `ui-harness` (`?factsempty` — «нет данных», `?nofacts` — сессия без фактов,
 `window.__stub.facts` — сбой ноды и устаревание).
 
+## Автопроверки
+
+Mock объявляет `checks` и отвечает на `POST/GET /api/v1/sessions/{id}/checks[/{run_id}]` (CONTRACTS §2.9): прогон идёт ~4 с,
+результат зависит от снимка фактов (верный конфиг — оценка 5, после «Обновить сейчас» в карточке — `vlan_wrong` со
+следствиями и `address_missing`), оценка — по `grading` запроса. В элементе курса включите «Автопроверки» (раздел виден, раз
+менеджер объявил `checks`), затем на странице лабы — «Проверка» (`docs/autochecks.md`).
+
+```sh
+curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'   # следующий прогон: «повторите проверку»
+curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'       # следующий прогон: сбой слота
+```
+
+Без браузера: `node devtools/check_checkreport.mjs`; в Chromium: `cd devtools/ui-harness && node check_checks.js`.
+
 ## Проверка слоёв без браузера
 
 ```bash
