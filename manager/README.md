@@ -1,4 +1,12 @@
-# Lab Manager — 0.17.0
+# Lab Manager — 0.18.0
+
+Автопроверки, этап 3 (`../docs/autochecks/README.md`): правила, которым были нужны данные слота 0.17.0, теперь работают —
+имя узла (`hostname_wrong`, у Linux, Windows, RouterOS и Cisco), пересылка пакетов на маршрутизаторе и хосте
+(`forwarding_off`, `forwarding_on_host`), сохранённая настройка сети Linux против живой (`address_not_saved`,
+`config_not_applied`, режим `persistence`), связность по таблицам маршрутов и через Cisco IOL (`routes` из `ios.config`),
+и выключенная пересылка на Linux-маршрутизаторе по пути. Со слотом старше 0.17.0 эти правила получают `skipped`.
+
+## 0.17.0
 
 Автопроверки, этап 1 (`../docs/autochecks/README.md`, `docs/CONTRACTS.md` §2.9): `POST/GET /api/v1/sessions/{id}/checks`,
 возможность `checks` в `info` и в сессии с фактами. Прогон просит слот собрать факты, ждёт свежих до `CHECK_FACTS_WAIT` и
