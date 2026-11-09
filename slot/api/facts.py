@@ -805,6 +805,10 @@ class Facts:
         self.interval = float(os.getenv("SLOT_FACTS_INTERVAL", "30"))
         self.timeout = float(os.getenv("SLOT_FACTS_TIMEOUT", "10"))
         self.min_refresh = float(os.getenv("SLOT_FACTS_MIN_REFRESH", "5"))
+        # A guest that has just booted is still bringing its network up: ifupdown waiting for a DHCP lease holds
+        # `ifup --no-act` of linux.config past the timeout. Until a collector has answered once since the node
+        # started, a timeout or an unreachable agent within this many seconds is not published.
+        self.boot_grace = float(os.getenv("SLOT_FACTS_BOOT_GRACE", "120"))
         self.tick = max(min(self.interval, 2.0), 0.05)
         self.slots = asyncio.Semaphore(int(os.getenv("SLOT_FACTS_CONCURRENCY", "8")))
         self.results = {}  # project_id -> node_id -> {"name", "collectors": {name: result}}
@@ -817,6 +821,8 @@ class Facts:
         # would stay as a stranger's error (the manager never deletes a collector's row).
         self.families = {}
         self.snapshots = {}  # same keys: the outcome for the last version of a file (local collectors)
+        self.started = {}  # (project_id, node_id) -> monotonic time the slot first saw the node started
+        self.answered = set()  # (project_id, node_id, collector) that succeeded since the node started
         self.epoch = 0  # bumped by reset(): results of an attempt that started earlier are dropped
         self.force = False
         self.last_refresh = float("-inf")
@@ -834,6 +840,8 @@ class Facts:
         self.families.clear()
         self.snapshots.clear()
         self.soon.clear()
+        self.started.clear()
+        self.answered.clear()
 
     def request_refresh(self):
         now = time.monotonic()
@@ -893,9 +901,9 @@ class Facts:
             del self.results[project_id]
         for key in [k for k in self.next_due if k[0] not in labs]:
             del self.next_due[key]
-        for memory in (self.absent, self.confirmed):
+        for memory in (self.absent, self.confirmed, self.answered):
             memory.difference_update([k for k in memory if k[0] not in labs])
-        for memory in (self.families, self.snapshots, self.soon):
+        for memory in (self.families, self.snapshots, self.soon, self.started):
             for key in [k for k in memory if k[0] not in labs]:
                 del memory[key]
         if not self.lc.claimed:
@@ -912,6 +920,11 @@ class Facts:
                 spec = specs.get(node.get("name"))
                 if spec is None:
                     continue
+                booted = (lab["project_id"], node["node_id"])
+                if node.get("status") == "started":
+                    self.started.setdefault(booted, time.monotonic())
+                elif self.started.pop(booted, None) is not None:  # stopped: the next start boots again
+                    self.answered.difference_update([k for k in self.answered if k[:2] == booted])
                 if spec.get("uplink_port") is not None:
                     node = {**node, SHOWN_ADAPTERS: frozenset(cabled.get(spec["name"], set()) - {spec["uplink_port"]})}
                 due = []
@@ -1057,6 +1070,11 @@ class Facts:
             self.confirmed.discard(key)
             self.drop(key)
             return
+        if failure is None:
+            self.answered.add(key)
+        elif (not collector.probe and failure[0] in ("timeout", "unreachable") and key not in self.answered
+              and time.monotonic() - self.started.get(key[:2], float("-inf")) < self.boot_grace):
+            return  # still booting: asked again at the next round, nothing is published yet
         if collector.probe:
             if failure is None:
                 self.confirmed.add(key)

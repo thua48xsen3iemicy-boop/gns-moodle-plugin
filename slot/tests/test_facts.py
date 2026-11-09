@@ -634,6 +634,7 @@ def success():
 def scenario(monkeypatch, body):
     monkeypatch.setenv("SLOT_FACTS_INTERVAL", "0")  # every cycle collects again
     monkeypatch.setenv("SLOT_FACTS_MIN_REFRESH", "0")
+    monkeypatch.setenv("SLOT_FACTS_BOOT_GRACE", "0")  # every failure is published; the boot tests set their own
 
     async def run():
         labs = {"p1": lab()}
@@ -1861,3 +1862,52 @@ def test_a_spare_port_of_the_internet_node_is_not_shown(monkeypatch):
 def test_other_nodes_keep_every_interface():
     data = parse_linux_net(output(), MACS)
     assert cabled_ports_only(data, {"name": "PC1"}) is data
+
+
+# --- a guest that is still booting -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("failure", [QgaTimeout("slow"), QgaUnavailable("backing off")])
+def test_a_booting_guest_is_not_a_collection_error_until_the_grace_ends(monkeypatch, failure):
+    async def body(facts, lifecycle, labs):
+        facts.boot_grace = 120
+        lifecycle.qga.config_reply = failure  # ifupdown waits for a DHCP lease at boot
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n1"]["collectors"]
+        assert "linux.config" not in collectors and collectors["linux.net"]["ok"] is True
+        lifecycle.qga.config_reply = LINUX_CONFIG_NONE
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["ok"] is True
+        lifecycle.qga.config_reply = failure  # it has answered once: a failure now is the owner's to see
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["ok"] is False
+
+    scenario(monkeypatch, body)
+
+
+def test_the_grace_ends_and_starts_again_with_the_next_boot(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        facts.boot_grace = 120
+        lifecycle.qga.config_reply = QgaTimeout("slow")
+        await facts.cycle()
+        facts.started[("p1", "n1")] -= 121  # two minutes later the guest still does not answer
+        await facts.cycle()
+        record = facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]
+        assert record["ok"] is False and record["error"]["code"] == "timeout"
+        for status in ("stopped", "started"):  # the node is started again: it boots again
+            labs["p1"]["nodes"][0]["status"] = status
+            await facts.cycle()
+        assert ("p1", "n1") in facts.started and facts.started[("p1", "n1")] > 0
+        assert not any(k[:2] == ("p1", "n1") for k in facts.answered if k[2] == "linux.config")
+
+    scenario(monkeypatch, body)
+
+
+def test_a_refusal_of_the_guest_is_published_at_once(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        facts.boot_grace = 120
+        lifecycle.qga.config_reply = {"exit_code": 1, "stdout": "", "stderr": "boom"}  # not a slow boot
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["error"]["code"] == "failed"
+
+    scenario(monkeypatch, body)
