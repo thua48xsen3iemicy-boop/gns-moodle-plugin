@@ -246,6 +246,32 @@ async def test_session_fields_stage_progress_features(tmp_path, dsn):
         assert ports[0]["short_name"] == "e0"  # Port names kept for the console port links (П7)
 
 
+async def test_stop_while_devices_boot_reads_as_stopping(tmp_path, dsn):
+    """A stop during lab_wait waits for the step; every read must already say stopping, or the button comes back."""
+    async with make_env(tmp_path, dsn) as env:
+        s = await start(env)
+        sid = s["session_id"]
+        env.slots[201].op_polls = 10**6
+        await env.run(6)
+        assert (await env.client.get(f"/api/v1/sessions/{sid}")).json()["stage"] == "lab_wait"
+        for _ in range(3):  # A student clicks stop, refreshes and clicks again
+            r = await env.client.post(f"/api/v1/sessions/{sid}/stop")
+            assert r.status_code == 200 and r.json()["status"] == "stopping"
+            await env.run(2)
+            got = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
+            assert got["status"] == "stopping" and got["stage"] == "stop_pending" and "progress" not in got
+            assert got["features"] == [] and "topology" not in got
+            listed = (await env.client.get("/api/v1/sessions", params={"instance_id": 1})).json()
+            assert listed[0]["status"] == "stopping"
+        assert (await env.services.store.session(sid))["status"] == "starting"  # The step is still running
+        env.slots[201].op_polls = 0
+        for op in env.slots[201].ops.values():
+            op["remaining"] = 0
+        await env.run()
+        got = (await env.client.get(f"/api/v1/sessions/{sid}")).json()
+        assert got["status"] == "stopped"
+
+
 async def test_failed_session_error_codes(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         env.slots[201].fail_next = {"code": "RuntimeError", "message": "Missing QEMU image"}

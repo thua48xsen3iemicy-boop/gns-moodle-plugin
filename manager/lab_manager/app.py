@@ -231,7 +231,20 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             raise ApiError(401, "unauthorized", "Invalid credentials or unknown X-Moodle-Site")
         return site
 
+    def shown(s):
+        """The session as the plugin sees it: a stop the orchestrator has not reached yet is already stopping.
+
+        The orchestrator honours a stop only between its steps, and a step such as lab_wait lasts while the
+        devices boot. Until then the row keeps queued/starting/running; reporting that would bring back the
+        stop button after every poll and invite more clicks (CONTRACTS 2.3, stage stop_pending).
+        """
+        if s["stop_requested"] and s["status"] in ("queued", "starting", "running"):
+            return {**s, "status": "stopping", "stage": "stop_pending", "progress": None,
+                    "status_message": "Остановка: завершается текущий шаг…"}
+        return s
+
     def summary(s):
+        s = shown(s)
         body = {
             "schema": "gns3lab.session/1",
             "session_id": s["id"],
@@ -252,6 +265,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         return body
 
     async def present(s):
+        s = shown(s)
         body = summary(s)
         body["features"] = ["consoles"] if s["status"] == "running" else []
         if s["status"] == "running" and s["facts_polled_at"] is not None:
@@ -460,14 +474,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 await store.event(s["id"], s["slot_vmid"], "stop_requested_by", {"user_id": by})
             services.orchestrator.wake()
             s = await own_session(session_id, site)
-            if s["status"] not in ("stopped", "failed"):
-                # The orchestrator moves it to stopping on its next step; report the intent now.
-                body = await present(s)
-                body["status"] = "stopping"
-                if s["status"] != "stopping":
-                    body["status_message"] = "Остановка…"
-                return body
-        return await present(s)
+        return await present(s)  # A requested stop already reads as stopping (shown)
 
     @app.get("/api/v1/sessions/{session_id}/state")
     async def session_state(session_id: str, since_rev: int | None = Query(default=None, ge=0),
