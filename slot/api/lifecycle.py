@@ -702,10 +702,12 @@ class Lifecycle:
                     await self.guest_family(node["node_id"]) == "routeros"
                 )
                 if spec["kind"] == "qemu" and not vnc and not routeros:
+                    # Enabled on resume too: the console is the slot's, not the student's work, and a guest
+                    # powered off right after its first provisioning can come back without the unit's link.
+                    # A check alone would then fail every later start of the project.
                     command = (
-                        "systemctl enable --now serial-getty@ttyS0.service && systemctl is-active --quiet serial-getty@ttyS0.service"
-                        if initial
-                        else "systemctl is-active --quiet serial-getty@ttyS0.service"
+                        "systemctl enable --now serial-getty@ttyS0.service"
+                        " && systemctl is-active --quiet serial-getty@ttyS0.service"
                     )
                     result = await self.qga.exec(
                         node["node_id"], command, timeout=20, priority=Priority.LIFECYCLE
@@ -754,6 +756,12 @@ class Lifecycle:
                 if result["exit_code"] != 0:
                     # The lab is rolled back with its slot: what the guest said is the only trace left.
                     raise RuntimeError(provision_failure(result))
+        # A stop powers the nodes off; what was just written in the guest (the console unit, the network set
+        # up by the first provisioning) must be on its disk before the node counts as ready.
+        if qga_needed and not routeros and await self.guest_family(node["node_id"]) == "posix":
+            result = await self.qga.exec(node["node_id"], "sync", timeout=60, priority=Priority.LIFECYCLE)
+            if result["exit_code"] != 0:
+                raise RuntimeError(provision_failure(result))
 
     async def run(self, op, lab):
         pid = lab["project_id"]
