@@ -10,6 +10,8 @@ This image is an independent component; it changes no Slot, Manager or Plugin co
 * Install: `install/lab-uplink-filter` keeps slots from seeing each other in the shared VLAN.
 * The slot reads the guest as any QEMU node with QGA (`linux.net`, `linux.sys`, `linux.config`; read-only).
   The facts of the LAN ports are what keeps the carrier and the IOL keepalives of the cables to the lab's routers.
+  The catalog entry has no `role`: the slot never asks it the switch collectors. Do not build this image on top of
+  `images/linux-switch` without removing switch-api (see that image's docs/INTEGRATION.md).
 * Optional LAN routing is an image-local build setting (`--routed-lan-ports`), persisted in
   `/etc/lab-uplink/routing.json`. Slot and Manager do not inject this policy. Use a separate image
   variant for each policy and provide all selected adapters. Adapter 0 remains the PPPoE port;
