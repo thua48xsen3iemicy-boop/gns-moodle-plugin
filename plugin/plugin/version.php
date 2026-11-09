@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'mod_gns3lab';
-$plugin->version   = 2026110900;
+$plugin->version   = 2026110901;
 $plugin->requires  = 2025100600; // Moodle 5.1.
 $plugin->supported = [501, 503];
 $plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = '0.19.1';
+$plugin->release   = '0.19.2';
