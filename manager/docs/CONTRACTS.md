@@ -619,12 +619,55 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 `addresses.allowed` — не `rfc1918` и не сеть IPv4), а также общие `required`, `unknown_field`, `bad_type`, `bad_name`,
 `duplicate_name` (имя группы), `unknown_node`, `out_of_range` (в том числе `segments[i].configure`). Эталонная лаба с неверным `meta.json.checks` — `409 lab_invalid`, как с другими ошибками каталога.
 
+### 2.10. 🆕 Удаление наработок: `/purges` (менеджер 0.19.0)
+
+Возможность `purge` в `info.features`. Наработки студента — его workspace (§2.4): проект GNS3 в каталоге студента на
+CephFS, сессии, факты и прогоны проверок в БД менеджера. Их удаляют, когда в Moodle удаляют элемент курса, курс или
+пользователя, и когда студент сам стирает свою лабу («Wipe»).
+
+**`POST /api/v1/purges`** — чьи наработки удалить:
+
+| Тело | Что удаляется | Когда шлёт плагин |
+|---|---|---|
+| `{"instance_id": 7}` | все workspace активности, всех студентов | удалён элемент курса (и курс целиком) |
+| `{"instance_id": 7, "user_id": 42}` | workspace одного студента в активности | «Wipe» студента |
+| `{"user_id": 42}` | все workspace пользователя на сайте, и авторские | удалён пользователь (privacy) |
+| `{"library_lab_id": 12}` или с `user_id` | авторские workspace лабы библиотеки | удалена лаба библиотеки |
+
+Хотя бы одно поле; `instance_id` вместе с `library_lab_id` — `400 invalid_request`. Ответ `200`
+`{"workspaces": N, "pending": M}`: `N` — сколько workspace подошло, `M` — сколько ещё не удалено из БД, потому что их
+сессия жива. Запрос идемпотентный; после `200` удаление — забота менеджера, плагину повторять не нужно (повтор безвреден).
+
+Что делает менеджер:
+1. Помечает workspace (`purge_requested_at`). Живые сессии останавливаются сразу, как «Стоп» (`stop_reason: "purge"`,
+   текст «Лаба удалена»); конца сессии он не ждёт.
+2. Workspace без живой сессии (и без идущего снятия образа, §2.8) удаляется из БД одной транзакцией вместе с сессиями,
+   фактами, прогонами проверок и записями снятия. Без живой сессии — прямо в запросе: у «Wipe» остановленной лабы
+   `pending: 0`. Дальше `GET /sessions?user_id=&instance_id=` отвечает `404 session_not_found`, а следующий
+   `POST /sessions` создаёт новый workspace с новым `project_id` — свежий проект.
+3. Каталог проекта на CephFS ставится в очередь: его удаляет агент узла (§5, `DELETE /students/{key}/projects/{id}`),
+   когда каталог студента не подключён ни к одному слоту. Неудачная попытка повторяется с растущей паузой
+   (30 с … 1 ч); перезапуск менеджера очередь не теряет. Агент без `projects_delete` — каталоги ждут, менеджер пишет
+   предупреждение в журнал.
+
+Пока workspace помечен, но ещё не удалён, `POST /sessions` в него — `409 workspace_purging` (повторить позже).
+
+**`POST /api/v1/purges/reconcile`** `{"instance_ids": [3, 7, 12]}` — страховка от потерянных запросов (Moodle
+восстановлен из резервной копии, запрос не дошёл). Плагин раз в сутки присылает все существующие `id` своих
+активностей. Менеджер помечает на удаление workspace сайта с `instance_id`, которого нет в списке, но только
+`instance_id ≤ max(instance_ids)`: Moodle `id` не переиспользует, поэтому активность, созданная после того, как плагин
+собрал список, удалённой не посчитается. Пустой список — `400 invalid_request` (ошибка плагина не стирает всё). Ответ —
+как у `/purges`. Авторские workspace сверка не трогает.
+
+Wipe отдельной ноды — другой механизм: он идёт в живой лабе внутри слота (`POST /v1/labs/{project_id}/nodes/{node_id}/wipe`,
+пока `NOT_SUPPORTED`, slot README «Node Wipe»), к `/purges` отношения не имеет.
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `workspace_purging` 409 (§2.10), 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -1254,6 +1297,13 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 именем backing file, проверяет и публикует файл атомарно. Менеджер вызывает его, только если `GET /capabilities` агента содержит
 `"images_capture": true` (§1.3); иначе `image_capture` в `info` не объявляется.
 
+**Удаление проекта (🆕 агент 1.4.0, AGENT_REQUESTS §7).** `DELETE /students/{student_key}/projects/{project_id}` —
+агент удаляет каталог проекта и записи слота о нём (`.lab-slot/labs/<id>.json`, `.slot-locks/<id>.lock`), не следуя
+симлинкам. Идемпотентно: `200 {"student_key", "project_id", "deleted"}`. Это не команда CT: заголовков владельца нет,
+вызывать можно агент любого узла (CephFS общая). Менеджер вызывает его, только если в `GET /capabilities` агента есть
+`"projects_delete": true`, и только когда ни один слот по его БД не держит каталог студента; агент ещё и сам отвечает
+`409 STUDENT_DIR_BUSY`, пока каталог подключён к CT его узла.
+
 **Откат слота (агент 1.2).** `POST /slots/{vmid}/reset`, тело `{}`, те же заголовки владельца, что у
 `stop`: на остановленном CT выполняет `pct rollback` к снимку чистого слота (имя задаёт
 администратор агента, `LAB_CLEAN_SNAPSHOT`, по умолчанию `lab-clean`; клиент его не передаёт).
@@ -1281,6 +1331,7 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | `facts` | менеджер | ✅ `/sessions/{id}/state` (§2.7, live-state.md); в `session.features`, когда слот отдаёт факты |
 | `checks` | менеджер | 🆕 `/sessions/{id}/checks` (§2.9), поле `checks` и `segments[].configure` в `gns3lab.lab/2`, `checks` в `meta.json`; в `session.features` — вместе с `facts` |
 | `reset` | менеджер | 🆕 `options.reset` |
+| `purge` | менеджер | 🆕 `POST /purges` и `/purges/reconcile` (§2.10) |
 | `resume` | менеджер | следующий запуск продолжает проект студента (всегда, с менеджера 0.5.1) |
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
@@ -1288,6 +1339,7 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | `image_capture` | менеджер | 🆕 авторский запуск (`options.mode: "authoring"`), снятие слоёв и производные образы в каталоге (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
 | `guest-shutdown` | слот | QGA powerdown выбранной QEMU-ноды и ожидание stopped, §4.3a |
 | `images_capture` | агент | 🆕 `POST /images/capture` (§5, AGENT_REQUESTS §6); поле `GET /capabilities` агента |
+| `projects_delete` | агент | 🆕 `DELETE /students/{key}/projects/{id}` (§5, AGENT_REQUESTS §7); поле `GET /capabilities` агента, агент 1.4.0 |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |
 | `qga` | слот | QEMU Guest Agent и provisioning через QGA |
 | `vnc` | слот | 🆕 `NodeSpec.console: "vnc"` и сырой поток RFB в консольном WS (§4.2); слот объявляет её в `features` (0.8.0); когда появится `requires`, лабы с такими узлами будут требовать её |
