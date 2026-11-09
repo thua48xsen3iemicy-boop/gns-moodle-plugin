@@ -541,6 +541,7 @@ SOURCE_FILES = (
     'agent/tests/test_capture.py',
     'agent/tests/test_fencing.py',
     'agent/tests/test_guest_init.py',
+    'agent/tests/test_project_delete.py',
     'agent/tests/test_tls.py',
     'constraints-tested.txt',
     'manager/AGENTS.md',

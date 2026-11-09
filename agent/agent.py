@@ -198,7 +198,7 @@ def require_fence(vmid, request):
 
 app = FastAPI(
     title="Lab Node Agent",
-    version="1.3.0",
+    version="1.4.0",
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -410,6 +410,7 @@ def capabilities():
         "guest_action_timeout_seconds": GUEST_ACTION_TIMEOUT,
         "images_capture": IMAGES_DIR is not None and shutil.which("qemu-img") is not None,
         "capture_timeout_seconds": CAPTURE_TIMEOUT,
+        "projects_delete": True,
     }
 
 
@@ -867,3 +868,107 @@ def capture_image(spec: Capture):
         raise api_error(503, "STORAGE_UNAVAILABLE", "Image storage operation failed") from None
     except (ValueError, KeyError, TypeError):
         raise api_error(422, "CAPTURE_BASE_MISMATCH", "Malformed project or disk metadata") from None
+
+
+# ---------------------------------------------------------------- project deletion
+# Files Lab Slot keeps for one project in the student directory (slot README, `student-state`):
+# the GNS3 project itself, the lab record and the project lock.
+PROJECT_STATE_FILES = ((".lab-slot", "labs", "{pid}.json"), (".slot-locks", "{pid}.lock"))
+
+
+def remove_entry(dir_fd: int, name: str) -> bool:
+    """Remove one name below dir_fd without following symlinks; False if it does not exist."""
+    try:
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISDIR(st.st_mode):
+        # The fd-based walk never follows a symlink planted by the guest (rmtree.avoids_symlink_attacks).
+        shutil.rmtree(name, dir_fd=dir_fd)
+    else:
+        os.unlink(name, dir_fd=dir_fd)  # A symlink is removed itself, never its target.
+    return True
+
+
+def open_subdir(dir_fd: int, name: str) -> int | None:
+    """A real subdirectory or None: a missing one, or one the guest replaced with a symlink or file."""
+    try:
+        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ELOOP, errno.ENOTDIR):
+            return None
+        raise
+
+
+def remove_state_file(student_fd: int, parts: tuple[str, ...], pid: str) -> bool:
+    fds = []
+    try:
+        fd = student_fd
+        for part in parts[:-1]:
+            fd = open_subdir(fd, part)
+            if fd is None:
+                return False
+            fds.append(fd)
+        removed = remove_entry(fd, parts[-1].format(pid=pid))
+        if parts[-1].endswith(".json"):
+            # Leftovers of an interrupted atomic write of the record: .<pid>.<hex>.tmp
+            for name in os.listdir(fd):
+                if name.startswith(f".{pid}.") and name.endswith(".tmp"):
+                    removed = remove_entry(fd, name) or removed
+        return removed
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+@app.delete("/students/{student_key}/projects/{project_id}")
+def delete_project(student_key: Key, project_id: str):
+    """Delete one stopped project of a student and the slot's state for it. Idempotent."""
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", student_key) is None:
+        raise api_error(422, "INVALID_REQUEST", "Expected one safe path component")
+    try:
+        if str(uuid.UUID(project_id)) != project_id:
+            raise ValueError()
+    except ValueError:
+        raise api_error(422, "INVALID_REQUEST", "Expected a canonical project UUID") from None
+    if not shutil.rmtree.avoids_symlink_attacks:
+        raise api_error(503, "AGENT_CONFIG_INVALID", "Platform has no symlink-safe recursive delete")
+    validate_cephfs()
+    parent = CEPH_ROOT / STUDENTS_DIR
+    validate_no_symlinks(parent)
+    trash = ".purge-" + project_id
+    try:
+        with student_lock(student_key):
+            capture_idle(parent / student_key)
+            root = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                try:
+                    student = os.open(student_key, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+                except FileNotFoundError:
+                    return {"student_key": student_key, "project_id": project_id, "deleted": False}
+                try:
+                    # Rename first: the project disappears for the slot at once, and an interrupted delete is
+                    # finished by the next call through the same trash name.
+                    deleted = remove_entry(student, trash)
+                    try:
+                        os.rename(project_id, trash, src_dir_fd=student, dst_dir_fd=student)
+                        deleted = True
+                    except FileNotFoundError:
+                        pass
+                    remove_entry(student, trash)
+                    for parts in PROJECT_STATE_FILES:
+                        deleted = remove_state_file(student, parts, project_id) or deleted
+                    os.fsync(student)
+                finally:
+                    os.close(student)
+            finally:
+                os.close(root)
+    except HTTPException:
+        raise
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise api_error(422, "SOURCE_UNSAFE", "Student path is not a real directory") from None
+        log.warning("project deletion failed key=%s errno=%s", student_key, exc.errno)
+        raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot delete the project; retry later") from None
+    log.info("deleted project key=%s project=%s existed=%s", student_key, project_id, deleted)
+    return {"student_key": student_key, "project_id": project_id, "deleted": deleted}
