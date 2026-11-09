@@ -645,12 +645,31 @@ class Collector:
     timeout_scale: float = 1.0  # times SLOT_FACTS_TIMEOUT; a cold PowerShell needs seconds to start
 
 
+# The "Internet" node (NodeSpec.uplink_port) is a service appliance of the slot, not a device of the lab: it shows
+# only its ports that have a cable in the lab (Facts.cycle puts their adapters into the node under SHOWN_ADAPTERS)
+# and the routes through them. Its outer port, ppp0, the spare LAN ports with their preset addresses, its
+# hostname and its saved configuration are not the student's business (CONTRACTS.md 4.6).
+SHOWN_ADAPTERS = "_shown_adapters"
+
+
+def cabled_ports_only(data, node):
+    shown = node.get(SHOWN_ADAPTERS)
+    if shown is None:
+        return data
+    interfaces = [
+        i for i in data["interfaces"]
+        if i.get("kind") == "physical" and i.get("port", {}).get("adapter") in shown
+    ]
+    names = {i["name"] for i in interfaces}
+    return {"interfaces": interfaces, "routes": [r for r in data["routes"] if r.get("dev") in names]}
+
+
 LINUX_NET = Collector(
     name="linux.net",
     schema="linux.net/1",
     command=LINUX_NET_COMMAND,
     applies=lambda node, spec: node.get("node_type") == "qemu" and spec.get("qga", True),
-    parse=lambda stdout, node: parse_linux_net(stdout, adapter_macs(node)),
+    parse=lambda stdout, node: cabled_ports_only(parse_linux_net(stdout, adapter_macs(node)), node),
     missing="The guest has no usable `ip -j`",
 )
 # Only a node the ticket calls a switch (NodeSpec.role, from the image catalog). The guest is not asked what it
@@ -885,15 +904,23 @@ class Facts:
         jobs = []
         for lab in labs.values():
             specs = {spec["name"]: spec for spec in lab["ticket"]["nodes"]}
+            cabled = {}  # node name -> adapters with a cable in the lab (the manifest's links are the project's)
+            for link in lab["ticket"].get("links", []):
+                for end in (link.get("a") or {}, link.get("b") or {}):
+                    cabled.setdefault(end.get("node"), set()).add(end.get("adapter", 0))
             for node in lab.get("nodes", []):
                 spec = specs.get(node.get("name"))
                 if spec is None:
                     continue
+                if spec.get("uplink_port") is not None:
+                    node = {**node, SHOWN_ADAPTERS: frozenset(cabled.get(spec["name"], set()) - {spec["uplink_port"]})}
                 due = []
                 family = self.families.get((lab["project_id"], node["node_id"]))
                 for collector in COLLECTORS:
                     if not collector.applies(node, spec):
                         continue
+                    if spec.get("uplink_port") is not None and collector is not LINUX_NET:
+                        continue  # the "Internet" node: its cabled ports only (cabled_ports_only)
                     if collector.local is None and family is not None and collector.family != family:
                         continue
                     key = (lab["project_id"], node["node_id"], collector.name)

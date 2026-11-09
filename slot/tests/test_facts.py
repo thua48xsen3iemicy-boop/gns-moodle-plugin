@@ -17,6 +17,7 @@ import pytest
 from api import facts as facts_module
 from api.facts import (
     COLLECTORS,
+    cabled_ports_only,
     LINUX_NET_COMMAND,
     ROUTEROS_NET_COMMAND,
     ROUTEROS_SYS_COMMAND,
@@ -1821,3 +1822,42 @@ def test_capabilities_announce_the_collectors(mock_server):
         "linux.sys/1", "linux.config/1", "routeros.sys/1", "iol.l1/1",
     ]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"
+
+
+# --- the "Internet" node (NodeSpec.uplink_port): its cabled ports only ---------------------------------------------
+
+
+def make_isp(labs, links):
+    """PC1 becomes the "Internet" node: adapter 1 is its outer port, `links` are the lab's cables."""
+    labs["p1"]["ticket"]["nodes"][0]["uplink_port"] = 1
+    labs["p1"]["ticket"]["links"] = links
+
+
+def test_the_internet_node_shows_its_cabled_ports_and_nothing_else(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        make_isp(labs, [{"a": {"node": "PC1", "adapter": 0, "port": 0}, "b": {"node": "SW1", "adapter": 0, "port": 0}}])
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n1"]["collectors"]
+        assert list(collectors) == ["linux.net"]  # no hostname, saved configuration or switch probes
+        data = collectors["linux.net"]["data"]
+        # ens3 (adapter 0) has a cable; lo, the outer port ens4, the unknown ens5 and the VLAN are not shown.
+        assert [i["name"] for i in data["interfaces"]] == ["ens3"]
+        assert all(r["dev"] == "ens3" for r in data["routes"]) and data["routes"]
+        assert lifecycle.qga.asked(LINUX_SYS_COMMAND) == [] and lifecycle.qga.asked(LINUX_CONFIG_COMMAND) == []
+
+    scenario(monkeypatch, body)
+
+
+def test_a_spare_port_of_the_internet_node_is_not_shown(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        make_isp(labs, [])  # no cable: the preset address of a spare LAN port stays out of the facts
+        await facts.cycle()
+        data = facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.net"]["data"]
+        assert data == {"interfaces": [], "routes": []}
+
+    scenario(monkeypatch, body)
+
+
+def test_other_nodes_keep_every_interface():
+    data = parse_linux_net(output(), MACS)
+    assert cabled_ports_only(data, {"name": "PC1"}) is data
