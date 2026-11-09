@@ -81,6 +81,9 @@ class Image(Strict):
     adapters: Range | None = None
     capture: bool | None = None
     uplink_port: int | None = Field(default=None, strict=True, ge=0, le=15)
+    # What a node of the image is beyond its kind (NodeSpec.role, CONTRACTS 4.2): "switch" is the Linux switch,
+    # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
+    role: Literal["switch"] | None = None
     sha256: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     derived: dict | None = None
     featured: bool = False
@@ -114,6 +117,8 @@ class Image(Strict):
             if self.console_type != "none" or self.net_config is not None or self.capture is True:
                 raise ValueError("ISP images have no console, network preconfiguration or capture")
             self.capture = False
+        if self.role is not None and (self.kind != "qemu" or self.uplink_port is not None):
+            raise ValueError("role is for qemu images without uplink_port")
         if self.slot.cli_prompt is not None:
             try:
                 pattern = re.compile(self.slot.cli_prompt.encode())
