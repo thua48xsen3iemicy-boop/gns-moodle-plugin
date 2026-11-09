@@ -400,7 +400,8 @@ def test_real_provision_checks_exit_codes_and_resume_does_not_replay(
         assert "enable --now" in calls[0]
         calls.clear()
         await service.provision({}, node, spec, False)
-        assert len(calls) == 1 and "is-active" in calls[0]
+        # No command is replayed; the console unit is enabled again and the guest's disk synced.
+        assert len(calls) == 2 and "enable --now" in calls[0] and "is-active" in calls[0] and calls[1] == "sync"
         await service.close()
         server.close()
         await server.wait_closed()

@@ -310,6 +310,7 @@ def test_vnc_node_waits_for_qga_only_to_run_provisioning(tmp_path, monkeypatch):
         ("call", "guest-ping"),
         ("call", "guest-get-osinfo"),
         ("exec", "echo ok"),
+        ("exec", "sync"),  # What the commands wrote survives a stop right after
     ]
     # A resume replays nothing and needs no guest at all.
     assert run_provision(tmp_path, monkeypatch, spec, initial=False) == []
@@ -322,8 +323,12 @@ def test_telnet_node_still_waits_for_serial_getty(tmp_path, monkeypatch, extra):
     calls = run_provision(tmp_path, monkeypatch, spec, initial=True)
     assert calls[:2] == [("call", "guest-ping"), ("call", "guest-get-osinfo")]
     assert calls[2][0] == "exec" and "enable --now serial-getty@ttyS0" in calls[2][1]
+    assert calls[3:] == [("exec", "sync")]
+    # A resume enables the unit again: a guest powered off before the link reached its disk would
+    # otherwise fail every later start of the project.
     calls = run_provision(tmp_path, monkeypatch, spec, initial=False)
-    assert calls[2][0] == "exec" and "is-active" in calls[2][1] and "enable" not in calls[2][1]
+    assert calls[2][0] == "exec" and "enable --now serial-getty@ttyS0" in calls[2][1] and "is-active" in calls[2][1]
+    assert calls[3:] == [("exec", "sync")]
 
 
 ROUTEROS = {"id": "routeros", "name": "RouterOS", "variant-id": "chr", "version": "7.25.1"}
@@ -354,7 +359,7 @@ def test_an_agent_without_osinfo_is_an_old_linux_one(tmp_path, monkeypatch):
 
     qga = OldAgent()
     calls = run_provision(tmp_path, monkeypatch, {"kind": "qemu", "provisioning": []}, qga=qga)
-    assert "enable --now serial-getty@ttyS0" in calls[2][1] and qga.shells == ["sh"]
+    assert "enable --now serial-getty@ttyS0" in calls[2][1] and qga.shells == ["sh", "sh"]
 
 
 def test_vnc_readiness_fails_without_a_vnc_console_or_listener(tmp_path, monkeypatch):
