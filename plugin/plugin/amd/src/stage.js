@@ -275,6 +275,9 @@ export class Stage {
             n.realName = n.name;
         });
         this.setReveal(typeof view === 'function' ? view(this.base) : view, false);
+        // The layers of the previous lab name its nodes: they must not be drawn over the new one (setFactsMeta redraws).
+        this.fx = null;
+        this.der = null;
         this.statuses = statuses || new Map();
         this.statusKnown = !!statuses;
         this.guests = guests;

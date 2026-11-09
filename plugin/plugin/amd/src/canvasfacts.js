@@ -30,7 +30,7 @@ export const layerHelp = (s, layer) => s.s(layer === 'l4' ? 'ui_canvas_l4' : `ui
 export const layerIssues = s => {
     const issues = [...(s.der?.[s.layer]?.issues || [])];
     s.fx?.nodes.forEach(f => {
-        if (f.err) issues.unshift({sev: 'warn', text: s.model.nodes.get(f.id).name + ': ' + s.s('ui_canvas_collection_error'), go: {kind: 'node', id: f.id}});
+        if (f.err) issues.unshift({sev: 'warn', text: (s.model.nodes.get(f.id)?.name || '?') + ': ' + s.s('ui_canvas_collection_error'), go: {kind: 'node', id: f.id}});
     });
     return issues;
 };

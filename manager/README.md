@@ -1,4 +1,4 @@
-# Lab Manager — 0.18.0
+# Lab Manager — 0.18.1
 
 Автопроверки, этап 3 (`../docs/autochecks/README.md`): правила, которым были нужны данные слота 0.17.0, теперь работают —
 имя узла (`hostname_wrong`, у Linux, Windows, RouterOS и Cisco), пересылка пакетов на маршрутизаторе и хосте

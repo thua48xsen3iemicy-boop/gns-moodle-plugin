@@ -822,12 +822,12 @@ def test_collection_is_paced_and_refresh_forces_it(monkeypatch):
 SWITCH_KEY = ("p1", "n3", "switch.net")
 FDB_KEY = ("p1", "n3", "switch.fdb")
 SWITCH_ROLE = {SWITCH_KEY, FDB_KEY}  # what a working switch has confirmed
-HOST_ABSENT = {("p1", "n1", "switch.net"), ("p1", "n1", "switch.fdb")}  # what the ordinary host said
+HOST_ABSENT = set()  # an ordinary host is never asked: only the ticket names a switch (NodeSpec.role)
 
 
 def add_switch(lifecycle, labs, reply=None, fdb_reply=None):
     """A QEMU node n3 next to the ordinary host n1; its guest answers the switch.net and switch.fdb commands."""
-    labs["p1"]["ticket"]["nodes"].append({"name": "SW2", "kind": "qemu", "qga": True})
+    labs["p1"]["ticket"]["nodes"].append({"name": "SW2", "kind": "qemu", "qga": True, "role": "switch"})
     labs["p1"]["nodes"].append(
         {"node_id": "n3", "name": "SW2", "node_type": "qemu", "status": "started",
          "properties": {"mac_address": BASE_MAC, "adapters": 2}}
@@ -871,12 +871,14 @@ def test_a_switch_is_published_next_to_linux_net_with_the_broker_priority_that_y
     scenario(monkeypatch, body)
 
 
-def test_an_ordinary_host_is_asked_once_and_never_gets_a_record(monkeypatch):
+def test_a_node_without_the_switch_role_is_never_asked_even_with_a_switchctl(monkeypatch):
     async def body(facts, lifecycle, labs):
+        lifecycle.qga.switch_reply = switch_success()  # a guest with a switchctl: a student's, or the ISP image
+        lifecycle.qga.fdb_reply = fdb_success()
         for _ in range(3):
             await facts.cycle()
         assert len(lifecycle.qga.asked(LINUX_NET_COMMAND)) == 3  # linux.net goes on as before
-        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 1  # the guest said it is no switch
+        assert lifecycle.qga.asked(SWITCH_NET_COMMAND) == [] and lifecycle.qga.asked(SWITCH_FDB_COMMAND) == []
         assert facts.absent == HOST_ABSENT and facts.confirmed == set()
         assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == LINUX_COLLECTORS
 
@@ -945,7 +947,7 @@ def test_a_guest_that_loses_switchctl_is_no_switch_any_more(monkeypatch):
         assert facts.snapshot("p1")["nodes"]["n3"]["collectors"]["linux.net"]["ok"] is True
         lifecycle.qga.switch_by_node["n3"] = switch_success()
         await facts.cycle()  # not asked again: the role is remembered
-        assert switch_of(facts) is None and len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 3
+        assert switch_of(facts) is None and len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 2
 
     scenario(monkeypatch, body)
 
@@ -954,17 +956,17 @@ def test_the_role_is_remembered_until_the_owner_or_the_lab_goes(monkeypatch):
     async def body(facts, lifecycle, labs):
         add_switch(lifecycle, labs)
         await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 2
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 1  # the switch only
         facts.reset()  # another owner: everything is learned again
         assert facts.absent == set() and facts.confirmed == set()
         await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 4 and facts.confirmed == SWITCH_ROLE
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 2 and facts.confirmed == SWITCH_ROLE
         labs["p1"]["state"] = "STOPPING"  # the lab leaves READY: its memory goes with its results
         await facts.cycle()
         assert facts.absent == set() and facts.confirmed == set() and facts.results == {}
         labs["p1"]["state"] = "READY"
         await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 6
+        assert len(lifecycle.qga.asked(SWITCH_NET_COMMAND)) == 3
         assert facts.absent == HOST_ABSENT and facts.confirmed == SWITCH_ROLE
         # Forgotten with the memory: a timeout of a node that has not answered yet is silent again.
         facts.reset()
@@ -1021,7 +1023,7 @@ def test_the_collectors_of_a_node_share_its_channel_and_run_one_after_another(mo
         lifecycle.qga.exec = watched
         await facts.cycle()
         assert peak == {"n1": 1, "n3": 1}  # a second exec at once would be refused as busy
-        assert len(lifecycle.qga.calls) == 10 and switch_of(facts)["ok"] is True  # five collectors on each Linux node
+        assert len(lifecycle.qga.calls) == 8 and switch_of(facts)["ok"] is True  # three on the host, five on the switch
 
     scenario(monkeypatch, body)
 
@@ -1071,17 +1073,16 @@ def test_the_mac_table_is_a_collector_of_its_own_next_to_switch_net(monkeypatch)
         assert collectors["switch.net"]["data"] == {"interfaces": EXPECTED_SWITCH_PORTS}
         (call,) = [c for c in lifecycle.qga.asked(SWITCH_FDB_COMMAND) if c[0] == "n3"]
         assert call[2]["priority"] is Priority.METRICS and call[2]["wait"] is False and call[2]["max_age"] == 2
-        assert FDB_KEY in facts.confirmed and ("p1", "n1", "switch.fdb") in facts.absent
+        assert FDB_KEY in facts.confirmed and facts.absent == set()
 
     scenario(monkeypatch, body)
 
 
-def test_an_ordinary_host_is_asked_for_the_mac_table_once_and_never_gets_a_record(monkeypatch):
+def test_an_ordinary_host_is_never_asked_for_the_mac_table(monkeypatch):
     async def body(facts, lifecycle, labs):
         for _ in range(3):
             await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 1  # the guest said it has no switchctl
-        assert ("p1", "n1", "switch.fdb") in facts.absent
+        assert lifecycle.qga.asked(SWITCH_FDB_COMMAND) == [] and facts.absent == set()
         assert list(facts.snapshot("p1")["nodes"]["n1"]["collectors"]) == LINUX_COLLECTORS
 
     scenario(monkeypatch, body)
@@ -1178,11 +1179,11 @@ def test_the_role_of_the_mac_table_is_forgotten_with_the_owner_and_with_the_lab(
         add_switch(lifecycle, labs)
         await facts.cycle()
         await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 3  # the host once, the switch every time
+        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 2  # the switch every time, the host never
         facts.reset()
         assert facts.absent == set() and facts.confirmed == set()
         await facts.cycle()
-        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 5 and FDB_KEY in facts.confirmed
+        assert len(lifecycle.qga.asked(SWITCH_FDB_COMMAND)) == 3 and FDB_KEY in facts.confirmed
         labs["p1"]["state"] = "STOPPING"
         await facts.cycle()
         assert facts.absent == set() and facts.confirmed == set() and facts.results == {}
@@ -1709,7 +1710,7 @@ def fast_facts(monkeypatch):
     monkeypatch.setenv("SLOT_FACTS_MIN_REFRESH", "0")
 
 
-def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH, fdb_reply=NOT_A_SWITCH):
+def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH, fdb_reply=NOT_A_SWITCH, role=None):
     from api.qga import QgaBroker
 
     calls = []
@@ -1734,7 +1735,7 @@ def deployed(client, monkeypatch, reply, switch_reply=NOT_A_SWITCH, fdb_reply=NO
     response = client.post(
         "/v1/labs/deploy",
         headers=HEADERS,
-        json={"name": "facts", "project_id": pid, "nodes": [{"name": "D1", "kind": "qemu", "image": "debian12.qcow2"}],
+        json={"name": "facts", "project_id": pid, "nodes": [{"name": "D1", "kind": "qemu", "image": "debian12.qcow2", **({"role": role} if role else {})}],
               "links": []},
     )
     assert response.status_code == 202, response.text
@@ -1780,7 +1781,8 @@ def test_facts_route_serves_the_latest_results(fast_facts, mock_server, monkeypa
 
 def test_facts_route_serves_the_switch_ports(fast_facts, mock_server, monkeypatch):
     client, _projects, _nodes = mock_server
-    pid, _calls = deployed(client, monkeypatch, success(), switch_reply=switch_success(), fdb_reply=fdb_success())
+    pid, _calls = deployed(client, monkeypatch, success(), switch_reply=switch_success(), fdb_reply=fdb_success(),
+                           role="switch")
     body = wait_for_facts(
         client, pid, lambda b: any("linux.config" in n["collectors"] for n in b["nodes"].values())
     )

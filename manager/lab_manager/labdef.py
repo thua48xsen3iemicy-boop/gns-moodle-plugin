@@ -320,6 +320,9 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
             # Only the "Internet" node carries it: other nodes, and the canonical JSON and lab_revision of
             # labs without one, do not change (CONTRACTS 4.2).
             spec["uplink_port"] = node["uplink_port"]
+        if image.role is not None:
+            # Only a node of an image with a role carries it (CONTRACTS 4.2), like uplink_port.
+            spec["role"] = image.role
         if image.console_type == "vnc":
             # Only vnc nodes carry the field: a telnet node stays byte for byte what it was, so the
             # canonical JSON and the lab_revision of existing labs do not change (CONTRACTS 4.2).

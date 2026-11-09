@@ -12,6 +12,7 @@
     },
     {
       "id": "linux-switch",
+      "role": "switch",
       "capture": false,
       "title": "Linux Switch",
       "kind": "qemu",

@@ -68,6 +68,15 @@ def uplink_problems(ticket: dict) -> list[str]:
     return []
 
 
+def role_problems(ticket: dict) -> list[str]:
+    """NodeSpec.role of a catalog ticket, as the slot will check it (CONTRACTS 4.2)."""
+    for node in ticket["nodes"]:
+        if isinstance(node, dict) and "role" in node:
+            if node["role"] != "switch" or node.get("kind") != "qemu" or "uplink_port" in node:
+                return [f"ticket.json: role of {node.get('name')} must be \"switch\" on a qemu node without uplink_port"]
+    return []
+
+
 def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str]:
     """Consistency checks between lab.gns3 and ticket.json. Returns problems (empty = ok)."""
     problems = []
@@ -89,6 +98,7 @@ def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str
         extra = sorted(set(ticket_names) - set(gns3_names))
         problems.append(f"Node names differ: only in lab.gns3 {missing}, only in ticket.json {extra}")
     problems += uplink_problems(ticket)
+    problems += role_problems(ticket)
     if not isinstance(meta.get("title"), str) or not meta["title"].strip():
         problems.append("meta.json needs a title")
     res = meta.get("resources")

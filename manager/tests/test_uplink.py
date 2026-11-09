@@ -193,3 +193,45 @@ async def test_a_lab_with_uplink_gets_only_a_slot_that_offers_it(tmp_path, dsn):
         other = (await start_def(env, LAB, user_id=43)).json()["session_id"]
         await env.run(1)
         assert (await env.services.store.session(other))["slot_vmid"] == 201
+
+
+# --- NodeSpec.role (CONTRACTS 4.2): the switch is told by the catalog, never by the guest -------------------------
+
+def switch_lab():
+    lab = copy.deepcopy(LAB)
+    lab["nodes"].append({"name": "LSW", "image": "linux-switch", "x": 0, "y": 400, "adapters": 3})
+    return lab
+
+
+def test_the_role_of_the_image_reaches_the_ticket_of_its_nodes_only():
+    ticket = ticket_of(switch_lab())
+    assert [(n["name"], n["role"]) for n in ticket["nodes"] if "role" in n] == [("LSW", "switch")]
+    parsed = slot_models().DeployTicket.model_validate(ticket)
+    assert [n.role for n in parsed.nodes if n.role is not None] == ["switch"]
+
+
+def test_the_isp_and_labs_without_a_switch_carry_no_role():
+    assert "role" not in json.dumps(ticket_of(inet_lab()))
+    assert "role" not in json.dumps(ticket_of(LAB))
+
+
+@pytest.mark.parametrize("extra", [{"kind": "iou", "file": "x.bin"}, {"uplink_port": 0}])
+def test_a_role_is_for_qemu_images_without_uplink(extra):
+    from lab_manager.images import Image
+
+    base = IMAGES["linux-switch"].model_dump(exclude_none=True)
+    base.update(extra, capture=False, console_type="none")
+    with pytest.raises(ValueError):
+        Image.model_validate(base)
+
+
+@pytest.mark.parametrize("node, bad", [
+    ({"name": "S", "kind": "qemu", "role": "switch"}, False),
+    ({"name": "S", "kind": "iou", "role": "switch"}, True),
+    ({"name": "S", "kind": "qemu", "role": "router"}, True),
+    ({"name": "S", "kind": "qemu", "role": "switch", "uplink_port": 0}, True),
+])
+def test_a_catalog_ticket_checks_the_role(node, bad):
+    from lab_manager.labs import role_problems
+
+    assert bool(role_problems({"nodes": [node]})) is bad

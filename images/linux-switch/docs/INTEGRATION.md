@@ -22,6 +22,13 @@ semantics and Linux command construction remain inside the image.
 Slot 0.7.0 reads `ports` and `vlans` (read-only, METRICS priority) in its `switch.net/1` facts collector,
 see manager/docs/CONTRACTS.md section 4.6; no other guest method is used yet.
 
+Slot 0.17.1 asks only nodes whose ticket says `role: "switch"`: the image's catalog entry must carry
+`"role": "switch"` (manager/docs/CONTRACTS.md, IMAGES_FILE and NodeSpec.role). The guest is never asked what it is.
+An image built on top of this one for another purpose (the lab-uplink "Internet" node, for instance) does not
+set the role; better still, remove switch-api from it (`/usr/local/sbin/switchctl`, `switch-api.service`,
+`/opt/switch-api`, the `slot-br0`/`slot-ports` networkd files and `/etc/sysctl.d/90-slot-switch.conf`,
+which turns IP forwarding off).
+
 ## Manager and Plugin
 
 Future integration must add its own documented contracts before implementation.

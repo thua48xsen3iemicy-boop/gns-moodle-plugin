@@ -72,6 +72,7 @@ export class Session {
         this.state = null;
         this.timer = null;
         this.busy = false;
+        this.pollFailed = false; // the message on the page is from a failed poll of the state
         const region = name => root.querySelector(`[data-region="${name}"]`);
         this.statusEl = region('status');
         this.timeEl = region('timeleft');
@@ -104,9 +105,16 @@ export class Session {
                 methodname: 'mod_gns3lab_get_state',
                 args: {cmid: this.cmid, userid: this.userid},
             }]));
+            // A poll that failed once (a network blip: "Failed to fetch") must not stay on the page after the
+            // next one succeeds. A message of a start or stop stays: it is about that action.
+            if (this.pollFailed) {
+                this.pollFailed = false;
+                this.showMessage('');
+            }
             this.apply(state);
             return state;
         } catch (error) {
+            this.pollFailed = true;
             this.showMessage(error.message || String(error));
             this.timer = setTimeout(() => this.refresh(), POLL_RUNNING);
             return null;
@@ -126,6 +134,7 @@ export class Session {
         this.render();
         try {
             const [session] = await Promise.all(this.api([{methodname, args: {cmid: this.cmid, tabid: tabId()}}]));
+            this.pollFailed = false;
             this.showMessage('');
             this.apply({...this.state, session});
         } catch (error) {
