@@ -817,3 +817,37 @@ def test_a_failed_provisioning_command_names_what_the_guest_said(tmp_path, monke
 
     assert provision_failure({"exit_code": 1, "stderr": ""}) == "Mandatory provisioning command failed (exit 1)"
     assert len(provision_failure({"exit_code": 1, "stderr": "x" * 999})) < 260
+
+
+# ---- NodeSpec.role: told by the catalog, it builds nothing in GNS3 ------------------------------------------------
+
+
+def role_request(role):
+    body = vnc_request(None)
+    if role is not None:
+        body["nodes"][0]["role"] = role
+    return body
+
+
+def test_a_project_stored_without_a_role_continues_with_one_and_keeps_it(mock_server):
+    client, _, _ = mock_server
+    assert wait(client, deploy(client, role_request(None)))["status"] == "SUCCEEDED"
+    lifecycle = app.state.lifecycle
+    lab = lifecycle.get("lab", PID)
+    lab["ticket"] = json.loads(json.dumps(LEGACY_TICKET))  # written before the field existed
+    lifecycle.save("lab", PID, lab)
+    assert "role" not in DeployTicket.model_validate(role_request(None)).model_dump(mode="json")["nodes"][0]
+    assert wait(client, deploy(client, role_request("switch")))["status"] == "SUCCEEDED"
+    assert lifecycle.get("lab", PID)["ticket"]["nodes"][0]["role"] == "switch"  # the collectors follow it
+    # Any other difference is still another manifest.
+    other = role_request("switch")
+    other["nodes"][0]["ram_mb"] = 2048
+    response = deploy(client, other)
+    assert response.status_code == 409 and "manifest differs" in response.text
+
+
+@pytest.mark.parametrize("node", [{"kind": "iou", "image": "x.bin"}, {"uplink_port": 0}, {"role": "router"}])
+def test_a_role_is_for_a_qemu_node_without_uplink(node):
+    body = {"name": "n", "kind": "qemu", "image": "d.qcow2", "role": "switch", "adapters": 2, **node}
+    with pytest.raises(ValueError):
+        NodeSpec.model_validate(body)

@@ -40,6 +40,10 @@ class NodeSpec(BaseModel):
     # QEMU only: the adapter that is the outer port of the "Internet" node. The slot gives it the
     # SLOT_UPLINK_MAC and links it to a cloud node on eth1 (CONTRACTS.md 4.2). At most one per ticket.
     uplink_port: int | None = Field(default=None, ge=0, le=15)
+    # QEMU only: what the node is beyond its kind, from the image catalog. "switch" is the Linux switch
+    # (images/linux-switch): only such a node is asked the switch.net and switch.fdb collectors
+    # (CONTRACTS.md 4.2, 4.6). A guest is never asked what it is for: a student could answer anything.
+    role: Literal["switch"] | None = None
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -47,7 +51,7 @@ class NodeSpec(BaseModel):
         # stored in the lab record) and part of the idempotency fingerprint. The default
         # "telnet" must not appear in it: records written before this field existed, and a
         # manifest that omits it, keep their exact representation. The same holds for an absent
-        # nvram_config: only a node the Manager preconfigured carries it. The same for uplink_port.
+        # nvram_config: only a node the Manager preconfigured carries it. The same for uplink_port and role.
         data = handler(self)
         if isinstance(data, dict):
             if data.get("console") == "telnet":
@@ -56,6 +60,8 @@ class NodeSpec(BaseModel):
                 data.pop("nvram_config", None)
             if data.get("uplink_port") is None:
                 data.pop("uplink_port", None)
+            if data.get("role") is None:
+                data.pop("role", None)
         return data
 
     @model_validator(mode="after")
@@ -80,6 +86,10 @@ class NodeSpec(BaseModel):
                 raise ValueError("uplink_port is only supported for qemu nodes")
             if self.uplink_port >= self.adapters:
                 raise ValueError("uplink_port must be less than adapters")
+        if self.role is not None and self.kind != "qemu":
+            raise ValueError("role is only supported for qemu nodes")
+        if self.role is not None and self.uplink_port is not None:
+            raise ValueError("a node with uplink_port has no role")
         if self.nvram_config is not None:
             if self.kind != "iou":
                 raise ValueError("nvram_config is only supported for iou nodes")

@@ -653,12 +653,18 @@ LINUX_NET = Collector(
     parse=lambda stdout, node: parse_linux_net(stdout, adapter_macs(node)),
     missing="The guest has no usable `ip -j`",
 )
-# The ticket has no "switch" role for a node, so every QEMU node with QGA is asked and the guest answers.
+# Only a node the ticket calls a switch (NodeSpec.role, from the image catalog). The guest is not asked what it
+# is: any Linux guest can carry a switchctl, a student's included, and an image built on top of the switch
+# (the "Internet" node) does carry it without running its service.
+def is_switch(node, spec):
+    return LINUX_NET.applies(node, spec) and spec.get("role") == "switch"
+
+
 SWITCH_NET = Collector(
     name="switch.net",
     schema="switch.net/1",
     command=SWITCH_NET_COMMAND,
-    applies=LINUX_NET.applies,
+    applies=is_switch,
     parse=lambda stdout, node: parse_switch_net(stdout, adapter_macs(node)),
     missing="The guest has no switchctl",
     probe=True,
@@ -669,7 +675,7 @@ SWITCH_FDB = Collector(
     name="switch.fdb",
     schema="switch.fdb/1",
     command=SWITCH_FDB_COMMAND,
-    applies=LINUX_NET.applies,
+    applies=is_switch,
     parse=lambda stdout, node: parse_switch_fdb(stdout),
     missing="The guest has no switchctl",
     probe=True,

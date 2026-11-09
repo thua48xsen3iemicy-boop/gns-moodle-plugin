@@ -160,6 +160,12 @@ class Admission:
         self.release()
 
 
+def without_roles(ticket):
+    """The manifest without NodeSpec.role: what has to match when a project is deployed again."""
+    nodes = [{k: v for k, v in n.items() if k != "role"} if isinstance(n, dict) else n for n in ticket.get("nodes", [])]
+    return {**ticket, "nodes": nodes}
+
+
 class Lifecycle:
     def __init__(self, app):
         self.request = SimpleNamespace(app=app)
@@ -394,7 +400,11 @@ class Lifecycle:
         if lab and ticket_data:
             ticket_data["project_id"] = pid
             if ticket_data != lab["ticket"]:
-                raise HTTPException(409, "Existing project manifest differs")
+                if without_roles(ticket_data) != without_roles(lab["ticket"]):
+                    raise HTTPException(409, "Existing project manifest differs")
+                # Only NodeSpec.role differs: a project deployed before the catalog named the role. The role
+                # builds nothing in GNS3 (it picks the collectors), so the stored manifest takes the new one.
+                lab["ticket"] = ticket_data
         if not lab:
             ticket_data["project_id"] = pid
             lab = {
