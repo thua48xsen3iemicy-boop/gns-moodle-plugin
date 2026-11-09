@@ -17,6 +17,7 @@ import pytest
 from api import facts as facts_module
 from api.facts import (
     COLLECTORS,
+    cabled_ports_only,
     LINUX_NET_COMMAND,
     ROUTEROS_NET_COMMAND,
     ROUTEROS_SYS_COMMAND,
@@ -633,6 +634,7 @@ def success():
 def scenario(monkeypatch, body):
     monkeypatch.setenv("SLOT_FACTS_INTERVAL", "0")  # every cycle collects again
     monkeypatch.setenv("SLOT_FACTS_MIN_REFRESH", "0")
+    monkeypatch.setenv("SLOT_FACTS_BOOT_GRACE", "0")  # every failure is published; the boot tests set their own
 
     async def run():
         labs = {"p1": lab()}
@@ -1821,3 +1823,91 @@ def test_capabilities_announce_the_collectors(mock_server):
         "linux.sys/1", "linux.config/1", "routeros.sys/1", "iol.l1/1",
     ]
     assert os.getenv("SLOT_API_TOKEN") == "test-token"
+
+
+# --- the "Internet" node (NodeSpec.uplink_port): its cabled ports only ---------------------------------------------
+
+
+def make_isp(labs, links):
+    """PC1 becomes the "Internet" node: adapter 1 is its outer port, `links` are the lab's cables."""
+    labs["p1"]["ticket"]["nodes"][0]["uplink_port"] = 1
+    labs["p1"]["ticket"]["links"] = links
+
+
+def test_the_internet_node_shows_its_cabled_ports_and_nothing_else(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        make_isp(labs, [{"a": {"node": "PC1", "adapter": 0, "port": 0}, "b": {"node": "SW1", "adapter": 0, "port": 0}}])
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n1"]["collectors"]
+        assert list(collectors) == ["linux.net"]  # no hostname, saved configuration or switch probes
+        data = collectors["linux.net"]["data"]
+        # ens3 (adapter 0) has a cable; lo, the outer port ens4, the unknown ens5 and the VLAN are not shown.
+        assert [i["name"] for i in data["interfaces"]] == ["ens3"]
+        assert all(r["dev"] == "ens3" for r in data["routes"]) and data["routes"]
+        assert lifecycle.qga.asked(LINUX_SYS_COMMAND) == [] and lifecycle.qga.asked(LINUX_CONFIG_COMMAND) == []
+
+    scenario(monkeypatch, body)
+
+
+def test_a_spare_port_of_the_internet_node_is_not_shown(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        make_isp(labs, [])  # no cable: the preset address of a spare LAN port stays out of the facts
+        await facts.cycle()
+        data = facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.net"]["data"]
+        assert data == {"interfaces": [], "routes": []}
+
+    scenario(monkeypatch, body)
+
+
+def test_other_nodes_keep_every_interface():
+    data = parse_linux_net(output(), MACS)
+    assert cabled_ports_only(data, {"name": "PC1"}) is data
+
+
+# --- a guest that is still booting -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("failure", [QgaTimeout("slow"), QgaUnavailable("backing off")])
+def test_a_booting_guest_is_not_a_collection_error_until_the_grace_ends(monkeypatch, failure):
+    async def body(facts, lifecycle, labs):
+        facts.boot_grace = 120
+        lifecycle.qga.config_reply = failure  # ifupdown waits for a DHCP lease at boot
+        await facts.cycle()
+        collectors = facts.snapshot("p1")["nodes"]["n1"]["collectors"]
+        assert "linux.config" not in collectors and collectors["linux.net"]["ok"] is True
+        lifecycle.qga.config_reply = LINUX_CONFIG_NONE
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["ok"] is True
+        lifecycle.qga.config_reply = failure  # it has answered once: a failure now is the owner's to see
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["ok"] is False
+
+    scenario(monkeypatch, body)
+
+
+def test_the_grace_ends_and_starts_again_with_the_next_boot(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        facts.boot_grace = 120
+        lifecycle.qga.config_reply = QgaTimeout("slow")
+        await facts.cycle()
+        facts.started[("p1", "n1")] -= 121  # two minutes later the guest still does not answer
+        await facts.cycle()
+        record = facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]
+        assert record["ok"] is False and record["error"]["code"] == "timeout"
+        for status in ("stopped", "started"):  # the node is started again: it boots again
+            labs["p1"]["nodes"][0]["status"] = status
+            await facts.cycle()
+        assert ("p1", "n1") in facts.started and facts.started[("p1", "n1")] > 0
+        assert not any(k[:2] == ("p1", "n1") for k in facts.answered if k[2] == "linux.config")
+
+    scenario(monkeypatch, body)
+
+
+def test_a_refusal_of_the_guest_is_published_at_once(monkeypatch):
+    async def body(facts, lifecycle, labs):
+        facts.boot_grace = 120
+        lifecycle.qga.config_reply = {"exit_code": 1, "stdout": "", "stderr": "boom"}  # not a slow boot
+        await facts.cycle()
+        assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["error"]["code"] == "failed"
+
+    scenario(monkeypatch, body)

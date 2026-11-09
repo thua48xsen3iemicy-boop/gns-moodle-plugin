@@ -239,6 +239,7 @@ def test_a_read_under_way_when_the_carrier_changes_is_repeated_at_once():
         service.slots, service.epoch, service.wake = asyncio.Semaphore(1), 0, asyncio.Event()
         service.results, service.next_due, service.soon = {}, {}, {}
         service.absent, service.confirmed, service.families, service.snapshots = set(), set(), {}, {}
+        service.started, service.answered, service.boot_grace = {}, set(), 0.0
         collector = next(c for c in COLLECTORS if c.name == "linux.net")
         node = {"node_id": "pc", "name": "pc", "status": "started", "properties": {}}
         key = ("p", "pc", "linux.net")

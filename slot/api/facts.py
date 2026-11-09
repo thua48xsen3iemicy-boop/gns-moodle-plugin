@@ -645,12 +645,31 @@ class Collector:
     timeout_scale: float = 1.0  # times SLOT_FACTS_TIMEOUT; a cold PowerShell needs seconds to start
 
 
+# The "Internet" node (NodeSpec.uplink_port) is a service appliance of the slot, not a device of the lab: it shows
+# only its ports that have a cable in the lab (Facts.cycle puts their adapters into the node under SHOWN_ADAPTERS)
+# and the routes through them. Its outer port, ppp0, the spare LAN ports with their preset addresses, its
+# hostname and its saved configuration are not the student's business (CONTRACTS.md 4.6).
+SHOWN_ADAPTERS = "_shown_adapters"
+
+
+def cabled_ports_only(data, node):
+    shown = node.get(SHOWN_ADAPTERS)
+    if shown is None:
+        return data
+    interfaces = [
+        i for i in data["interfaces"]
+        if i.get("kind") == "physical" and i.get("port", {}).get("adapter") in shown
+    ]
+    names = {i["name"] for i in interfaces}
+    return {"interfaces": interfaces, "routes": [r for r in data["routes"] if r.get("dev") in names]}
+
+
 LINUX_NET = Collector(
     name="linux.net",
     schema="linux.net/1",
     command=LINUX_NET_COMMAND,
     applies=lambda node, spec: node.get("node_type") == "qemu" and spec.get("qga", True),
-    parse=lambda stdout, node: parse_linux_net(stdout, adapter_macs(node)),
+    parse=lambda stdout, node: cabled_ports_only(parse_linux_net(stdout, adapter_macs(node)), node),
     missing="The guest has no usable `ip -j`",
 )
 # Only a node the ticket calls a switch (NodeSpec.role, from the image catalog). The guest is not asked what it
@@ -786,6 +805,10 @@ class Facts:
         self.interval = float(os.getenv("SLOT_FACTS_INTERVAL", "30"))
         self.timeout = float(os.getenv("SLOT_FACTS_TIMEOUT", "10"))
         self.min_refresh = float(os.getenv("SLOT_FACTS_MIN_REFRESH", "5"))
+        # A guest that has just booted is still bringing its network up: ifupdown waiting for a DHCP lease holds
+        # `ifup --no-act` of linux.config past the timeout. Until a collector has answered once since the node
+        # started, a timeout or an unreachable agent within this many seconds is not published.
+        self.boot_grace = float(os.getenv("SLOT_FACTS_BOOT_GRACE", "120"))
         self.tick = max(min(self.interval, 2.0), 0.05)
         self.slots = asyncio.Semaphore(int(os.getenv("SLOT_FACTS_CONCURRENCY", "8")))
         self.results = {}  # project_id -> node_id -> {"name", "collectors": {name: result}}
@@ -798,6 +821,8 @@ class Facts:
         # would stay as a stranger's error (the manager never deletes a collector's row).
         self.families = {}
         self.snapshots = {}  # same keys: the outcome for the last version of a file (local collectors)
+        self.started = {}  # (project_id, node_id) -> monotonic time the slot first saw the node started
+        self.answered = set()  # (project_id, node_id, collector) that succeeded since the node started
         self.epoch = 0  # bumped by reset(): results of an attempt that started earlier are dropped
         self.force = False
         self.last_refresh = float("-inf")
@@ -815,6 +840,8 @@ class Facts:
         self.families.clear()
         self.snapshots.clear()
         self.soon.clear()
+        self.started.clear()
+        self.answered.clear()
 
     def request_refresh(self):
         now = time.monotonic()
@@ -874,9 +901,9 @@ class Facts:
             del self.results[project_id]
         for key in [k for k in self.next_due if k[0] not in labs]:
             del self.next_due[key]
-        for memory in (self.absent, self.confirmed):
+        for memory in (self.absent, self.confirmed, self.answered):
             memory.difference_update([k for k in memory if k[0] not in labs])
-        for memory in (self.families, self.snapshots, self.soon):
+        for memory in (self.families, self.snapshots, self.soon, self.started):
             for key in [k for k in memory if k[0] not in labs]:
                 del memory[key]
         if not self.lc.claimed:
@@ -885,15 +912,28 @@ class Facts:
         jobs = []
         for lab in labs.values():
             specs = {spec["name"]: spec for spec in lab["ticket"]["nodes"]}
+            cabled = {}  # node name -> adapters with a cable in the lab (the manifest's links are the project's)
+            for link in lab["ticket"].get("links", []):
+                for end in (link.get("a") or {}, link.get("b") or {}):
+                    cabled.setdefault(end.get("node"), set()).add(end.get("adapter", 0))
             for node in lab.get("nodes", []):
                 spec = specs.get(node.get("name"))
                 if spec is None:
                     continue
+                booted = (lab["project_id"], node["node_id"])
+                if node.get("status") == "started":
+                    self.started.setdefault(booted, time.monotonic())
+                elif self.started.pop(booted, None) is not None:  # stopped: the next start boots again
+                    self.answered.difference_update([k for k in self.answered if k[:2] == booted])
+                if spec.get("uplink_port") is not None:
+                    node = {**node, SHOWN_ADAPTERS: frozenset(cabled.get(spec["name"], set()) - {spec["uplink_port"]})}
                 due = []
                 family = self.families.get((lab["project_id"], node["node_id"]))
                 for collector in COLLECTORS:
                     if not collector.applies(node, spec):
                         continue
+                    if spec.get("uplink_port") is not None and collector is not LINUX_NET:
+                        continue  # the "Internet" node: its cabled ports only (cabled_ports_only)
                     if collector.local is None and family is not None and collector.family != family:
                         continue
                     key = (lab["project_id"], node["node_id"], collector.name)
@@ -1030,6 +1070,11 @@ class Facts:
             self.confirmed.discard(key)
             self.drop(key)
             return
+        if failure is None:
+            self.answered.add(key)
+        elif (not collector.probe and failure[0] in ("timeout", "unreachable") and key not in self.answered
+              and time.monotonic() - self.started.get(key[:2], float("-inf")) < self.boot_grace):
+            return  # still booting: asked again at the next round, nothing is published yet
         if collector.probe:
             if failure is None:
                 self.confirmed.add(key)
