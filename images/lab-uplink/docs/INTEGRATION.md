@@ -8,8 +8,9 @@ This image is an independent component; it changes no Slot, Manager or Plugin co
 * Manager: image `lab-uplink` in `images.json` with `"console_type": "none"`; labs with the node run only on slots that
   offer the `uplink` feature (CONTRACTS 7).
 * Install: `install/lab-uplink-filter` keeps slots from seeing each other in the shared VLAN.
-* The slot reads the guest as any QEMU node with QGA (`linux.net`, `linux.sys`, `linux.config`; read-only).
-  The facts of the LAN ports are what keeps the carrier and the IOL keepalives of the cables to the lab's routers.
+* The slot reads only `linux.net` of the guest (read-only) and publishes only the LAN ports that have a cable in the
+  lab, with their routes (slot 0.17.2, manager/docs/CONTRACTS.md 4.2). Those facts keep the carrier and the IOL
+  keepalives of the cables to the lab's routers. The outer port, ppp0 and spare LAN ports are not shown.
   The catalog entry has no `role`: the slot never asks it the switch collectors. Do not build this image on top of
   `images/linux-switch` without removing switch-api (see that image's docs/INTEGRATION.md).
 * Optional LAN routing is an image-local build setting (`--routed-lan-ports`), persisted in
