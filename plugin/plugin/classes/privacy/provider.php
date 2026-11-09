@@ -24,6 +24,7 @@ use core_privacy\local\request\transform;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
 use mod_gns3lab\local\check_runs;
+use mod_gns3lab\local\purges;
 use mod_gns3lab\local\reveal;
 use mod_gns3lab\local\seat;
 
@@ -104,6 +105,11 @@ class provider implements
             'mark' => 'privacy:metadata:gns3lab_check_runs:mark',
             'timecreated' => 'privacy:metadata:gns3lab_check_runs:timecreated',
         ], 'privacy:metadata:gns3lab_check_runs');
+        $collection->add_database_table('gns3lab_purges', [
+            'instanceid' => 'privacy:metadata:gns3lab_purges:instanceid',
+            'userid' => 'privacy:metadata:gns3lab_purges:userid',
+            'timecreated' => 'privacy:metadata:gns3lab_purges:timecreated',
+        ], 'privacy:metadata:gns3lab_purges');
         return $collection;
     }
 
@@ -303,6 +309,7 @@ class provider implements
             reveal::delete(self::instance_of($context));
             seat::delete(self::instance_of($context));
             check_runs::delete(self::instance_of($context));
+            self::purge_in($context, 0);
             return;
         }
         if ($context->contextlevel != CONTEXT_SYSTEM) {
@@ -324,10 +331,13 @@ class provider implements
         foreach ($contextlist->get_contexts() as $context) {
             if ($context->contextlevel == CONTEXT_SYSTEM) {
                 self::hand_over([$userid]);
+                // Everything of the user on the lab manager, the authoring projects included.
+                purges::queue(0, $userid);
             } else if ($context->contextlevel == CONTEXT_MODULE) {
                 reveal::delete(self::instance_of($context), [$userid]);
                 seat::delete(self::instance_of($context), [$userid]);
                 check_runs::delete(self::instance_of($context), [$userid]);
+                self::purge_in($context, $userid);
             }
         }
     }
@@ -342,10 +352,32 @@ class provider implements
         $userids = array_map('intval', $userlist->get_userids());
         if ($context->contextlevel == CONTEXT_SYSTEM) {
             self::hand_over($userids);
+            foreach ($userids as $userid) {
+                purges::queue(0, $userid);
+            }
         } else if ($context->contextlevel == CONTEXT_MODULE) {
             reveal::delete(self::instance_of($context), $userids);
             seat::delete(self::instance_of($context), $userids);
             check_runs::delete(self::instance_of($context), $userids);
+            foreach ($userids as $userid) {
+                self::purge_in($context, $userid);
+            }
+        }
+    }
+
+    /**
+     * Queues the deletion of work on the lab manager in one activity: of one user, or of everyone with 0.
+     *
+     * Nothing is queued when the course module is already gone: a request without the activity would reach all the
+     * user's work on the site. Deleting the activity itself has queued its request already (gns3lab_delete_instance).
+     *
+     * @param \context $context module context
+     * @param int $userid user id, 0 for all users of the activity
+     */
+    protected static function purge_in(\context $context, int $userid): void {
+        $instanceid = self::instance_of($context);
+        if ($instanceid > 0) {
+            purges::queue($instanceid, $userid);
         }
     }
 

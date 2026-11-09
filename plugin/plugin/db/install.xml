@@ -147,5 +147,24 @@
         <INDEX NAME="status" UNIQUE="false" FIELDS="status"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="gns3lab_purges" COMMENT="Requests to delete student work on the lab manager that are not delivered yet (manager CONTRACTS 2.10)">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="instanceid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Deleted activity, 0 for none; the record itself may be gone"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="User whose work goes, 0 for all users"/>
+        <FIELD NAME="librarylabid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Deleted lab of the lab library (authoring projects), 0 for none"/>
+        <FIELD NAME="attempts" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Failed deliveries"/>
+        <FIELD NAME="nextattempt" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When to deliver next"/>
+        <FIELD NAME="lasterror" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Why the last delivery failed"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="request" UNIQUE="true" FIELDS="instanceid, userid, librarylabid"/>
+        <INDEX NAME="nextattempt" UNIQUE="false" FIELDS="nextattempt"/>
+      </INDEXES>
+    </TABLE>
   </TABLES>
 </XMLDB>

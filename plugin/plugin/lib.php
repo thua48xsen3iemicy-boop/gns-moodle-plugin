@@ -105,6 +105,8 @@ function gns3lab_delete_instance($id): bool {
     \mod_gns3lab\local\reveal::delete((int) $id);
     \mod_gns3lab\local\seat::delete((int) $id);
     \mod_gns3lab\local\check_runs::delete((int) $id);
+    // The students' projects live on the lab manager: it deletes them when the task delivers the request.
+    \mod_gns3lab\local\purges::queue((int) $id);
     gns3lab_grade_item_delete($DB->get_record('gns3lab', ['id' => $id]));
     $DB->delete_records('gns3lab', ['id' => $id]);
     return true;

@@ -367,6 +367,45 @@ class manager_client {
     }
 
     /**
+     * Asks the manager to delete student work (CONTRACTS §2.10): an activity, a user, a library lab, or one student
+     * in an activity. Ids left at 0 are not sent.
+     *
+     * @param int $instanceid gns3lab instance id, 0 for none
+     * @param int $userid Moodle user id, 0 for none
+     * @param int $librarylabid lab of the lab library (authoring projects), 0 for none
+     * @return \stdClass {workspaces, pending}: pending workspaces still have a live session that is being stopped
+     */
+    public function purge(int $instanceid = 0, int $userid = 0, int $librarylabid = 0): \stdClass {
+        $body = array_filter(['instance_id' => $instanceid, 'user_id' => $userid, 'library_lab_id' => $librarylabid]);
+        return $this->expect_purge($this->request('POST', '/api/v1/purges', $body));
+    }
+
+    /**
+     * Daily safety net: the manager purges the work of activities this site no longer has (CONTRACTS §2.10).
+     *
+     * @param int[] $instanceids ids of all gns3lab activities of the site, not empty
+     * @return \stdClass {workspaces, pending}
+     */
+    public function reconcile_purges(array $instanceids): \stdClass {
+        $ids = array_values(array_map('intval', $instanceids));
+        return $this->expect_purge($this->request('POST', '/api/v1/purges/reconcile', ['instance_ids' => $ids]));
+    }
+
+    /**
+     * Checks the answer of a purge request.
+     *
+     * @param mixed $data decoded JSON
+     * @return \stdClass {workspaces, pending}
+     */
+    protected function expect_purge(mixed $data): \stdClass {
+        $data = $this->expect_object($data);
+        if (!is_int($data->workspaces ?? null) || !is_int($data->pending ?? null)) {
+            throw new manager_exception('badresponse', 200, 'purge answer without workspaces or pending');
+        }
+        return $data;
+    }
+
+    /**
      * Sessions of all students of an activity, for the observer page: live or the last finished one each.
      *
      * @param int $instanceid gns3lab instance id

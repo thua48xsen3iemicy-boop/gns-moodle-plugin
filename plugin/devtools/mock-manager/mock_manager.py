@@ -33,6 +33,9 @@
   действительно «собирает»: rev растёт, снимок переключается между facts.json и facts-broken.json.
 
 Автопроверки (CONTRACTS §2.9 менеджера 0.17):
+- info: feature "purge"; POST /api/v1/purges {"instance_id"?, "user_id"?, "library_lab_id"?} — живые сессии получают
+  остановку, остановленные и упавшие удаляются сразу; ответ {"workspaces", "pending"} (CONTRACTS §2.10);
+  POST /api/v1/purges/reconcile {"instance_ids"} — то же для активностей не из списка с id ≤ max; пустой список — 400;
 - info: feature "checks"; у running-сессии features ["consoles", "facts", "checks"];
 - POST /api/v1/sessions/{id}/checks {"requested_by_user_id", "grading"?} — 202 прогон queued (неизвестное поле — 400
   unsupported_field, неизвестный код в overrides или неверные пороги — 400 invalid_request, сессия не running — 409
@@ -579,7 +582,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -731,6 +734,51 @@ async def stop_session(request):
         by = body.get("requested_by_user_id")
         s.stopped_by_teacher = by is not None and by != s.user_id
     return web.json_response(request.app["m"].present(s))
+
+
+def purge_sessions(m, matches):
+    """Stop the live sessions that match, forget the finished ones; {workspaces, pending} as the manager answers."""
+    keys, pending = set(), set()
+    for s in list(m.sessions):
+        if not matches(s):
+            continue
+        key = (s.user_id, s.instance_id, s.library_lab_id, s.key)
+        keys.add(key)
+        if s.status() in ("stopped", "failed"):
+            m.sessions.remove(s)
+        else:
+            pending.add(key)
+            if s.stop_requested is None:
+                m.observe(s)
+                s.stop_requested = time.time()
+    return {"workspaces": len(keys), "pending": len(pending)}
+
+
+async def purge(request):
+    site = site_of(request)
+    try:
+        body = await read_body(request, {"instance_id": 1, "user_id": 1, "library_lab_id": 1})
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    ids = {k: body.get(k) for k in ("instance_id", "user_id", "library_lab_id")}
+    if (not any(ids.values()) or (ids["instance_id"] and ids["library_lab_id"])
+            or any(v is not None and (not is_int(v) or v <= 0) for v in ids.values())):
+        return error(400, "invalid_request", "Name instance_id, user_id or library_lab_id")
+    return web.json_response(purge_sessions(request.app["m"], lambda s: s.site == site and all(
+        v is None or getattr(s, k) == v for k, v in ids.items())))
+
+
+async def reconcile(request):
+    site = site_of(request)
+    try:
+        body = await read_body(request, {"instance_ids": 1})
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    ids = body.get("instance_ids")
+    if not isinstance(ids, list) or not ids or not all(is_int(i) and i > 0 for i in ids):
+        return error(400, "invalid_request", "instance_ids: a non-empty list of positive integers")
+    return web.json_response(purge_sessions(request.app["m"], lambda s: s.site == site and s.instance_id is not None
+                                            and s.instance_id <= max(ids) and s.instance_id not in ids))
 
 
 async def image_capture(request):
@@ -1452,6 +1500,8 @@ def make_apps():
     api.router.add_get('/api/v1/sessions/{sid}/capture', image_capture)
     api.router.add_patch('/api/v1/images/{image}', image_patch)
     api.router.add_get("/api/v1/info", info)
+    api.router.add_post("/api/v1/purges", purge)
+    api.router.add_post("/api/v1/purges/reconcile", reconcile)
     api.router.add_get("/api/v1/labs", list_labs)
     api.router.add_get("/api/v1/images", images)
     api.router.add_post("/api/v1/labs/validate", validate_lab)
