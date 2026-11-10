@@ -343,6 +343,7 @@ class FakeSlot:
         self.shutdown_route = True
         self.shutdown_errors = {}
         self.refreshes = []  # project ids the manager asked to collect now
+        self.on_refresh = None  # callable(project_id): what the slot does on a refresh (collects, drops it...)
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -469,6 +470,8 @@ class FakeSlot:
         if facts and self.facts_enabled:
             if facts.group(2):
                 self.refreshes.append(facts.group(1))
+                if self.on_refresh:
+                    self.on_refresh(facts.group(1))
                 return self._json(202, {"accepted": True})
             return self._json(200, {"schema": "gns3lab.slot-facts/1", "project_id": facts.group(1),
                                     "nodes": self.facts.get(facts.group(1), {})})
