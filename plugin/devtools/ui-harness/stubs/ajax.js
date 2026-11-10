@@ -211,7 +211,8 @@ define([], function() {
 
     // Auto-checks (classes/external/get_checks.php, start_check.php, get_check_run.php): runs in memory, a run takes
     // two seconds (?fast: half a second); the report depends on the facts variant like the mock manager. ?checksreport=counts
-    // or =after hides the findings like the server does, ?checksmax=N limits the attempts (0: unlimited).
+    // or =after hides the findings like the server does, ?checksmax=N limits the attempts (0: unlimited), ?checkteacher
+    // runs them as a teacher, who is told what could not be checked.
     const checks = {runs: [], next: null};
     const checkFindings = () => facts.variant === 'broken' ? [
         {id: 'f1', code: 'vlan_wrong', group: 'l2', class: 'major', baseclass: 'major', counted: true, causedby: '',
@@ -293,7 +294,12 @@ define([], function() {
             const detailed = o.detailsfrom === 0 && r.status === 'done';
             return {...checkSummary(r), detailed, detailsfrom: o.detailsfrom, gone: false,
                 findings: detailed ? r.findings : [],
-                rules: detailed ? [{code: 'address_not_saved', group: 'addressing', status: 'skipped', reason: 'no_collector'}] : []};
+                // Like the server: the rules skipped for want of data, to a teacher only (?checkteacher, ?observer).
+                rules: detailed && (cfg.checkteacher || cfg.observer) ? [
+                    {code: 'address_not_saved', group: 'addressing', status: 'skipped', reason: 'no_collector'},
+                    {code: 'config_not_applied', group: 'addressing', status: 'skipped', reason: 'no_collector'},
+                    {code: 'hostname_wrong', group: 'host', status: 'skipped', reason: 'collect_failed'},
+                ] : []};
         },
         mod_gns3lab_get_course_overview: courseOverview,
         mod_gns3lab_get_state: async args => {

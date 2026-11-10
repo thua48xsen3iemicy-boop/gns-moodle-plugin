@@ -120,6 +120,7 @@ const startButton = page => page.locator('[data-region="checksBody"] .chk-start 
         check('counts by class', /мелких: 1/.test(await panelText(page)));
         check('attempts went down', !!await until(async() => /1 из 2/.test(await region(page, 'checksLead').innerText())));
         check('the mark is on the button', (await region(page, 'checksMark').innerText()) === '5');
+        check('a student is not told what was not checked', !/Проверено не всё|Не проверено/.test(await panelText(page)));
         await page.screenshot({path: path.join(SHOTS, 'checks-ok.png')});
 
         // A broken lab: consequences under the root, a forgiven note, the message as text (no markup from the manager).
@@ -171,6 +172,20 @@ const startButton = page => page.locator('[data-region="checksBody"] .chk-start 
         await startButton(page).click();
         check('counts-only report: mark, no findings', !!await until(async() => (await page.locator('.chk-mark-value').count()) > 0, 6000)
             && (await page.locator('.chk-findings').count()) === 0 && /только итог/.test(await panelText(page)));
+        await page.context().close();
+
+        // ---- a teacher: the gaps in the data, by reason, in the language of the page
+        page = await open('index.ru.checks.html?checkteacher&checksmax=0');
+        await region(page, 'checksOpen').click();
+        await region(page, 'start').click();
+        await until(async() => startButton(page).isEnabled(), 6000);
+        await startButton(page).click();
+        await until(async() => (await page.locator('.chk-mark-value').count()) > 0, 6000);
+        const gaps = await page.locator('ul.chk-note li').allInnerTexts();
+        check('a teacher is told what was not checked', /Проверено не всё:/.test(await panelText(page)) && gaps.length === 2
+            && /не собираются факты.*правил: 2/.test(gaps[0]) && /ошибкой.*правил: 1/.test(gaps[1]), gaps.join(' | '));
+        check('...without rule codes', !/no_collector|address_not_saved/.test(await panelText(page)));
+        await page.screenshot({path: path.join(SHOTS, 'checks-teacher.png')});
         await page.context().close();
 
         // ---- an observer: the runs of the student, no button
