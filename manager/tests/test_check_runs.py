@@ -66,6 +66,45 @@ async def test_a_run_goes_from_queued_to_done(tmp_path, dsn):
         assert r.status_code == 202
 
 
+async def test_a_run_waits_for_the_collection_it_asked_for(tmp_path, dsn, monkeypatch):
+    """The slot drops a refresh within its rate limit and stamps attempts in whole seconds: a collection made in
+    the second the run started, after the run asked again, is fresh."""
+    import time
+
+    from lab_manager import orchestrator
+
+    monkeypatch.setattr(orchestrator, "CHECK_REASK", 0)
+    async with make_env(tmp_path, dsn) as env:
+        for slot in env.slots.values():
+            slot.facts_enabled = True
+        with_checks(env)
+        sid, slot, pid, ids = await started(env)
+        old = "2000-01-01T00:00:00Z"
+        addrs = (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"))
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": collected(
+            host(a)["data"], attempted=old, observed=old)}} for n, a in addrs}
+        env.orch._facts_next.clear()
+        await env.run(3)
+
+        def collect(project_id):
+            if slot.refreshes.count(project_id) < 2:
+                return  # Within SLOT_FACTS_MIN_REFRESH of a previous request: dropped
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": collected(
+                host(a)["data"], attempted=stamp, observed=stamp)}} for n, a in addrs}
+
+        slot.on_refresh = collect
+        r = await env.client.post(f"/api/v1/sessions/{sid}/checks", json={"requested_by_user_id": 42})
+        run = r.json()
+        for _ in range(10):
+            env.orch._facts_next.clear()
+            await env.run(1)
+        assert slot.refreshes.count(pid) >= 2  # The run asked again
+        done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{run['run_id']}")).json()
+        assert done["status"] == "done" and done["result"]["outcome"] == "graded"
+        assert not [r for r in done["result"]["rules"] if r.get("reason") == "stale_facts"]
+
+
 async def test_requests_that_are_refused(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         sid, _slot, _pid, _ids = await started(env)

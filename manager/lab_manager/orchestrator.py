@@ -67,6 +67,7 @@ NODE_KEYS = ("node_id", "name", "node_type", "x", "y", "z", "width", "height", "
 LINK_KEYS = ("link_id", "nodes", "suspend", "filters", "link_type", "link_style")
 CONSOLE_TYPES = {"telnet", "vnc"}
 NODE_STATUSES = {"started", "stopped", "suspended"}
+CHECK_REASK = 6  # Seconds between the requests of a check run to collect now: over the slot's 5 s rate limit
 
 # The CT may be running with the student's directory mounted read-write.
 MOUNTED_STAGES = ("ct_start", "slot_ready", "lab_submit", "lab_wait", "ready", "lab_stop", "lab_stop_wait")
@@ -190,6 +191,7 @@ class Orchestrator:
         self._health_checked: dict[str, float] = {}
         self._facts_next: dict[str, float] = {}  # session id -> monotonic time of the next read
         self._facts_refreshed: dict[str, object] = {}  # session id -> facts_refresh_at already served
+        self._check_asked: dict[str, float] = {}  # session id -> monotonic time a check run last asked the slot
         self._live_cache: dict[str, tuple[float, dict]] = {}
         self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
         self.leader = False
@@ -492,6 +494,7 @@ class Orchestrator:
         self._health_checked.pop(s["id"], None)
         self._facts_next.pop(s["id"], None)
         self._facts_refreshed.pop(s["id"], None)
+        self._check_asked.pop(s["id"], None)
         self._consoleless.pop(s["id"], None)
 
     @staticmethod
@@ -1013,13 +1016,7 @@ class Orchestrator:
             if run["status"] == "queued":
                 if await self.store.start_check_run(run["id"]) is None:
                     return
-                try:
-                    await self._slot(s).refresh_facts(str(s["project_id"]))
-                except SlotOwnerLost:
-                    raise
-                except SlotError as exc:
-                    log.warning("Check %s: facts refresh failed: %s", run["id"], exc)
-                self._facts_next[sid] = mono + 3  # Time for the slot to collect
+                await self._ask_collect(s, run)
                 return
             rows = await self.store.facts_rows(sid)
             nodes, _ = await self.live_nodes(s)
@@ -1027,10 +1024,17 @@ class Orchestrator:
             latest = {}
             for row in rows:
                 latest[row["node_id"]] = max(latest.get(row["node_id"], row["attempted_at"]), row["attempted_at"])
-            stale = {nid for nid, at in latest.items() if at < run["started_at"] and statuses.get(nid) == "started"}
+            # The slot stamps its attempts in whole seconds: one made in the second the run started is fresh.
+            since = run["started_at"].replace(microsecond=0)
+            stale = {nid for nid, at in latest.items() if at < since and statuses.get(nid) == "started"}
             if stale and (now() - run["started_at"]).total_seconds() < self.settings.check_facts_wait:
+                if mono - self._check_asked.get(sid, float("-inf")) >= CHECK_REASK:
+                    # The slot drops a refresh that comes within SLOT_FACTS_MIN_REFRESH of the previous one (a
+                    # plugin's "refresh now", say), and a collector read before the run is due again only in 30 s.
+                    await self._ask_collect(s, run)
                 self._facts_next[sid] = min(self._facts_next.get(sid, mono + 3), mono + 3)
                 return
+            self._check_asked.pop(sid, None)
             fresh = await self.store.session(sid)
             try:
                 result, checks_def = await self._grade_checks(s, run, rows, statuses, stale, nodes)
@@ -1045,6 +1049,17 @@ class Orchestrator:
             raise
         except psycopg.Error as exc:
             log.warning("Check run of session %s: %s", sid, type(exc).__name__)
+
+    async def _ask_collect(self, s, run):
+        """Ask the slot to collect the facts of every node now, and read them a few seconds later."""
+        self._check_asked[s["id"]] = time.monotonic()
+        try:
+            await self._slot(s).refresh_facts(str(s["project_id"]))
+        except SlotOwnerLost:
+            raise
+        except SlotError as exc:
+            log.warning("Check %s: facts refresh failed: %s", run["id"], exc)
+        self._facts_next[s["id"]] = time.monotonic() + 3  # Time for the slot to collect
 
     async def _grade_checks(self, s, run, rows, statuses, stale, nodes):
         """(result, checks_def) of a run over the stored facts of the session."""
