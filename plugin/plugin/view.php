@@ -26,6 +26,7 @@ require('../../config.php');
 require_once($CFG->libdir . '/completionlib.php');
 
 $id = required_param('id', PARAM_INT);
+$action = optional_param('action', '', PARAM_ALPHA);
 
 [$course, $cm] = get_course_and_cm_from_cmid($id, 'gns3lab');
 $instance = $DB->get_record('gns3lab', ['id' => $cm->instance], '*', MUST_EXIST);
@@ -49,6 +50,32 @@ $PAGE->set_url('/mod/gns3lab/view.php', ['id' => $cm->id]);
 $PAGE->set_title(format_string($course->shortname) . ': ' . format_string($instance->name));
 $PAGE->set_heading(format_string($course->fullname));
 $PAGE->set_activity_record($instance);
+
+if ($action === 'wipe') {
+    // The student wipes the own lab in this activity (manager CONTRACTS 2.10): confirm, then delete at once.
+    $client = \core\di::get(\mod_gns3lab\local\manager_client::class);
+    if (!\mod_gns3lab\local\purges::can_wipe($context, $client)) {
+        throw new \moodle_exception('wipeunavailable', 'gns3lab', $PAGE->url);
+    }
+    if (!optional_param('confirm', 0, PARAM_BOOL)) {
+        $continue = new \core\url($PAGE->url, ['action' => 'wipe', 'confirm' => 1, 'sesskey' => sesskey()]);
+        echo $OUTPUT->header();
+        echo $OUTPUT->confirm(get_string('wipeconfirm', 'gns3lab'), $continue, $PAGE->url);
+        echo $OUTPUT->footer();
+        exit;
+    }
+    require_sesskey();
+    try {
+        $result = \mod_gns3lab\local\purges::wipe($instance, (int) $USER->id, $client);
+    } catch (\mod_gns3lab\local\manager_exception $e) {
+        redirect($PAGE->url, get_string('wipefailed', 'gns3lab', $e->remotecode), null,
+            \core\output\notification::NOTIFY_ERROR);
+    } catch (\moodle_exception $e) {
+        redirect($PAGE->url, $e->getMessage(), null, \core\output\notification::NOTIFY_WARNING);
+    }
+    $message = !$result->workspaces ? 'wipenothing' : ($result->pending ? 'wipepending' : 'wipedone');
+    redirect($PAGE->url, get_string($message, 'gns3lab'), null, \core\output\notification::NOTIFY_SUCCESS);
+}
 
 $overview = new \mod_gns3lab\output\overview($cm, $instance);
 

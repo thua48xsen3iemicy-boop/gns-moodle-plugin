@@ -23,6 +23,7 @@ use core\url;
 use mod_gns3lab\local\demo;
 use mod_gns3lab\local\lab_preview;
 use mod_gns3lab\local\manager_client;
+use mod_gns3lab\local\purges;
 use mod_gns3lab\local\reveal;
 
 /**
@@ -60,7 +61,11 @@ class overview implements renderable, templatable {
         // Without a reference lab, or without a lab manager, the lab page shows the demo lab.
         $nolab = empty($this->instance->labversionid) && trim((string) $this->instance->labref) === '';
         $isdemo = $nolab || !manager_client::is_configured();
+        $canwipe = !$isdemo && purges::can_wipe($this->cm->context, \core\di::get(manager_client::class));
         return [
+            // The student's own "Wipe": the confirmation page comes first (view.php, action=wipe).
+            'wipeurl' => $canwipe
+                ? (new url('/mod/gns3lab/view.php', ['id' => $this->cm->id, 'action' => 'wipe']))->out(false) : '',
             'openurl' => (new url('/mod/gns3lab/lab.php', ['id' => $this->cm->id]))->out(false),
             'isdemo' => $isdemo,
             'previewjson' => $this->preview_json(),

@@ -54,6 +54,17 @@ $capabilities = [
             'editingteacher' => CAP_ALLOW,
         ],
     ],
+    // Wipe one's own lab in the activity: the project is deleted, the next start is a fresh one (manager CONTRACTS 2.10).
+    'mod/gns3lab:wipe' => [
+        'riskbitmask' => RISK_DATALOSS,
+        'captype' => 'write',
+        'contextlevel' => CONTEXT_MODULE,
+        'archetypes' => [
+            'student' => CAP_ALLOW,
+            'teacher' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+    ],
     'mod/gns3lab:observe' => [
         'riskbitmask' => RISK_PERSONAL,
         'captype' => 'read',

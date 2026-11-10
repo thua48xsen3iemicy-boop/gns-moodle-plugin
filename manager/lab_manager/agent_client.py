@@ -18,6 +18,10 @@ Agent endpoints (all synchronous, one operation per CT at a time):
                                          -> {"student_key", "ready": true}; 409 if the existing
                                          directory has another owner (also briefly during a
                                          concurrent creation), 503 if the agent lacks the uid/gid
+    DELETE /students/{key}/projects/{id} agent 1.4.0 (`projects_delete` in /capabilities): delete one
+                                         stopped project and the slot's state for it, idempotent
+                                         -> {"student_key", "project_id", "deleted"};
+                                         409 STUDENT_DIR_BUSY while a local CT has the directory
 
 Errors. Preferred: {"detail": {"code": "...", "message": "..."}} with the codes in
 docs/AGENT_REQUESTS.md; until the agent sends codes, the FastAPI {"detail": "..."} text of
@@ -272,6 +276,14 @@ class AgentClient:
                                 mutating=True)
         if body.get("ready") is not True or body.get("student_key") != student_key:
             raise AgentUncertain(200, "Unexpected student provisioning response")
+        return body
+
+    async def delete_project(self, node: str, student_key: str, project_id: str) -> dict:
+        """Idempotent. Not a CT command: no ownership headers, any node's agent reaches the shared CephFS."""
+        body = await self._call("DELETE", node, f"/students/{student_key}/projects/{project_id}",
+                                timeout=self.mounts_timeout)
+        if body.get("project_id") != project_id or type(body.get("deleted")) is not bool:
+            raise AgentUncertain(200, "Unexpected project deletion response")
         return body
 
     async def stop(self, node, vmid, *, force=False):

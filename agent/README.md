@@ -1,4 +1,4 @@
-# Lab Node Agent 1.3.0 — Proxmox LXC + CephFS
+# Lab Node Agent 1.4.0 — Proxmox LXC + CephFS
 
 Small **privileged helper** for each Proxmox VE cluster node. **mTLS required**. The standard Proxmox API with its limited-permission token should still handle cloning, networks, CPU/RAM, resource discovery and normal cluster orchestration.
 
@@ -65,8 +65,9 @@ All endpoints require a valid **client TLS certificate** signed by `manager-clie
 | Method | Endpoint | Behavior |
 |---|---|---|
 | PUT | `/students/{student_key}` | Ensure a student directory with configured mapped gns3 ownership |
+| DELETE | `/students/{student_key}/projects/{project_id}` | Delete one stopped project and the slot's state for it (1.4.0) |
 | GET | `/health` | Liveness (not storage health) |
-| GET | `/capabilities` | Agent `version`, `start_budget_seconds`, `guest_action_timeout_seconds` |
+| GET | `/capabilities` | Agent `version`, `start_budget_seconds`, `guest_action_timeout_seconds`, `images_capture`, `projects_delete` |
 | GET | `/slots/{vmid}/status` | Running or stopped; only tagged/approved local LXC |
 | PUT | `/slots/{vmid}/mounts` | Attach approved CephFS paths while stopped |
 | POST | `/slots/{vmid}/start` | Attach approved CephFS paths, start CT, execute fixed guest actions |
@@ -413,3 +414,22 @@ The manager reserves the workspace across all nodes, while the agent shares a
 student lock with mount/start and checks current `mp1` of every local CT.
 Publication creates the GNS3 MD5 cache and image with mode 0444 without replacing
 existing files. Completed files are immutable; retirement never deletes them.
+
+## Project deletion (1.4.0)
+
+`DELETE /students/{student_key}/projects/{project_id}` follows `manager/docs/AGENT_REQUESTS.md` §7: the manager
+calls it when a Moodle activity, a user or a student's own lab ("Wipe") is deleted. `/capabilities` advertises
+`projects_delete: true`. The agent removes, below `students/<student_key>`:
+
+- the GNS3 project directory `<project_id>/`;
+- the slot's lab record `.lab-slot/labs/<project_id>.json` (and leftovers `.<project_id>.*.tmp`);
+- the project lock `.slot-locks/<project_id>.lock`.
+
+Nothing else: other projects of the student and the directory itself stay. `project_id` must be a canonical UUID.
+The student directory belongs to the guest, so every step uses directory FDs with `O_NOFOLLOW`: the project is
+first renamed to `.purge-<project_id>` (a repeated call finishes an interrupted delete), then removed with the
+fd-based `shutil.rmtree`, which never follows a symlink; a symlink in place of a file or directory is removed
+itself. A state directory replaced by a symlink is skipped. It shares the student lock with mount/start/capture
+and answers `409 STUDENT_DIR_BUSY` while any local CT has the directory as `mp1`; the manager makes sure no slot
+on any node holds it. Answer `200 {"student_key", "project_id", "deleted"}`, `deleted: false` when there was
+nothing to delete (also a missing student directory).

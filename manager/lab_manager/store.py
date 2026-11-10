@@ -28,6 +28,10 @@ class CaptureConflict(RuntimeError):
     pass
 
 
+class WorkspacePurging(RuntimeError):
+    """The workspace is being deleted (CONTRACTS §2.10): the start waits until it is gone."""
+
+
 class Fenced(RuntimeError):
     """The slot was re-allocated or released: this worker's view is stale."""
 
@@ -158,7 +162,9 @@ class Store:
                         previous = await conn.execute("SELECT lab_key FROM workspaces WHERE site = %s AND user_id = %s AND library_lab_id = %s ORDER BY id DESC LIMIT 1", (site, user_id, library_lab_id))
                         last = await previous.fetchone()
                         if last and last['lab_key'] != lab_key:
-                            await conn.execute("UPDATE workspaces SET library_lab_id = NULL WHERE site = %s AND user_id = %s AND library_lab_id = %s", (site, user_id, library_lab_id))
+                            # The earlier project is detached and purged (no live session: checked above).
+                            await conn.execute("UPDATE workspaces SET library_lab_id = NULL, purge_requested_at = now()"
+                                               " WHERE site = %s AND user_id = %s AND library_lab_id = %s", (site, user_id, library_lab_id))
                     cur = await conn.execute(
                         "INSERT INTO workspaces (site, user_id, instance_id, lab_ref, lab_def, definition, lab_key,"
                         " project_id, project_name, library_lab_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '', %s)"
@@ -178,6 +184,8 @@ class Store:
                         (site, user_id, instance_id, lab_key, library_lab_id),
                     )
                     ws = await cur.fetchone()
+                    if ws["purge_requested_at"] is not None:
+                        raise WorkspacePurging("The student's work in this lab is being deleted; start again shortly")
                     snapshot = ws["resource_snapshot"] or resources
                     ticket = ws["ticket"]
                     if ticket is None and ticket_factory is not None:

@@ -196,5 +196,26 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         upgrade_mod_savepoint(true, 2026110800, 'gns3lab');
     }
 
+    if ($oldversion < 2026110903) {
+        // Requests to delete student work on the lab manager (manager CONTRACTS 2.10).
+        $table = new xmldb_table('gns3lab_purges');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('instanceid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('librarylabid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('attempts', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('nextattempt', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('lasterror', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('request', XMLDB_INDEX_UNIQUE, ['instanceid', 'userid', 'librarylabid']);
+        $table->add_index('nextattempt', XMLDB_INDEX_NOTUNIQUE, ['nextattempt']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026110903, 'gns3lab');
+    }
+
     return true;
 }

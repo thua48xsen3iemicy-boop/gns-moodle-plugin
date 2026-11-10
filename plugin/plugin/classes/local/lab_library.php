@@ -162,6 +162,8 @@ class lab_library {
         core_tag_tag::remove_all_item_tags('mod_gns3lab', self::TAG_ITEMTYPE, $lab->id);
         $DB->delete_records('gns3lab_lab_versions', ['labid' => $lab->id]);
         $DB->delete_records('gns3lab_labs', ['id' => $lab->id]);
+        // The authors' projects of the lab live on the lab manager (manager CONTRACTS 2.10).
+        purges::queue(0, 0, (int) $lab->id);
         $transaction->allow_commit();
     }
 

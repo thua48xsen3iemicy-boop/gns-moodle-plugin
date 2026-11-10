@@ -568,7 +568,7 @@ def test_capabilities_report_the_start_budget(env, monkeypatch):
     body = client.get("/capabilities").json()
     assert body == {"version": agent.app.version, "start_budget_seconds": 120 + 3 * 90,
                     "guest_action_timeout_seconds": 90, "images_capture": False,
-                    "capture_timeout_seconds": agent.CAPTURE_TIMEOUT}
+                    "capture_timeout_seconds": agent.CAPTURE_TIMEOUT, "projects_delete": True}
     assert calls == []
 
 

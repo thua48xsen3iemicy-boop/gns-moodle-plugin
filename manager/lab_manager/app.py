@@ -25,7 +25,8 @@ from .orchestrator import Orchestrator
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
 from .storage import StorageError, student_key, authoring_key
-from .store import Store, CaptureConflict
+from .store import Store, CaptureConflict, WorkspacePurging
+from .purge import Purges
 
 log = logging.getLogger("lab_manager.api")
 
@@ -94,6 +95,17 @@ class StopRequest(Strict):
     requested_by_user_id: int | None = Field(default=None, gt=0)  # Journal only (events)
 
 
+class PurgeRequest(Strict):
+    """CONTRACTS §2.10: whose work to delete. At least one id; an activity and a library lab exclude each other."""
+    instance_id: int | None = Field(default=None, gt=0)
+    user_id: int | None = Field(default=None, gt=0)
+    library_lab_id: int | None = Field(default=None, gt=0)
+
+
+class ReconcileRequest(Strict):
+    instance_ids: list[int] = Field(min_length=1, max_length=100000)
+
+
 OPTIONS = ["max_duration"]
 
 
@@ -134,6 +146,8 @@ class Services:
         self.orchestrator = Orchestrator(settings, self.store, self.pve, self.agent, self.slots,
                                          self.catalog)
         self.orchestrator.derived = self.derived
+        self.purges = Purges(self)
+        self.orchestrator.purges = self.purges
 
     async def leader_connection(self):
         from psycopg.rows import dict_row
@@ -193,6 +207,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def api_error(request, exc: ApiError):
         return JSONResponse(status_code=exc.status,
                             content={"error": exc.error, "message": exc.message, **exc.extra})
+
+    @app.exception_handler(WorkspacePurging)
+    async def workspace_purging(request, exc):
+        return JSONResponse(status_code=409, content={"error": "workspace_purging", "message": str(exc)})
 
     @app.exception_handler(CaptureConflict)
     async def capture_conflict(request, exc):
@@ -330,7 +348,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
         # resume: the next session continues the project; checks: CONTRACTS 2.9
-        features = ["consoles", "observer", "resume", "facts", "checks"]
+        features = ["consoles", "observer", "resume", "facts", "checks", "purge"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -458,6 +476,20 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             await store.event(s["id"], None, "plugin_client", body.client.model_dump(exclude_none=True))
         services.orchestrator.wake()
         return JSONResponse(status_code=201 if created else 200, content=await present(s))
+
+    @app.post("/api/v1/purges")
+    async def purge(body: PurgeRequest, site=Depends(site_of)):
+        if (body.instance_id is None and body.user_id is None and body.library_lab_id is None) or (
+                body.instance_id is not None and body.library_lab_id is not None):
+            raise ApiError(400, "invalid_request", "Name instance_id, user_id or library_lab_id; not an activity and a library lab")
+        return await services.purges.request(site.slug, instance_id=body.instance_id, user_id=body.user_id,
+                                             library_lab_id=body.library_lab_id)
+
+    @app.post("/api/v1/purges/reconcile")
+    async def reconcile(body: ReconcileRequest, site=Depends(site_of)):
+        if any(type(i) is not int or i <= 0 for i in body.instance_ids):
+            raise ApiError(400, "invalid_request", "instance_ids are positive integers")
+        return await services.purges.reconcile(site.slug, body.instance_ids)
 
     @app.get("/api/v1/sessions/{session_id}")
     async def get_session(session_id: str, site=Depends(site_of)):

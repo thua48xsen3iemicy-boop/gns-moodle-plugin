@@ -197,6 +197,7 @@ class Orchestrator:
         self._claims = set()
         self.last_tick = None
         self.derived = None
+        self.purges = None  # purge.Purges, set by Services
 
     # ------------------------------------------------------------------ loop
     def wake(self):
@@ -263,6 +264,10 @@ class Orchestrator:
                 task = self._tasks.get(key)
                 if task is None or task.done():
                     self._tasks[key] = asyncio.create_task(self.derived.step(row["session_id"]))
+        if self.purges:
+            task = self._tasks.get("purge")
+            if task is None or task.done():
+                self._tasks["purge"] = asyncio.create_task(self.purges.step())
         self._tasks = {k: t for k, t in self._tasks.items() if not t.done()}
 
     async def drain(self):
@@ -1196,7 +1201,8 @@ class Orchestrator:
         else:
             reason = s["stop_reason"] or "user"
             message = {"maxduration": "Время лабы истекло",
-                       "teacher": "Лаба остановлена преподавателем"}.get(reason, "Лаба остановлена")
+                       "teacher": "Лаба остановлена преподавателем",
+                       "purge": "Лаба удалена"}.get(reason, "Лаба остановлена")
             # A lab that ran and stopped cleanly shows the slot works: the record of failures starts again.
             clean = [] if slot_state == "free" and s.get("started_at") else None
             await self.store.finish_session(s, status="stopped", message=message,

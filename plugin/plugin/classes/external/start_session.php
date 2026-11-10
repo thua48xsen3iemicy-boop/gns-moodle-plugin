@@ -81,6 +81,10 @@ class start_session extends external_api {
             if ($e->remotecode === 'session_conflict') {
                 self::conflict($e);
             }
+            if ($e->remotecode === 'workspace_purging') {
+                // The lab of the student is being wiped or deleted (manager CONTRACTS 2.10): a moment later it starts fresh.
+                throw new \moodle_exception('workspacepurging', 'gns3lab');
+            }
             if ($e->remotecode === 'lab_invalid' && is_array($lab)) {
                 self::rejected($access, $e);
             }

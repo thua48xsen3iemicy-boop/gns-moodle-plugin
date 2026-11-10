@@ -158,6 +158,9 @@ class FakeAgent:
         self.capture_fail_node = None
         self.captured_images = {}
         self.start_budget = 480  # start_budget_seconds of GET /capabilities; None: agent older than 1.2.1
+        self.projects_delete = True  # agent 1.4.0
+        self.deleted_projects = []  # (student_key, project_id) of every DELETE that succeeded
+        self.delete_fails = None  # (status, code) the next DELETE answers instead
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -188,7 +191,8 @@ class FakeAgent:
             if self.start_budget is None:
                 return self._err(404, "Not Found")
             return httpx.Response(200, json={"version": "1.2.1", "start_budget_seconds": self.start_budget,
-                                             "guest_action_timeout_seconds": 120, "images_capture": self.images_capture, "capture_timeout_seconds": 900})
+                                             "guest_action_timeout_seconds": 120, "images_capture": self.images_capture, "capture_timeout_seconds": 900,
+                                             **({"projects_delete": True} if self.projects_delete else {})})
         if path == "/images/capture":
             if self.capture_fail_node == body['node_name']:
                 return self._err(422, {"code": "CAPTURE_NODE_MISSING", "message": "Missing disk"})
@@ -198,6 +202,15 @@ class FakeAgent:
                       "sha256": "sha256:" + "1" * 64, "md5": "2" * 32, "backing": body['base_file']}
             self.captured_images[body['image_file']] = result
             return httpx.Response(200, json=result)
+        m = re.fullmatch(r"/students/([A-Za-z0-9][A-Za-z0-9_-]{0,63})/projects/([0-9a-f-]{36})", path)
+        if m and request.method == "DELETE" and self.projects_delete:
+            if self.delete_fails:
+                status, code = self.delete_fails
+                self.delete_fails = None
+                return self._err(status, {"code": code, "message": code})
+            self.deleted_projects.append((m.group(1), m.group(2)))
+            self.timeline.append(("agent:delete_project", m.group(1)))
+            return httpx.Response(200, json={"student_key": m.group(1), "project_id": m.group(2), "deleted": True})
         m = re.fullmatch(r"/students/([A-Za-z0-9][A-Za-z0-9_-]{0,63})", path)
         if m and request.method == "PUT":
             key = m.group(1)

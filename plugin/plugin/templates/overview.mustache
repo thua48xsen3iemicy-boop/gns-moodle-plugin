@@ -30,6 +30,7 @@
         "openurl": "https://example.org/mod/gns3lab/lab.php?id=1",
         "isdemo": true,
         "courselabsurl": "https://example.org/mod/gns3lab/course.php?id=2",
+        "wipeurl": "https://example.org/mod/gns3lab/view.php?id=1&action=wipe",
         "previewjson": ""
     }
 }}
@@ -38,6 +39,9 @@
     {{#courselabsurl}}
     <a class="btn btn-secondary btn-lg" href="{{courselabsurl}}">{{#str}}courselabs, mod_gns3lab{{/str}}</a>
     {{/courselabsurl}}
+    {{#wipeurl}}
+    <a class="btn btn-outline-danger" href="{{wipeurl}}" title="{{#str}}wipehelp, mod_gns3lab{{/str}}">{{#str}}wipe, mod_gns3lab{{/str}}</a>
+    {{/wipeurl}}
     {{#isdemo}}
     <p class="text-muted small mb-0 flex-grow-1">{{#str}}demonotice, mod_gns3lab{{/str}}</p>
     {{/isdemo}}

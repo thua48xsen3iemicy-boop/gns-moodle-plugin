@@ -48,6 +48,8 @@ Moodle никогда не держит WebSocket и не видит токен�
 | GET | `/api/v1/sessions/{session_id}` | → сессия |
 | POST | `/api/v1/sessions/{session_id}/stop` | → сессия со `status: "stopping"` |
 | POST | `/api/v1/sessions/{session_id}/console-tickets` | `{"node_id","readonly","issued_for_user_id"}` → `{"ticket","gateway_url","expires_in"}` |
+| POST | `/api/v1/purges` | 🆕 (0.20.0, `purge` в `info.features`) `{"instance_id"?, "user_id"?, "library_lab_id"?}` → `{"workspaces","pending"}` — удалить наработки (manager CONTRACTS §2.10) |
+| POST | `/api/v1/purges/reconcile` | 🆕 `{"instance_ids"}` (не пустой) → `{"workspaces","pending"}` — суточная сверка: наработки активностей не из списка |
 
 Сессия:
 
@@ -129,6 +131,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod/gns3lab:view` | все роли курса | видеть страницу и превью схемы |
 | `mod/gns3lab:use` | student, teacher, editingteacher | запускать свою лабу и консоли |
 | `mod/gns3lab:observe` | teacher, editingteacher, manager | смотреть лабы студентов (только чтение), с учётом групп |
+| `mod/gns3lab:wipe` | student, teacher, editingteacher | 🆕 (0.20.0) стереть свою лабу в активности (`RISK_DATALOSS`); вместе с `use` |
 
 Режим групп активности учитывается: без `moodle/site:accessallgroups` преподаватель видит только студентов своих групп.
 
@@ -173,7 +176,31 @@ Moodle никогда не держит WebSocket и не видит токен�
 
 ### 5.4. Страницы и UI
 
-- `view.php` — страница активности: описание и кнопка «Открыть лабу».
+- `view.php` — страница активности: описание и кнопка «Открыть лабу». 🆕 (0.20.0) Кнопка «Стереть мою лабу» — при правах
+  `use` и `wipe` и менеджере с `purge`: страница подтверждения Moodle, затем `POST /purges {"instance_id","user_id"}`
+  сразу (студент ждёт ответа). Запущенную лабу не стирает («сначала остановите»). Вместе с проектом уходят маска `seen`/`fog`
+  (`gns3lab_reveal`) — она описывала удалённый проект; прогоны проверок и оценки остаются. Следующий запуск — свежий проект;
+  пока менеджер ещё удаляет, запуск отвечает `409 workspace_purging` (строка `workspacepurging`).
+
+### 5.4a. 🆕 Удаление наработок на менеджере (0.20.0)
+
+Проекты студентов живут на менеджере и в CephFS, а не в Moodle. Что удаляют в Moodle, плагин передаёт менеджеру
+(manager CONTRACTS §2.10), иначе хранилище заполняется недостижимыми наработками. Moodle не ждёт менеджер и не падает без
+него: запрос ложится в таблицу `gns3lab_purges` (`classes/local/purges.php`), задача `send_purges` (каждые 5 мин) доставляет
+его с растущей паузой (1 мин … 1 ч) до `200`; менеджер без `purge` — запрос ждёт его обновления.
+
+| Событие в Moodle | Запрос |
+|---|---|
+| `gns3lab_delete_instance` (удаление элемента и курса) | `{"instance_id"}` |
+| `lab_library::delete_lab` | `{"library_lab_id"}` — авторские проекты лабы |
+| `\core\event\user_deleted` (`db/events.php`) | `{"user_id"}` — всё пользователя на сайте |
+| privacy: контекст активности | `{"instance_id"}` или `{"instance_id","user_id"}`; модуль уже удалён — ничего (иначе ушло бы всё пользователя) |
+| privacy: системный контекст пользователя | `{"user_id"}` |
+| «Стереть мою лабу» | `{"instance_id","user_id"}`, сразу, без очереди |
+
+Задача `reconcile_purges` (раз в сутки) шлёт `POST /purges/reconcile` со всеми `id` из `gns3lab`; пустой список не шлёт.
+Это страховка от потерянных запросов (например, БД Moodle восстановлена из копии). Без адреса менеджера ничего не ставится
+в очередь.
 - `lab.php` — страница студента на весь экран, эталон — `prototypes/student-ui.html` (`amd/src/lab.js` и его модули):
   панель сессии (кнопки «Запустить» / «Остановить», статус, оставшееся время), схема с уровнями детализации по зуму
   (`stage.js`), колесо действий узла и линка (`wheel.js`), карточка сведений (`details.js`), консоли панелью, сеткой или
