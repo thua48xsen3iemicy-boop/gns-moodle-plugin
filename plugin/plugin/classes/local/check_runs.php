@@ -382,12 +382,21 @@ class check_runs {
     }
 
     /**
+     * Why a rule may be skipped for want of data, not by the setup of the lab: what a teacher is told about.
+     *
+     * The rest are left out for everybody: no_expectation and off follow from the lab definition, stale_facts makes
+     * the run incomplete, which is shown anyway.
+     */
+    public const DATA_GAPS = ['no_collector', 'collect_failed', 'unsupported_os', 'port_unknown'];
+
+    /**
      * The findings and rules of a run from the manager, for the external functions.
      *
      * @param \stdClass|null $run run from the manager
+     * @param bool $gaps include the rules skipped for want of data (DATA_GAPS); no other rule is ever included
      * @return array ['findings' => array, 'rules' => array]
      */
-    public static function export_details(?\stdClass $run): array {
+    public static function export_details(?\stdClass $run, bool $gaps = false): array {
         $result = $run && ($run->result ?? null) instanceof \stdClass ? $run->result : null;
         $findings = [];
         foreach (is_array($result->findings ?? null) ? $result->findings : [] as $f) {
@@ -414,13 +423,16 @@ class check_runs {
             ];
         }
         $rules = [];
-        foreach (is_array($result->rules ?? null) ? $result->rules : [] as $r) {
-            if ($r instanceof \stdClass && is_string($r->code ?? null)) {
+        foreach ($gaps && is_array($result->rules ?? null) ? $result->rules : [] as $r) {
+            if (
+                $r instanceof \stdClass && is_string($r->code ?? null) && ($r->status ?? '') === 'skipped'
+                && in_array($r->reason ?? '', self::DATA_GAPS, true)
+            ) {
                 $rules[] = [
                     'code' => self::token($r->code),
                     'group' => self::token($r->group ?? ''),
-                    'status' => in_array($r->status ?? '', ['pass', 'fail', 'skipped', 'off'], true) ? $r->status : '',
-                    'reason' => self::token($r->reason ?? ''),
+                    'status' => 'skipped',
+                    'reason' => $r->reason,
                 ];
             }
         }
@@ -453,8 +465,8 @@ class check_runs {
                 'code' => new external_value(PARAM_ALPHANUMEXT, 'Rule code'),
                 'group' => new external_value(PARAM_ALPHANUMEXT, 'Rule group'),
                 'status' => new external_value(PARAM_ALPHA, 'pass, fail, skipped or off'),
-                'reason' => new external_value(PARAM_ALPHANUMEXT, 'Why a rule was skipped, empty otherwise'),
-            ]), 'Rules of the lab, empty when the report is not shown'),
+                'reason' => new external_value(PARAM_ALPHANUMEXT, 'Why it was skipped: no_collector, collect_failed, unsupported_os, port_unknown'),
+            ]), 'Rules skipped for want of data, for a teacher only; empty for a student and when the report is not shown'),
         ];
     }
 

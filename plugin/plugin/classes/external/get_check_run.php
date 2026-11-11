@@ -79,7 +79,8 @@ class get_check_run extends external_api {
 
         $visible = checks::details_visible($instance, $readonly);
         $from = checks::details_from($instance);
-        $details = check_runs::export_details($visible ? $run : null);
+        $gaps = has_capability('mod/gns3lab:observe', $access->context);
+        $details = check_runs::export_details($visible ? $run : null, $gaps);
         return check_runs::export($row) + [
             'detailed' => $visible && $run !== null,
             'detailsfrom' => $readonly ? 0 : ($from === PHP_INT_MAX ? -1 : $from),
@@ -94,7 +95,7 @@ class get_check_run extends external_api {
      */
     public static function execute_returns(): external_single_structure {
         return new external_single_structure(check_runs::summary_fields() + [
-            'detailed' => new external_value(PARAM_BOOL, 'Findings and rules are included'),
+            'detailed' => new external_value(PARAM_BOOL, 'Findings (and for a teacher the gaps in the data) are included'),
             'detailsfrom' => new external_value(PARAM_INT, 'From when the findings are shown: 0 always, -1 never'),
             'gone' => new external_value(PARAM_BOOL, 'The lab manager no longer has the run (its session was deleted)'),
         ] + check_runs::details_fields());

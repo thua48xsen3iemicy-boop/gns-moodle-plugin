@@ -30,16 +30,20 @@ import {CLASSES, groupFindings, isForgiven, isPending, pollDelay, startState} fr
 import {hel} from 'mod_gns3lab/dom';
 import {reportRefusal, tabId} from 'mod_gns3lab/seat';
 
+/** Why a rule was skipped for want of data: the server sends these rules to a teacher only. */
+const DATA_GAPS = ['no_collector', 'collect_failed', 'unsupported_os', 'port_unknown'];
+
 /** Language strings of the panel. */
 export const STRING_KEYS = [
     'chk_title', 'chk_open', 'chk_start', 'chk_again', 'chk_attempts', 'chk_attempts_unlimited', 'chk_running',
     'chk_noattempts', 'chk_needsrunning', 'chk_nofacts', 'chk_cannot', 'chk_progress_queued', 'chk_progress_running',
     'chk_mark', 'chk_incomplete', 'chk_failed', 'chk_nofindings', 'chk_consequence', 'chk_toroot', 'chk_forgiven',
     'chk_details_counts', 'chk_details_after', 'chk_details_gone', 'chk_history', 'chk_hist_mark', 'chk_hist_incomplete',
-    'chk_hist_failed', 'chk_hist_pending', 'chk_skipped', 'chk_started', 'chk_done', 'chk_empty', 'chk_observer',
+    'chk_hist_failed', 'chk_hist_pending', 'chk_gaps', 'chk_started', 'chk_done', 'chk_empty', 'chk_observer',
     'chk_disabled',
     ...CLASSES.map(c => 'chk_class_' + c),
     ...CLASSES.map(c => 'chk_n_' + c),
+    ...DATA_GAPS.map(r => 'chk_gap_' + r),
 ];
 
 export class Checks {
@@ -386,10 +390,14 @@ export class Checks {
                 });
             });
         });
-        const skipped = (run.rules || []).filter(r => r.status === 'skipped');
-        if (skipped.length) {
-            hel('p', 'chk-note', box).textContent = fill(this.strings.chk_skipped,
-                skipped.map(r => r.code + (r.reason ? ` (${r.reason})` : '')).join(', '));
+        const gaps = DATA_GAPS.map(reason => [reason, (run.rules || []).filter(r => r.reason === reason).length])
+            .filter(([, n]) => n > 0);
+        if (gaps.length) {
+            hel('p', 'chk-note', box).textContent = this.strings.chk_gaps;
+            const list = hel('ul', 'chk-note', box);
+            gaps.forEach(([reason, n]) => {
+                hel('li', '', list).textContent = fill(this.strings['chk_gap_' + reason], n);
+            });
         }
     }
 

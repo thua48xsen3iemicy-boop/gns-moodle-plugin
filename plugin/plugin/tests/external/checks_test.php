@@ -186,7 +186,7 @@ final class checks_test extends \advanced_testcase {
         $this->assertCount(2, $run['findings']);
         $this->assertSame('f3', $run['findings'][1]['causedby']);
         $this->assertSame([['node' => 'PC1', 'iface' => 'ens4']], $run['findings'][0]['ifaces']);
-        $this->assertSame('no_collector', $run['rules'][0]['reason']);
+        $this->assertSame([], $run['rules']); // What was not checked is told to the teacher only.
         $this->assertSame(['max' => 2, 'used' => 1, 'left' => 1], $this->overview()['attempts']);
         // Mark 4 of the top mark 5, grade out of 10.
         $grades = grade_get_grades($this->course->id, 'mod', 'gns3lab', $this->lab->id, $this->student->id);
@@ -280,6 +280,25 @@ final class checks_test extends \advanced_testcase {
         $run = $this->read_run((int) $this->student->id);
         $this->assertTrue($run['detailed']);
         $this->assertCount(2, $run['findings']);
+    }
+
+    public function test_a_teacher_sees_only_the_gaps_in_the_data(): void {
+        // The non-editing teacher sees the student in separate groups only through a shared group.
+        $group = $this->getDataGenerator()->create_group(['courseid' => $this->course->id]);
+        $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->student->id]);
+        $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->teacher->id]);
+        $this->setUser($this->student);
+        $this->start();
+        $this->finish(4);
+
+        $this->setUser($this->teacher);
+        $run = $this->read_run((int) $this->student->id);
+
+        // Not no_expectation (the lab does not ask for it), not off, not pass.
+        $this->assertSame(
+            [['code' => 'address_not_saved', 'group' => 'addressing', 'status' => 'skipped', 'reason' => 'no_collector']],
+            $run['rules']
+        );
     }
 
     public function test_findings_after_a_date(): void {

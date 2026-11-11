@@ -170,8 +170,13 @@ class fake_manager {
                 'outcome' => $outcome,
                 'mark' => $outcome === 'graded' ? $mark : null,
                 'counts' => ['critical' => 0, 'major' => 1, 'minor' => 2, 'note' => 1],
-                'rules' => [['code' => 'address_not_saved', 'group' => 'addressing', 'status' => 'skipped',
-                    'reason' => 'no_collector']],
+                'rules' => [
+                    ['code' => 'address_not_saved', 'group' => 'addressing', 'status' => 'skipped',
+                        'reason' => 'no_collector'],
+                    ['code' => 'vlan_name_wrong', 'group' => 'l2', 'status' => 'skipped', 'reason' => 'no_expectation'],
+                    ['code' => 'hostname_wrong', 'group' => 'host', 'status' => 'off'],
+                    ['code' => 'segment_split', 'group' => 'l2', 'status' => 'pass'],
+                ],
                 'findings' => [
                     ['id' => 'f3', 'code' => 'address_misplaced', 'group' => 'addressing', 'class' => 'major',
                         'base_class' => 'major', 'counted' => true, 'caused_by' => null, 'nodes' => ['PC1'],
