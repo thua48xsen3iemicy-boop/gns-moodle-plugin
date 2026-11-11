@@ -13,6 +13,9 @@ networkd, or routeros (MikroTik CHR: a RouterOS script instead of /bin/sh). It i
 preconfigure addresses (netconfig.py, lab constructor README §4.1); an image without it (and not vpcs) cannot be a
 member of a segment. `preconfig` in public() says whether it can.
 
+random_ifnames (qemu with a /bin/sh net_config only): the guest can take random interface names (ifnames.py), so the
+lab editor offers the teacher a checkbox for nodes of the image. public() carries `random_ifnames: true` then.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -29,6 +32,7 @@ PORT_NAMES = {"iou": "Ethernet{adapter}/{port}", "qemu": "Ethernet{adapter}", "v
 PORTS_PER_ADAPTER = {"iou": 4, "qemu": 1, "vpcs": 1}
 DEFAULT_SYMBOLS = {"iou": ":/symbols/router.svg", "qemu": ":/symbols/computer.svg",
                    "vpcs": ":/symbols/vpcs_guest.svg"}
+MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")  # netconfig.MECHANISMS: /bin/sh guests
 VPCS_MEMORY_MB = 32  # Counted for the CT size; VPCS has no memory setting
 
 
@@ -80,6 +84,7 @@ class Image(Strict):
     cpus: Range | None = None
     adapters: Range | None = None
     capture: bool | None = None
+    random_ifnames: bool = False
     uplink_port: int | None = Field(default=None, strict=True, ge=0, le=15)
     # What a node of the image is beyond its kind (NodeSpec.role, CONTRACTS 4.2): "switch" is the Linux switch,
     # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
@@ -109,6 +114,8 @@ class Image(Strict):
             raise ValueError("cpus is for qemu only, within 1..16")
         if self.net_config is not None and self.kind != "qemu":
             raise ValueError("net_config is for qemu only")
+        if self.random_ifnames and (self.kind != "qemu" or self.net_config not in MECHANISMS):
+            raise ValueError("random_ifnames needs qemu and net_config ifupdown, networkmanager, netplan or networkd")
         if self.console_type == "vnc" and self.kind != "qemu":
             raise ValueError("console_type vnc is for qemu only")  # CONTRACTS 2.6
         if self.uplink_port is not None:
@@ -151,6 +158,7 @@ class Image(Strict):
             **({"uplink_port": self.uplink_port} if self.uplink_port is not None else {}),
             # The plugin picks console snippets by it; only RouterOS images carry the field (CONTRACTS 2.6).
             **({"guest": "routeros"} if self.net_config == "routeros" else {}),
+            **({"random_ifnames": True} if self.random_ifnames else {}),
             **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }
 
