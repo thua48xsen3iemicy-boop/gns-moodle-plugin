@@ -1,11 +1,12 @@
 """Проверка шлюза против поддельного Lab Slot: билеты, субпротокол с токеном, наблюдатель, коды закрытия,
-консоль telnet и экран vnc (сырой RFB: двоичные кадры в обе стороны).
+консоль telnet и экран vnc (сырой RFB: двоичные кадры в обе стороны), пределы консолей и билетов,
+срок рукопожатия со слотом, закрытие соединения со слотом при любом сбое.
 Запуск: pip install aiohttp && python3 manager/gateway/tests/check_gateway.py
 """
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 os.environ.update(GW_SLOT_SCHEME="ws", GW_ALLOW_PLAINTEXT_SLOTS="1",
-                  GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret"}), GW_SLOT_PORT="38080",
+                  GW_INTERNAL_KEY="k", GW_SLOTS=json.dumps({"127.0.0.1": "console-secret", "127.0.0.2": "hang"}), GW_SLOT_PORT="38080",
                   GW_ALLOWED_ORIGINS="https://moodle.test")
 import console_gateway as gw
 from aiohttp import web, ClientSession, WSMsgType
@@ -46,9 +47,26 @@ async def cons(r):
 fake = web.Application()
 fake.router.add_get("/v1/console/{p}/{n}", cons)
 
+# --- зависший слот 127.0.0.2: принимает TCP и молчит; hang_open — его открытые соединения
+hang_open = set()
+async def hang(reader, writer):
+    hang_open.add(writer)
+    try:
+        await reader.read()                              # до EOF: шлюз закрыл соединение
+    finally:
+        hang_open.discard(writer); writer.close()
+
+async def until(cond, timeout=3.0):
+    for _ in range(int(timeout / 0.05)):
+        if cond(): return True
+        await asyncio.sleep(0.05)
+    return cond()
+
 async def main():
     r1 = web.AppRunner(fake); await r1.setup(); await web.TCPSite(r1, "127.0.0.1", 38080).start()
-    r2 = web.AppRunner(gw.make_app()); await r2.setup(); await web.TCPSite(r2, "127.0.0.1", 38081).start()
+    hang_srv = await asyncio.start_server(hang, "127.0.0.2", 38080)
+    app = gw.make_app()
+    r2 = web.AppRunner(app); await r2.setup(); await web.TCPSite(r2, "127.0.0.1", 38081).start()
     async with ClientSession() as s:
         moodle = {"Origin": "https://moodle.test"}
         async def ticket(ro, project=P, nodes=(N1, OFF, VNC), **extra):
@@ -191,6 +209,77 @@ async def main():
         except Exception as e:
             assert getattr(e, "status", None) == 403, e
         print("vnc: upstream close -> 4000, refused -> 4001, Origin 403, one-time ticket OK")
-    await r2.cleanup(); await r1.cleanup()
+        # --- пределы и сбои: одна лаба не занимает весь шлюз ----------------------------------------------
+        assert await until(lambda: app["limits"].total == 0), app["limits"].__dict__
+        # обычный HTTP-запрос с билетом — 400 до траты билета и до похода в слот
+        _, t = await ticket(False); n = len(paths)
+        async with s.get(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle) as r:
+            assert r.status == 400, r.status
+        assert len(paths) == n and app["limits"].total == 0
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle)
+        await prompt(ws); await ws.close()
+        print("plain HTTP -> 400, ticket kept, slot not called OK")
+        # предел на ноду и на проект: сверх него 4001, после закрытия — снова можно
+        gw.MAX_PER_NODE, gw.MAX_PER_PROJECT = 2, 3
+        async def open_console(node=N1, project=P, nodes=(N1, N2, OFF, VNC)):
+            _, t = await ticket(False, project=project, nodes=nodes)
+            return await s.ws_connect(f"http://127.0.0.1:38081/console/{node}?ticket={t}", headers=moodle)
+        a, b = await open_console(), await open_console()
+        await prompt(a); await prompt(b)
+        c = await open_console()
+        m = await c.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        d = await open_console(VNC)                       # другая нода того же проекта — третья консоль проекта
+        assert (await d.receive()).data == BANNER
+        e = await open_console(VNC)                       # четвёртая консоль проекта — сверх предела
+        m = await e.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        P2 = "66666666-6666-4666-8666-666666666666"      # другая лаба не страдает
+        f = await open_console(project=P2)
+        assert paths[-1] == f"/v1/console/{P2}/{N1}"; await prompt(f)
+        assert app["limits"].total == 4, app["limits"].__dict__
+        await a.close()
+        assert await until(lambda: app["limits"].total == 3)
+        g2 = await open_console(); await prompt(g2)
+        for w in (b, d, f, g2): await w.close()
+        assert await until(lambda: app["limits"].total == 0), app["limits"].__dict__
+        gw.MAX_PER_NODE, gw.MAX_PER_PROJECT = 6, 40
+        print("per-node and per-project limits -> 4001, other lab unaffected, released on close OK")
+        # общий предел шлюза
+        gw.MAX_CONSOLES = 1
+        a = await open_console(); await prompt(a)
+        b = await open_console(project=P2)
+        m = await b.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        await a.close(); assert await until(lambda: app["limits"].total == 0)
+        gw.MAX_CONSOLES = 400
+        print("gateway-wide limit -> 4001 OK")
+        # неиспользованные билеты одной лабы ограничены (429), у другой лабы выдаются
+        gw.MAX_TICKETS_PER_PROJECT = 3
+        P3 = "77777777-7777-4777-8777-777777777777"
+        assert [(await ticket(False, project=P3))[0] for _ in range(4)] == [200, 200, 200, 429]
+        assert (await ticket(False, project="88888888-8888-4888-8888-888888888888"))[0] == 200
+        gw.MAX_TICKETS_PER_PROJECT = 40
+        print("unused tickets per lab -> 429 OK")
+        # зависший слот: рукопожатие ограничено сроком, соединение со слотом закрыто, место освобождено
+        gw.HANDSHAKE_TIMEOUT = 0.5
+        async def ticket_for_hang():
+            body = {"slot": "127.0.0.2", "project_id": P, "nodes": [N1], "readonly": False}
+            async with s.post("http://127.0.0.1:38081/internal/tickets", headers={"X-Internal-Key": "k"},
+                              json=body) as r:
+                return (await r.json())["ticket"]
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={await ticket_for_hang()}", headers=moodle)
+        m = await ws.receive(timeout=5); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        assert await until(lambda: not hang_open), hang_open
+        assert app["limits"].total == 0, app["limits"].__dict__
+        print("hanging slot -> 4001 after the handshake timeout, slot connection closed OK")
+        # браузер ушёл во время рукопожатия: aiohttp не отменяет обработчик, его останавливает срок рукопожатия;
+        # затем соединение со слотом и место освобождаются, ответ браузеру не нужен
+        gw.HANDSHAKE_TIMEOUT = 1.0
+        url = f"http://127.0.0.1:38081/console/{N1}?ticket={await ticket_for_hang()}"
+        pending = asyncio.create_task(s.ws_connect(url, headers=moodle))
+        assert await until(lambda: len(hang_open) == 1 and app["limits"].total == 1)
+        pending.cancel(); await asyncio.gather(pending, return_exceptions=True)
+        assert await until(lambda: not hang_open and app["limits"].total == 0, 4), (hang_open, app["limits"].__dict__)
+        gw.HANDSHAKE_TIMEOUT = 15
+        print("browser gone during the handshake -> slot connection closed, limit released OK")
+    await r2.cleanup(); await r1.cleanup(); hang_srv.close()
 asyncio.run(main())
 print("ALL OK")
