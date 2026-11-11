@@ -246,7 +246,7 @@
 |---|---|---|---|---|
 | `segments_merged` | два сегмента или группы в одном L2-домене | все | нет | major / critical / critical |
 | `segment_split` | участники сегмента или группы в разных L2-доменах | все | нет | major / critical / critical |
-| `member_isolated` | участник один в своём домене, хотя в домене есть коммутатор | все | да | major / major / critical |
+| `member_isolated` | участник один в своём домене, хотя в домене есть коммутатор (в сети порта ISP не одинок: там ISP) | все | да | major / major / critical |
 | `vlan_mismatch` | на концах линка разные native или access VLAN | S C | да | minor / major / major |
 | `tag_not_allowed` | тег, который шлёт хост, маршрутизатор или коммутатор, не принимает другой конец. Лишний VLAN на транке к хосту или маршрутизатору — не ошибка линка (это `trunk_not_pruned`) | S C M L | да | minor / major / major |
 | `vlan_wrong` | порт участника не в VLAN сегмента или группы (когда VLAN задан) | S C | нет | minor / major / major |
@@ -266,7 +266,7 @@
 | `address_misplaced` | нужный адрес стоит на другом интерфейсе | L W M C | нет | major / major / critical |
 | `address_extra` | лишний адрес: второй на интерфейсе, на неподключённом интерфейсе, на L2-коммутаторе вне `mgmt_vlan` | L W M C | да | minor / major / major |
 | `address_apipa` | адрес 169.254.0.0/16 (DHCP не ответил) | L W M | да | minor / major / major |
-| `address_not_private` | адрес вне `allowed` | L W M C | да | minor / major / critical |
+| `address_not_private` | адрес вне `allowed` (адрес из сети порта ISP, к которому интерфейс подключён, — не ошибка, см. ниже) | L W M C | да | minor / major / critical |
 | `address_duplicate` | один адрес на двух интерфейсах | L W M C | да | major / critical / critical |
 | `subnet_overlap` | пересекающиеся подсети | L W M C | да | major / major / critical |
 | `subnet_mixed` | в одном L2-домене несколько подсетей | L W M C | да | major / major / critical |
@@ -278,7 +278,7 @@
 | Код | Что | ОС | Без ожиданий | Классы |
 |---|---|---|---|---|
 | `gateway_missing` | у хоста сегмента или группы со шлюзом нет маршрута по умолчанию | L W M | нет | major / major / critical |
-| `gateway_wrong` | шлюз не адрес шлюза сегмента или группы (без ожиданий — не адрес в лабе или не в подсети хоста) | L W M | да | major / critical / critical |
+| `gateway_wrong` | шлюз не адрес шлюза сегмента или группы (без ожиданий — не адрес в лабе или не в подсети хоста; адрес порта ISP в его сети — свой) | L W M | да | major / critical / critical |
 | `unreachable` | по таблицам маршрутов путь между сегментами не проходит: нет маршрута, петля, нет обратного маршрута (`reachability`) | L W M; C — после `ip route` в `ios.config` | нет | major / critical / critical |
 
 ### Узел (`host`) — после этапа 3
@@ -295,6 +295,12 @@
 |---|---|---|
 | `facts_conflict` | источники фактов противоречат друг другу (§6) | всегда `note`, пометка для преподавателя |
 | `script_failed` | скрипт преподавателя не прошёл (§7) | из скрипта |
+
+**Сеть ISP** (менеджер 0.21.3). Нода с образом, у которого есть `uplink_port` (`images/lab-uplink`), раздаёт на свой
+порт N сеть `198.18.N.0/24`: DHCP `.100–.250`, шлюз и DNS — `198.18.N.1`. Фактов у ISP нет, поэтому проверки видят его сеть
+так. Интерфейс, который кабелем (напрямую или через коммутаторы) достаёт до порта N, может иметь адрес из `198.18.N.0/24`
+без `address_not_private`. Его шлюз `198.18.N.1` — не `gateway_wrong`, а сам он — не `member_isolated`. Тот же адрес
+в любом другом месте или из сети другого порта ISP — по-прежнему `address_not_private`.
 
 Порядок первопричин (§3): `node_stopped`, `config_not_saved`, `link_suspended`, `port_shutdown`, `link_down` → `vlan_*`, `tag_not_allowed` →
 `segments_merged`, `segment_split`, `member_isolated` → `address_*`, `mask_wrong`, `subnet_*` → `gateway_*` → `unreachable`.
