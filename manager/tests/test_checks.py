@@ -544,3 +544,41 @@ def test_unreachable_is_traced_through_a_cisco_router():
     assert codes(bad, counted=True) == ["gateway_missing"]
     assert [f["message"] for f in bad["findings"] if f["code"] == "unreachable"] == [
         "Нет связи A ↔ B: у PC2 нет маршрута к 192.168.10.1."]
+
+
+# ---------------------------------------------------------------------- ISP (lab-uplink)
+
+def isp_run(facts, links, nodes=None):
+    nodes = nodes or [("ISP1", "lab-uplink", 3), ("R1", "mikrotik-chr7", 2), ("SW1", "linux-switch", 3),
+                      ("PC1", "debian12", 1), ("PC2", "debian12", 1)]
+    definition = {"format": "gns3lab.lab/2", "nodes": [{"name": n, "image": i, "adapters": a, **(
+        {"uplink_port": 0} if i == "lab-uplink" else {})} for n, i, a in nodes]}
+    state = {"nodes": {nid(n): {"name": n, "status": "started", **f} for n, f in facts.items()}}
+    return run_checks(topology=topology(nodes, links), state=state, statuses={nid(n): "started" for n, _, _ in nodes},
+                      definition=definition, images=IMAGES, checks=None, grading=GRADING, stale=set())
+
+
+def not_private(result):
+    return sorted(f["message"].split(":")[0] for f in result["findings"] if f["code"] == "address_not_private")
+
+
+def test_an_address_from_the_isp_is_not_outside_the_allowed_ranges():
+    # R1 WAN on ISP adapter 1, PC2 behind SW1 on ISP adapter 2: each takes the LAN of its own ISP port (198.18.N.0/24).
+    links = [(("ISP1", 1), ("R1", 0)), (("R1", 1), ("PC1", 0)), (("ISP1", 2), ("SW1", 0)), (("SW1", 1), ("PC2", 0))]
+    facts = {"R1": router("198.18.1.100/24", "192.168.10.254/24"), "SW1": switch([1, 1, 1]),
+             "PC1": host("192.168.10.1/24", "192.168.10.254"), "PC2": host("198.18.2.100/24", "198.18.2.1")}
+    result = isp_run(facts, links)
+    assert result["findings"] == []  # Nor is PC2 alone behind SW1, nor its gateway (the ISP port) missing from the lab
+    # The LAN of another ISP port, or an ISP address where no cable reaches the ISP, is still outside the ranges.
+    facts["R1"] = router("198.18.2.100/24", "192.168.10.254/24")
+    facts["PC1"] = host("198.18.1.7/24")
+    assert not_private(isp_run(facts, links)) == ["PC1 ens3", "R1 eth0"]
+    facts["PC2"] = host("198.18.2.100/24", "198.18.2.7")
+    assert [f["code"] for f in isp_run(facts, links)["findings"] if f["code"] == "gateway_wrong"] == ["gateway_wrong"]
+
+
+def test_an_isp_lan_needs_the_isp_image():
+    # The same address next to a plain QEMU node (no uplink_port in its image) is not the ISP's.
+    nodes = [("GW", "debian12", 2), ("R1", "mikrotik-chr7", 2)]
+    facts = {"R1": router("198.18.1.100/24", None), "GW": host("192.168.1.1/24")}
+    assert not_private(isp_run(facts, [(("GW", 1), ("R1", 0))], nodes)) == ["R1 eth0"]

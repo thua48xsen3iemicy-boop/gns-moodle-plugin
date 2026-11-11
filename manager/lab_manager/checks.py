@@ -27,6 +27,8 @@ ROUTER_NAME_RE = re.compile(r"^(r|router)[-_]?\d*$", re.IGNORECASE)
 SWITCH_NAME_RE = re.compile(r"^(sw|switch)[-_]?\d*$", re.IGNORECASE)
 RFC1918 = tuple(ipaddress.IPv4Network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 APIPA = ipaddress.IPv4Network("169.254.0.0/16")
+# The LAN of adapter N of the ISP node (an image with uplink_port, images/lab-uplink/README.md): 198.18.N.0/24 by DHCP.
+ISP_LAN = "198.18.{adapter}.0/24"
 DEFAULT_FORBID_PREFIX = (0, 8, 32)
 TRANSIENT = ("stale_facts", "collect_failed")  # A system reason a later run may not have: the run is incomplete
 SKIP_REASONS = ("no_collector", "stale_facts", "collect_failed", "no_expectation", "unsupported_os", "port_unknown")
@@ -460,6 +462,31 @@ def l2_reach(model: Model, roles: dict, start):
     return ends, switches, links
 
 
+def uplink_lans(model: Model, roles: dict, definition: dict | None, images: dict) -> dict:
+    """(node_id, interface name) -> ISP LANs the interface is cabled to, directly or through switches.
+
+    An address from such a LAN is where the ISP puts it, not outside the allowed ranges: it is checked against the LAN of
+    the very ISP port the interface reaches, so 198.18.x anywhere else is still `address_not_private`.
+    """
+    lans = {}
+    for node in (definition or {}).get("nodes", []):
+        image = images.get(node.get("image"))
+        isp = model.by_name.get(node.get("name"))
+        if image is None or image.uplink_port is None or isp is None:
+            continue
+        for start in sorted(p for p in model.peer if p[0] == isp):
+            adapter = start[1]
+            if adapter == image.uplink_port or not is_int(adapter) or not 1 <= adapter <= 15:
+                continue
+            network = ipaddress.IPv4Network(ISP_LAN.format(adapter=adapter))
+            ends, _, _ = l2_reach(model, roles, start)
+            for end in ends:
+                for i in model.ifaces.get(end[0], []):
+                    if i.port == (end[1], end[2]):
+                        lans.setdefault((i.node_id, i.name), set()).add(network)
+    return lans
+
+
 def path_objects(model: Model, roles: dict, ends: list) -> set:
     """Ports, links and switches on the L2 paths between the endpoints of a set (segments.Fabric.tree): a switch that
     no endpoint is cabled to and that has one cable at most inside the set (a spur) is not on a path."""
@@ -568,7 +595,8 @@ class Run:
 
 
 def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, stale: set,
-             unsaved: set = frozenset(), persistence: dict | None = None) -> tuple[list, list]:
+             unsaved: set = frozenset(), persistence: dict | None = None,
+             isp_lans: dict | None = None) -> tuple[list, list]:
     """(rules, findings) of a lab: rules = [{"code", "group", "status"[, "reason"]}], findings as in the run document."""
     checks = checks or {}
     run = Run()
@@ -743,6 +771,8 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
         i = d.members[0]
         if not i.addrs or i.node_id in ignored or i.port is None or (i.node_id, *i.port) in endpoint_ports:
             continue
+        if (i.node_id, i.name) in (isp_lans or {}):
+            continue  # The ISP is there too: it has no facts, so it is no member of the domain
         end = (i.node_id, *i.port)
         run.add("member_isolated", f"{i.label} один в своём L2-домене ({model.domain_label(d)}): кроме него там никого нет.",
                 nodes=[i.node], ifaces=[iface_ref(i)], objects={f"port:{end}", f"node:{i.node_id}"})
@@ -965,7 +995,8 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                     run.add("address_apipa", f"{i.label}: адрес {a} из 169.254.0.0/16 — DHCP-клиент не получил ответа.",
                             nodes=[i.node], ifaces=[iface_ref(i)], objects=objects)
                     continue
-                if not any(a.ip in net for net in allowed_nets):
+                lans = (isp_lans or {}).get((i.node_id, i.name), ())
+                if not any(a.ip in net for net in allowed_nets) and not any(a.ip in net for net in lans):
                     run.add("address_not_private", f"{i.label}: адрес {a} не из разрешённых диапазонов "
                                                    f"({', '.join(addr.get('allowed', ['rfc1918']))}).",
                             nodes=[i.node], ifaces=[iface_ref(i)], objects=objects)
@@ -1079,7 +1110,11 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
             continue
         has, vias = default_via(nid)
         own = [a.network for i in model.ifaces[nid] for a in i.addrs]
+        # The ISP port of a LAN the node is cabled to is a gateway, though the ISP has no facts (images/lab-uplink).
+        isp = {net.network_address + 1 for i in model.ifaces[nid] for net in (isp_lans or {}).get((nid, i.name), ())}
         for v in vias:
+            if v in isp:
+                continue
             if v not in lab_ips or not any(v in net for net in own):
                 why = "такого адреса нет в лабе" if v not in lab_ips else "он не в подсети узла"
                 run.add("gateway_wrong", f"{names(nid)}: шлюз по умолчанию {v} — {why}.",
@@ -1409,7 +1444,8 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
         model = Model(topology, state, statuses, now, consoles)
     expected = build_expected(model, roles, definition, checks)
     rules, findings = evaluate(model, roles=roles, expected=expected, checks=checks, stale=stale, unsaved=unsaved,
-                               persistence=persistence_of(model, definition, images, checks))
+                               persistence=persistence_of(model, definition, images, checks),
+                               isp_lans=uplink_lans(model, roles, definition, images))
     return grade(rules, findings, grading, checks)
 
 
