@@ -3,6 +3,7 @@
 import copy
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -113,6 +114,19 @@ def test_ifupdown_guest_gets_link_files_new_names_and_config(tmp_path):
     assert (root / "etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg").exists()
     assert "ip link set dev ens9 name gns3lab0" in calls and "ip link set dev gns3lab0 name ens3" in calls
     assert calls[-1] == "ifup ens3"  # Only what ifupdown had up comes up again
+
+
+def test_a_dhcp_client_of_the_boot_is_stopped_first(tmp_path):
+    # Debian's ifup@ens9 of allow-hotplug asks DHCP for minutes in a lab without a server and holds the interface's
+    # lock meanwhile: the script kills that dhclient instead of waiting for it (seen on the stand: provisioning timeout).
+    client = subprocess.Popen(["dhclient", "-c", "import time; time.sleep(60)", "-1", "ens9"], executable=sys.executable)
+    try:
+        done, root, calls = run("ifupdown", {0: "eno1"}, tmp_path)
+        assert done.returncode == 0, done.stderr
+        assert client.wait(timeout=5) != 0  # Killed
+    finally:
+        client.kill()
+    assert "ifdown --force ens9" in calls
 
 
 def test_netplan_and_networkmanager_files_follow_the_new_name(tmp_path):
