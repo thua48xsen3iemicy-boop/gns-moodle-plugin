@@ -167,6 +167,24 @@ class check_runs {
     }
 
     /**
+     * Whether a user has a run in an activity that is not resolved yet (queued or running).
+     *
+     * @param int $instanceid gns3lab id
+     * @param int $userid owner of the lab
+     * @return bool
+     */
+    public static function has_pending(int $instanceid, int $userid): bool {
+        global $DB;
+
+        [$insql, $params] = $DB->get_in_or_equal(self::PENDING, SQL_PARAMS_NAMED);
+        return $DB->record_exists_select(
+            self::TABLE,
+            "gns3labid = :labid AND userid = :userid AND status {$insql}",
+            $params + ['labid' => $instanceid, 'userid' => $userid]
+        );
+    }
+
+    /**
      * Reads one run from the manager and records it.
      *
      * @param \stdClass $instance gns3lab record

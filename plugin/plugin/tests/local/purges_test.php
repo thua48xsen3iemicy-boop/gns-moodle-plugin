@@ -125,6 +125,52 @@ final class purges_test extends \advanced_testcase {
         $this->assertEquals(0, $DB->count_records('gns3lab_reveal', ['gns3labid' => $lab->id, 'userid' => 42]));
     }
 
+    public function test_wipe_records_a_finished_check_before_the_manager_deletes_it(): void {
+        global $DB;
+
+        $course = $this->getDataGenerator()->create_course();
+        $lab = $this->getDataGenerator()->create_module('gns3lab', [
+            'course' => $course->id, 'grade' => 10, 'checksenabled' => 1, 'checksattempts' => 2,
+        ]);
+        $this->fake->on('GET', '/api/v1/sessions', 200, fake_manager::session('stopped'));
+        // Moodle still has the run queued, the manager has graded it already.
+        check_runs::record($lab, 42, 's-3f9a1c0d2b4e5f60', (object) fake_manager::check_run('queued'), 42);
+        $this->fake->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 200, fake_manager::check_run('done', 'graded', 4));
+
+        purges::wipe($lab, 42, $this->client);
+
+        $this->assertCount(1, $this->purge_bodies());
+        $run = check_runs::get((int) $lab->id, 42, fake_manager::RUN);
+        $this->assertSame('done', $run->status);
+        $this->assertEquals(4, $run->mark);
+        $this->assertSame(1, check_runs::attempts_used((int) $lab->id, 42));
+    }
+
+    public function test_wipe_waits_for_an_unresolved_check_and_for_a_reachable_manager(): void {
+        $course = $this->getDataGenerator()->create_course();
+        $lab = $this->getDataGenerator()->create_module('gns3lab', ['course' => $course->id, 'checksenabled' => 1]);
+        $this->fake->on('GET', '/api/v1/sessions', 200, fake_manager::session('stopped'));
+        check_runs::record($lab, 42, 's-3f9a1c0d2b4e5f60', (object) fake_manager::check_run('queued'), 42);
+
+        $this->fake->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 200, fake_manager::check_run('running'));
+        try {
+            purges::wipe($lab, 42, $this->client);
+            $this->fail('A lab with a check in progress must not be wiped');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('wipecheckpending', $e->errorcode);
+        }
+
+        $this->fake->on('GET', fake_manager::CHECKS . '/' . fake_manager::RUN, 503, ['error' => 'internal', 'message' => 'down']);
+        try {
+            purges::wipe($lab, 42, $this->client);
+            $this->fail('A lab must not be wiped while its check runs cannot be read');
+        } catch (manager_exception $e) {
+            $this->assertSame('internal', $e->remotecode);
+        }
+        $this->assertSame([], $this->purge_bodies());
+        $this->assertTrue(check_runs::has_pending((int) $lab->id, 42));
+    }
+
     public function test_reconcile_sends_every_activity_and_never_an_empty_list(): void {
         $this->fake->on('POST', '/api/v1/purges/reconcile', 200, ['workspaces' => 0, 'pending' => 0]);
         $this->assertNull(purges::reconcile($this->client));

@@ -40,11 +40,20 @@ export const STRING_KEYS = [
     'chk_mark', 'chk_incomplete', 'chk_failed', 'chk_nofindings', 'chk_consequence', 'chk_toroot', 'chk_forgiven',
     'chk_details_counts', 'chk_details_after', 'chk_details_gone', 'chk_history', 'chk_hist_mark', 'chk_hist_incomplete',
     'chk_hist_failed', 'chk_hist_pending', 'chk_gaps', 'chk_started', 'chk_done', 'chk_empty', 'chk_observer',
-    'chk_disabled',
+    'chk_disabled', 'chk_filter', 'chk_filter_all',
     ...CLASSES.map(c => 'chk_class_' + c),
     ...CLASSES.map(c => 'chk_n_' + c),
     ...DATA_GAPS.map(r => 'chk_gap_' + r),
 ];
+
+/**
+ * A group of findings belongs to a class when its root or one of its consequences does.
+ *
+ * @param {object} group a group of groupFindings()
+ * @param {string} c class
+ * @returns {boolean}
+ */
+const inClass = (group, c) => group.finding.class === c || group.consequences.some(f => f.class === c);
 
 export class Checks {
     /**
@@ -77,6 +86,7 @@ export class Checks {
         this.session = null;
         this.run = null;
         this.runId = null;
+        this.filter = null;
         this.polls = 0;
         this.timer = null;
         this.busy = false;
@@ -202,6 +212,7 @@ export class Checks {
         clearTimeout(this.timer);
         if (this.runId !== runid) {
             this.runId = runid;
+            this.filter = null;
             this.run = null;
             this.polls = 0;
         }
@@ -337,12 +348,47 @@ export class Checks {
             hel('span', 'chk-mark-label', head).textContent = this.strings.chk_mark;
             hel('b', 'chk-mark-value', head).textContent = String(run.mark);
         }
+        // With the findings at hand the counts are filters: a click shows the findings of one class, "all" shows them all.
+        const groups = run.detailed ? groupFindings(run.findings) : null;
         const counts = hel('div', 'chk-counts', box);
+        if (groups) {
+            counts.setAttribute('role', 'group');
+            counts.setAttribute('aria-label', this.strings.chk_filter);
+            if (!CLASSES.some(c => this.filter === c && groups.some(g => inClass(g, c)))) {
+                this.filter = null;
+            }
+            this.filterChip(counts, null, this.strings.chk_filter_all, groups.length > 0);
+        }
         CLASSES.forEach(c => {
-            const chip = hel('span', 'chk-chip ' + c, counts);
-            chip.textContent = fill(this.strings['chk_n_' + c], run.counts[c]);
+            const text = fill(this.strings['chk_n_' + c], run.counts[c]);
+            if (groups) {
+                this.filterChip(counts, c, text, groups.some(g => inClass(g, c)));
+            } else {
+                hel('span', 'chk-chip sev-' + c, counts).textContent = text;
+            }
         });
-        this.renderDetails(box, run);
+        this.renderDetails(box, run, groups);
+    }
+
+    /**
+     * A count that filters the findings by class.
+     *
+     * @param {HTMLElement} parent container
+     * @param {string|null} c class, null for all findings
+     * @param {string} text label
+     * @param {boolean} enabled there are findings to show
+     */
+    filterChip(parent, c, text, enabled) {
+        const chip = hel('button', 'chk-chip sev-' + (c || 'all'), parent);
+        chip.type = 'button';
+        chip.dataset.key = 'filter-' + (c || 'all');
+        chip.textContent = text;
+        chip.disabled = !enabled;
+        chip.setAttribute('aria-pressed', String(this.filter === c));
+        chip.addEventListener('click', () => {
+            this.filter = c === null || this.filter === c ? null : c;
+            this.render();
+        });
     }
 
     /**
@@ -350,22 +396,22 @@ export class Checks {
      *
      * @param {HTMLElement} box container
      * @param {object} run result of get_check_run
+     * @param {Array|null} groups the findings grouped by root cause, null when they are not shown
      */
-    renderDetails(box, run) {
+    renderDetails(box, run, groups) {
         if (!run.detailed) {
             const text = run.gone ? this.strings.chk_details_gone : run.detailsfrom > 0
                 ? fill(this.strings.chk_details_after, when(run.detailsfrom)) : this.strings.chk_details_counts;
             hel('p', 'chk-note', box).textContent = text;
             return;
         }
-        const groups = groupFindings(run.findings);
         if (!groups.length) {
             hel('p', 'chk-ok', box).textContent = this.strings.chk_nofindings;
         }
         const list = hel('ol', 'chk-findings', box);
         const anchor = id => `gns3lab-chk-${this.runId}-${id}`;
-        groups.forEach(({finding, consequences}) => {
-            const item = hel('li', 'chk-finding ' + finding.class + (finding.counted ? ' counted' : ''), list);
+        groups.filter(g => !this.filter || inClass(g, this.filter)).forEach(({finding, consequences}) => {
+            const item = hel('li', 'chk-finding sev-' + finding.class + (finding.counted ? ' counted' : ''), list);
             if (finding.id) {
                 item.id = anchor(finding.id);
                 item.tabIndex = -1;
@@ -409,7 +455,7 @@ export class Checks {
      */
     findingLine(parent, f) {
         const line = hel('div', 'chk-line', parent);
-        hel('span', 'chk-class ' + f.class, line).textContent = this.strings['chk_class_' + f.class] || f.class;
+        hel('span', 'chk-class sev-' + f.class, line).textContent = this.strings['chk_class_' + f.class] || f.class;
         hel('span', 'chk-msg', line).textContent = f.message || f.code;
         if (isForgiven(f)) {
             hel('small', 'chk-forgiven', parent).textContent = this.strings.chk_forgiven;

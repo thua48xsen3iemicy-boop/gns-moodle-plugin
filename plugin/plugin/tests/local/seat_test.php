@@ -189,6 +189,50 @@ final class seat_test extends \advanced_testcase {
         $this->assertSame(0, $DB->count_records('gns3lab_seat'));
     }
 
+    public function test_a_page_without_a_tab_is_refused_only_by_another_login_and_takes_nothing(): void {
+        global $DB;
+        $access = lab_access::from_cmid((int) $this->lab->cmid);
+        $id = (int) $this->student->id;
+
+        // Nobody holds the seat: the call goes through and does not claim it.
+        seat::require_login($access, $id, 'login-A', self::NOW);
+        $this->assertSame(0, $DB->count_records('gns3lab_seat'));
+
+        // The lab page of the same login holds it: same person, through, and the seat stays with that page.
+        seat::claim($this->lab, $id, 'page1', true, 'login-A', self::NOW);
+        seat::require_login($access, $id, 'login-A', self::NOW + 5);
+        $this->assertSame('page1', $DB->get_field('gns3lab_seat', 'tabid', ['userid' => $id]));
+
+        // Another login while the seat is alive: refused and logged.
+        $sink = $this->redirectEvents();
+        try {
+            seat::require_login($access, $id, 'login-B', self::NOW + 10);
+            $this->fail('Another login must be refused');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('seatotherlogin', $e->errorcode);
+        }
+        $events = array_filter($sink->get_events(), fn($e) => $e instanceof \mod_gns3lab\event\seat_denied);
+        $this->assertCount(1, $events);
+        $sink->close();
+
+        // Once the holder is gone, another login goes through.
+        seat::require_login($access, $id, 'login-B', self::NOW + seat::TTL + 1);
+    }
+
+    public function test_a_page_without_a_tab_is_never_refused_without_a_limit(): void {
+        global $DB;
+        $lab = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->lab->course, 'seatmode' => 'off']);
+        $id = (int) $this->student->id;
+        // A row left from before the limit was turned off.
+        $DB->insert_record('gns3lab_seat', (object) [
+            'gns3labid' => $lab->id, 'userid' => $id, 'sessionkey' => 'login-A', 'tabid' => 'page1',
+            'timeclaimed' => self::NOW, 'timemodified' => self::NOW,
+        ]);
+
+        $this->expectNotToPerformAssertions();
+        seat::require_login(lab_access::from_cmid((int) $lab->cmid), $id, 'login-B', self::NOW);
+    }
+
     public function test_seats_are_kept_per_student_and_activity(): void {
         $other = $this->getDataGenerator()->create_and_enrol(get_course($this->lab->course), 'student');
         $lab2 = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->lab->course]);
