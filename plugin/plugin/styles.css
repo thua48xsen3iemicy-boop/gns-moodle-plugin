@@ -4965,23 +4965,29 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .checks-panel .chk-mark{display:flex;align-items:baseline;gap:10px;margin:4px 0 8px}
 .gns3lab-student.canvas-ui .checks-panel .chk-mark-label{color:var(--muted)}
 .gns3lab-student.canvas-ui .checks-panel .chk-mark-value{font:600 34px/1 var(--display);color:var(--accent)}
-.gns3lab-student.canvas-ui .checks-panel .chk-counts{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
-.gns3lab-student.canvas-ui .checks-panel .chk-chip{font:600 11px var(--mono);border:1px solid var(--line);border-radius:6px;padding:3px 7px;color:var(--muted)}
-.gns3lab-student.canvas-ui .checks-panel .chk-chip.critical,
-.gns3lab-student.canvas-ui .checks-panel .chk-class.critical{color:var(--bad);border-color:var(--bad)}
-.gns3lab-student.canvas-ui .checks-panel .chk-chip.major,
-.gns3lab-student.canvas-ui .checks-panel .chk-class.major{color:var(--warn);border-color:var(--warn)}
-.gns3lab-student.canvas-ui .checks-panel .chk-chip.minor,
-.gns3lab-student.canvas-ui .checks-panel .chk-class.minor{color:var(--fg)}
+.gns3lab-student.canvas-ui .checks-panel .chk-counts{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}
+/* The counts by class: pills of one size, filters of the findings when the findings are shown. */
+.gns3lab-student.canvas-ui .checks-panel .chk-chip{--sev:var(--fg);display:inline-flex;align-items:center;box-sizing:border-box;min-height:30px;margin:0;
+  padding:0 10px;border:1px solid var(--sev);border-radius:999px;background:transparent;color:var(--sev);font:600 11px/1 var(--mono);white-space:nowrap}
+.gns3lab-student.canvas-ui .checks-panel button.chk-chip{cursor:pointer;transition:background-color .15s ease,color .15s ease}
+.gns3lab-student.canvas-ui .checks-panel button.chk-chip:hover:not(:disabled){background:color-mix(in srgb,var(--sev) 16%,transparent)}
+.gns3lab-student.canvas-ui .checks-panel button.chk-chip[aria-pressed="true"]{background:var(--sev);color:var(--accent-ink)}
+.gns3lab-student.canvas-ui .checks-panel button.chk-chip:disabled{cursor:default}
+.gns3lab-student.canvas-ui .checks-panel button.chk-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gns3lab-student.canvas-ui .checks-panel .sev-all{--sev:var(--accent)}
+.gns3lab-student.canvas-ui .checks-panel .sev-critical{--sev:var(--bad)}
+.gns3lab-student.canvas-ui .checks-panel .sev-major{--sev:var(--warn)}
+.gns3lab-student.canvas-ui .checks-panel .sev-minor{--sev:var(--fg)}
+.gns3lab-student.canvas-ui .checks-panel .sev-note{--sev:var(--muted)}
 .gns3lab-student.canvas-ui .checks-panel .chk-findings{list-style:none;margin:0;padding:0}
 .gns3lab-student.canvas-ui .checks-panel .chk-finding{padding:9px 0;border-top:1px solid var(--line)}
 .gns3lab-student.canvas-ui .checks-panel .chk-finding:focus{outline:2px solid var(--accent);outline-offset:2px}
 .gns3lab-student.canvas-ui .checks-panel .chk-finding.counted{border-left:3px solid var(--bad);padding-left:10px}
-.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted.minor{border-left-color:var(--muted)}
-.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted.major{border-left-color:var(--warn)}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted.sev-minor{border-left-color:var(--fg)}
+.gns3lab-student.canvas-ui .checks-panel .chk-finding.counted.sev-major{border-left-color:var(--warn)}
 .gns3lab-student.canvas-ui .checks-panel .chk-line{display:flex;gap:8px;align-items:baseline}
-.gns3lab-student.canvas-ui .checks-panel .chk-class{flex:none;font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.04em;
-  border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-class{--sev:var(--muted);flex:none;font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.04em;
+  border:1px solid var(--sev);border-radius:4px;padding:1px 5px;color:var(--sev)}
 .gns3lab-student.canvas-ui .checks-panel .chk-msg{overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
 .gns3lab-student.canvas-ui .checks-panel .chk-forgiven{display:block;color:var(--muted);font-size:11px;margin-top:3px}
 .gns3lab-student.canvas-ui .checks-panel .chk-consequences{list-style:none;margin:6px 0 0 14px;padding:0}
@@ -4991,3 +4997,24 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .checks-panel .chk-h{font:600 13px var(--body);margin:16px 0 4px}
 .gns3lab-student.canvas-ui .checks-panel .chk-history{list-style:none;margin:0;padding:0}
 .gns3lab-student.canvas-ui .checks-panel .chk-history .issue-row.current{color:var(--accent)}
+
+/* The overview, the assignments and the checks open as the object card does: a drawer on the right as high as the
+   scheme, a sheet above the zoom controls on a narrow screen. */
+.gns3lab-student.canvas-ui .canvas-panel,
+.gns3lab-student.canvas-ui .tasks-panel{top:0;right:0;bottom:0;max-height:none;width:min(440px,calc(100% - 48px));z-index:8;
+  border-radius:0;border-width:0 0 0 1px;box-shadow:-18px 0 44px rgb(0 8 17 / .4);animation:gns3lab-drawer-in .22s ease}
+.gns3lab-student.canvas-ui .canvas-panel h2{font:600 25px/1.2 var(--display);margin:5px 0}
+.gns3lab-student.canvas-ui .canvas-panel p{margin:4px 0}
+.gns3lab-student.canvas-ui .panel-body,
+.gns3lab-student.canvas-ui .tasks-body{flex:1;min-height:0}
+@keyframes gns3lab-drawer-in{from{transform:translateX(calc(100% + 24px))}}
+@keyframes gns3lab-sheet-in{from{transform:translateY(calc(100% + 80px))}}
+@media(max-width:760px){
+.gns3lab-student.canvas-ui .canvas-panel,
+.gns3lab-student.canvas-ui .tasks-panel{top:auto;left:8px;right:8px;bottom:64px;width:auto;height:min(62%,calc(100% - 140px));
+  border-radius:17px;border-width:1px;box-shadow:var(--shadow);animation-name:gns3lab-sheet-in}
+}
+@media(prefers-reduced-motion:reduce){
+.gns3lab-student.canvas-ui .canvas-panel,
+.gns3lab-student.canvas-ui .tasks-panel{animation:none}
+}
