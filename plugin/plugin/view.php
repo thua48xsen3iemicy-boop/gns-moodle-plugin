@@ -57,6 +57,12 @@ if ($action === 'wipe') {
     if (!\mod_gns3lab\local\purges::can_wipe($context, $client)) {
         throw new \moodle_exception('wipeunavailable', 'gns3lab', $PAGE->url);
     }
+    // Wiping drives the student's own lab: another login of the account that holds the seat may not (docs/seat.md).
+    try {
+        \mod_gns3lab\local\seat::require_login(\mod_gns3lab\local\lab_access::from_cmid((int) $cm->id), (int) $USER->id);
+    } catch (\moodle_exception $e) {
+        redirect($PAGE->url, $e->getMessage(), null, \core\output\notification::NOTIFY_WARNING);
+    }
     if (!optional_param('confirm', 0, PARAM_BOOL)) {
         $continue = new \core\url($PAGE->url, ['action' => 'wipe', 'confirm' => 1, 'sesskey' => sesskey()]);
         echo $OUTPUT->header();
