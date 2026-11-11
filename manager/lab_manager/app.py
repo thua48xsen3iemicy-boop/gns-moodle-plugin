@@ -27,6 +27,7 @@ from .slot_client import GatewayClient, SlotClient, SlotError
 from .storage import StorageError, student_key, authoring_key
 from .store import Store, CaptureConflict, WorkspacePurging
 from .purge import Purges
+from .maintenance import Maintenance
 
 log = logging.getLogger("lab_manager.api")
 
@@ -148,6 +149,8 @@ class Services:
         self.orchestrator.derived = self.derived
         self.purges = Purges(self)
         self.orchestrator.purges = self.purges
+        self.maintenance = Maintenance(self.pool)
+        self.orchestrator.maintenance = self.maintenance
 
     async def leader_connection(self):
         from psycopg.rows import dict_row
@@ -261,7 +264,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                     "status_message": "Остановка: завершается текущий шаг…"}
         return s
 
-    def summary(s):
+    def summary(s, maintenance=None):
         s = shown(s)
         body = {
             "schema": "gns3lab.session/1",
@@ -279,12 +282,13 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             body["progress"] = s["progress"]
         if s.get("mode"):
             body["mode"] = s["mode"]
-
+        if maintenance and maintenance["state"] != "off":
+            body["maintenance"] = maintenance  # CONTRACTS 2.11
         return body
 
     async def present(s):
         s = shown(s)
-        body = summary(s)
+        body = summary(s, await services.maintenance.public_state())
         body["features"] = ["consoles"] if s["status"] == "running" else []
         if s["status"] == "running" and s["facts_polled_at"] is not None:
             body["features"] += ["facts", "checks"]  # The slot of this session serves facts (CONTRACTS 2.7, 2.9)
@@ -348,7 +352,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
         # resume: the next session continues the project; checks: CONTRACTS 2.9
-        features = ["consoles", "observer", "resume", "facts", "checks", "purge"]
+        features = ["consoles", "observer", "resume", "facts", "checks", "purge", "maintenance"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -359,6 +363,17 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             features.append("image_capture")
             body["options"].append("mode")
         return body
+
+    @app.get("/api/v1/maintenance")
+    async def maintenance_state(site=Depends(site_of)):
+        """CONTRACTS 2.11: the plugin reads it on pages without a live session."""
+        return {"schema": "gns3lab.maintenance/1", **await services.maintenance.public_state()}
+
+    async def refuse_in_maintenance(*, started_only=False):
+        state = await services.maintenance.public_state()
+        if state["state"] != "off" and not (started_only and state["state"] == "announced"):
+            raise ApiError(503, "maintenance", "Идёт техническое обслуживание: запуск лаб временно недоступен",
+                           maintenance=state)
 
     @app.get("/api/v1/images")
     async def images(site=Depends(site_of)):
@@ -404,7 +419,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if user_id is None:
             # Observer page: one entry per student of the activity, without topology (П1).
             rows = await store.activity_sessions(site.slug, instance_id)
-            return [dict(summary(s), user_id=s["user_id"]) for s in rows]
+            maintenance = await services.maintenance.public_state() if rows else None
+            return [dict(summary(s, maintenance), user_id=s["user_id"]) for s in rows]
         s = await store.latest_session(site.slug, user_id, instance_id)
         if not s:
             raise ApiError(404, "session_not_found", "No session for this user and instance")
@@ -440,6 +456,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             if not same(existing):
                 raise conflict(existing)
             return JSONResponse(status_code=200, content=await present(existing))  # options not re-applied
+        await refuse_in_maintenance()  # CONTRACTS 2.11: no new lab once maintenance is announced
         try:
             lab = None if checked else await asyncio.to_thread(services.catalog.get, body.lab_ref)
             resources = checked.resources if checked else lab.resources
@@ -580,6 +597,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         node_ids = {n["node_id"] for n in s["topology"]["topology"]["nodes"]}
         if body.node_id not in node_ids:
             raise ApiError(404, "node_not_found", "Node does not belong to this session")
+        await refuse_in_maintenance(started_only=True)  # The labs are being stopped (CONTRACTS 2.11)
         try:
             no_console = await services.orchestrator.consoleless(s)
         except (LabError, KeyError) as exc:  # Fail closed: not knowing is not a reason to hand out a console

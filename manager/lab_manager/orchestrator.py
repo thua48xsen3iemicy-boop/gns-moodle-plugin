@@ -57,6 +57,7 @@ from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
 from .slot_client import SlotError, SlotOwnerLost, SlotUnavailable
 from .store import Fenced
+from . import maintenance as maint
 from .ownership import command_scope, current
 
 log = logging.getLogger("lab_manager.orchestrator")
@@ -200,6 +201,7 @@ class Orchestrator:
         self.last_tick = None
         self.derived = None
         self.purges = None  # purge.Purges, set by Services
+        self.maintenance = None  # maintenance.Maintenance, set by Services
 
     # ------------------------------------------------------------------ loop
     def wake(self):
@@ -256,6 +258,7 @@ class Orchestrator:
             await self.store.fail_orphan_check_runs(self.settings.check_timeout)
         except psycopg.Error as exc:
             log.warning("Check runs were not swept: %s", type(exc).__name__)
+        maintenance_started = await self._maintenance_step()
         for session in await self.store.live_sessions():
             task = self._tasks.get(session["id"])
             if task is None or task.done():
@@ -266,11 +269,32 @@ class Orchestrator:
                 task = self._tasks.get(key)
                 if task is None or task.done():
                     self._tasks[key] = asyncio.create_task(self.derived.step(row["session_id"]))
-        if self.purges:
+        if self.purges and not maintenance_started:  # The node agents may be updated during maintenance
             task = self._tasks.get("purge")
             if task is None or task.done():
                 self._tasks["purge"] = asyncio.create_task(self.purges.step())
         self._tasks = {k: t for k, t in self._tasks.items() if not t.done()}
+
+    async def _maintenance_step(self) -> bool:
+        """Maintenance mode (CONTRACTS 2.11): stop the sessions it concerns. True once starts_at passed.
+
+        While announced only sessions still waiting for a slot are cancelled (their lab would be stopped
+        minutes later anyway); from starts_at on every live session is asked to stop with reason maintenance.
+        """
+        if self.maintenance is None:
+            return False
+        try:
+            row = await self.maintenance.row()
+            if row is None:
+                return False
+            started = maint.now() >= row["starts_at"]
+            stopped = await self.maintenance.stop_sessions(queued_only=not started)
+            if stopped:
+                log.warning("Maintenance: stop requested for %d session(s): %s", len(stopped), ", ".join(stopped))
+            return started
+        except psycopg.Error as exc:
+            log.warning("Maintenance state not read: %s", type(exc).__name__)
+            return False
 
     async def drain(self):
         """Tests: wait for the per-session tasks started by the last tick."""
@@ -627,7 +651,8 @@ class Orchestrator:
     # ------------------------------------------------------------------ queued
     async def _stage_wait_slot(self, s):
         if s["stop_requested"]:
-            await self.store.finish_session(s, status="stopped", message="Остановлено до запуска")
+            message = maint.CANCEL_MESSAGE if s["stop_reason"] == "maintenance" else "Остановлено до запуска"
+            await self.store.finish_session(s, status="stopped", message=message)
             return False
         if s["lab_ref"]:
             self.catalog.get(s["lab_ref"])  # Lab removed from the catalog -> failed
@@ -948,7 +973,8 @@ class Orchestrator:
                 await self.store.observe_nodes(s, {n["name"]: "unknown" for n in s["topology"]["topology"]["nodes"]})
         if s["stop_requested"] or (s["expires_at"] and now() >= s["expires_at"]):
             reason = "maxduration" if not s["stop_requested"] else (s["stop_reason"] or "user")
-            msg = "Время лабы истекло, остановка…" if reason == "maxduration" else "Остановка лабы…"
+            msg = {"maxduration": "Время лабы истекло, остановка…",
+                   "maintenance": maint.STOPPING_MESSAGE}.get(reason, "Остановка лабы…")
             await self._poll_facts(s, final=True)  # How the lab looked at the end stays in the history
             return await self._goto(s, "lab_stop", msg, status="stopping", slot_state="releasing",
                                     stop_requested=True, stop_reason=reason)
@@ -1217,7 +1243,8 @@ class Orchestrator:
             reason = s["stop_reason"] or "user"
             message = {"maxduration": "Время лабы истекло",
                        "teacher": "Лаба остановлена преподавателем",
-                       "purge": "Лаба удалена"}.get(reason, "Лаба остановлена")
+                       "purge": "Лаба удалена",
+                       "maintenance": maint.STOP_MESSAGE}.get(reason, "Лаба остановлена")
             # A lab that ran and stopped cleanly shows the slot works: the record of failures starts again.
             clean = [] if slot_state == "free" and s.get("started_at") else None
             await self.store.finish_session(s, status="stopped", message=message,

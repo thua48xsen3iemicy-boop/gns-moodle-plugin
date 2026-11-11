@@ -214,6 +214,48 @@ def cmd_slot_state(args):
     asyncio.run(_with_services(run))
 
 
+def _maintenance_report(state, sessions, captures):
+    return {"maintenance": state,
+            "ready": state["state"] == "active",
+            "sessions": [{k: r[k] for k in ("id", "site", "user_id", "status", "stage", "mode", "slot_vmid")}
+                         for r in sessions],
+            "captures": [{"session_id": r["session_id"], "phase": r["phase"]} for r in captures]}
+
+
+def cmd_maintenance(args):
+    """Maintenance mode (CONTRACTS 2.11): on --in 5m [--message], status, wait [--timeout], off."""
+    from .maintenance import Maintenance, parse_delay
+
+    delay = None
+    if args.action == "on":
+        try:
+            delay = parse_delay(args.delay)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+
+    async def run(services):
+        m = Maintenance(services.pool)
+        if args.action == "on":
+            await m.switch_on(delay, args.message)
+        elif args.action == "off":
+            removed = await m.switch_off()
+            print(json.dumps({"maintenance": {"state": "off"}, "was_on": removed}))
+            return 0
+        deadline = asyncio.get_running_loop().time() + (args.timeout if args.action == "wait" else 0)
+        while True:
+            report = _maintenance_report(*await m.state())
+            if args.action != "wait" or report["ready"] or report["maintenance"]["state"] == "off":
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                print(json.dumps(report, ensure_ascii=False, default=str))
+                return 1
+            await asyncio.sleep(5)
+        print(json.dumps(report, ensure_ascii=False, default=str))
+        return 0 if args.action != "wait" or report["ready"] else 1
+
+    return asyncio.run(_with_services(run))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="lab_manager.admin")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -228,8 +270,18 @@ def main(argv=None):
         p.add_argument("vmid", type=int)
         p.add_argument("--message", default="")
         p.set_defaults(fn=cmd_slot_state, state=state)
+    p = sub.add_parser("maintenance", help="maintenance mode: stop every lab at a deadline")
+    actions = p.add_subparsers(dest="action", required=True)
+    on = actions.add_parser("on", help="announce; the labs stop after --in")
+    on.add_argument("--in", dest="delay", required=True, help="delay before the labs stop: 5m, 90s, 1h, 0")
+    on.add_argument("--message", default="", help="text shown to the users (at most 500 characters)")
+    actions.add_parser("status", help="phase and what still runs")
+    wait = actions.add_parser("wait", help="wait until nothing runs (phase active); exit 1 on timeout")
+    wait.add_argument("--timeout", type=int, default=1800, help="seconds (default 1800)")
+    actions.add_parser("off", help="end the maintenance: launches are allowed again")
+    p.set_defaults(fn=cmd_maintenance)
     args = parser.parse_args(argv)
-    args.fn(args)
+    return args.fn(args)
 
 
 if __name__ == "__main__":

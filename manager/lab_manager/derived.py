@@ -358,6 +358,12 @@ def register_routes(app, services, site_of, own_session, error):
         session = await own_session(session_id, site)
         if not await images.enabled():
             raise error(400, 'unsupported_field', 'Image capture is unavailable')
+        maintenance = getattr(services, 'maintenance', None)
+        state = await maintenance.public_state() if maintenance else {'state': 'off'}
+        if state['state'] in ('draining', 'active'):
+            # A capture started while announced is finished; a new one waits for the end (CONTRACTS 2.11).
+            raise error(503, 'maintenance', 'Идёт техническое обслуживание: сохранение с образами временно недоступно',
+                        maintenance=state)
         result = await images.begin(session, body, error)
         services.orchestrator.wake()
         return JSONResponse(status_code=202, content=result)
