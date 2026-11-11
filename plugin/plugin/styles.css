@@ -5018,3 +5018,10 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .canvas-panel,
 .gns3lab-student.canvas-ui .tasks-panel{animation:none}
 }
+
+/* Spanning tree on L2, as the console showed it (docs/live-state.md §8.2): the root bridge and the blocked ports. */
+.gns3lab-student.canvas-ui .l2-path.stp-blocked .stroke{stroke-dasharray:3 6;stroke-opacity:.75}
+.gns3lab-student.canvas-ui .l2-path .stp-block circle{fill:#173747;stroke:#ffbc69;stroke-width:1.6;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path .stp-block line{stroke:#ffbc69;stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-virtual .stp-root-tag rect{fill:#ffd36e;stroke:#173747;stroke-width:1;filter:none}
+.gns3lab-student.canvas-ui .l2-virtual .stp-root-tag text{fill:#173747;font:700 9px var(--display);text-anchor:middle;dominant-baseline:middle}

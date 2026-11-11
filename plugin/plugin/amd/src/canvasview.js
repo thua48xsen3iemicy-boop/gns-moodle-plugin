@@ -26,10 +26,11 @@ import {svgEl as el} from 'mod_gns3lab/dom';
 import {clamp, isHost} from 'mod_gns3lab/model';
 import {factsStatus, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 import {PILL_H, canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
+import {portStp, stpBlocks, stpRoot, stpShort} from 'mod_gns3lab/facts';
 
 export const STRING_KEYS = [
     'ui_canvas_title', 'ui_canvas_l4', 'ui_canvas_duplex',
-    'ui_canvas_blocked', 'ui_canvas_unknown', 'ui_canvas_disconnected', 'ui_canvas_objects',
+    'ui_canvas_blocked', 'ui_canvas_stp_blocked', 'ui_canvas_stp_root', 'ui_canvas_stp_self', 'ui_canvas_unknown', 'ui_canvas_disconnected', 'ui_canvas_objects',
     'ui_canvas_card_layers', 'ui_canvas_interface', 'ui_canvas_admin', 'ui_canvas_oper',
     'ui_assignments', 'ui_assignments_empty', 'ui_canvas_practice', 'ui_overview', 'ui_canvas_l1_help', 'ui_canvas_l2_help', 'ui_canvas_l3_help',
     'ui_canvas_collection_error', 'ui_canvas_empty_l2', 'ui_canvas_empty_l3', 'ui_canvas_subnet',
@@ -167,6 +168,7 @@ export class CanvasView {
                 // On the curve itself: the control point of a fanned line is far from it.
                 el('text', {x: (a.cx + 2 * mx + b.cx) / 4, y: (a.cy + 2 * my + b.cy) / 4 - 7, class: 'caption'}, label).textContent = caption;
             }
+            this.markStp(segment, g, a, b, {x: mx, y: my});
             segment.g = g;
             segment.ends = [[link.a.nodeId, a, b], [link.b.nodeId, b, a]];
             segment.mid = {x: (a.cx + 2 * mx + b.cx) / 4, y: (a.cy + 2 * my + b.cy) / 4};
@@ -197,12 +199,53 @@ export class CanvasView {
             el('rect', {x: -v.w / 2, y: -PILL_H / 2, width: v.w, height: PILL_H, rx: PILL_H / 2}, g);
             el('circle', {cx: -v.w / 2 + 13, cy: 0, r: 4, class: 'vmark'}, g);
             el('text', {x: -v.w / 2 + 23, y: 0, class: 'vtitle'}, g).textContent = 'VLAN ' + v.vlan + (mixed ? ' !' : '');
+            // The root bridge of the spanning tree of this VLAN, as the console showed it (docs/live-state.md §8.2).
+            const root = stpRoot(s.fx && s.fx.nodes.get(v.orig.id), v.vlan) === true;
+            if (root) {
+                g.classList.add('stp-root');
+                const tag = el('g', {class: 'stp-root-tag', transform: `translate(${v.w / 2 - 10} ${-PILL_H / 2})`}, g);
+                el('rect', {x: -15, y: -7, width: 30, height: 14, rx: 7}, tag);
+                el('text', {x: 0, y: .5}, tag).textContent = 'root';
+            }
             // Domain and members are in the tooltip and the card, not on the scheme.
-            el('title', {}, g).textContent = v.domain
+            el('title', {}, g).textContent = (v.domain
                 ? mixed ? `VLAN ${v.domain.vlans.join('+')} !` : `${v.domain.members.length} ${s.s('ui_canvas_members')}`
-                : s.s('ui_canvas_disconnected');
+                : s.s('ui_canvas_disconnected')) + (root ? ' · ' + s.s('ui_canvas_stp_root') : '');
             v.g = g;
         });
+    }
+
+    /**
+     * Marks the ends of an L2 line whose switch port the spanning tree keeps from forwarding in that VLAN: a "cut" sign
+     * on the line beside the port, and the line dashed. Only what the facts say: nothing is guessed from the topology.
+     *
+     * @param {object} segment segment of canvasL2
+     * @param {SVGElement} g group of the line
+     * @param {object} a start of the line (centre of a VLAN pill or a node)
+     * @param {object} b end of the line
+     * @param {{x: number, y: number}} m control point of the curve
+     */
+    markStp(segment, g, a, b, m) {
+        const s = this.stage, notes = [];
+        const length = Math.hypot(b.cx - a.cx, b.cy - a.cy) || 1;
+        [[segment.va, segment.pa, a, 0], [segment.vb, segment.pb, b, 1]].forEach(([vertex, iface, from, side]) => {
+            if (!vertex || !vertex.startsWith('S|') || !iface) return;
+            const port = portStp(iface, Number(vertex.split('|')[2]));
+            if (!port) return;
+            notes.push(`${from.orig?.name || from.name || ''} ${iface.name}: ${stpShort(port)}`);
+            if (!stpBlocks(port)) return;
+            // Just outside the pill (or the icon) of the switch, on the curve.
+            const away = Math.min(.42, Math.max(.08, ((from.w ? from.w / 2 : 26) + 14) / length));
+            const t = side ? 1 - away : away, u = 1 - t;
+            const x = u * u * a.cx + 2 * u * t * m.x + t * t * b.cx, y = u * u * a.cy + 2 * u * t * m.y + t * t * b.cy;
+            const angle = Math.atan2(2 * u * (m.y - a.cy) + 2 * t * (b.cy - m.y), 2 * u * (m.x - a.cx) + 2 * t * (b.cx - m.x));
+            const mark = el('g', {class: 'stp-block', transform: `translate(${x} ${y}) rotate(${angle * 180 / Math.PI})`}, g);
+            el('circle', {r: 7}, mark);
+            el('line', {x1: 0, y1: -4.5, x2: 0, y2: 4.5}, mark);
+            el('title', {}, mark).textContent = `${iface.name} · ${s.s('ui_canvas_stp_blocked')} (${stpShort(port)})`;
+            g.classList.add('stp-blocked');
+        });
+        if (notes.length) el('title', {}, g).textContent = 'STP · ' + notes.join(' · ');
     }
 
     renderL3() {

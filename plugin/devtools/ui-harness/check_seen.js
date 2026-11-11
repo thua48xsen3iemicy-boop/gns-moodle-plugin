@@ -189,6 +189,29 @@ async function run(page, command, prompt) {
         check('still no poll of facts after the second command',
             (await calls(page)).mod_gns3lab_get_facts === base.mod_gns3lab_get_facts);
 
+        // ---- show spanning-tree: the root bridge and a blocked port on L2, the roles in the card
+        await run(page, 'show spanning-tree', /SW1#$/);
+        await page.locator('[data-layer="l2"]').click();
+        const stp = await until(async() => {
+            const marks = await page.locator('.l2-path.stp-blocked .stp-block').count();
+            const roots = await page.locator(`.l2-virtual.stp-root[data-virtual^="S|${SW1}|"]`).evaluateAll(es => es.map(e => e.dataset.virtual));
+            return marks === 1 && roots.length === 2 ? {marks, roots} : null;
+        }, 3000);
+        check('L2: SW1 is the STP root of VLAN 1 and 10, one port is blocked', !!stp, JSON.stringify(stp));
+        check('...the blocked mark is on the line of Et0/2 - PC2 in VLAN 10',
+            (await page.locator(`.l2-path.stp-blocked[data-link="${LINK}"]`).count()) === 1);
+        await page.screenshot({path: path.join(SHOTS, 'seen-stp-l2.png')});
+        await page.locator('[data-layer="l1"]').click();
+        await openCard(page, SW1);
+        await page.locator('[data-card-layer="l2"]').click();
+        const roles = await until(async() => {
+            const text = await page.locator('.object-card').innerText();
+            return /VLAN 10: Altn BLK/.test(text) && /this bridge/.test(text) ? text : null;
+        }, 3000);
+        check('the card of SW1 shows the roles of the ports and the root by VLAN', !!roles);
+        await page.screenshot({path: path.join(SHOTS, 'seen-stp-card.png')});
+        await page.keyboard.press('Escape');
+
         // ---- VPCS: show ip moves the address of PC1 on the L3 layer (the interface is eth0 there, e0 in the facts)
         await page.locator('[data-layer="l3"]').click();
         const pills = () => page.locator('[data-region="lyrL3"] .pip').evaluateAll(els => els.map(e => '.' + e.textContent.trim().split('.').pop()));

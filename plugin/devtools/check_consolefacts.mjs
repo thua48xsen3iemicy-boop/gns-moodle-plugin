@@ -754,16 +754,6 @@ check('MikroTik RouterOS: own snippets by guest or disk image, no IOS prompt', (
     assert.equal(cf.promptKind('routeros', 'R1#'), null);
 });
 
-for (const [name, fn] of queue) {
-    try {
-        await fn();
-        console.log('ok    ' + name);
-    } catch (e) {
-        failures.push(name);
-        console.log('FAIL  ' + name + '\n      ' + String(e.stack || e).split('\n').slice(0, 9).join('\n      '));
-    }
-}
-
 check('fingerprint: independent L1 does not erase console IP and VLAN observations', () => {
     const base = {nodes: {x: {interfaces: [{name: 'Ethernet0/0', ipv4: ['10.0.0.1/24']}]}}};
     const heartbeat = structuredClone(base);
@@ -773,6 +763,193 @@ check('fingerprint: independent L1 does not erase console IP and VLAN observatio
     heartbeat.nodes.x.l1_ports.ports[0].state = 'down';
     assert.equal(fingerprint(base, 'x'), fingerprint(heartbeat, 'x'));
 });
+
+/* ---------------- spanning tree ---------------- */
+
+const IOL_STP_ROOT = `
+VLAN0001
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    32769
+             Address     aabb.cc00.0100
+             This bridge is the root
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     aabb.cc00.0100
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Et0/0               Desg FWD 100       128.1    Shr
+Et0/1               Desg FWD 100       128.2    Shr
+`;
+
+const IOL_STP = `
+VLAN0001
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    32769
+             Address     aabb.cc00.0100
+             Cost        100
+             Port        1 (Ethernet0/0)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     aabb.cc00.0300
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Et0/0               Root FWD 100       128.1    Shr
+Et0/1               Altn BLK 100       128.2    Shr
+Et0/2               Desg FWD 100       128.3    Shr Edge
+
+
+
+VLAN0010
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    4106
+             Address     aabb.cc00.0200
+             Cost        100
+             Port        2 (Ethernet0/1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32778  (priority 32768 sys-id-ext 10)
+             Address     aabb.cc00.0300
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Et0/0               Altn BLK*100       128.1    Shr *TYPE_Inc
+Et0/1               Root FWD 100       128.2    P2p
+`;
+
+check('recognize IOS: the spanning tree commands', () => {
+    for (const cmd of ['show spanning-tree', 'sh span', 'SH SPANNING', 'do sh spann vlan 1', 'sh span vl 1,10-20', 'sh span active']) {
+        assert.equal(rec('ios', cmd), 'show spanning-tree', cmd);
+    }
+    assert.equal(rec('ios', 'sh span int e0/1'), 'show spanning-tree interface (partial)');
+    assert.equal(rec('ios', 'sh span int Ethernet 0/1'), 'show spanning-tree interface (partial)');
+    assert.equal(rec('ios', 'sh span root'), 'show spanning-tree root');
+    assert.equal(rec('ios', 'sh span blockedports'), 'show spanning-tree blockedports');
+    assert.equal(rec('ios', 'sh span summ'), 'show spanning-tree summary');
+    assert.equal(rec('ios', 'sh span | i BLK'), 'show spanning-tree (partial)');
+    for (const cmd of ['sh spa', 'sh span detail', 'sh span vlan', 'sh span int', 'spanning-tree vlan 1 priority 4096']) {
+        assert.equal(rec('ios', cmd), null, cmd);
+    }
+});
+check('IOS show spanning-tree: the root bridge, its ports designated', () => {
+    const res = seen('ios', 'sh span', IOL_STP_ROOT);
+    assert.deepEqual(res.fragment.stp, {mode: 'pvst', complete: [1], vlans: {1: {
+        root: {priority: 32769, mac: 'aa:bb:cc:00:01:00'}, bridge: {priority: 32769, mac: 'aa:bb:cc:00:01:00'}, is_root: true, root_cost: 0}}});
+    assert.deepEqual(ifc(res, 'Ethernet0/0'), {name: 'Ethernet0/0', stp: {vlans: {1: {role: 'designated', state: 'forwarding', cost: 100}}}});
+});
+check('IOS show spanning-tree: per VLAN the root port, a blocked alternate, an inconsistent port', () => {
+    const res = seen('ios', 'sh span', IOL_STP);
+    assert.equal(res.fragment.stp.mode, 'rapid-pvst');
+    assert.deepEqual(res.fragment.stp.complete, [1, 10]);
+    assert.deepEqual(res.fragment.stp.vlans[1], {root: {priority: 32769, mac: 'aa:bb:cc:00:01:00'},
+        bridge: {priority: 32769, mac: 'aa:bb:cc:00:03:00'}, is_root: false, root_cost: 100});
+    assert.equal(res.fragment.stp.vlans[10].root.priority, 4106);
+    assert.deepEqual(ifc(res, 'Ethernet0/1').stp.vlans, {1: {role: 'alternate', state: 'blocking', cost: 100},
+        10: {role: 'root', state: 'forwarding', cost: 100}});
+    assert.deepEqual(ifc(res, 'Ethernet0/0').stp.vlans[10], {role: 'alternate', state: 'broken', cost: 100});
+    assert.deepEqual(names(res), ['Ethernet0/0', 'Ethernet0/1', 'Ethernet0/2']);
+});
+check('IOS show spanning-tree: a filter or the pager leaves no VLAN complete', () => {
+    assert.deepEqual(seen('ios', 'sh span', IOL_STP, true).fragment.stp.complete, []);
+    const res = seen('ios', 'sh span | i BLK', 'Et0/1               Altn BLK 100       128.2    Shr');
+    assert.equal(res, null, 'a row without its VLAN block says nothing');
+});
+check('IOS show spanning-tree interface, root, blockedports, summary', () => {
+    const one = seen('ios', 'sh span int et0/1', `
+Vlan                Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+VLAN0001            Altn BLK 100       128.2    Shr
+VLAN0010            Root FWD 100       128.2    P2p`);
+    assert.deepEqual(one.fragment.interfaces, [{name: 'Ethernet0/1', stp: {vlans: {1: {role: 'alternate', state: 'blocking', cost: 100},
+        10: {role: 'root', state: 'forwarding', cost: 100}}}}]);
+    const root = seen('ios', 'sh span root', `
+                                        Root    Hello Max Fwd
+Vlan                   Root ID          Cost    Time  Age Dly  Root Port
+---------------- -------------------- --------- ----- --- ---  ------------
+VLAN0001         32769 aabb.cc00.0100         0    2   20  15
+VLAN0010          4106 aabb.cc00.0200       100    2   20  15  Et0/1`);
+    assert.deepEqual(root.fragment.stp.vlans, {1: {root: {priority: 32769, mac: 'aa:bb:cc:00:01:00'}, root_cost: 0, is_root: true},
+        10: {root: {priority: 4106, mac: 'aa:bb:cc:00:02:00'}, root_cost: 100, is_root: false}});
+    assert.deepEqual(ifc(root, 'Ethernet0/1').stp.vlans, {10: {role: 'root'}});
+    const blocked = seen('ios', 'sh span blockedports', `
+Name                 Blocked Interfaces List
+-------------------- ------------------------------------
+VLAN0001             Et0/1, Et0/2
+                     Et0/3
+VLAN0010             Et0/0
+
+Number of blocked ports (segments) in the system : 4`);
+    assert.deepEqual(names(blocked), ['Ethernet0/1', 'Ethernet0/2', 'Ethernet0/3', 'Ethernet0/0']);
+    assert.deepEqual(ifc(blocked, 'Ethernet0/0').stp.vlans, {10: {state: 'blocking'}});
+    const summary = seen('ios', 'sh span summary', `
+Switch is in pvst mode
+Root bridge for: VLAN0001, VLAN0020
+Extended system ID                      is enabled
+Portfast Default                        is disabled
+
+Name                   Blocking Listening Learning Forwarding STP Active
+---------------------- -------- --------- -------- ---------- ----------
+VLAN0001                     0         0        0          2          2
+VLAN0010                     1         0        0          1          2
+VLAN0020                     0         0        0          2          2
+---------------------- -------- --------- -------- ---------- ----------
+3 vlans                      1         0        0          5          6`);
+    assert.equal(summary.fragment.stp.mode, 'pvst');
+    assert.deepEqual(summary.fragment.stp.vlans, {1: {is_root: true}, 20: {is_root: true}, 10: {is_root: false}});
+});
+check('merge: the spanning tree is merged by VLAN, a VLAN shown in full drops ports that left it', () => {
+    let store = feed(decisive, SW, 'ios', 'sh span', IOL_STP);
+    const fp = fingerprint(decisive, SW);
+    store = addSeen(store, SW, seen('ios', 'sh span root', `
+VLAN0020         32788 aabb.cc00.0300         0    2   20  15`), {at: 2000, fp});
+    let merged = mergeSeen(model, decisive, store);
+    assert.deepEqual(Object.keys(merged.nodes[SW].stp.vlans), ['1', '10', '20']);
+    assert.equal(merged.nodes[SW].stp.vlans[20].is_root, true);
+    const e01 = ifOf(merged, SW, 'Ethernet0/1');
+    assert.equal(e01.stp.vlans[1].state, 'blocking');
+    assert.ok(e01.seen.includes('stp'));
+    assert.deepEqual(e01.switchport, {mode: 'access', vlan: 10}, 'the configuration of the port stays');
+    // The link of Et0/1 went down: VLAN 1 is shown again without it.
+    store = addSeen(store, SW, seen('ios', 'sh span vlan 1', IOL_STP_ROOT), {at: 3000, fp});
+    merged = mergeSeen(model, decisive, store);
+    assert.equal(merged.nodes[SW].stp.vlans[1].is_root, true);
+    assert.equal(ifOf(merged, SW, 'Ethernet0/1').stp.vlans[1].role, 'designated');
+    assert.equal(ifOf(merged, SW, 'Ethernet0/2').stp.vlans[1], undefined, 'Et0/2 is no longer in the VLAN 1 tree');
+    assert.equal(ifOf(merged, SW, 'Ethernet0/0').stp.vlans[10].state, 'broken', 'VLAN 10 was not shown again: it stays');
+});
+check('facts: a port blocked by STP, the root of a VLAN, the text of the card', async () => {
+    const {portStp, stpBlocks, stpRoot, stpText} = await import(srcUrl + 'facts.js');
+    const merged = mergeSeen(model, decisive, feed(decisive, SW, 'ios', 'sh span', IOL_STP));
+    const der = derive(model, merged);
+    const f = der.fx.nodes.get(SW);
+    assert.equal(stpRoot(f, 1), false);
+    assert.equal(stpRoot(f, 99), null);
+    const e01 = f.byName.get('Ethernet0/1');
+    assert.equal(stpBlocks(portStp(e01, 1)), true);
+    assert.equal(stpBlocks(portStp(e01, 10)), false);
+    assert.equal(stpText(e01), 'VLAN 1: Altn BLK · VLAN 10: Root FWD');
+    assert.deepEqual(portStp({stp: {state: 'blocking', role: 'alternate'}}, 5), {state: 'blocking', role: 'alternate'}, 'one tree for all VLANs');
+    assert.equal(stpText({name: 'x'}), '—');
+});
+
+for (const [name, fn] of queue) {
+    try {
+        await fn();
+        console.log('ok    ' + name);
+    } catch (e) {
+        failures.push(name);
+        console.log('FAIL  ' + name + '\n      ' + String(e.stack || e).split('\n').slice(0, 9).join('\n      '));
+    }
+}
 
 if (failures.length) {
     console.log(`\n${failures.length} failed`);
