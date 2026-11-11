@@ -24,7 +24,12 @@
 import {esc} from 'mod_gns3lab/model';
 import {objectData, factsStatus, groupOpen, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 
-/** A selector that finds the same control in a redrawn card, or null. */
+/**
+ * A selector that finds the same control in a redrawn card.
+ *
+ * @param {Element} e the focused control of the old card
+ * @returns {string|null} the selector, or null for a control that cannot be found again
+ */
 const focusSelector = e => {
     for (const name of ['data-act', 'data-card-layer', 'data-inspect', 'data-go-id']) {
         if (e.hasAttribute(name)) return `[${name}="${CSS.escape(e.getAttribute(name))}"]`;
