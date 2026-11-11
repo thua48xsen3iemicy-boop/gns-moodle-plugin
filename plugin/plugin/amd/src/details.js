@@ -14,20 +14,28 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * The Canvas prototype's SVG anchored object cards and separate layer overview.
+ * The object card in a drawer on the right of the scheme (a sheet at the bottom on a narrow scheme) and the layer overview.
  *
  * @module mod_gns3lab/details
  * @copyright 2026 mod_gns3lab contributors
  * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
-import {svgEl as el} from 'mod_gns3lab/dom';
-import {clamp, esc} from 'mod_gns3lab/model';
+import {esc} from 'mod_gns3lab/model';
 import {objectData, factsStatus, groupOpen, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
+
+/** A selector that finds the same control in a redrawn card, or null. */
+const focusSelector = e => {
+    for (const name of ['data-act', 'data-card-layer', 'data-inspect', 'data-go-id']) {
+        if (e.hasAttribute(name)) return `[${name}="${CSS.escape(e.getAttribute(name))}"]`;
+    }
+    return e.classList.contains('mac-toggle') ? '.mac-toggle' : e.classList.contains('object-content') ? '.object-content' : null;
+};
 
 export class Details {
     constructor(element, {stage, strings, host}) {
         this.el = element; this.stage = stage; this.strings = strings; this.host = host;
+        this.clearTimer = null;
         this.sel = null; this.layer = 'l1'; this.panel = 'ports'; this.shape = null; this.overviewTab = 'objects';
         this.overview = stage.r('overviewPanel');
         stage.r('overviewClose').onclick = () => { this.hideOverview(); stage.r('overview').focus(); };
@@ -43,6 +51,7 @@ export class Details {
         this.layer = sel?.kind === 'subnet' ? 'l3' : ['vlan', 'switchvlan', 'segment'].includes(sel?.kind) ? 'l2'
             : this.stage.layer === 'l4' ? 'l1' : this.stage.layer;
         this.render();
+        this.keepVisible();
     }
     hideOverview() {
         this.overview.hidden = true;
@@ -50,7 +59,11 @@ export class Details {
         this.stage.canvas.scheduleLabels();
     }
     hideCard() {
-        this.el.textContent = ''; this.shape = null; this.sel = null;
+        this.shape = null; this.sel = null;
+        this.el.classList.remove('open'); this.el.setAttribute('inert', '');
+        // The content stays while the drawer slides out.
+        clearTimeout(this.clearTimer);
+        this.clearTimer = setTimeout(() => { if (!this.shape) this.el.textContent = ''; }, 300);
         this.stage.canvas.scheduleLabels();
     }
     hide() { this.hideCard(); this.hideOverview(); }
@@ -84,17 +97,12 @@ export class Details {
         const data = objectData(this.stage, this.sel, this.layer, this.panel);
         if (!data) { this.hideCard(); return; }
         this.stage.r('chip').hidden = true;
-        const focusInside = this.el.contains(document.activeElement);
-        this.el.textContent = '';
-        const card = el('g', {class: 'info-card'}, this.el), foreign = el('foreignObject', {}, card);
-        const html = document.createElementNS('http://www.w3.org/1999/xhtml', 'section');
-        html.setAttribute('class', 'object-card'); html.setAttribute('aria-label', data.title);
-        foreign.appendChild(html);
         const layers = this.sel.kind === 'subnet' ? ['l3'] : this.sel.kind === 'vlan' ? ['l2'] : ['l1', 'l2', 'l3'];
         const mac = this.layer === 'l2' && data.device?.cat === 'switch' && groupOpen(this.stage, data.device, 'l2');
         const inspections = data.device && this.host.inspections ? this.host.inspections(data.device) : [];
+        const canInspect = !!data.device && inspections.length > 0 && this.host.canInspect(data.device);
         const panelId = this.stage.prefix + '-object-facts';
-        html.innerHTML = `<header><div><span class="kicker">${esc(data.kind.toUpperCase())}</span><h2>${esc(data.title)}</h2><p>${esc(data.sub || '')}</p></div><button class="ib" type="button" data-act="close" aria-label="${esc(this.strings.ui_close)}">×</button></header>`
+        const markup = `<header><div><span class="kicker">${esc(data.kind.toUpperCase())}</span><h2>${esc(data.title)}</h2><p>${esc(data.sub || '')}</p></div><button class="ib" type="button" data-act="close" aria-label="${esc(this.strings.ui_close)}">×</button></header>`
             + `<div class="object-tabs" role="tablist" aria-label="${esc(this.strings.ui_canvas_card_layers)}">${layers.map(layer => `<button type="button" role="tab" id="${panelId}-${layer}" data-card-layer="${layer}" aria-controls="${panelId}" aria-selected="${layer === this.layer}" tabindex="${layer === this.layer ? 0 : -1}">${layer.toUpperCase()}</button>`).join('')}</div>`
             + `<div class="object-content" id="${panelId}" role="tabpanel" aria-labelledby="${panelId}-${this.layer}" tabindex="0">${this.banner(data.device)}`
             + (mac ? `<button class="btn mac-toggle" type="button" aria-pressed="${this.panel === 'mac'}">${esc(this.t(this.panel === 'mac' ? 'mac_back' : 'mac_open'))}</button>` : '')
@@ -104,9 +112,20 @@ export class Details {
             + (data.messages?.length ? `<h3>${esc(this.t('issues'))}</h3>${data.messages.map(message => `<p class="fact-banner warn">${esc(message.text || message)}</p>`).join('')}` : '')
             + (data.related?.length ? `<h3>${esc(this.t('related'))}</h3><div class="object-links">${data.related.map(r => `<button type="button" data-go-kind="${esc(r.kind)}" data-go-id="${esc(r.id)}">${esc(r.label)}</button>`).join('')}</div>` : '')
             + (data.device?.consoleType && data.device.consoleType !== 'none' ? `<h3>${esc(this.strings.ui_console)}</h3><div class="object-links"><button type="button" data-act="console">${esc(this.strings.ui_open_console)}</button>`
-                + inspections.map(item => `<button type="button" data-inspect="${esc(item.id)}"${this.host.canInspect(data.device) ? '' : ' disabled'} title="${esc(this.t('inspect_note'))}">${esc(item.cmd)}</button>`).join('') + '</div>'
+                + inspections.map(item => `<button type="button" data-inspect="${esc(item.id)}"${canInspect ? '' : ' disabled'} title="${esc(this.t('inspect_note'))}">${esc(item.cmd)}</button>`).join('') + '</div>'
                 + (inspections.length ? `<p>${esc(this.t('inspect_note'))}</p>` : '') : '')
             + `<p class="card-foot">${esc(data.foot || '')}</p></div>`;
+        const key = `${this.sel.kind}:${this.sel.id}:${this.layer}:${this.panel}`, same = this.shape?.key === key;
+        // A poll of the facts redraws the same card: nothing changed, nothing to do; otherwise keep the scroll and the focus.
+        if (same && this.shape.markup === markup) { this.shape.data = data; this.open(); return; }
+        const oldContent = this.el.querySelector('.object-content'), scroll = same && oldContent ? oldContent.scrollTop : 0;
+        const focusInside = this.el.contains(document.activeElement), focusKey = same && focusInside ? focusSelector(document.activeElement) : null;
+        clearTimeout(this.clearTimer);
+        this.el.textContent = '';
+        const html = document.createElement('section');
+        html.setAttribute('class', 'object-card'); html.setAttribute('aria-label', data.title);
+        html.innerHTML = markup;
+        this.el.appendChild(html);
         html.querySelector('[data-act="close"]').onclick = () => { this.hideCard(); this.stage.svg.focus(); };
         html.querySelector('[data-act="console"]')?.addEventListener('click', () => this.host.openConsole(data.device));
         html.querySelectorAll('[data-inspect]').forEach(button => {
@@ -124,45 +143,41 @@ export class Details {
         html.querySelector('.mac-toggle')?.addEventListener('click', () => { this.panel = this.panel === 'mac' ? 'ports' : 'mac'; this.render(); this.el.querySelector('.mac-toggle').focus(); });
         this.bindNavigation(html);
         html.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { this.hide(); this.stage.select(null); this.stage.svg.focus(); } });
-        this.shape = {data, foreign, card};
-        this.position();
-        if (focusInside) this.el.querySelector(`[data-card-layer="${this.layer}"]`).focus();
+        this.shape = {data, key, markup};
+        html.querySelector('.object-content').scrollTop = scroll;
+        this.open();
+        if (focusInside) (focusKey && html.querySelector(focusKey) || html.querySelector(`[data-card-layer="${this.layer}"]`)).focus();
         this.stage.canvas.scheduleLabels();
     }
+    open() {
+        this.position();
+        this.el.removeAttribute('inert');
+        this.el.classList.add('open');
+    }
+    /** The part of the scheme the drawer leaves free, in screen pixels of the wrap (the slide is not counted). */
+    freeArea() {
+        const s = this.stage, w = s.wrap.clientWidth, h = s.wrap.clientHeight;
+        if (!this.el.classList.contains('open')) return {w, h};
+        return this.el.classList.contains('sheet') ? {w, h: Math.max(1, this.el.offsetTop)} : {w: Math.max(1, this.el.offsetLeft), h};
+    }
+    /** Moves the scheme so that the object of the card is not under the drawer. */
+    keepVisible() {
+        const s = this.stage, f = this.shape?.data.focus;
+        if (!f) return;
+        const area = this.freeArea(), p = s.toScreen(f.cx, f.cy), pad = 48;
+        const dx = p.x > area.w - pad ? area.w / 2 - p.x : 0, dy = p.y > area.h - pad ? area.h / 2 - p.y : 0;
+        if (dx || dy) s.animateTo({k: s.view.k, tx: s.view.tx + dx, ty: s.view.ty + dy}, 260);
+    }
     position() {
-        const c = this.shape, s = this.stage;
-        if (!c) return;
-        const ww = s.wrap.clientWidth, wh = s.wrap.clientHeight, compact = ww < 760;
-        const w = Math.min(560, Math.max(1, ww - 24));
-        const h = Math.max(1, compact ? Math.min(520, wh * .6, wh - 128) : Math.min(520, wh - 24));
-        const p = s.toScreen(c.data.focus?.cx || 0, c.data.focus?.cy || 0);
-        const rawX = p.x + w + 76 < ww ? p.x + 74 : p.x - w - 74 > 4 ? p.x - w - 74 : ww - w - 12;
-        let x = clamp(rawX, 12, Math.max(12, ww - w - 12));
-        const minY = compact ? 12 : x < (s.hudRight || 384) + 12 ? (s.hudBottom || 168) + 8 : 12, bottom = compact ? 112 : 12;
-        const y = clamp(compact ? wh - h - bottom : p.y - 80, Math.min(minY, wh - h - bottom), Math.max(12, wh - h - bottom));
-        if (!compact && s.sel) {
-            const root = s.wrap.getBoundingClientRect();
-            const boxes = [...s.vp.querySelectorAll('.node.on .ico,.l2-virtual.on > rect,.subnet-object.on rect')].map(e => {
-                const r = e.getBoundingClientRect(); return {x: r.left - root.left - 12, y: r.top - root.top - 8, w: r.width + 24, h: r.height + 36};
-            });
-            const overlap = candidate => boxes.reduce((score, b) => {
-                const width = Math.max(0, Math.min(candidate + w, b.x + b.w) - Math.max(candidate, b.x));
-                const height = Math.max(0, Math.min(y + h, b.y + b.h) - Math.max(y, b.y));
-                return score + (width && height ? 1000000 + width * height : 0);
-            }, candidate < (s.hudRight || 384) + 12 && y < (s.hudBottom || 168) + 8 ? 25000000 : 0);
-            x = [x, Math.max(12, ww - w - 12), 12].reduce((best, candidate) => overlap(candidate) < overlap(best) ? candidate : best);
-        }
-        c.foreign.setAttribute('width', w); c.foreign.setAttribute('height', h);
-        c.card.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-        s.canvas.scheduleLabels();
+        // A narrow scheme (a phone, a narrow Moodle column) gets a sheet at the bottom instead of the drawer on the right.
+        this.el.classList.toggle('sheet', this.stage.wrap.clientWidth < 760);
     }
     goto(selection) {
         this.stage.select(selection); this.show(selection);
         const focus = this.shape?.data.focus;
         if (focus) {
-            const s = this.stage, k = Math.max(s.view.k, 1.25), w = s.wrap.clientWidth, h = s.wrap.clientHeight;
-            s.animateTo({k, tx: (s.mobile ? w / 2 : Math.max(100, (w - Math.min(560, w - 24) - 48) / 2)) - k * focus.cx,
-                ty: (s.mobile ? Math.max(80, (h - Math.min(520, h * .6)) / 2) : h / 2) - k * focus.cy}, 320);
+            const s = this.stage, k = Math.max(s.view.k, 1.25), area = this.freeArea();
+            s.animateTo({k, tx: area.w / 2 - k * focus.cx, ty: area.h / 2 - k * focus.cy}, 320);
         }
     }
     bindNavigation(root) {

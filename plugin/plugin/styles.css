@@ -4617,22 +4617,6 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:hover rect,
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus-visible rect{fill:#315e6a;stroke-width:2}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus{outline:none}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card{filter:drop-shadow(0 20px 26px rgb(0 0 0 / .5))}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .body{fill:#142c39;stroke:#54838a;stroke-width:1.3}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .top-rule{stroke:#355966;stroke-width:1}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .ey{fill:#69dfcf;font:600 10px var(--mono);letter-spacing:1.2px}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .title{fill:#f3fbfa;font:600 21px var(--display)}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .minor{fill:#a9c3c9;font:500 11px var(--body)}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .colhead{fill:#8cabb4;font:600 10px var(--mono)}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .cell{fill:#e1f0f0;font:500 11px var(--mono)}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .row-rule{stroke:#294c57;stroke-width:1}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .down{fill:#f08e87}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .warn{fill:#f0c77b}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .empty{fill:#aec4ca;font:400 12px var(--body)}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card{cursor:pointer}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card rect{fill:#244652}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card text{fill:#e3f2f3;font:600 18px var(--body);text-anchor:middle;dominant-baseline:middle}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card .close-card:hover rect{fill:#3a6770}
 .gns3lab-student.canvas-ui .hint{background:rgb(15 36 48 / .84);border:1px solid #315460;color:#bcd2d7}
 .gns3lab-student.canvas-ui .zoom{background:#17313e;border-radius:12px}
 .gns3lab-student.canvas-ui .details{display:none !important}
@@ -4652,6 +4636,16 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .tasks-panel{box-sizing:border-box;background:#142c39;color:var(--fg);border:1px solid #54838a;
   border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
 .gns3lab-student.canvas-ui .object-card{height:100%;display:flex;flex-direction:column}
+/* The object card: a drawer on the right, as high as the scheme; on a narrow scheme a sheet above the zoom controls. */
+.gns3lab-student.canvas-ui .object-drawer{position:absolute;top:0;right:0;bottom:0;z-index:7;width:min(440px,calc(100% - 48px));
+  box-sizing:border-box;visibility:hidden;transform:translateX(calc(100% + 24px));
+  transition:transform .22s ease,visibility 0s linear .22s}
+.gns3lab-student.canvas-ui .object-drawer.open{visibility:visible;transform:none;transition:transform .22s ease}
+.gns3lab-student.canvas-ui .object-drawer .object-card{border-radius:0;border-width:0 0 0 1px;box-shadow:-18px 0 44px rgb(0 8 17 / .4)}
+.gns3lab-student.canvas-ui .object-drawer.sheet{top:auto;left:8px;right:8px;bottom:64px;width:auto;height:min(62%,calc(100% - 140px));
+  transform:translateY(calc(100% + 80px))}
+.gns3lab-student.canvas-ui .object-drawer.sheet.open{transform:none}
+.gns3lab-student.canvas-ui .object-drawer.sheet .object-card{border-radius:17px;border-width:1px;box-shadow:var(--shadow)}
 .gns3lab-student.canvas-ui .object-card header,
 .gns3lab-student.canvas-ui .tasks-panel header{padding:18px 20px 12px;display:flex;justify-content:space-between;gap:12px}
 .gns3lab-student.canvas-ui .object-card header > div,
@@ -4742,7 +4736,8 @@ from{transform:translateY(40%);opacity:.3}
 
 }
 @media(prefers-reduced-motion:reduce){
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .info-card{filter:none}
+.gns3lab-student.canvas-ui .object-drawer,
+.gns3lab-student.canvas-ui .object-drawer.open{transition:none}
 
 }
 
