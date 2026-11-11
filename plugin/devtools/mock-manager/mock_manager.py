@@ -179,6 +179,9 @@ IMAGES.extend([
     dict(next(i for i in IMAGES if i['id'] == 'debian12'), id='lab-uplink', title='Internet',
          category='cloud', capture=False, console_type='none'),
 ])
+for _image in IMAGES:  # Random guest interface names (CONTRACTS 2.6): the Debian guests can take them
+    if _image["id"] in ("debian12", "debian12-server"):
+        _image["random_ifnames"] = True
 LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "images": "*"}
 LAB_FORMAT = "gns3lab.lab/1"
 # Проверка определения — перенос manager/lab_manager/labdef.py (ветка менеджера claude/determined-brown-lfgnxy):
@@ -257,7 +260,7 @@ def lab_problems(lab):
         if not isinstance(node, dict):
             bad(path, "bad_type", "object expected")
             continue
-        unknown(node, {"name", "image", "x", "y", "ram_mb", "cpus", "adapters"}, path)
+        unknown(node, {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "random_ifnames"}, path)
         out, ok = {}, True
         name = node.get("name")
         if not isinstance(name, str) or not NAME_RE.fullmatch(name):
@@ -290,6 +293,14 @@ def lab_problems(lab):
                     bad(f"{path}.{key}", "out_of_range", f"{rng['min']}..{rng['max']}")
                 else:
                     out[key] = value
+        if "random_ifnames" in node:
+            value = node["random_ifnames"]
+            if type(value) is not bool:
+                bad(f"{path}.random_ifnames", "bad_type", "boolean")
+            elif value and image is not None and not image.get("random_ifnames"):
+                bad(f"{path}.random_ifnames", "unsupported_image", f"{image['id']} cannot rename its interfaces")
+            elif value:
+                out["random_ifnames"] = True
         if ok and image is not None:
             out = {"name": name, "image": image["id"], **out}
             by_name[name] = out
@@ -611,7 +622,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance", "random_ifnames"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})

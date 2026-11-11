@@ -122,6 +122,24 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         check('opening an older ISP draft restores uplink_port',
             (await saved(page)).nodes.find(n => n.name === 'OLD_ISP').uplink_port === 0);
 
+        // ---- random guest interface names: a checkbox on nodes of images that can take them, only true is saved
+        await page.goto(`${BASE}/editor.en.html${MIN}`);
+        await until(async() => (await page.locator('.node').count()) === 5);
+        await tap(page, PC3);
+        check('a VPCS node offers no random interface names', (await page.locator('[data-field="random_ifnames"]').count()) === 0);
+        await tap(page, PC1);
+        const names = page.locator('[data-field="random_ifnames"]');
+        check('a Debian node offers random interface names, off by default', (await names.count()) === 1 && !(await names.isChecked()));
+        await names.check();
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.find(n => n.name === 'PC1')?.random_ifnames === true);
+        check('the ticked node is saved with random_ifnames', (await saved(page)).nodes.find(n => n.name === 'PC1').random_ifnames === true
+            && !(await saved(page)).nodes.some(n => n.name !== 'PC1' && 'random_ifnames' in n));
+        await page.locator('[data-field="random_ifnames"]').uncheck();
+        await act(page, 'save').click();
+        await until(async() => !('random_ifnames' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {random_ifnames: 1})));
+        check('unticking drops the field', !('random_ifnames' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
+
         // ---- a manager without the lab constructor: no segments, no preview
         await page.goto(`${BASE}/editor.en.plain.html${MIN}`);
         await until(async() => (await page.locator('.node').count()) === 5);

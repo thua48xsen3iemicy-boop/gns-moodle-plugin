@@ -757,6 +757,12 @@ export const init = (prefix) => {
         step="1" value="${v}" placeholder="${r.default - offset}"><small>${r.min - offset}…${r.max - offset}</small></label>`;
   };
 
+  /* random guest interface names (CONTRACTS §2.6): only images that can take them offer the checkbox */
+  const ifnamesField = (n, img) => !(img && img.random_ifnames) && !n.random_ifnames ? "" :
+    `<label class="ed-field ed-check"><input type="checkbox" data-field="random_ifnames"${
+      n.random_ifnames ? " checked" : ""}> <span>${esc(str("ed_randomifnames"))}</span><small>${
+      esc(str("ed_randomifnames_help"))}</small></label>`;
+
   const nodeHTML = i => {
     const n = st.lab.nodes[i], img = imageOf(n), used = usedPorts();
     const ports = portsOf(n).map(p => {
@@ -776,6 +782,7 @@ export const init = (prefix) => {
       ${numberField(n, "adapters", str(adapterOffset(n) ? "ed_ports" : "ed_adapters"))}
       ${numberField(n, "ram_mb", str("ed_ram"))}
       ${numberField(n, "cpus", str("ed_cpus"))}
+      ${ifnamesField(n, img)}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
       <h3>${esc(str("ed_ports"))}</h3>
       <table class="ed-ports"><tbody>${ports}</tbody></table>
@@ -1284,6 +1291,16 @@ export const init = (prefix) => {
           });
         });
         n.name = name;
+      });
+      return;
+    }
+    if (field === "random_ifnames") {
+      change(() => {
+        if (t.checked) {
+          n.random_ifnames = true;
+        } else {
+          delete n.random_ifnames;
+        }
       });
       return;
     }
