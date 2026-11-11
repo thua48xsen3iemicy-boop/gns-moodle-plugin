@@ -168,16 +168,25 @@ class purges {
      * A running lab is not wiped: the student stops it first, so nothing is lost by a click on the wrong page. What the
      * student uncovered on the scheme belongs to the deleted project and goes too; check runs and grades stay.
      *
+     * The manager deletes the check runs of the workspace with it (CONTRACTS §2.10). A run Moodle still has as queued or
+     * running would then be found gone and given up as lost, and a mark the manager had already set would never reach
+     * the gradebook. So the runs are synced first, and the lab is not wiped while one of them is still unresolved.
+     *
      * @param \stdClass $instance gns3lab record
      * @param int $userid the student
      * @param manager_client $client lab manager
      * @return \stdClass {workspaces, pending}
-     * @throws \moodle_exception wipestopfirst when the lab is running
+     * @throws \moodle_exception wipestopfirst when the lab is running, wipecheckpending when a check run is unresolved
+     * @throws manager_exception when the manager cannot be asked about the session or a check run
      */
     public static function wipe(\stdClass $instance, int $userid, manager_client $client): \stdClass {
         $session = $client->find_session($userid, (int) $instance->id);
         if ($session !== null && !in_array($session->status ?? '', self::FINISHED, true)) {
             throw new \moodle_exception('wipestopfirst', 'gns3lab');
+        }
+        check_runs::sync($instance, $userid, $client);
+        if (check_runs::has_pending((int) $instance->id, $userid)) {
+            throw new \moodle_exception('wipecheckpending', 'gns3lab');
         }
         $result = $client->purge((int) $instance->id, $userid);
         reveal::delete((int) $instance->id, [$userid]);

@@ -855,6 +855,7 @@ $string['privacy:metadata:gns3lab_purges:userid'] = 'The user whose work is dele
 $string['taskreconcilepurges'] = 'Delete lab work of activities that no longer exist';
 $string['tasksendpurges'] = 'Send requests to delete lab work to the lab manager';
 $string['wipe'] = 'Wipe my lab';
+$string['wipecheckpending'] = 'A check of your lab is not finished yet. Wait for its result, then wipe the lab.';
 $string['wipeconfirm'] = 'Wipe your lab in this activity? All devices, their settings and your changes to the scheme are deleted for good; the next start is a fresh lab. Check results and grades stay.';
 $string['wipedone'] = 'Your lab has been wiped. The next start is a fresh lab.';
 $string['wipefailed'] = 'The lab could not be wiped: the lab manager answered {$a}. Try again later.';

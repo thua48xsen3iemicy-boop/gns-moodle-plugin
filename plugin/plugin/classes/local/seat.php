@@ -272,6 +272,40 @@ class seat {
     }
 
     /**
+     * Lets the caller through unless another login of the same account holds the seat. For actions on the student's
+     * own lab that come from a page without a tabid, such as "Wipe" on view.php.
+     *
+     * Another page of the same login is not a reason to refuse: it is the same person. The seat is only read, never
+     * claimed: such a page does not drive the lab and must not take the seat from the lab page.
+     *
+     * @param lab_access $access the activity
+     * @param int $userid owner of the lab (the current user)
+     * @param string|null $sessionkey login of the caller, null for the current request
+     * @param int|null $now current time, null for now
+     * @throws \moodle_exception seatotherlogin
+     */
+    public static function require_login(
+        lab_access $access,
+        int $userid,
+        ?string $sessionkey = null,
+        ?int $now = null
+    ): void {
+        global $DB;
+
+        $mode = self::mode($access->instance);
+        if ($mode === self::OFF) {
+            return;
+        }
+        $row = $DB->get_record('gns3lab_seat', ['gns3labid' => (int) $access->instance->id, 'userid' => $userid]) ?: null;
+        $status = self::verdict($mode, $row, $sessionkey ?? self::session_key(), '', true, $now ?? time());
+        if ($status === self::HELD) {
+            return;
+        }
+        self::log_denied($access, $userid, $status, 'action');
+        throw new \moodle_exception('seatotherlogin', 'gns3lab');
+    }
+
+    /**
      * Writes a refusal to the log when it may mean a second person on the account: another login asked.
      *
      * A refusal because of another tab of the same login is routine and not logged.
