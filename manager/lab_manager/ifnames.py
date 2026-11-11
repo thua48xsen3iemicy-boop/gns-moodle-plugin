@@ -121,13 +121,28 @@ carry() {
     fi
   done
 }
+# The guest may still be asking DHCP for the interface it booted with (ifup@<if> of allow-hotplug; without a server
+# dhclient tries for minutes and writes no pid file until it has a lease). That ifup holds the interface's lock, and
+# ifdown would wait for it past the time of the command: stop the unit and the dhclient of the interface first.
+t() { if has timeout; then timeout -k 5 20 "$@"; else "$@"; fi; }
+nodhcp() {
+  for c in /proc/[0-9]*/cmdline; do
+    l=$(tr '\0' ' ' < "$c" 2>/dev/null) || continue
+    case $l in dhclient*" $1 "|*/dhclient*" $1 ") c=${c#/proc/}; kill "${c%/cmdline}" 2>/dev/null || true;; esac
+  done
+}
+quiet() {
+  if has systemctl; then t systemctl stop "ifup@$1.service" >/dev/null 2>&1 || true; fi
+  nodhcp "$1"
+  if has ifdown; then t ifdown --force "$1" >/dev/null 2>&1 || true; fi
+}
 renamed() {
   UP=""
   for p in $PAIRS; do
     a=${p%%:*}; r=${p#*:}; o=${r%%:*}; n=${r#*:}
     if [ "$o" = "$n" ]; then continue; fi
     if has ifquery && ifquery --state "$o" >/dev/null 2>&1; then UP="$UP $n"; fi
-    if has ifdown; then ifdown --force "$o" >/dev/null 2>&1 || true; fi
+    quiet "$o"
     ip link set dev "$o" down
     ip link set dev "$o" name "gns3lab$a"
     carry "$o" "gns3lab$a"
@@ -145,9 +160,10 @@ renamed() {
     netplan) netplan apply || true;;
     networkd) networkctl reload || true
       for p in $PAIRS; do networkctl reconfigure "${p##*:}" || true; done;;
-    ifupdown) for n in $UP; do
-        if has timeout; then timeout 30 ifup "$n" >/dev/null 2>&1 || true; else ifup "$n" >/dev/null 2>&1 || true; fi
-      done;;
+    ifupdown) # What was up comes up again, all at once and for 20 s at most: DHCP may have no server in the lab
+      for n in $UP; do t ifup "$n" >/dev/null 2>&1 & done
+      wait
+      for n in $UP; do nodhcp "$n"; done;;
   esac
 }
 '''
