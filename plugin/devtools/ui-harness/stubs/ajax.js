@@ -127,9 +127,30 @@ define([], function() {
         return doc;
     };
 
+    // Maintenance mode of the manager (CONTRACTS 2.11): `?maintenance=<seconds>` announces it, window.__stub.maintenance
+    // changes it. From startsat on the running lab is stopped, and with no live lab left the phase is active.
+    let maintenance = cfg.maintenance === null || cfg.maintenance === undefined ? null
+        : {startsat: now() + cfg.maintenance, message: 'Image update'};
+    const maintenanceState = () => {
+        if (!maintenance) {
+            return {state: 'off', startsat: 0, message: ''};
+        }
+        if (now() < maintenance.startsat) {
+            return {state: 'announced', startsat: maintenance.startsat, message: maintenance.message};
+        }
+        if (session && ['starting', 'running'].includes(session.status)) {
+            session.status = 'stopping';
+            session.at = Date.now();
+        }
+        const live = session && !['stopped', 'failed'].includes(session.status);
+        return {state: live ? 'draining' : 'active', startsat: maintenance.startsat, message: maintenance.message};
+    };
+
     const state = async() => {
+        const m = maintenanceState();
         const s = await view();
-        const out = {canuse: !cfg.observer, readonly: !!cfg.observer, managerconfigured: true, labready: !cfg.norunning, resume: true};
+        const out = {canuse: !cfg.observer, readonly: !!cfg.observer, managerconfigured: true, labready: !cfg.norunning, resume: true,
+            maintenance: m};
         if (s) {
             out.session = s;
         }
@@ -323,6 +344,9 @@ define([], function() {
         mod_gns3lab_start_session: async args => {
             needSeat(args, 'start_session');
             await loadDemo();
+            if (maintenanceState().state !== 'off') {
+                throw new Error('Maintenance of the lab servers is announced or in progress.');
+            }
             if (cfg.conflict) {
                 const e = new Error('You already have a lab running in "Lab 2". Stop it first.');
                 e.errorcode = 'sessionconflictat';
@@ -491,6 +515,10 @@ define([], function() {
 
     window.__stub = {
         editor,
+        // Announce a maintenance that starts in `seconds` (null ends it).
+        maintenance: (seconds, message = 'Image update') => {
+            maintenance = seconds === null ? null : {startsat: now() + seconds, message};
+        },
         course: {
             set: setCell,
             // The facts of a student changed: the next read sees a new rev.

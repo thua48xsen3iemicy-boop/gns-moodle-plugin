@@ -24,6 +24,7 @@ use core_external\external_value;
 use mod_gns3lab\local\image_data;
 use mod_gns3lab\local\lab_definition;
 use mod_gns3lab\local\lab_library;
+use mod_gns3lab\local\maintenance;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
 use mod_gns3lab\local\session_data;
@@ -118,6 +119,7 @@ class authoring extends external_api {
             if ($session) {
                 $state['session'] = self::session($session);
             }
+            $state['maintenance'] = maintenance::current($client, $session);
             $result = ['state' => $state, 'capturecandidates' => array_map(fn($node) => ['name' => (string) $node->name,
                 'status' => (string) $node->status], $session->capture_nodes ?? [])];
             if ($session) {

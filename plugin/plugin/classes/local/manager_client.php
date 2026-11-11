@@ -43,6 +43,9 @@ class manager_client {
     /** How soon a failed GET /api/v1/info is asked again, seconds. */
     public const INFO_RETRY = 30;
 
+    /** How long the maintenance state of the manager is kept, seconds (manager CONTRACTS §2.11: at most 30). */
+    public const MAINTENANCE_TTL = 30;
+
     /** Format of the facts snapshot the plugin reads (docs/live-state.md). */
     public const FACTS_SCHEMA = 'gns3lab.facts/1';
 
@@ -115,6 +118,26 @@ class manager_client {
         }
         $cache->set($key, (object) ['until' => time() + $ttl, 'info' => $info]);
         return $info;
+    }
+
+    /**
+     * Maintenance mode of the manager (CONTRACTS §2.11), cached for half a minute.
+     *
+     * @return \stdClass|null the maintenance object; null if the manager has no maintenance mode
+     */
+    public function get_maintenance(): ?\stdClass {
+        if (!$this->has_feature('maintenance')) {
+            return null;
+        }
+        $cache = \cache::make('mod_gns3lab', 'info');
+        $key = 'n' . md5($this->baseurl);
+        $hit = $cache->get($key);
+        if ($hit && $hit->until > time()) {
+            return $hit->maintenance;
+        }
+        $maintenance = $this->expect_object($this->request('GET', '/api/v1/maintenance'));
+        $cache->set($key, (object) ['until' => time() + self::MAINTENANCE_TTL, 'maintenance' => $maintenance]);
+        return $maintenance;
     }
 
     /**

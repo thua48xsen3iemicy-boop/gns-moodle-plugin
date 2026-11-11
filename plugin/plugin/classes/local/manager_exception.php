@@ -31,7 +31,7 @@ class manager_exception extends \moodle_exception {
     private const KNOWN = [
         'lab_not_found', 'lab_invalid', 'session_conflict', 'session_not_found', 'session_not_running',
         'node_not_found', 'node_not_running', 'gateway_unavailable', 'unauthorized', 'check_in_progress',
-        'check_not_found',
+        'check_not_found', 'maintenance',
     ];
 
     /**

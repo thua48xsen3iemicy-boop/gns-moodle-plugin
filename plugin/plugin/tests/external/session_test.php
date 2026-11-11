@@ -62,9 +62,47 @@ final class session_test extends \advanced_testcase {
         $state = external_api::clean_returnvalue(get_state::execute_returns(), get_state::execute($this->lab->cmid));
 
         $this->assertSame(
-            ['canuse' => true, 'readonly' => false, 'managerconfigured' => true, 'labready' => true, 'resume' => false],
+            ['canuse' => true, 'readonly' => false, 'managerconfigured' => true, 'labready' => true, 'resume' => false,
+                'maintenance' => ['state' => 'off', 'startsat' => 0, 'message' => '']],
             $state
         );
+    }
+
+    public function test_state_reports_an_announced_maintenance(): void {
+        $this->manager->with_info(['consoles', 'observer', 'resume', 'maintenance']);
+        $this->manager->on('GET', '/api/v1/maintenance', 200, ['schema' => 'gns3lab.maintenance/1',
+            'state' => 'announced', 'starts_at' => '2026-11-11T12:05:00Z', 'announced_at' => '2026-11-11T12:00:00Z',
+            'message' => 'Обновление образов']);
+        $this->setUser($this->student);
+
+        $state = external_api::clean_returnvalue(get_state::execute_returns(), get_state::execute($this->lab->cmid));
+
+        $this->assertSame(['state' => 'announced', 'startsat' => strtotime('2026-11-11T12:05:00Z'),
+            'message' => 'Обновление образов'], $state['maintenance']);
+    }
+
+    public function test_session_carries_the_maintenance(): void {
+        $this->manager->with_info(['consoles', 'observer', 'resume', 'maintenance']);
+        $session = fake_manager::session();
+        $session['maintenance'] = ['state' => 'draining', 'starts_at' => '2026-11-11T12:05:00Z',
+            'announced_at' => '2026-11-11T12:00:00Z', 'message' => ''];
+        $this->manager->on('GET', '/api/v1/sessions', 200, $session);
+        $this->setUser($this->student);
+
+        $state = external_api::clean_returnvalue(get_state::execute_returns(), get_state::execute($this->lab->cmid));
+
+        $this->assertSame('draining', $state['maintenance']['state']);
+        // The session already says it: the maintenance route is not asked.
+        $this->assertNotContains('/api/v1/maintenance', array_column($this->manager->requests, 'path'));
+    }
+
+    public function test_start_refused_during_maintenance(): void {
+        $this->manager->on('POST', '/api/v1/sessions', 503, ['error' => 'maintenance', 'message' => 'Обслуживание',
+            'maintenance' => ['state' => 'announced', 'starts_at' => '2026-11-11T12:05:00Z']]);
+        $this->setUser($this->student);
+
+        $this->expectExceptionMessage(get_string('managererror_maintenance', 'gns3lab'));
+        start_session::execute($this->lab->cmid);
     }
 
     public function test_state_with_a_running_session(): void {

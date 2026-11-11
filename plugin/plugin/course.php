@@ -44,5 +44,6 @@ $PAGE->set_heading(format_string($course->fullname, true, ['context' => $context
 $overview = new \mod_gns3lab\output\course_overview($course);
 
 echo $OUTPUT->header();
+echo \mod_gns3lab\local\maintenance::notification();
 echo $OUTPUT->render_from_template('mod_gns3lab/course', $overview->export_for_template($OUTPUT));
 echo $OUTPUT->footer();

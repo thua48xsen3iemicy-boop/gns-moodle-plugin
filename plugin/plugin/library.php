@@ -59,6 +59,7 @@ if (!manager_client::is_configured()) {
 }
 
 echo $OUTPUT->header();
+echo \mod_gns3lab\local\maintenance::notification();
 echo $OUTPUT->render_from_template('mod_gns3lab/library', [
     'labs' => $labs,
     'haslabs' => (bool) $labs,

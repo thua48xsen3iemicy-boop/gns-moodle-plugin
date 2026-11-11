@@ -49,6 +49,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | POST | `/api/v1/sessions/{session_id}/stop` | → сессия со `status: "stopping"` |
 | POST | `/api/v1/sessions/{session_id}/console-tickets` | `{"node_id","readonly","issued_for_user_id"}` → `{"ticket","gateway_url","expires_in"}` |
 | POST | `/api/v1/purges` | 🆕 (0.20.0, `purge` в `info.features`) `{"instance_id"?, "user_id"?, "library_lab_id"?}` → `{"workspaces","pending"}` — удалить наработки (manager CONTRACTS §2.10) |
+| GET | `/api/v1/maintenance` | 🆕 (0.21.0, `maintenance` в `info.features`) → `{"schema","state","starts_at","announced_at","message"}` — режим обслуживания (manager CONTRACTS §2.11); то же поле `maintenance` есть в сессии, пока режим не `off` |
 | POST | `/api/v1/purges/reconcile` | 🆕 `{"instance_ids"}` (не пустой) → `{"workspaces","pending"}` — суточная сверка: наработки активностей не из списка |
 
 Сессия:
@@ -139,7 +140,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 
 | Функция | Параметры | Проверки | Результат |
 |---|---|---|---|
-| `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}` |
+| `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}`; 🆕 (0.21.0) `maintenance` `{state, startsat, message}` — из сессии, а без неё из `GET /api/v1/maintenance` (MUC `info`, 30 с); недоступный менеджер — `off` |
 | `mod_gns3lab_start_session` | `cmid` | use | сессия |
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
 | `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — только своя: чужая → отказ `consolevncobserver` без запроса к менеджеру; в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
@@ -181,6 +182,15 @@ Moodle никогда не держит WebSocket и не видит токен�
   сразу (студент ждёт ответа). Запущенную лабу не стирает («сначала остановите»). Вместе с проектом уходят маска `seen`/`fog`
   (`gns3lab_reveal`) — она описывала удалённый проект; прогоны проверок и оценки остаются. Следующий запуск — свежий проект;
   пока менеджер ещё удаляет, запуск отвечает `409 workspace_purging` (строка `workspacepurging`).
+
+- 🆕 (0.21.0) **Режим обслуживания** (manager CONTRACTS §2.11). Включает его оператор на менеджере, плагин только
+  показывает. На `lab.php` и странице авторского запуска строка `maintenance` в шапке лабы: пока обслуживание объявлено —
+  обратный отсчёт до остановки и просьба сохранить конфигурации устройств, потом — «идёт обслуживание»; к ней
+  добавляется текст администратора. Кнопка «Запустить» неактивна, остаток времени лабы считается до
+  `min(expiresat, startsat)`. Пока режим не `off`, страница опрашивает состояние раз в 15 с и без живой лабы, чтобы
+  заметить конец обслуживания. На `view.php`, «Лабах курса», в библиотеке и редакторе лаб — уведомление Moodle
+  (`maintenance::notification()`) со временем остановки. Отказ менеджера `503 maintenance` — строка
+  `managererror_maintenance`.
 
 ### 5.4a. 🆕 Удаление наработок на менеджере (0.20.0)
 

@@ -193,6 +193,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
 | `capture_nodes` | у authoring: `[{"name", "status"}]`, когда-либо запускавшиеся QEMU-ноды проекта, включая штатно выключенные маршрутом shutdown |
 | `mode` | 🆕 только у авторского запуска (§2.8): `"authoring"`. У обычной сессии поля нет |
+| `maintenance` | 🆕 режим обслуживания (§2.11), пока он не `off`; иначе поля нет |
 | `nodes_stale` | `true`, когда слот не ответил и отдан снимок с начала сессии: статусы могут быть неверны. Нет поля — статусы живые |
 
 ### 2.4. ✅ Остальные маршруты
@@ -204,7 +205,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `POST /api/v1/sessions/{id}/stop` | тело необязательно: `{"requested_by_user_id": 17}` — кто остановил (только журнал); если это не сам студент, причина «преподаватель» и текст «Лаба остановлена преподавателем». Ответ — сессия со `status: "stopping"` |
 | `POST /api/v1/sessions/{id}/console-tickets` | `{"node_id", "readonly", "issued_for_user_id"}` → `{"ticket", "gateway_url", "expires_in"}`. `gateway_url` есть всегда: `ws://` или `wss://` (в бою `wss://`), хост, порт, путь, **без `/` на конце**; плагин дописывает `/console/<node_id>?ticket=…`. К ноде, которая по живым статусам не `started`, — `409 node_not_running` (при `nodes_stale` билет выдаётся). К ноде, чей образ в каталоге объявлен с `console_type: "none"` (например, Linux-коммутатор), — `403 console_disabled`: для всех, и для наблюдателя (`readonly`) тоже; образ узла берётся из билета развёртывания рабочей области по имени файла, поэтому правило одинаково для лаб из Moodle и эталонных. Если лабу сессии уже не разобрать (образ убран из каталога), — `503 console_unavailable`: менеджер не выдаёт консоль, пока не знает, что она разрешена. 🆕 К ноде с `console_type: "vnc"` (§2.6) билет выдаётся только владельцу сессии: билет с `readonly: true` — `403 console_disabled` (экран студента преподаватель не видит). Ответ тот же; тип консоли плагин знает из `session.nodes[].console_type` |
 
-Состояние лабы — `/sessions/{id}/state` (§2.7, ✅ менеджер 0.8.0). 🆕 Автопроверки — `/sessions/{id}/checks` (§2.9),
+🆕 `GET /api/v1/maintenance` — режим обслуживания (§2.11). Состояние лабы — `/sessions/{id}/state` (§2.7, ✅ менеджер 0.8.0). 🆕 Автопроверки — `/sessions/{id}/checks` (§2.9),
 вместе с возможностью `checks`.
 
 ### 2.6. ✅ Лабы из Moodle: образы, определение, проверка
@@ -664,12 +665,48 @@ CephFS, сессии, факты и прогоны проверок в БД ме
 Wipe отдельной ноды — другой механизм: он идёт в живой лабе внутри слота (`POST /v1/labs/{project_id}/nodes/{node_id}/wipe`,
 пока `NOT_SUPPORTED`, slot README «Node Wipe»), к `/purges` отношения не имеет.
 
+### 2.11. 🆕 Режим обслуживания: `/maintenance` (менеджер 0.20.0)
+
+Возможность `maintenance` в `info.features`. Оператор останавливает все лабы к назначенному времени, чтобы обновить
+слоты, агенты, образы или сам менеджер, а пользователи заранее видят предупреждение. Включает и выключает режим только
+оператор, командой менеджера (README §6): `lab-manager-admin maintenance on --in 5m [--message …]`, `status`,
+`wait`, `off`. API плагина режим только читает: один сайт не должен останавливать лабы других сайтов того же менеджера.
+
+**Объект обслуживания** (`state` — фаза):
+
+```json
+{"state": "announced", "starts_at": "2026-11-11T12:05:00Z", "announced_at": "2026-11-11T12:00:00Z",
+ "message": "Обновление образов"}
+```
+
+| `state` | Что происходит |
+|---|---|
+| `off` | обычная работа; других полей нет |
+| `announced` | до `starts_at`: новые сессии не создаются (`503 maintenance`), сессии в очереди (`wait_slot`) отменяются («Запуск отменён: техническое обслуживание»), запущенные лабы, в том числе авторские, работают до `starts_at`, консоли выдаются |
+| `draining` | `starts_at` наступило: каждая живая сессия останавливается, как по «Стоп» (`stop_reason: "maintenance"`; при остановке — «Техническое обслуживание, остановка лабы…», в конце — «Лаба остановлена на время технического обслуживания»). Проект сохраняется, следующий запуск после обслуживания его продолжает. Снятие образов (§2.8), начатое до `starts_at`, доводится до конца; новое — `503 maintenance`. Билеты консолей — `503 maintenance` |
+| `active` | живых сессий и идущих снятий образов не осталось: оператор может работать. Очередь удаления каталогов (§2.10) стоит с `starts_at` до выключения режима |
+
+`message` — текст оператора (до 500 символов, может быть пустым); плагин показывает его как есть, вместе со своим
+текстом. Повторное `on` переносит `starts_at` и меняет `message`. `off` удаляет режим в любой фазе: новые запуски снова
+разрешены; слоты отдельно включать не нужно (их состояние режим не меняет).
+
+**`GET /api/v1/maintenance`** — `{"schema": "gns3lab.maintenance/1", ...объект}`; при `off` — только `schema` и `state`.
+Плагин читает его на страницах без живой сессии; кешировать — не дольше 30 с.
+
+**В объекте сессии** (§2.3) и в списке наблюдателя (§2.4) — поле `maintenance` с тем же объектом (без `schema`), пока
+режим не `off`; при `off` поля нет. Плагин показывает предупреждение и считает остаток времени лабы до
+`min(expires_at, starts_at)`; `expires_at` менеджер не меняет.
+
+**`503 maintenance`** — `{"error": "maintenance", "message", "maintenance": объект}`: `POST /sessions` в любой фазе,
+кроме `off` (повтор `POST` для уже живой сессии по-прежнему `200` с ней); `console-tickets` и `POST /capture` — в фазах
+`draining` и `active`.
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, 🆕 `workspace_purging` 409 (§2.10), 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `workspace_purging` 409 (§2.10), 🆕 `maintenance` 503 (§2.11), 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -1334,6 +1371,7 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | `checks` | менеджер | 🆕 `/sessions/{id}/checks` (§2.9), поле `checks` и `segments[].configure` в `gns3lab.lab/2`, `checks` в `meta.json`; в `session.features` — вместе с `facts` |
 | `reset` | менеджер | 🆕 `options.reset` |
 | `purge` | менеджер | 🆕 `POST /purges` и `/purges/reconcile` (§2.10) |
+| `maintenance` | менеджер | 🆕 режим обслуживания: `GET /maintenance`, поле `maintenance` сессии, `503 maintenance` (§2.11) |
 | `resume` | менеджер | следующий запуск продолжает проект студента (всегда, с менеджера 0.5.1) |
 | `images` | менеджер | `GET /api/v1/images` (§2.6) |
 | `lab_definitions` | менеджер | `POST /labs/validate` и `POST /sessions` с `lab` (§2.6) |
