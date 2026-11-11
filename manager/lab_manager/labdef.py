@@ -21,7 +21,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from . import iosconfig, netconfig
+from . import ifnames, iosconfig, netconfig
 from . import checks as checks_mod
 from . import segments as segments_mod
 from .images import PORTS_PER_ADAPTER, VPCS_MEMORY_MB
@@ -36,7 +36,7 @@ MAX_LINKS = 1000
 COORD = 100_000
 TOP_KEYS = {"format", "title", "nodes", "links"}
 TOP_KEYS_2 = TOP_KEYS | {"segments", "checks"}
-NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port"}
+NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port", "random_ifnames"}
 ENDPOINT_KEYS = {"node", "adapter", "port"}
 CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "duplicate_name", "unknown_image",
          "image_not_allowed", "out_of_range", "unknown_node", "bad_port", "port_in_use", "self_link",
@@ -202,6 +202,16 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
             else:
                 out["uplink_port"] = value
                 uplinks.append((name, value))
+        if "random_ifnames" in node:
+            # Random guest interface names (CONTRACTS 2.6): only `true` is kept, so a lab with `false` everywhere
+            # has the lab_def it had without the field.
+            value = node["random_ifnames"]
+            if type(value) is not bool:
+                problem(f"{path}.random_ifnames", "bad_type", "boolean")
+            elif value and image is not None and not image.random_ifnames:
+                problem(f"{path}.random_ifnames", "unsupported_image", f"{image.id} cannot rename its interfaces")
+            elif value:
+                out["random_ifnames"] = True
         if ok and image is not None:
             out = {"name": name, "image": image.id, **out}
             by_name[name] = out
@@ -329,6 +339,15 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
             spec["console"] = "vnc"
         options = image.slot.model_dump(exclude_none=True)
         preset = setup.get(node["name"], {})
+        if node.get("random_ifnames"):
+            # After the commands of the image, before the network of the segments: it finds the adapters by MAC.
+            # The names follow the project id, so a resumed project gets the same command (its ticket is stored).
+            count = values["adapters"]
+            names = ifnames.node_names(project_id, node["name"], count)
+            adapters = {a: n for a, n in enumerate(names) if a != node.get("uplink_port")}
+            options["provisioning"] = [*options.get("provisioning", []),
+                                       {"command": ifnames.script(image.net_config, adapters),
+                                        "timeout_seconds": ifnames.TIMEOUT_SECONDS}]
         if "command" in preset:  # After the commands of the image
             options["provisioning"] = [*options.get("provisioning", []),
                                        {"command": preset["command"], "timeout_seconds": netconfig.TIMEOUT_SECONDS}]

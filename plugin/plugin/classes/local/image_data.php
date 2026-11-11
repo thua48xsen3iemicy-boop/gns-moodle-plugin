@@ -52,6 +52,7 @@ class image_data {
             'preconfig' => new external_value(PARAM_BOOL, 'Network can be configured', VALUE_DEFAULT, false),
             'capture' => new external_value(PARAM_BOOL, 'Capture allowed'),
             'uplink_port' => new external_value(PARAM_INT, 'Reserved external adapter', VALUE_OPTIONAL),
+            'random_ifnames' => new external_value(PARAM_BOOL, 'Guest interface names can be random', VALUE_DEFAULT, false),
             'authorname' => new external_value(PARAM_TEXT, 'Moodle display name', VALUE_DEFAULT, ''),
             'featured' => new external_value(PARAM_BOOL, 'Featured', VALUE_DEFAULT, false),
             'retired' => new external_value(PARAM_BOOL, 'Retired', VALUE_DEFAULT, false),

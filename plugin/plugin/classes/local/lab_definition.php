@@ -123,6 +123,15 @@ class lab_definition {
                     $clean[$key] = self::int($node, $key, $i);
                 }
             }
+            // Random guest interface names (manager CONTRACTS 2.6): only true is kept, like the lab manager does.
+            if (array_key_exists('random_ifnames', $node) && $node['random_ifnames'] !== null) {
+                if (!is_bool($node['random_ifnames'])) {
+                    throw self::invalid("nodes[{$i}].random_ifnames");
+                }
+                if ($node['random_ifnames']) {
+                    $clean['random_ifnames'] = true;
+                }
+            }
             $def['nodes'][] = $clean;
         }
         foreach ($links as $i => $link) {
