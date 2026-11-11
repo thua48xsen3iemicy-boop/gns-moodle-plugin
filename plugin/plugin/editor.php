@@ -129,6 +129,7 @@ $PAGE->set_title(get_string('labeditortitle', 'gns3lab', $name));
 $PAGE->add_body_class('gns3lab-fullscreen');
 
 echo $OUTPUT->header();
+echo \mod_gns3lab\local\maintenance::notification();
 echo $OUTPUT->render_from_template('mod_gns3lab/editor', [
     'labname' => $name,
     'libraryurl' => (new \core\url('/mod/gns3lab/library.php'))->out(false),

@@ -66,6 +66,12 @@ interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашени�
     curl -X POST localhost:8090/mock/fail-next -d '{"code": "SLOT_START_FAILED", "retryable": true}'
     curl -X POST localhost:8090/mock/stale/on                 # статусы нод «устарели» (nodes_stale)
     curl -X POST localhost:8090/mock/stale/off
+    curl -X POST localhost:8090/mock/maintenance/on -d '{"in": 60, "message": "Обновление образов"}'  # обслуживание
+    curl -X POST localhost:8090/mock/maintenance/off
+
+Режим обслуживания (CONTRACTS §2.11 менеджера 0.20): info: feature "maintenance"; GET /api/v1/maintenance; поле
+maintenance у сессий, пока режим не off; POST /sessions — 503 maintenance (повтор для живой сессии — 200); в назначенное
+время живые сессии останавливаются («Лаба остановлена на время технического обслуживания»), билеты консолей — 503.
     curl -X POST localhost:8090/mock/facts/nodes/<node_id>/fail -d '{"code": "timeout"}'  # сбор с ноды не удался
     curl -X POST localhost:8090/mock/facts/nodes/<node_id>/ok
     curl -X POST localhost:8090/mock/facts/stall/on           # сбор встал: generated_at стоит, через ttl — «устарели»
@@ -451,6 +457,24 @@ class Manager:
         self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
         self.fact_changes = 0  # changes of fact_errors: they move rev of every session
         self.facts_stalled = None  # time the collection stopped, None while it works
+        self.maintenance = None  # {"starts_at", "announced_at", "message"} while maintenance mode is on
+
+    def maintenance_state(self):
+        """The maintenance object (CONTRACTS 2.11) or None; stops every live session once it starts."""
+        mt = self.maintenance
+        if mt is None:
+            return None
+        now = time.time()
+        if now < mt["starts_at"]:
+            phase = "announced"
+        else:
+            for s in self.sessions:
+                if s.stop_requested is None and s.status() not in ("stopped", "failed"):
+                    s.stop_requested = now
+                    s.stopped_by_maintenance = True
+            phase = "draining" if any(s.status() not in ("stopped", "failed") for s in self.sessions) else "active"
+        return {"state": phase, "starts_at": iso(mt["starts_at"]), "announced_at": iso(mt["announced_at"]),
+                "message": mt["message"]}
 
     def live(self, site, user_id, library_lab_id=None):
         return next((s for s in self.sessions if s.site == site and s.user_id == user_id and s.library_lab_id == library_lab_id
@@ -473,11 +497,14 @@ class Manager:
                                                                     if status == 'started')
 
     def summary(self, s):
+        maintenance = self.maintenance_state()  # First: from its start it stops the session
         self.observe(s)
         status, stage, progress = s.state()
         message = MESSAGES.get(status, "Лаба не запустилась")
         if status in ("stopping", "stopped") and s.stopped_by_teacher:
             message = "Лаба остановлена преподавателем"
+        if status == "stopped" and getattr(s, "stopped_by_maintenance", False):
+            message = "Лаба остановлена на время технического обслуживания"
         body = {
             "schema": "gns3lab.session/1",
             "session_id": s.id,
@@ -492,6 +519,8 @@ class Manager:
         }
         if progress is not None:
             body["progress"] = progress
+        if maintenance:
+            body["maintenance"] = maintenance
         if s.mode:
             body['mode'] = s.mode
             body['capture_nodes'] = [{'name': n['name'], 'status': s.node_statuses.get(n['name'], 'unknown')}
@@ -582,10 +611,28 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
+
+
+async def maintenance(request):
+    site_of(request)
+    return web.json_response({"schema": "gns3lab.maintenance/1",
+                              **(request.app["m"].maintenance_state() or {"state": "off"})})
+
+
+async def mock_maintenance(request):
+    m: Manager = request.app["m"]
+    if request.match_info["mode"] == "off":
+        m.maintenance = None
+        return web.json_response({"state": "off"})
+    body = await request.json() if request.can_read_body else {}
+    now = time.time()
+    m.maintenance = {"starts_at": now + float(body.get("in", 300)), "announced_at": now,
+                     "message": str(body.get("message", ""))[:500]}
+    return web.json_response(m.maintenance_state())
 
 
 async def images(request):
@@ -692,6 +739,9 @@ async def create_session(request):
                          conflict={"instance_id": live.instance_id, "course_id": live.course_id,
                                    "lab_ref": live.lab_ref, "lab_def": live.lab_def, "status": live.status()})
         return web.json_response(m.present(live), status=200)
+    if m.maintenance_state():
+        return error(503, "maintenance", "Идёт техническое обслуживание: запуск лаб временно недоступен",
+                     maintenance=m.maintenance_state())
     if lab_ref is not None and lab_ref not in m.labs:
         return error(404, "lab_not_found", "Unknown lab_ref")
     requested = (body.get("options") or {}).get("max_duration") or 0
@@ -909,6 +959,9 @@ async def console_ticket(request):
         body = await read_body(request, {"node_id": 1, "readonly": 1, "issued_for_user_id": 1})
     except Unsupported as exc:
         return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    mt = m.maintenance_state()
+    if mt and mt["state"] != "announced":
+        return error(503, "maintenance", "Лабы останавливаются: техническое обслуживание", maintenance=mt)
     if s.status() != "running":
         return error(409, "session_not_running", "Session is not running")
     node_id = body.get("node_id")
@@ -1500,6 +1553,8 @@ def make_apps():
     api.router.add_get('/api/v1/sessions/{sid}/capture', image_capture)
     api.router.add_patch('/api/v1/images/{image}', image_patch)
     api.router.add_get("/api/v1/info", info)
+    api.router.add_get("/api/v1/maintenance", maintenance)
+    api.router.add_post("/mock/maintenance/{mode:on|off}", mock_maintenance)
     api.router.add_post("/api/v1/purges", purge)
     api.router.add_post("/api/v1/purges/reconcile", reconcile)
     api.router.add_get("/api/v1/labs", list_labs)

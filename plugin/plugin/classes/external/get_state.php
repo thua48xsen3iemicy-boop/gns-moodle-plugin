@@ -22,6 +22,7 @@ use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\lab_library;
+use mod_gns3lab\local\maintenance;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\session_data;
 
@@ -89,6 +90,7 @@ class get_state extends external_api {
         if ($session !== null) {
             $result['session'] = session_data::export($session);
         }
+        $result['maintenance'] = maintenance::current($client, $session);
         return $result;
     }
 
@@ -105,6 +107,7 @@ class get_state extends external_api {
             'labready' => new external_value(PARAM_BOOL, 'The manager is set up and the activity has a reference lab'),
             'resume' => new external_value(PARAM_BOOL, 'The next start continues the saved project, else work is lost'),
             'session' => session_data::structure(VALUE_OPTIONAL),
+            'maintenance' => maintenance::structure(),
         ]);
     }
 }

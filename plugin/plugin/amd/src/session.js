@@ -47,8 +47,22 @@ export const STRING_KEYS = [
     'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
     'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'managernotconfigured', 'labnotready',
     'failedretry', 'failedadmin', 'stopconfirmtitle', 'stopconfirm', 'stopconfirmkept', 'conflictlink',
+    'maintenanceannounced', 'maintenanceactive', 'maintenancenote',
     ...STAGES.map(stage => 'stage_' + stage),
 ];
+
+/**
+ * Seconds as h:mm:ss or mm:ss.
+ *
+ * @param {number} left seconds
+ * @returns {string}
+ */
+const duration = left => {
+    const h = Math.floor(left / 3600);
+    const m = String(Math.floor(left / 60) % 60).padStart(2, '0');
+    const s = String(left % 60).padStart(2, '0');
+    return h ? `${h}:${m}:${s}` : `${m}:${s}`;
+};
 
 export class Session {
     /**
@@ -79,9 +93,19 @@ export class Session {
         this.startBtn = region('start');
         this.stopBtn = region('stop');
         this.messageEl = region('message');
+        this.maintenanceEl = region('maintenance');
         this.startBtn.addEventListener('click', () => this.act('mod_gns3lab_start_session'));
         this.stopBtn.addEventListener('click', () => this.stop());
         setInterval(() => this.renderTime(), 1000);
+    }
+
+    /**
+     * Maintenance mode of the lab manager (manager CONTRACTS §2.11).
+     *
+     * @returns {{state: string, startsat: number, message: string}} state off when nothing is announced
+     */
+    get maintenance() {
+        return (this.state && this.state.maintenance) || {state: 'off', startsat: 0, message: ''};
     }
 
     /**
@@ -179,6 +203,9 @@ export class Session {
             this.timer = setTimeout(() => this.refresh(), POLL_TRANSIENT);
         } else if (session && session.status === 'running') {
             this.timer = setTimeout(() => this.refresh(), POLL_RUNNING);
+        } else if (this.maintenance.state !== 'off') {
+            // Without a live lab nothing else polls: the page must still see the maintenance end.
+            this.timer = setTimeout(() => this.refresh(), POLL_RUNNING);
         }
     }
 
@@ -213,7 +240,8 @@ export class Session {
         this.startBtn.textContent = retry ? this.strings.startagain : this.strings.startlab;
         this.startBtn.hidden = !state.canuse || !!live;
         this.stopBtn.hidden = !state.canuse || !live || status === 'stopping';
-        this.startBtn.disabled = this.busy || !state.labready;
+        // The manager refuses new labs while a maintenance is announced or running.
+        this.startBtn.disabled = this.busy || !state.labready || this.maintenance.state !== 'off';
         this.stopBtn.disabled = this.busy;
         this.renderTime();
     }
@@ -238,20 +266,48 @@ export class Session {
     }
 
     /**
-     * Time left before the manager stops the lab.
+     * Time left before the manager stops the lab, and the maintenance notice.
+     *
+     * A lab stops at its own limit or when the announced maintenance starts, whichever comes first.
      */
     renderTime() {
+        const now = Math.floor(Date.now() / 1000);
+        const maintenance = this.maintenance;
+        const announced = maintenance.state === 'announced' && maintenance.startsat > 0;
+        this.renderMaintenance(maintenance, announced ? Math.max(0, maintenance.startsat - now) : 0);
         const session = this.session;
-        if (!session || session.status !== 'running' || !session.expiresat) {
+        const ends = [session && session.expiresat, announced && maintenance.startsat].filter(t => t > 0);
+        if (!session || session.status !== 'running' || !ends.length) {
             this.timeEl.hidden = true;
             return;
         }
-        const left = Math.max(0, session.expiresat - Math.floor(Date.now() / 1000));
-        const h = Math.floor(left / 3600);
-        const m = String(Math.floor(left / 60) % 60).padStart(2, '0');
-        const s = String(left % 60).padStart(2, '0');
-        this.timeEl.textContent = this.strings.timeleft.replace('{$a}', h ? `${h}:${m}:${s}` : `${m}:${s}`);
+        this.timeEl.textContent = this.strings.timeleft.replace('{$a}', duration(Math.max(0, Math.min(...ends) - now)));
         this.timeEl.hidden = false;
+    }
+
+    /**
+     * The maintenance notice: a countdown while announced, then that the labs are stopped.
+     *
+     * @param {{state: string, message: string}} maintenance maintenance mode
+     * @param {number} left seconds before the labs stop, 0 once they are being stopped
+     */
+    renderMaintenance(maintenance, left) {
+        if (!this.maintenanceEl) {
+            return;
+        }
+        let text = '';
+        if (maintenance.state === 'announced' && left > 0) {
+            text = this.strings.maintenanceannounced.replace('{$a}', duration(left));
+        } else if (maintenance.state !== 'off') {
+            text = this.strings.maintenanceactive;
+        }
+        if (text && maintenance.message) {
+            text += ' ' + this.strings.maintenancenote.replace('{$a}', maintenance.message);
+        }
+        if (this.maintenanceEl.textContent !== text) {
+            this.maintenanceEl.textContent = text;
+        }
+        this.maintenanceEl.hidden = !text;
     }
 
     /**

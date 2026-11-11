@@ -80,5 +80,6 @@ if ($action === 'wipe') {
 $overview = new \mod_gns3lab\output\overview($cm, $instance);
 
 echo $OUTPUT->header();
+echo \mod_gns3lab\local\maintenance::notification();
 echo $OUTPUT->render_from_template('mod_gns3lab/overview', $overview->export_for_template($OUTPUT));
 echo $OUTPUT->footer();
