@@ -134,6 +134,31 @@ const startButton = page => page.locator('[data-region="checksBody"] .chk-start 
         await page.locator('.chk-toroot').first().click();
         check('"to the cause" focuses the root', await page.evaluate(() => document.activeElement.classList.contains('chk-finding')));
         check('a forgiven finding says so', /Прощено: при обычной строгости/.test(await panelText(page)));
+        const roots = await page.locator('.chk-findings > li').count();
+        const pills = await page.locator('.chk-counts .chk-chip').evaluateAll(es => es.map(e => {
+            const r = e.getBoundingClientRect();
+            return {h: Math.round(r.height), font: getComputedStyle(e).fontSize};
+        }));
+        check('the count pills are of one size', pills.length === 5 && pills.every(p => p.h === pills[0].h && p.font === pills[0].font),
+            JSON.stringify(pills));
+        await page.locator('.chk-counts [data-key="filter-major"]').click();
+        const majors = await page.locator('.chk-findings > li > .chk-line .chk-class').allInnerTexts();
+        check('a count pill filters the findings by class', majors.length > 0 && majors.length < roots
+            && majors.every(t => t.toLowerCase() === 'значительная'), majors.join(','));
+        check('...and is pressed', (await page.locator('[data-key="filter-major"]').getAttribute('aria-pressed')) === 'true');
+        await page.screenshot({path: path.join(SHOTS, 'checks-filter.png')});
+        await page.locator('.chk-counts [data-key="filter-major"]').click();
+        check('a second click shows all findings again', (await page.locator('.chk-findings > li').count()) === roots);
+        await page.locator('.chk-counts [data-key="filter-note"]').click();
+        await page.locator('.chk-counts [data-key="filter-all"]').click();
+        check('"all" shows all findings', (await page.locator('.chk-findings > li').count()) === roots
+            && (await page.locator('[data-key="filter-all"]').getAttribute('aria-pressed')) === 'true');
+        const drawer = await page.evaluate(() => {
+            const w = document.querySelector('[data-region="wrap"]').getBoundingClientRect();
+            const p = document.querySelector('[data-region="checksPanel"]').getBoundingClientRect();
+            return {top: p.top - w.top, bottom: w.bottom - p.bottom, right: w.right - p.right};
+        });
+        check('the panel is a drawer as high as the scheme', Object.values(drawer).every(v => Math.abs(v) < 1), JSON.stringify(drawer));
         check('the message of the manager is text', (await page.locator('.chk-msg b').count()) === 0
             && /<b>/.test(await panelText(page)));
         check('mark 3 for two major findings', (await page.locator('.chk-mark-value').innerText()) === '3');
@@ -201,6 +226,7 @@ const startButton = page => page.locator('[data-region="checksBody"] .chk-start 
         await region(page, 'checksOpen').click();
         const box = await region(page, 'checksPanel').boundingBox();
         check('phone: the panel fits the screen', !!box && box.x >= 0 && box.x + box.width <= 360, JSON.stringify(box));
+        await sleep(400);
         await page.screenshot({path: path.join(SHOTS, 'checks-phone-dark.png')});
         await page.context().close();
 
