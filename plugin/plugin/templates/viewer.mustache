@@ -118,7 +118,6 @@
                 </g>
                 <g data-region="canvasUi" aria-label="{{#str}}ui_canvas_title, mod_gns3lab{{/str}}">
                     <g data-region="layerSeg"></g>
-                    <g class="svg-card" data-region="details"></g>
                 </g>
             </svg>
             <svg class="ov" data-region="ov" aria-hidden="true"></svg>
@@ -136,6 +135,7 @@
                 <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
             </div>
             <div class="empty-surface" data-region="canvasEmpty" hidden></div>
+            <aside class="object-drawer" data-region="details"></aside>
             <aside class="canvas-panel" data-region="overviewPanel" id="{{uniqid}}-overview" aria-labelledby="{{uniqid}}-overview-title" hidden>
                 <header><div><h2 id="{{uniqid}}-overview-title" data-region="overviewTitle">{{#str}}ui_overview, mod_gns3lab{{/str}}</h2><p data-region="overviewLead"></p></div><button class="ib" type="button" data-region="overviewClose" aria-label="{{#str}}ui_close, mod_gns3lab{{/str}}">×</button></header>
                 <div class="panel-body" data-region="overviewBody"></div>

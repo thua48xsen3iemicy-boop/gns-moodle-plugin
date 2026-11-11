@@ -42,20 +42,31 @@ async function prototypeParity(browser, page) {
             const title = getComputedStyle(card.querySelector('h2')), tabs = getComputedStyle(card.querySelector('.object-tabs button[aria-selected="true"]'));
             const hud = document.querySelector(isPrototype ? '#canvasHud .hud-bg' : '[data-region="layerSeg"] .hud-bg');
             return {palette: ['--canvas', '--panel', '--fg', '--accent', '--ico', '--line'].map(k => getComputedStyle(root).getPropertyValue(k).trim()),
-                card: {width: box.width, height: box.height, background: style.backgroundColor, border: style.borderTopColor, radius: style.borderTopLeftRadius,
+                // The card is a drawer on the right in the plugin, not a card anchored on the scheme as in the prototype:
+                // only the look is compared, the geometry is checked by drawerGeometry().
+                card: {background: style.backgroundColor, border: isPrototype ? style.borderTopColor : style.borderLeftColor,
                     font: style.fontFamily, titleSize: title.fontSize, titleFont: title.fontFamily, tabFill: tabs.backgroundColor, tabHeight: tabs.minHeight},
                 // The HUD is not compared: it is as wide as its compact content and also holds the overview,
                 // assignments and facts controls, unlike the prototype.
-                hud: !!hud,
-                mounted: !!card.closest('foreignObject')?.closest(isPrototype ? '#canvasUi' : '[data-region="canvasUi"]')};
+                hud: !!hud};
         }, prototype);
         assert.deepEqual(await appearance(page, false), await appearance(reference, true));
         assert.equal(await page.locator('[data-region="factsSel"],#demoPanel,#viewMode,#demoToggle').count(), 0);
-        console.log('PASS  live Canvas palette, SVG HUD present, card geometry and typography match the original prototype; no prototype mode controls');
+        console.log('PASS  live Canvas palette, SVG HUD present, card typography match the original prototype; no prototype mode controls');
     } finally {
         await reference.close();
         await new Promise(resolve => referenceServer.close(resolve));
     }
+}
+
+async function drawerGeometry(page) {
+    await page.waitForTimeout(300);
+    const g = await page.evaluate(() => {
+        const wrap = document.querySelector('[data-region="wrap"]').getBoundingClientRect();
+        const card = document.querySelector('.object-drawer.open .object-card').getBoundingClientRect();
+        return {top: card.top - wrap.top, bottom: wrap.bottom - card.bottom, right: wrap.right - card.right, width: card.width};
+    });
+    assert.ok(Math.abs(g.top) < 1 && Math.abs(g.bottom) < 1 && Math.abs(g.right) < 1 && g.width > 300 && g.width <= 440, JSON.stringify(g));
 }
 
 async function captureStage(page) {
@@ -101,7 +112,24 @@ async function captureStage(page) {
         assert.equal(await page.locator('[data-layer="l1"]').getAttribute('aria-pressed'), 'true');
         assert.match(await page.locator('.object-card').innerText(), /10\.1\.99\./);
         assert.equal(await page.locator('[data-region="chip"]').isHidden(), true);
+        await drawerGeometry(page);
         await prototypeParity(browser, page);
+        await page.setViewportSize({width: 1440, height: 520});
+        await page.waitForTimeout(300);
+        const scrolled = await page.evaluate(() => {
+            const c = document.querySelector('.object-drawer .object-content');
+            c.scrollTop = 120;
+            return {top: c.scrollTop, calls: window.__stub.calls.mod_gns3lab_get_facts};
+        });
+        assert.ok(scrolled.top > 0, 'the card has to scroll at this height');
+        await page.locator('[data-region="canvasRefresh"]').click();
+        await page.waitForFunction(n => window.__stub.calls.mod_gns3lab_get_facts > n, scrolled.calls);
+        await page.waitForTimeout(500);
+        assert.equal(await page.locator('.object-drawer .object-content').evaluate(c => c.scrollTop), scrolled.top);
+        await page.locator('[data-region="canvasRefresh"]').click();
+        await page.waitForTimeout(500);
+        await page.setViewportSize({width: 1440, height: 1000});
+        console.log('PASS  the card is a full-height drawer on the right and keeps its scroll when the facts change');
         await page.locator('.object-card [data-act="close"]').click();
         assert.equal(await page.locator('.node.sel').getAttribute('data-node'), selection.node);
         assert.equal(await page.locator('.link.on').count(), selection.links.length);
@@ -277,6 +305,7 @@ async function captureStage(page) {
         await page.locator('.node').first().focus();
         await page.keyboard.press('ContextMenu');
         await page.locator('[data-region="radial"] .wedge').nth(0).click();
+        await page.waitForTimeout(300);
         const card = await page.locator('.object-card').boundingBox(), zoom = await page.locator('.zoom').boundingBox();
         assert.ok(card.x >= 0 && card.x + card.width <= 391 && card.y + card.height < zoom.y);
         await page.locator('.object-card [data-act="close"]').click();
