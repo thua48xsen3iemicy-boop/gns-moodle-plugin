@@ -89,7 +89,7 @@ docs/          SPEC.md и прочая документация
   `start_session`, `stop_session`, `get_console_ticket` (свою лабу), `reveal` и `start_check` зовут `seat::require_seat` и принимают `tabid`.
   Новый вызов, которым студент **меняет** свою лабу или открывает консоль, обязан делать то же и отдавать странице `tabid`
   (`seat.js` `tabId()`, ошибку — в `reportRefusal`). Чтение место не охраняет. Контракт менеджера не затронут.
-- Остановка оставленной лабы (0.23.0, `docs/idle-stop.md`): задача `task/stop_idle_labs` и `classes/local/idle_labs.php` останавливают лабу,
+- Остановка оставленной лабы (0.24.0, `docs/idle-stop.md`): задача `task/stop_idle_labs` и `classes/local/idle_labs.php` останавливают лабу,
   у владельца которой дольше настройки сайта `idletimeout` не бьётся страница лабы (время биения — `gns3lab_seat.timemodified`).
 - Автопроверки (0.19.0, `docs/autochecks.md`): настройки и каталог кодов правил — `classes/local/checks.php`, прогоны студентов,
   попытки и оценки журнала — `classes/local/check_runs.php` (таблица `gns3lab_check_runs`), задача `task/sync_check_runs`.

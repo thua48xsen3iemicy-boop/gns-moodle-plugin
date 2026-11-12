@@ -190,6 +190,37 @@ const SW_VLANS = [
     '1002 fddi-default                     act/unsup',
 ];
 
+// The demo has no loop: Et0/2 is shown blocking in VLAN 10 only so the scheme has a blocked port to draw.
+const SW_STP = [
+    'VLAN0001',
+    '  Spanning tree enabled protocol ieee',
+    '  Root ID    Priority    32769',
+    '             Address     aabb.cc00.0100',
+    '             This bridge is the root',
+    '',
+    '  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)',
+    '             Address     aabb.cc00.0100',
+    '',
+    'Interface           Role Sts Cost      Prio.Nbr Type',
+    '------------------- ---- --- --------- -------- --------------------------------',
+    'Et0/0               Desg FWD 100       128.1    Shr',
+    '',
+    'VLAN0010',
+    '  Spanning tree enabled protocol ieee',
+    '  Root ID    Priority    32778',
+    '             Address     aabb.cc00.0100',
+    '             This bridge is the root',
+    '',
+    '  Bridge ID  Priority    32778  (priority 32768 sys-id-ext 10)',
+    '             Address     aabb.cc00.0100',
+    '',
+    'Interface           Role Sts Cost      Prio.Nbr Type',
+    '------------------- ---- --- --------- -------- --------------------------------',
+    'Et0/0               Desg FWD 100       128.1    Shr',
+    'Et0/1               Desg FWD 100       128.2    Shr',
+    'Et0/2               Altn BLK 100       128.3    Shr',
+];
+
 /**
  * A host address of the node from the demo facts, moved to .99 (.77 on a VPCS): a change the scheme can show.
  *
@@ -226,6 +257,9 @@ function answer(kind, id, cmd) {
         }
         if (/^sh(ow)?\s+vl(an)?\s+b(rief)?$/i.test(cmd)) {
             return ['', ...SW_VLANS];
+        }
+        if (/^sh(ow)?\s+span(ning-tree)?$/i.test(cmd)) {
+            return ['', ...SW_STP];
         }
         return /^(write memory|wr|write)$/i.test(cmd) ? ['Building configuration...', '[OK]'] : null;
     }
