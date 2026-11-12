@@ -217,5 +217,16 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         upgrade_mod_savepoint(true, 2026110903, 'gns3lab');
     }
 
+    if ($oldversion < 2026111200) {
+        // Idle stop (docs/idle-stop.md): the beat of a seat at which the task last looked at its lab.
+        $table = new xmldb_table('gns3lab_seat');
+        $field = new xmldb_field('timeidlechecked', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'timemodified');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_mod_savepoint(true, 2026111200, 'gns3lab');
+    }
+
     return true;
 }

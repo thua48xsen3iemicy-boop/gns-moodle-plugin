@@ -96,6 +96,7 @@ class provider implements
             'tabid' => 'privacy:metadata:gns3lab_seat:tabid',
             'timeclaimed' => 'privacy:metadata:gns3lab_seat:timeclaimed',
             'timemodified' => 'privacy:metadata:gns3lab_seat:timemodified',
+            'timeidlechecked' => 'privacy:metadata:gns3lab_seat:timeidlechecked',
         ], 'privacy:metadata:gns3lab_seat');
         $collection->add_database_table('gns3lab_check_runs', [
             'gns3labid' => 'privacy:metadata:gns3lab_check_runs:gns3labid',
