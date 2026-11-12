@@ -26,6 +26,15 @@ defined('MOODLE_INTERNAL') || die();
 
 $tasks = [
     [
+        'classname' => \mod_gns3lab\task\stop_idle_labs::class,
+        'blocking' => 0,
+        'minute' => '*/5',
+        'hour' => '*',
+        'day' => '*',
+        'month' => '*',
+        'dayofweek' => '*',
+    ],
+    [
         'classname' => \mod_gns3lab\task\sync_check_runs::class,
         'blocking' => 0,
         'minute' => '*/5',

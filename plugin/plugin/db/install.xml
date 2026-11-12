@@ -104,6 +104,7 @@
         <FIELD NAME="tabid" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="Random id of the holder's page load; empty from a page that sends none"/>
         <FIELD NAME="timeclaimed" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the seat last changed hands"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Last sign of life of the holder"/>
+        <FIELD NAME="timeidlechecked" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The timemodified at which the idle-stop task last looked at the lab of this seat (docs/idle-stop.md)"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

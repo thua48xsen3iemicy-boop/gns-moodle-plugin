@@ -117,6 +117,8 @@ Moodle никогда не держит WebSocket и не видит токен�
 Таблица `gns3lab_seat` (0.12.0): «кто ведёт лабу студента сейчас» — `gns3labid`, `userid`, `sessionkey` (SHA-256 от id сеанса Moodle),
 `tabid` (случайный id страницы), `timeclaimed`, `timemodified`; уникальный индекс `(gns3labid, userid)`, строка живёт 90 с после
 последнего признака жизни держателя. Не состояние лабы, а право ей управлять.
+🆕 0.24.0: поле `gns3lab_seat.timeidlechecked` и настройка сайта `idletimeout` (минуты, по умолчанию 30, `0` — выключено) — лабу,
+у владельца которой столько времени не открыта страница лабы, останавливает задача `stop_idle_labs` обычным `POST …/stop` (`docs/idle-stop.md`).
 Автопроверки (0.19.0, `docs/autochecks.md`): поля `grade` (журнал оценок), `checksenabled`, `checksprofile`, `checksthresholds`,
 `checksfailmark`, `checksoverrides`, `checksattempts`, `checksreport`, `checksreportdate`; таблица `gns3lab_check_runs` — прогоны
 студентов (кто, `runid` менеджера, итог, оценка, счётчики по классам), по ней считаются попытки и оценка; находки остаются у менеджера.

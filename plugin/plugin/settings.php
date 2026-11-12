@@ -63,6 +63,13 @@ if ($ADMIN->fulltree) {
         10,
         PARAM_INT
     ));
+    $settings->add(new admin_setting_configtext(
+        'gns3lab/idletimeout',
+        new lang_string('idletimeout', 'gns3lab'),
+        new lang_string('idletimeout_desc', 'gns3lab'),
+        \mod_gns3lab\local\idle_labs::DEFAULT_TIMEOUT,
+        PARAM_INT
+    ));
 }
 
 $ADMIN->add('modgns3labfolder', $settings);
