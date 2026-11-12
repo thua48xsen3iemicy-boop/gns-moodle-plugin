@@ -45,7 +45,7 @@
 - `fog`: открытые ноды, интерфейсы и кабели (§2.2);
 - `seen`: пары «нода → группа данных». Группы по командам `live-state.md` §8.2: `l1` (состояние портов:
   `show ip interface brief`, `show interfaces status`, `ip a`), `l2` (`switchport`, `vlans`: `show interfaces status`,
-  `show interfaces trunk`, `show vlan brief`), `l3` (адреса: `show ip interface [brief]`, `ip a`, `show ip`),
+  `show interfaces trunk`, `show vlan brief`, `show spanning-tree …`), `l3` (адреса: `show ip interface [brief]`, `ip a`, `show ip`),
   `routes` (`ip route`). Новые команды — новые группы тем же правилом.
 
 Схема рисует **решающие факты через маску** плюс увиденное поверх (как в `live`). Открыл адреса R1 командой — дальше
@@ -359,13 +359,13 @@ PHP — `classes/local/reveal.php`, `classes/external/{get_reveal,reveal}.php`, 
   страница не отправляет остальные (они остаются в маске страницы).
 - **Что открывает команда.** `fog`: любая команда в консоли узла открывает **узел** (приглашение уже было выводом), даже та, из которой ничего не
   разбирается; разобранная — ещё интерфейсы из её вывода и группы. `seen`: только группы (`node` в маске не бывает, все узлы и кабели видны).
-  Группы по названию команды: `show ip interface [brief]` — `l1`, `l3`; `show interfaces status` — `l1`, `l2`; `show interfaces trunk` и `show vlan brief` —
+  Группы по названию команды: `show ip interface [brief]` — `l1`, `l3`; `show interfaces status` — `l1`, `l2`; `show interfaces trunk`, `show vlan brief` и `show spanning-tree …` —
   `l2`; `ip a` — `l1`, `l3`; `show ip` (VPCS) — `l3`; `ip route` — `routes`. Частичный вывод (фильтр, один интерфейс) тоже открывает группу целиком:
   в `seen` маска не знает интерфейсов. Неизвестная команда будущего открывает группы по полям, которые есть в её выводе.
 - **Что значит «работает».** `admin: up` и `oper` не `down` (у IOU сохранённая конфигурация без `oper`, как в слое L1), нода не остановлена и не на паузе;
   берётся из объединённых фактов **или** из решающих — «поднял и не повторил команду» открывает кабель по снимку менеджера, а устаревшее увиденное
   `down` его не удерживает.
-- **Группы и поля.** `l1`: `admin`, `oper`, `mac`; `l2`: `switchport`, `stp` интерфейса и `vlans` ноды; `l3`: `ipv4`, `gateway`; `routes`: `ospf`
+- **Группы и поля.** `l1`: `admin`, `oper`, `mac`; `l2`: `switchport`, `stp` интерфейса и `vlans`, `stp` ноды; `l3`: `ipv4`, `gateway`; `routes`: `ospf`
   интерфейса, `routes`, `router_id`, `adjacencies` ноды (соседства OSPF в слое «маршрутизация» открывает команда, которая покажет маршруты). `mac_table` не
   входит ни в одну группу: команды, которая её показывает, пока нет, в `seen` и `fog` таблицы нет. Всегда приходят: имя, вид, порт, `mirror`, состояние
   сбора (`status`, `error`, `collected_at`). Сабинтерфейс приводит родителя «голым» (имя, вид, порт, без данных): порт находится через родителя.

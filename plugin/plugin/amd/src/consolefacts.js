@@ -412,6 +412,314 @@ const parseVlanBrief = lines => {
     };
 };
 
+/* ---------------- spanning tree (IOS, docs/live-state.md §8.2) ---------------- */
+
+const STP_ROLES = {root: 'root', desg: 'designated', altn: 'alternate', back: 'backup', mstr: 'master', dis: 'disabled',
+    disb: 'disabled', none: 'disabled'};
+const STP_STATES = {fwd: 'forwarding', blk: 'blocking', lis: 'listening', lrn: 'learning', dis: 'disabled', bkn: 'broken'};
+const STP_MODES = {ieee: 'pvst', rstp: 'rapid-pvst', mstp: 'mst'};
+
+/** "VLAN0010" → 10; anything else (MST0, a port name) → null. */
+const stpVlan = text => {
+    const m = /^VLAN0*(\d{1,4})$/i.exec(text || '');
+    return m && +m[1] >= 1 && +m[1] <= VLAN_MAX ? +m[1] : null;
+};
+
+/** "aabb.cc00.0100" → "aa:bb:cc:00:01:00". */
+const dottedMac = text => {
+    const hex = String(text).toLowerCase().replace(/\./g, '');
+    return /^[0-9a-f]{12}$/.test(hex) ? hex.match(/../g).join(':') : null;
+};
+
+/**
+ * A row of a table of ports: `Et0/1  Altn BLK 100  128.2  Shr` (`show spanning-tree`) or the same with a VLAN
+ * in the first column (`show spanning-tree interface`). A state with `*` (`BKN*`) is an inconsistency: broken.
+ *
+ * @param {string} line a line
+ * @returns {{first: string, port: object}|null}
+ */
+const stpRow = line => {
+    const m = /^(\S+)\s+(Root|Desg|Altn|Back|Mstr|Disb?|None)\s+(FWD|BLK|LIS|LRN|DIS|BKN)(\*?)\s*(\d+)\s+(\d+\.\d+)/i.exec(line);
+    if (!m) {
+        return null;
+    }
+    const port = {role: STP_ROLES[m[2].toLowerCase()], state: m[4] ? 'broken' : STP_STATES[m[3].toLowerCase()], cost: +m[5]};
+    return {first: m[1], port};
+};
+
+/**
+ * An empty result of the spanning tree commands.
+ *
+ * @returns {{ports: Map, trees: Map, mode: string|null, complete: Set}}
+ */
+const stpResult = () => ({ports: new Map(), trees: new Map(), mode: null, complete: new Set()});
+
+/** Puts what a port does in a VLAN into the result. */
+const stpPort = (res, name, vlan, info) => {
+    const key = iosName(name);
+    if (!res.ports.has(key)) {
+        res.ports.set(key, {});
+    }
+    res.ports.get(key)[vlan] = Object.assign(res.ports.get(key)[vlan] || {}, info);
+};
+
+/** Puts what the bridge knows of a VLAN tree into the result. */
+const stpTree = (res, vlan, info) => {
+    res.trees.set(vlan, Object.assign(res.trees.get(vlan) || {}, info));
+};
+
+/**
+ * `show spanning-tree [vlan …] [active]`: per VLAN the root, this bridge, and the role and state of each port.
+ *
+ * A VLAN whose block was shown to its end (no filter, no pager) lists all its ports: `complete` holds it, and a port
+ * seen in it before but missing now has left the tree (down, or no longer in the VLAN).
+ *
+ * @param {string[]} lines output
+ * @param {boolean} whole the output may be taken as complete
+ * @returns {object} see stpResult()
+ */
+const parseStp = (lines, whole) => {
+    const res = stpResult();
+    let vlan = null;
+    let id = null;
+    let table = false;
+    for (const line of lines2(lines)) {
+        const head = /^(VLAN\d{1,4}|MST\d+)\s*$/i.exec(line);
+        if (head) {
+            vlan = stpVlan(head[1]);
+            id = null;
+            table = false;
+            if (vlan !== null) {
+                stpTree(res, vlan, {});
+                if (whole) {
+                    res.complete.add(vlan);
+                }
+            }
+            continue;
+        }
+        if (vlan === null) {
+            continue;
+        }
+        let m = /Spanning tree enabled protocol (\w+)/i.exec(line);
+        if (m) {
+            res.mode = STP_MODES[m[1].toLowerCase()] || res.mode;
+            continue;
+        }
+        m = /^\s*(Root|Bridge) ID\s+Priority\s+(\d+)/i.exec(line);
+        if (m) {
+            id = m[1].toLowerCase() === 'root' ? 'root' : 'bridge';
+            stpTree(res, vlan, {[id]: {priority: +m[2]}});
+            continue;
+        }
+        if (/^Interface\s+Role\s+Sts/i.test(line)) {
+            table = true;
+            id = null;
+            continue;
+        }
+        if (table) {
+            const row = stpRow(line);
+            if (row && iosKind(iosName(row.first))) {
+                stpPort(res, row.first, vlan, row.port);
+            }
+            continue;
+        }
+        if (!id) {
+            continue;
+        }
+        m = /^\s+Address\s+([0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4})/i.exec(line);
+        if (m && dottedMac(m[1])) {
+            const tree = res.trees.get(vlan);
+            tree[id] = {...tree[id], mac: dottedMac(m[1])};
+        } else if (/This bridge is the root/i.test(line)) {
+            stpTree(res, vlan, {'is_root': true, 'root_cost': 0});
+        } else if ((m = /^\s+Cost\s+(\d+)/i.exec(line)) && id === 'root') {
+            stpTree(res, vlan, {'is_root': false, 'root_cost': +m[1]});
+        } else if ((m = /^\s+Port\s+\d+\s+\((\S+)\)/i.exec(line)) && id === 'root') {
+            stpTree(res, vlan, {'is_root': false});
+            stpPort(res, m[1], vlan, {role: 'root'});
+        }
+    }
+    return res;
+};
+
+/**
+ * `show spanning-tree interface X`: a row per VLAN the port is in.
+ *
+ * @param {string} name the interface of the command
+ * @param {string[]} lines output
+ * @returns {object} see stpResult()
+ */
+const parseStpInterface = (name, lines) => {
+    const res = stpResult();
+    for (const line of lines2(lines)) {
+        const row = stpRow(line);
+        const vlan = row && stpVlan(row.first);
+        if (vlan !== null && row) {
+            stpPort(res, name, vlan, row.port);
+        }
+    }
+    return res;
+};
+
+/**
+ * `show spanning-tree root`: the root of each VLAN, the cost to it and the root port (none on the root itself).
+ *
+ * @param {string[]} lines output
+ * @returns {object} see stpResult()
+ */
+const parseStpRoot = lines => {
+    const res = stpResult();
+    for (const line of lines2(lines)) {
+        const m = /^(VLAN\d{1,4})\s+(\d+)\s+([0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4})\s+(\d+)\s+\d+\s+\d+\s+\d+(?:\s+(\S+))?\s*$/i
+            .exec(line);
+        const vlan = m && stpVlan(m[1]);
+        if (vlan === null || !m) {
+            continue;
+        }
+        const cost = +m[4];
+        stpTree(res, vlan, {root: {priority: +m[2], mac: dottedMac(m[3])}, 'root_cost': cost, 'is_root': !m[5] && cost === 0});
+        if (m[5]) {
+            stpPort(res, m[5], vlan, {role: 'root'});
+        }
+    }
+    return res;
+};
+
+/**
+ * `show spanning-tree blockedports`: the ports that block, by VLAN.
+ *
+ * @param {string[]} lines output
+ * @returns {object} see stpResult()
+ */
+const parseStpBlocked = lines => {
+    const res = stpResult();
+    let vlan = null;
+    for (const line of lines2(lines)) {
+        if (/^(Name|-{3,}|Number of blocked)/i.test(line.trim()) || !line.trim()) {
+            vlan = /^\s/.test(line) && line.trim() ? vlan : null;
+            continue;
+        }
+        const m = /^(\S+)\s+(.*)$/.exec(line);
+        let list = '';
+        if (m && stpVlan(m[1]) !== null) {
+            vlan = stpVlan(m[1]);
+            list = m[2];
+        } else if (vlan !== null && /^\s/.test(line)) {
+            list = line;
+        }
+        if (vlan === null) {
+            continue;
+        }
+        list.split(',').map(p => p.trim()).filter(Boolean).forEach(p => {
+            if (iosKind(iosName(p))) {
+                stpPort(res, p, vlan, {state: 'blocking'});
+            }
+        });
+    }
+    return res;
+};
+
+/**
+ * `show spanning-tree summary`: the mode, and which VLANs this bridge is the root of. The table at the end names
+ * every VLAN of the bridge, so with the whole output a VLAN missing from "Root bridge for" is not rooted here.
+ *
+ * @param {string[]} lines output
+ * @param {boolean} whole the output may be taken as complete
+ * @returns {object} see stpResult()
+ */
+const parseStpSummary = (lines, whole) => {
+    const res = stpResult();
+    const rooted = new Set();
+    const listed = new Set();
+    let inRoots = false;
+    for (const line of lines2(lines)) {
+        let m = /Switch is in (\S+) mode/i.exec(line);
+        if (m) {
+            res.mode = ({'pvst': 'pvst', 'rapid-pvst': 'rapid-pvst', 'mst': 'mst'})[m[1].toLowerCase()] || res.mode;
+            continue;
+        }
+        m = /^Root bridge for:?\s*(.*)$/i.exec(line);
+        if (m || (inRoots && /^\s+VLAN\d/i.test(line))) {
+            inRoots = true;
+            (m ? m[1] : line).split(/[\s,]+/).map(stpVlan).filter(v => v !== null).forEach(v => rooted.add(v));
+            continue;
+        }
+        inRoots = false;
+        m = /^(VLAN\d{1,4})\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s*$/i.exec(line);
+        if (m && stpVlan(m[1]) !== null) {
+            listed.add(stpVlan(m[1]));
+        }
+    }
+    rooted.forEach(v => stpTree(res, v, {'is_root': true}));
+    if (whole) {
+        listed.forEach(v => {
+            if (!rooted.has(v)) {
+                stpTree(res, v, {'is_root': false});
+            }
+        });
+    }
+    return res;
+};
+
+/**
+ * The fragment of facts from a result of the spanning tree commands.
+ *
+ * @param {object} res see stpResult()
+ * @returns {{interfaces: object[], stp: object}}
+ */
+const stpFragment = res => {
+    const interfaces = [];
+    res.ports.forEach((vlans, name) => {
+        if (iosKind(name)) {
+            interfaces.push({name, stp: {vlans}});
+        }
+    });
+    const stp = {vlans: Object.fromEntries(res.trees), complete: [...res.complete].sort((a, b) => a - b)};
+    if (res.mode) {
+        stp.mode = res.mode;
+    }
+    return {interfaces, stp};
+};
+
+/**
+ * A spanning tree command of IOS: `show spanning-tree` and its forms the facts are taken from.
+ *
+ * @param {string[]} toks tokens of the command, without `do` and the filter
+ * @returns {object|null} as recognizeIos()
+ */
+const recognizeStp = toks => {
+    const word = (t, keyword, min) => !!t && t.length >= min && keyword.startsWith(t.toLowerCase());
+    if (!word(toks[0], 'show', 2) || !word(toks[1], 'spanning-tree', 4)) {
+        return null;
+    }
+    const rest = toks.slice(2);
+    const label = 'show spanning-tree';
+    if (!rest.length) {
+        return {label, parse: (lines, whole) => stpFragment(parseStp(lines, whole))};
+    }
+    if (word(rest[0], 'vlan', 1) && rest.length === 2 && /^[\d,-]+$/.test(rest[1])) {
+        return {label, parse: (lines, whole) => stpFragment(parseStp(lines, whole))};
+    }
+    if (word(rest[0], 'active', 2) && rest.length === 1) {
+        // Only the active ports: the blocks are not complete.
+        return {label, parse: lines => stpFragment(parseStp(lines, false))};
+    }
+    if (word(rest[0], 'interface', 2) && interfaceTokens(rest, 1) && 1 + interfaceTokens(rest, 1) === rest.length) {
+        const name = iosName(rest.slice(1).join(''));
+        return {label: label + ' interface', partial: true, parse: lines => stpFragment(parseStpInterface(name, lines))};
+    }
+    if (word(rest[0], 'root', 2) && rest.length === 1) {
+        return {label: label + ' root', parse: lines => stpFragment(parseStpRoot(lines))};
+    }
+    if (word(rest[0], 'blockedports', 2) && rest.length === 1) {
+        return {label: label + ' blockedports', parse: lines => stpFragment(parseStpBlocked(lines))};
+    }
+    if (word(rest[0], 'summary', 2) && rest.length === 1) {
+        return {label: label + ' summary', parse: (lines, whole) => stpFragment(parseStpSummary(lines, whole))};
+    }
+    return null;
+};
+
 /* ---------------- parsers of the output: Linux and VPCS ---------------- */
 
 /**
@@ -605,7 +913,8 @@ const recognizeIos = text => {
             return {...def, partial: m.partial || filters.length > 0};
         }
     }
-    return null;
+    const stp = recognizeStp(toks);
+    return stp ? {...stp, partial: !!stp.partial || filters.length > 0} : null;
 };
 
 /**
@@ -699,8 +1008,12 @@ export const interpret = (kind, command, lines, paged = false) => {
         return {save: true, ok: lines.some(l => /\[OK\]/.test(l))};
     }
     const partial = cmd.partial || !!paged;
-    const parsed = cmd.parse(lines);
+    const parsed = cmd.parse(lines, !partial);
     const fragment = {interfaces: parsed.interfaces || []};
+    // The spanning tree is merged by VLAN: a VLAN the output did not show keeps what was seen of it.
+    if (parsed.stp && (Object.keys(parsed.stp.vlans).length || parsed.stp.mode)) {
+        fragment.stp = parsed.stp;
+    }
     // The lists are replaced as a whole, and only by a full output (§8.3).
     if (!partial && parsed.vlans && parsed.vlans.length) {
         fragment.vlans = parsed.vlans;
@@ -708,7 +1021,7 @@ export const interpret = (kind, command, lines, paged = false) => {
     if (!partial && parsed.routes && parsed.routes.length) {
         fragment.routes = parsed.routes;
     }
-    if (!fragment.interfaces.length && !fragment.vlans && !fragment.routes) {
+    if (!fragment.interfaces.length && !fragment.vlans && !fragment.routes && !fragment.stp) {
         return null;
     }
     return {kind, label: cmd.label, partial, fragment};
@@ -717,7 +1030,45 @@ export const interpret = (kind, command, lines, paged = false) => {
 /* ---------------- the store of what was seen, and the merge ---------------- */
 
 /** Fields of an interface a command can give. */
-const IF_FIELDS = ['admin', 'oper', 'ipv4', 'mac', 'gateway', 'switchport', 'parent'];
+const IF_FIELDS = ['admin', 'oper', 'ipv4', 'mac', 'gateway', 'switchport', 'parent', 'stp'];
+
+/**
+ * The spanning tree of a port merged by VLAN: what `seen` tells of a VLAN goes over what `base` tells of it, and the
+ * VLANs in `drop` (shown in full since) lose what `base` told.
+ *
+ * @param {object|undefined} base `stp` of the interface before
+ * @param {object|undefined} seen `stp` seen now
+ * @param {number[]} [drop] VLANs whose old entries are outdated
+ * @returns {{vlans: object}}
+ */
+const mergePortStp = (base, seen, drop = []) => {
+    const vlans = {};
+    Object.entries((base && base.vlans) || {}).forEach(([v, info]) => {
+        if (!drop.includes(+v)) {
+            vlans[v] = {...info};
+        }
+    });
+    Object.entries((seen && seen.vlans) || {}).forEach(([v, info]) => {
+        vlans[v] = {...vlans[v], ...info};
+    });
+    return {...(base || {}), vlans};
+};
+
+/**
+ * The spanning tree of a node merged by VLAN.
+ *
+ * @param {object|undefined} base `stp` of the node before
+ * @param {object} seen `stp` seen now
+ * @returns {{mode?: string, vlans: object}}
+ */
+const mergeNodeStp = (base, seen) => {
+    const vlans = {...((base && base.vlans) || {})};
+    Object.entries(seen.vlans || {}).forEach(([v, info]) => {
+        vlans[v] = {...vlans[v], ...info};
+    });
+    const mode = seen.mode || (base && base.mode);
+    return mode ? {mode, vlans} : {vlans};
+};
 
 const keyOf = name => String(name).toLowerCase();
 
@@ -783,10 +1134,24 @@ export const addSeen = (seen, nodeId, result, {at, fp}) => {
     // The deciding facts of the node changed since the last command: what was seen before is outdated.
     const rec = old && old.fp === fp
         ? {...old, ifs: {...old.ifs}, order: [...old.order]}
-        : {fp, ifs: {}, order: [], vlans: null, routes: null};
+        : {fp, ifs: {}, order: [], vlans: null, routes: null, stp: null, stpFull: []};
     rec.at = at;
     rec.kind = result.kind;
     rec.command = result.label;
+    const stp = result.fragment.stp;
+    if (stp) {
+        // A VLAN shown in full lists all its ports: what was seen of it before on the other ports is outdated.
+        const full = stp.complete || [];
+        if (full.length) {
+            rec.order.forEach(key => {
+                if (rec.ifs[key].stp) {
+                    rec.ifs[key] = {...rec.ifs[key], stp: mergePortStp(rec.ifs[key].stp, null, full)};
+                }
+            });
+            rec.stpFull = [...new Set([...(rec.stpFull || []), ...full])];
+        }
+        rec.stp = mergeNodeStp(rec.stp, stp);
+    }
     for (const frag of result.fragment.interfaces) {
         const key = keyOf(frag.name);
         const before = rec.ifs[key];
@@ -794,6 +1159,9 @@ export const addSeen = (seen, nodeId, result, {at, fp}) => {
             rec.order.push(key);
         }
         const cur = Object.assign({}, before, frag);
+        if (frag.stp) {
+            cur.stp = mergePortStp(before && before.stp, frag.stp);
+        }
         if (frag.switchport && before && before.switchport && before.switchport.mode === frag.switchport.mode) {
             // A trunk named by `show interfaces status` keeps what `show interfaces trunk` told about it.
             cur.switchport = Object.assign({}, before.switchport, frag.switchport);
@@ -910,13 +1278,15 @@ const kindOnDevice = (kind, s) => {
  * @param {object|null} known the interface in the deciding facts
  * @returns {string[]} the fields that came from the console
  */
-const applyFields = (item, s, known) => {
+const applyFields = (item, s, known, full = []) => {
     const given = [];
     for (const field of IF_FIELDS) {
         if (field === 'parent' || (s[field] === undefined && !(field === 'switchport' && s.switchport === null))) {
             continue;
         }
-        if (field === 'switchport') {
+        if (field === 'stp') {
+            item.stp = mergePortStp(known && known.stp, s.stp, full);
+        } else if (field === 'switchport') {
             if (s.switchport === null) {
                 delete item.switchport;
             } else {
@@ -968,7 +1338,7 @@ const mergeNode = (node, base, rec) => {
         }
         const known = at === undefined ? null : list[at];
         const item = known ? {...known} : {name: s.name, ...info, ...(port ? {port} : {})};
-        const given = applyFields(item, s, known);
+        const given = applyFields(item, s, known, rec.stpFull || []);
         item.seen = given;
         if (known) {
             list[at] = item;
@@ -977,7 +1347,18 @@ const mergeNode = (node, base, rec) => {
             list.push(item);
         }
     }
+    // A VLAN of the spanning tree shown in full: the ports the console did not list in it are no longer in it.
+    if (rec.stpFull && rec.stpFull.length) {
+        list.forEach((i, k) => {
+            if (i.stp && i.stp.vlans && !(Array.isArray(i.seen) && i.seen.includes('stp'))) {
+                list[k] = {...i, stp: mergePortStp(i.stp, null, rec.stpFull)};
+            }
+        });
+    }
     merged.interfaces = list;
+    if (rec.stp) {
+        merged.stp = mergeNodeStp(merged.stp, rec.stp);
+    }
     if (rec.vlans) {
         merged.vlans = rec.vlans.map(v => ({...v}));
     }

@@ -62,6 +62,11 @@ const LABEL_GROUPS = {
     'show interfaces status': ['l1', 'l2'],
     'show interfaces trunk': ['l2'],
     'show vlan brief': ['l2'],
+    'show spanning-tree': ['l2'],
+    'show spanning-tree interface': ['l2'],
+    'show spanning-tree root': ['l2'],
+    'show spanning-tree blockedports': ['l2'],
+    'show spanning-tree summary': ['l2'],
     'ip addr': ['l1', 'l3'],
     'ip route': ['routes'],
     'show ip': ['l3'],
@@ -84,7 +89,7 @@ const NODE_BASE = ['status', 'name', 'collected_at', 'error', 'seen'];
 /** Fields of a node by the group they belong to. `mac_table` has no group yet: no command shows it. */
 const NODE_FIELDS = {
     l1: [],
-    l2: ['vlans'],
+    l2: ['vlans', 'stp'],
     l3: [],
     routes: ['routes', 'router_id', 'adjacencies'],
 };
@@ -235,14 +240,14 @@ export const groupsOf = result => {
         if ('admin' in i || 'oper' in i || 'mac' in i) {
             found.add('l1');
         }
-        if ('switchport' in i) {
+        if ('switchport' in i || 'stp' in i) {
             found.add('l2');
         }
         if ('ipv4' in i || 'gateway' in i) {
             found.add('l3');
         }
     });
-    if (frag.vlans) {
+    if (frag.vlans || frag.stp) {
         found.add('l2');
     }
     if (frag.routes) {

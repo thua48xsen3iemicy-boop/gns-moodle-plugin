@@ -71,6 +71,7 @@
 | 🆕 `ip_forward` | нет | `true` / `false` — пересылает ли Linux-гость IPv4 (`net.ipv4.ip_forward`, `linux.sys/1`). Только Linux |
 | 🆕 `dns` | нет | `{ "servers": ["10.0.0.1"], "search": ["lab.local"] }` — DNS Linux-гостя по `resolv.conf` (`linux.sys/1`). За заглушкой systemd-resolved — серверы, куда она пересылает, и `"resolver": "systemd-resolved"`. Только Linux |
 | 🆕 `net_saved` | нет | сохранённая настройка сети Linux-гостя — с ней он поднимется после перезагрузки (`linux.config/1`): `{ "mechanism": "ifupdown" \| "none", "ok": true, "message"?: "…", "interfaces": [ { "name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"], "gateway"?: "10.0.0.254", "routes"?: [ { "dst": "192.168.5.0/24", "via": "10.0.0.2", "dev"?: "ens3" } ] } ] }`. `ok: false` — настройка не применится (текст ifupdown в `message`). Механизм, который слот ещё не читает (`networkmanager`, `netplan`, `networkd`) — `{ "mechanism": "…", "supported": false }`. Правила — `CONTRACTS.md` §4.6. Для автопроверок (`persistence: saved`); плагин его не рисует |
+| 🆕 `stp` | нет | связующее дерево моста по VLAN (плагин 0.23.0, сейчас только из консоли, §8.7): `{ "mode"?: "pvst" \| "rapid-pvst" \| "mst", "vlans": { "10": { "root"?: { "priority": 4106, "mac": "aa:bb:cc:00:02:00" }, "bridge"?: { … }, "is_root"?: true, "root_cost"?: 100 } } }`. Ключ — номер VLAN строкой; любое поле VLAN может отсутствовать (команда его не показала). Роли портов — в `stp` интерфейса |
 | `mac_table` | нет | таблица MAC коммутатора (§3.4). Нет поля — не собиралась; пустой `entries` — ничего не выучено |
 | `collected_at` | нет | когда факты этой ноды собраны (UTC). Нет поля — ни одного успешного сбора не было |
 | `error` | нет | последняя попытка сбора не удалась: `{ "code": "unreachable" \| "timeout" \| "stopped" \| "unsupported" \| "failed", "message": "…" }` (`failed` — команда сбора завершилась ошибкой или её вывод не разобрался; плагин показывает неизвестный код как общий текст). Факты рядом, если они есть, — **последние известные, а не текущие**: UI бледнит их и пишет «обновлено N мин назад». Ошибка сбора **не** означает `oper: down`: недоступный агент не должен рисовать ложную аварию |
@@ -97,7 +98,7 @@
 | `mirror` | `true` у порта коммутатора-«аппарата», которым студент не управляет (образ `images/linux-switch/`): состояние порта на схеме повторяет порт на другом конце кабеля (§4, L1). Ставит только сборщик, который знает это про устройство. Нет поля — порт управляется на устройстве (Cisco, Linux-хост) и в L1 читаются его собственные `admin` / `oper`. Наличие `switchport` ничего не говорит о `mirror`: у Cisco-коммутатора `switchport` есть, а `shutdown` студент делает сам |
 | `dot1q` | у `subif`: тег VLAN |
 | `vlan` | у `svi`: номер VLAN |
-| `stp` | `{ "state": "forwarding" \| "blocking" \| …, "role": "root" \| "designated" \| … }` |
+| `stp` | `{ "state": "forwarding" \| "blocking" \| …, "role": "root" \| "designated" \| … }` — одно дерево на все VLAN порта. 🆕 По VLAN (PVST, плагин 0.23.0): `{ "vlans": { "10": { "role": "alternate", "state": "blocking", "cost": 100 } } }`; запись VLAN важнее общего `state`/`role`. `role`: `root`, `designated`, `alternate`, `backup`, `master`, `disabled`; `state`: `forwarding`, `blocking`, `listening`, `learning`, `disabled`, `broken` (несогласованность, `BKN*`) |
 | `ipv4` | список адресов с маской: `["10.0.12.1/30"]` |
 | `gateway` | шлюз по умолчанию (у хостов) |
 | `ospf` | `{ "area": "0", "passive": true }` — интерфейс участвует в OSPF |
@@ -296,7 +297,7 @@
 - ~~Доставка: Moodle забирает снимок сервер-сервер, кэширует (MUC) и отдаёт странице через external function
   раз в ~30 с; кнопка «обновить сейчас». Права — только на сервере.~~ Сделано в плагине 0.6.0 (§6).
 - Тексты находок в `facts.js` и таблиц в `details.js` — всё ещё русские литералы; перенести в языковые строки.
-- IPv6, VRF, port-channel (LACP), роли STP на схеме, BGP.
+- IPv6, VRF, port-channel (LACP), BGP. Роли STP на схеме — из консоли (§8.7); живой источник без консоли (BPDU на линках) — потом.
 - Слой L4: ACL, NAT, сервисы — скорее наложение и таблица, чем отдельная схема.
 - Эталонные факты в описании лабы и режим «показать расхождения» (кому — решает автор лабы).
 - Лента времени: ведёшь пальцем по истории и видишь, какие адреса были назначены и что было неверно. Не проработана;
@@ -346,6 +347,11 @@ IOS — `^[A-Za-z0-9._-]+(\([A-Za-z0-9-]+\))?[>#] ?$`; Linux — строка о
 | IOS | `show interfaces status` | `connected` → `admin: up, oper: up`; `notconnect`, `err-disabled` → `admin: up, oper: down`; `disabled` → `admin: down`. Колонка `Vlan`: число → `switchport: {mode: access, vlan}`; `routed` → без `switchport`; `trunk` → `mode: trunk`, `allowed`/`native` из `show interfaces trunk` или из решающих фактов, иначе `allowed: "all"`, `native: 1` |
 | IOS | `show interfaces trunk` | порты в транке: `switchport: {mode: trunk, native, allowed}` (раздел `Vlans allowed on trunk`) |
 | IOS | `show vlan brief` | `vlans` (`id`, `name`); порты из колонки `Ports` → `switchport: {mode: access, vlan}` |
+| IOS | 🆕 `show spanning-tree [vlan N[,M-K]] [active]` | по блокам `VLANnnnn`: `stp` ноды (`root`, `bridge`, `is_root`, `root_cost`, `mode`) и `stp.vlans[N]` портов (`role`, `state`, `cost`); блоки MST пропускаются. §8.7 |
+| IOS | 🆕 `show spanning-tree interface X` | `stp.vlans` порта X по строкам `VLANnnnn Role Sts …`; вывод частичный |
+| IOS | 🆕 `show spanning-tree root` | `root`, `root_cost`, `is_root` по VLAN; корневой порт → `role: root` |
+| IOS | 🆕 `show spanning-tree blockedports` | `state: blocking` у перечисленных портов по VLAN |
+| IOS | 🆕 `show spanning-tree summary` | `mode`; `is_root: true` у VLAN из `Root bridge for`, а по полному выводу `false` у остальных VLAN таблицы |
 | Linux | `ip a`, `ip addr [show]`, `ip -c a`, `ip -4 a`, `ip -br a`, `ip a show dev X` | интерфейсы: `name`, `mac` (`link/ether`), `admin` (флаг `UP`), `oper` (флаг `LOWER_UP`, в `-br` — колонка состояния), `ipv4` (`inet A/N`) |
 | Linux | `ip route`, `ip r` | `routes` (§3.3) |
 | VPCS | `show ip`, `show ip all` | `eth0`: `ipv4`, `gateway`, `mac` |
@@ -357,7 +363,7 @@ IOS — `^[A-Za-z0-9._-]+(\([A-Za-z0-9-]+\))?[>#] ?$`; Linux — строка о
 имени порта GNS3 `Ethernet{adapter}/{port}`; у Linux — по MAC (адаптер N = `mac_address` ноды + N, как у `linux.net`).
 Не сопоставилось — без `port` (интерфейс только в сведениях о ноде, не на кабеле, §3.1).
 
-Не в первом этапе: соседства OSPF (`show ip ospf neighbor`, нужен `router_id`), таблица MAC (`show mac address-table`),
+`show spanning-tree detail` и `bridge` не разбираются. Не в первом этапе: соседства OSPF (`show ip ospf neighbor`, нужен `router_id`), таблица MAC (`show mac address-table`),
 `show running-config`, Windows. Их — тем же механизмом позже.
 
 ### 8.3. Как увиденное ложится на схему
@@ -448,3 +454,29 @@ IOS — `^[A-Za-z0-9._-]+(\([A-Za-z0-9-]+\))?[>#] ?$`; Linux — строка о
 какой группе — команды, которая её показывает, пока нет.
 В этих режимах увиденное работает и у сессии без `facts` (решающих фактов нет, значения берутся только из консолей): иначе
 в тумане кабели не открывались бы никогда.
+
+### 8.7. Связующее дерево из консоли (0.23.0)
+
+Состояние STP вычисляется на устройстве и в сохранённую конфигурацию не попадает: решающие факты IOL его не знают.
+Поэтому оно есть на схеме, только пока студент его посмотрел (`show spanning-tree` и формы из §8.2), и уходит вместе с
+остальным увиденным (§8.3).
+
+- **Слияние по VLAN.** `stp` ноды и `stp.vlans` портов сливаются по номеру VLAN: `show spanning-tree vlan 10` не стирает
+  виденное о VLAN 1, а `show spanning-tree root` дополняет блок `show spanning-tree`, а не заменяет его.
+- **Полный блок VLAN** (вывод без фильтра и без `--More--`) перечисляет все порты дерева: порт, которого в нём больше нет
+  (линк упал, порт ушёл из VLAN), теряет запись этого VLAN. Строка без своего заголовка `VLANnnnn` (`| include BLK`) ничего не даёт.
+- **Слой L2.** Пилюля VLAN корневого моста получает метку `root`; у конца линии VLAN, где порт коммутатора не пересылает
+  (`blocking`, `listening`, `disabled`, `broken`), — знак ⊘ поперёк линии рядом с портом, а сама линия пунктирная.
+  Подсказка линии — роли и состояния обоих концов (`SW3 Ethernet0/1: Altn BLK`). Ничего не угадывается по топологии:
+  нет данных — нет знаков.
+- **Карточка.** Колонка STP таблицы портов L2 — `VLAN 1: Altn BLK · VLAN 10: Root FWD`; раздел «STP» — корень и стоимость
+  до него по VLAN (в карточке VLAN-пилюли — только этот VLAN).
+- **Режимы `seen`/`fog`.** `stp` ноды и интерфейса — группа `l2`; команды `show spanning-tree …` открывают `l2`.
+
+Модули: `consolefacts.js` (`recognizeStp`, `parseStp*`, слияние), `facts.js` (`portStp`, `stpBlocks`, `stpRoot`, `stpText`),
+`canvasview.js` (`markStp`, метка `root`), `canvasfacts.js` (`stpSection`). Проверки — `devtools/check_consolefacts.mjs`
+и шаг `show spanning-tree` в `devtools/ui-harness/check_seen.js`.
+
+Проверить на стенде (владелец): три IOL L2 треугольником, `show spanning-tree` на каждом — на L2 у одного коммутатора
+метки `root`, на одной линии VLAN 1 знак ⊘ у порта `Altn BLK`; `shutdown` корневого порта и повторный `show spanning-tree`
+на том же коммутаторе — знак переезжает. Сверить вывод IOL с образцами в `check_consolefacts.mjs` (столбцы, `BKN*`, тип `P2p Edge`).

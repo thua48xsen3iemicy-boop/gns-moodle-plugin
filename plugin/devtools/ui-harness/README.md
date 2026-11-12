@@ -9,7 +9,8 @@
 (`stubs/`) и шлюз консолей (`server.js`, WebSocket `/gw/console/<node_id>`): эхо ввода и приглашение по виду устройства — Cisco IOS
 (IOU, маршрутизаторы) `R1#`, VPCS `PC1> `, остальные узлы — Linux `user@pc1:~$ `; `reload` закрывает консоль кодом 4000.
 Ответы подобраны так, чтобы слой «увидено в консоли» (`docs/live-state.md` §8) было что показать сразу: `show ip interface
-brief`, `show interfaces status` (порт Et0/2 коммутатора выключен), `show vlan brief` (есть VLAN 20, которого нет в фактах),
+brief`, `show interfaces status` (порт Et0/2 коммутатора выключен), `show vlan brief` (есть VLAN 20, которого нет в фактах), `show spanning-tree` (SW1 — корень VLAN 1 и 10, порт Et0/2
+показан заблокированным в VLAN 10, хотя петли в демо нет),
 `write memory` / `wr` с `[OK]`, у Linux `ip a`, `ip -br a`, `ip r` и у VPCS `show ip` с другим адресом, чем в фактах.
 
 Canvas проверяется скриптом `node check_canvas.js [--min]` после сборки. Он запускает сервер на 18129,

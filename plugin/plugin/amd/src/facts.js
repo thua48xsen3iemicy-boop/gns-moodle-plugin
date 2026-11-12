@@ -63,7 +63,9 @@ function indexFacts(m, facts){
       // No `mac_table` (or one without a list) means "not collected", which is not the same as an empty table.
       macs: f.mac_table && typeof f.mac_table === "object" && Array.isArray(f.mac_table.entries) ? f.mac_table : null,
       // Set by consolefacts.mergeSeen(): when and by which command the student saw some of these facts in a console.
-      seen: f.seen && typeof f.seen === "object" ? f.seen : null };
+      seen: f.seen && typeof f.seen === "object" ? f.seen : null,
+      // Spanning tree of the bridge by VLAN (root, this bridge, is it the root); its ports have it in `stp` too.
+      stp: f.stp && typeof f.stp === "object" && f.stp.vlans && typeof f.stp.vlans === "object" ? f.stp : null };
     (ifs || []).forEach(i => {
       rec.byName.set(i.name, i);
       if (i.port) fx.byPort.set(n.id + "|" + i.port.adapter + "/" + i.port.port, i);
@@ -195,6 +197,35 @@ export function endVertex(nodeId, i, w, t){
 }
 /* транк всегда может слать native без тега — это не ошибка, если на другом конце его никто не ждёт */
 const sends = (w, t) => w.set.has(t) && !(t === "u" && w.sw && w.sp.mode === "trunk");
+/**
+ * What a port does in the spanning tree of a VLAN: `stp.vlans[vlan]`, or the one tree of a bridge that has no
+ * per-VLAN trees (`stp: {state, role}`, docs/live-state.md §3.1). Null when nothing is known.
+ */
+export const portStp = (i, vlan) => {
+  const stp = i && i.stp;
+  if (!stp || typeof stp !== "object") return null;
+  if (stp.vlans && typeof stp.vlans === "object" && stp.vlans[vlan]) return stp.vlans[vlan];
+  return stp.state || stp.role ? { state: stp.state, role: stp.role } : null;
+};
+/** The port forwards nothing in this tree (blocking, listening, broken …), as STP decided. */
+export const stpBlocks = p => !!p && !!p.state && !["forwarding", "learning"].includes(p.state);
+/** The bridge is the root of the tree of the VLAN: true, false, or null when not known. */
+export const stpRoot = (f, vlan) => {
+  const t = f && f.stp && f.stp.vlans && f.stp.vlans[vlan];
+  return t && typeof t.is_root === "boolean" ? t.is_root : null;
+};
+const STP_SHORT = { root: "Root", designated: "Desg", alternate: "Altn", backup: "Back", master: "Mstr", disabled: "Dis",
+  forwarding: "FWD", blocking: "BLK", listening: "LIS", learning: "LRN", broken: "BKN" };
+/** Role and state of a port in the IOS notation: "Altn BLK". */
+export const stpShort = p => [p.role, p.state].filter(Boolean).map(x => STP_SHORT[x] || x).join(" ");
+/** The spanning tree of a port for a table: "VLAN 1: Altn BLK · VLAN 10: Desg FWD", or "—". */
+export const stpText = i => {
+  const stp = i && i.stp;
+  if (!stp || typeof stp !== "object") return "—";
+  const per = stp.vlans && typeof stp.vlans === "object" ? Object.keys(stp.vlans).sort((a, b) => a - b) : [];
+  if (per.length) return per.map(v => `VLAN ${v}: ${stpShort(stp.vlans[v])}`).join(" · ");
+  return stp.state || stp.role ? stpShort(stp) : "—";
+};
 export function switchVlans(f){
   const out = new Set(f.vlans.map(v => +v.id));
   (f.ifs || []).forEach(i => {

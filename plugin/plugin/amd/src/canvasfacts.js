@@ -21,7 +21,7 @@
  * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
-import {endIf, endState, macTable} from 'mod_gns3lab/facts';
+import {endIf, endState, macTable, stpText} from 'mod_gns3lab/facts';
 import {fmtFilters} from 'mod_gns3lab/model';
 import {linkDirections} from 'mod_gns3lab/canvasmodel';
 
@@ -108,6 +108,8 @@ export const objectData = (s, selected, layer, panel = 'ports') => {
     const guests = s.statusKnown && n.cat === 'hypervisor' && (n.state === 'open' || !s.reveal) && s.guests?.[n.id];
     if (guests) data.sections.push({title: t('guests'), heads: ['ID', t('name'), t('type'), t('state')], rows: guests.items.map(g => [g.vmid, g.name, g.type, g.status])});
     if (sil || !groupOpen(s, n, layer)) return {...data, rows: [], heads: [], empty: s.s('ui_fog_unexplored')};
+    const tree = v && layer === 'l2' && stpSection(s, f, v.vlan);
+    if (tree) data.sections.push(tree);
     if (v && layer === 'l2' && panel !== 'mac') return {...data, kind: 'L2 / ' + t('vlan_object'), title: n.name + ' · VLAN ' + v.vlan,
         heads: [t('node'), t('interface'), 'IPV4'], rows: memberRows(v.domain?.members || []),
         empty: t('disconnected'), related: [{kind: 'node', id: n.id, label: t('physical')}], foot: v.domain?.vlans.length > 1 ? t('vlan_mixed') : t('vlan_foot')};
@@ -132,7 +134,9 @@ export const objectData = (s, selected, layer, panel = 'ports') => {
         });
     } else if (layer === 'l2') {
         data.heads = [t('port'), t('config'), 'STP'];
-        data.rows = ints.filter(i => i.kind !== 'loopback').map(i => [i.name, cell(i, 'switchport', switchportText(s, i)), i.stp?.state || '—']);
+        data.rows = ints.filter(i => i.kind !== 'loopback').map(i => [i.name, cell(i, 'switchport', switchportText(s, i)), cell(i, 'stp', stpText(i))]);
+        const trees = stpSection(s, f);
+        if (trees) data.sections.push(trees);
         ints.forEach(i => {
             const d = s.der?.l2.domFor(n.id, i);
             if (d) data.related.push({kind: 'vlan', id: d.id, label: i.name + ' · ' + d.label});
@@ -146,6 +150,24 @@ export const objectData = (s, selected, layer, panel = 'ports') => {
     }
     return data;
 };
+
+/**
+ * The spanning trees of a bridge as the console showed them: per VLAN the root and the cost to it.
+ *
+ * @param {object} s stage
+ * @param {object|undefined} f facts of the node (facts.js index)
+ * @param {number} [vlan] only this VLAN
+ * @returns {object|null} a section of the card
+ */
+function stpSection(s, f, vlan) {
+    const trees = f?.stp ? Object.entries(f.stp.vlans).filter(([v]) => vlan === undefined || Number(v) === Number(vlan))
+        .sort((a, b) => a[0] - b[0]) : [];
+    if (!trees.length) return null;
+    const id = x => x && (x.priority !== undefined || x.mac) ? [x.priority, x.mac].filter(v => v !== undefined).join(' ') : '?';
+    return {title: 'STP' + (f.stp.mode ? ' · ' + f.stp.mode : ''), heads: ['VLAN', 'Root ID', 'Cost'],
+        rows: trees.map(([v, x]) => [v, x.is_root === true ? s.s('ui_canvas_stp_self') + (x.root || x.bridge ? ' · ' + id(x.root || x.bridge) : '')
+            : id(x.root), x.root_cost ?? '?'])};
+}
 
 function switchportText(s, i) {
     if (!i) return s.s('ui_canvas_unknown');
