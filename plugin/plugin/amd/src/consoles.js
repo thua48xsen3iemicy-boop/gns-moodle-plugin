@@ -63,6 +63,15 @@ const FONT_WHEEL_STEP = 50;
 /** Longest text that Paste sends to a screen, characters: it goes out in one frame, and the gateway takes 64 KB at most. */
 const PASTE_MAX = 8192;
 
+/**
+ * With pasting turned off, input that arrives from the terminal in one piece longer than this many characters is
+ * taken for a paste and dropped. A key gives one character, a word picked on a phone keyboard a few more.
+ */
+const TYPED_MAX = 16;
+
+/** The marker a terminal in bracketed paste mode puts before pasted text. */
+const PASTE_MARK = '\x1b[200~';
+
 /** The kinds of connection state that mean the console works now (a green dot). */
 const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: 'off', failed: 'bad', idle: 'wait', closed: 'off'};
 
@@ -391,7 +400,8 @@ class Con {
             if (this.conn && this.conn.ctrlAltDel()) this.focus();
             else o.toast(fill(o.s('ui_not_connected'), this.n.name));
         });
-        button(o.s('consolevncpaste'), o.s('consolevncpastehint'), () => this.pasteText());
+        // The only way of the clipboard to a screen; an activity may turn it off.
+        if (!o.nopaste) button(o.s('consolevncpaste'), o.s('consolevncpastehint'), () => this.pasteText());
     }
 
     /** Puts the text of the clipboard of the browser into the clipboard of the node. */
@@ -463,6 +473,7 @@ class Con {
         this.term.loadAddon(this.fit);
         this.term.open(this.viewport);
         this.addKeyHandler();
+        this.blockPaste();
         this.addPortLinks();
         this.term.onWriteParsed(() => this.output());
         this.term.onData(() => this.activity('in'));
@@ -482,12 +493,49 @@ class Con {
         this.conn = new ConsoleConnection({
             api: o.api, cmid: o.cmid, userid: o.userid, nodeId: this.n.id, term: this.term, strings: o.strings,
             nodeStatus: () => o.nodeStatus(this.n.id),
-            transform: data => o.applyCtrl(data),
+            transform: data => (this.pasted(data) ? '' : o.applyCtrl(data)),
             paced: CISCO_TYPES.includes(this.n.type),
             onState: state => this.setState(state),
         });
         this.term.write(note(o.s('consoleconnecting')));
         this.conn.connect();
+    }
+
+    /**
+     * With pasting turned off in the activity, keeps the clipboard and dragged text away from the terminal.
+     *
+     * xterm.js takes a paste (Ctrl+V, Shift+Insert, the menu of the browser, the middle button) from the paste event
+     * of its text area, so the event stops here, on the way down. This holds a student back and no more: the page is
+     * in their hands.
+     */
+    blockPaste() {
+        const o = this.owner;
+        if (!o.nopaste) return;
+        const refuse = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            o.toast(o.s('consolenopaste'));
+        };
+        this.viewport.addEventListener('paste', refuse, true);
+        this.viewport.addEventListener('drop', refuse, true);
+        this.viewport.addEventListener('dragover', event => event.preventDefault(), true);
+    }
+
+    /**
+     * Whether input of the terminal is a paste that the activity does not allow: the second line after blockPaste().
+     *
+     * Typing arrives a character at a time. What the terminal itself reports (arrows, function keys, the mouse)
+     * is longer but starts with Esc. Snippets and the key strip do not come this way.
+     *
+     * @param {string} data what xterm.js produced
+     * @returns {boolean}
+     */
+    pasted(data) {
+        const o = this.owner;
+        if (!o.nopaste) return false;
+        const paste = data.includes(PASTE_MARK) || (data[0] !== '\x1b' && [...data].length > TYPED_MAX);
+        if (paste) o.toast(o.s('consolenopaste'));
+        return paste;
     }
 
     /** Ctrl+C with a selection copies; Ctrl+Shift+6 sends the Cisco break sequence. */
@@ -651,13 +699,14 @@ export class Consoles {
      * @param {number} options.cmid course module id
      * @param {number} options.userid whose lab, 0 for the current user
      * @param {boolean} options.readonly observer: input is disabled
+     * @param {boolean} [options.nopaste] the activity does not let the clipboard into the consoles
      * @param {Function} options.nodeStatus async nodeId => {status, stale} from a fresh session state
      * @param {Function} options.toast shows a short message
      * @param {Function} [options.onSeen] called with {nodeId, kind, command, lines, partial} for a command seen in a console
      * @param {Function} [options.onScreen] called with the node id when the screen of a node answers (a fog opens the node)
      * @param {Function} [options.api] the transport of web service calls, passed to the consoles
      */
-    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}, api}) {
+    constructor(root, {stage, strings, cmid, userid, readonly, nopaste = false, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}, api}) {
         this.api = api;
         this.root = root;
         this.stage = stage;
@@ -665,6 +714,7 @@ export class Consoles {
         this.cmid = cmid;
         this.userid = userid;
         this.readonly = readonly;
+        this.nopaste = nopaste;
         this.nodeStatus = nodeStatus;
         this.toast = toast;
         this.onSeen = onSeen;

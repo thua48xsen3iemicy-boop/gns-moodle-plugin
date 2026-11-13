@@ -92,6 +92,7 @@ $string['consoleneedsrunning'] = 'Start the lab to open device consoles.';
 $string['consolenodestopped'] = 'The node is stopped. The console reconnects when the node starts again.';
 $string['consolenodesunknown'] = 'The lab does not report node states right now.';
 $string['consolenone'] = 'This device has no console.';
+$string['consolenopaste'] = 'Pasting is turned off in this lab';
 $string['consolenotsupported'] = 'This kind of console cannot be opened.';
 $string['consolereconnect'] = 'Reconnect';
 $string['consolereconnected'] = 'Reconnected. Press Enter to get a prompt.';
@@ -340,6 +341,10 @@ $string['modulenameplural'] = 'GNS3 labs';
 $string['nodenotfound'] = 'This device has not been found yet. Find it by the cables of the devices you have already opened.';
 $string['nodenotinsession'] = 'This device is not part of the running lab.';
 $string['nolabref'] = 'The activity has no reference lab.';
+$string['nopaste'] = 'No pasting into consoles';
+$string['nopaste_help'] = 'Students cannot paste text from the clipboard into the consoles of the lab: they type the commands themselves. The command snippets under a console keep working. Teachers are not limited.
+
+The page of the lab enforces this in the browser, so it stops a casual paste and not a determined student.';
 $string['nosession'] = 'There is no lab session to stop.';
 $string['openlab'] = 'Open the lab';
 $string['pluginadministration'] = 'GNS3 lab administration';
