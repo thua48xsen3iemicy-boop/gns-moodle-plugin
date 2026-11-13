@@ -38,6 +38,8 @@ async def qga_exec(
     if node.get("node_type") != "qemu" or node.get("status") != "started":
         raise HTTPException(409, "QGA command requires a running QEMU node")
     lifecycle = get_lifecycle(request)
+    if not lifecycle.has_guest_agent(str(project_id), str(node_id)):
+        raise HTTPException(409, "The node has no guest agent")
 
     async def run():
         # The command is a RouterOS script on a RouterOS guest, a /bin/sh command elsewhere (CONTRACTS 4.2).
@@ -67,6 +69,8 @@ async def enable_serial_getty(request: Request, project_id: UUID, node_id: UUID)
         )
     if node.get("node_type") != "qemu" or node.get("status") != "started":
         raise HTTPException(409, "Serial getty setup requires a running QEMU node")
+    if not get_lifecycle(request).has_guest_agent(str(project_id), str(node_id)):
+        raise HTTPException(409, "The node has no guest agent")
     qga = get_lifecycle(request).qga
 
     async def enable():

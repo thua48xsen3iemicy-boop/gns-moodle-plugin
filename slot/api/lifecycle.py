@@ -495,6 +495,15 @@ class Lifecycle:
         task.add_done_callback(self.tasks.discard)
         return self.present(op, compact=True)
 
+    def has_guest_agent(self, pid, node_id):
+        """False only for a node whose ticket says `qga: false` (CONTRACTS.md 4.2); unknown nodes are asked as before."""
+        lab = self.get("lab", pid) or {}
+        names = {n.get("node_id"): n.get("name") for n in lab.get("nodes", [])}
+        for spec in (lab.get("ticket") or {}).get("nodes", []):
+            if spec.get("name") == names.get(node_id):
+                return spec.get("qga", True) is not False
+        return True
+
     def submit_shutdown(self, pid, node_id, timeout, key, admission):
         fingerprint = hashlib.sha256(json.dumps(["shutdown", pid, node_id, timeout]).encode()).hexdigest()
         dedup = key or fingerprint
@@ -530,6 +539,8 @@ class Lifecycle:
             async with asyncio.timeout(timeout):
                 node = await self.api("GET", f"projects/{pid}/nodes/{node_id}")
                 if node.get("status") != "stopped":
+                    if not self.has_guest_agent(pid, node_id):
+                        raise LabError("GUEST_AGENT_UNAVAILABLE", "The node has no guest agent")
                     try:
                         await self.qga.call(node_id, "guest-shutdown", {"mode": "powerdown"},
                                             priority=Priority.LIFECYCLE, timeout=min(10, timeout), max_wait=timeout)
@@ -685,7 +696,8 @@ class Lifecycle:
         # console; it is awaited here only when the initial provisioning commands need it.
         # Tickets stored before NodeSpec.console existed have no such key: they are telnet.
         vnc = spec.get("console") == "vnc"
-        qga_needed = spec["kind"] == "qemu" and (
+        # A node without a guest agent (NodeSpec.qga false) is ready when its console port accepts a connection.
+        qga_needed = spec["kind"] == "qemu" and spec.get("qga", True) is not False and (
             not vnc or bool(initial and spec.get("provisioning"))
         )
         while True:
@@ -701,7 +713,7 @@ class Lifecycle:
                 routeros = spec["kind"] == "qemu" and qga_needed and (
                     await self.guest_family(node["node_id"]) == "routeros"
                 )
-                if spec["kind"] == "qemu" and not vnc and not routeros:
+                if qga_needed and not vnc and not routeros:
                     # Enabled on resume too: the console is the slot's, not the student's work, and a guest
                     # powered off right after its first provisioning can come back without the unit's link.
                     # A check alone would then fail every later start of the project.
