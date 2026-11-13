@@ -347,7 +347,7 @@ IOS — `^[A-Za-z0-9._-]+(\([A-Za-z0-9-]+\))?[>#] ?$`; Linux — строка о
 | IOS | `show interfaces status` | `connected` → `admin: up, oper: up`; `notconnect`, `err-disabled` → `admin: up, oper: down`; `disabled` → `admin: down`. Колонка `Vlan`: число → `switchport: {mode: access, vlan}`; `routed` → без `switchport`; `trunk` → `mode: trunk`, `allowed`/`native` из `show interfaces trunk` или из решающих фактов, иначе `allowed: "all"`, `native: 1` |
 | IOS | `show interfaces trunk` | порты в транке: `switchport: {mode: trunk, native, allowed}` (раздел `Vlans allowed on trunk`) |
 | IOS | `show vlan brief` | `vlans` (`id`, `name`); порты из колонки `Ports` → `switchport: {mode: access, vlan}` |
-| IOS | 🆕 `show spanning-tree [vlan N[,M-K]] [active]` | по блокам `VLANnnnn`: `stp` ноды (`root`, `bridge`, `is_root`, `root_cost`, `mode`) и `stp.vlans[N]` портов (`role`, `state`, `cost`); блоки MST пропускаются. §8.7 |
+| IOS | 🆕 `show spanning-tree [vlan N[,M-K]] [active]` (с 0.25.1 любое сокращение от `sh sp`: IOS в пользовательском режиме принимает `show spa`) | по блокам `VLANnnnn`: `stp` ноды (`root`, `bridge`, `is_root`, `root_cost`, `mode`) и `stp.vlans[N]` портов (`role`, `state`, `cost`); блоки MST пропускаются. §8.7 |
 | IOS | 🆕 `show spanning-tree interface X` | `stp.vlans` порта X по строкам `VLANnnnn Role Sts …`; вывод частичный |
 | IOS | 🆕 `show spanning-tree root` | `root`, `root_cost`, `is_root` по VLAN; корневой порт → `role: root` |
 | IOS | 🆕 `show spanning-tree blockedports` | `state: blocking` у перечисленных портов по VLAN |

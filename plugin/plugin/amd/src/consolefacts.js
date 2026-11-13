@@ -712,7 +712,7 @@ const stpFragment = res => {
  */
 const recognizeStp = toks => {
     const word = (t, keyword, min) => !!t && t.length >= min && keyword.startsWith(t.toLowerCase());
-    if (!word(toks[0], 'show', 2) || !word(toks[1], 'spanning-tree', 4)) {
+    if (!word(toks[0], 'show', 2) || !word(toks[1], 'spanning-tree', 2)) {
         return null;
     }
     const rest = toks.slice(2);

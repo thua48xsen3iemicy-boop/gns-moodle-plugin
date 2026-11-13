@@ -827,7 +827,9 @@ Et0/1               Root FWD 100       128.2    P2p
 `;
 
 check('recognize IOS: the spanning tree commands', () => {
-    for (const cmd of ['show spanning-tree', 'sh span', 'SH SPANNING', 'do sh spann vlan 1', 'sh span vl 1,10-20', 'sh span active']) {
+    // IOS takes any unambiguous prefix: `show spa` in the user mode is the whole command.
+    for (const cmd of ['show spanning-tree', 'show spa', 'sh sp', 'sh span', 'SH SPANNING', 'do sh spann vlan 1', 'sh span vl 1,10-20',
+        'sh span active']) {
         assert.equal(rec('ios', cmd), 'show spanning-tree', cmd);
     }
     assert.equal(rec('ios', 'sh span int e0/1'), 'show spanning-tree interface (partial)');
@@ -836,7 +838,7 @@ check('recognize IOS: the spanning tree commands', () => {
     assert.equal(rec('ios', 'sh span blockedports'), 'show spanning-tree blockedports');
     assert.equal(rec('ios', 'sh span summ'), 'show spanning-tree summary');
     assert.equal(rec('ios', 'sh span | i BLK'), 'show spanning-tree (partial)');
-    for (const cmd of ['sh spa', 'sh span detail', 'sh span vlan', 'sh span int', 'spanning-tree vlan 1 priority 4096']) {
+    for (const cmd of ['sh s', 'sh span detail', 'sh span vlan', 'sh span int', 'spanning-tree vlan 1 priority 4096']) {
         assert.equal(rec('ios', cmd), null, cmd);
     }
 });
@@ -939,6 +941,48 @@ check('facts: a port blocked by STP, the root of a VLAN, the text of the card', 
     assert.equal(stpText(e01), 'VLAN 1: Altn BLK · VLAN 10: Root FWD');
     assert.deepEqual(portStp({stp: {state: 'blocking', role: 'alternate'}}, 5), {state: 'blocking', role: 'alternate'}, 'one tree for all VLANs');
     assert.equal(stpText({name: 'x'}), '—');
+});
+
+const IOL_STP_RSTP = `
+VLAN0001
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    32769
+             Address     aabb.cc00.0100
+             Cost        100
+             Port        1 (Ethernet0/0)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     aabb.cc00.0200
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Et0/0               Root FWD 100       128.1    P2p 
+Et0/1               Desg FWD 100       128.2    P2p 
+Et0/2               Desg FWD 100       128.3    P2p 
+Et0/3               Desg FWD 100       128.4    P2p 
+
+`;
+
+check('watch IOS: the user mode, lines redrawn by Tab, syslog between commands (a session of IOL L2)', async() => {
+    const block = crlf(IOL_STP_RSTP);
+    const events = await play('ios', ['Switch>', PAUSE, 'sh\r\nSwitch>show sp\r\nSwitch>show spa\r\nSwitch>show spa\r\n', block, 'Switch>', PAUSE,
+        '\r\nNo startup-config, starting autoinstall/pnp/ztp...\r\n\r\nSwitch>', PAUSE,
+        'en\r\nSwitch>enable \r\nSwitch#', PAUSE,
+        'sh\r\nSwitch#show \r\n*Nov 13 08:53:44.723: %PNP-6-PNP_SAVING_TECH_SUMMARY: Saving PnP tech summary\r\nSwitch#show sp\r\n' +
+        'Switch#show spanning-tree \r\n*Nov 13 08:53:45.253: %PNP-6-PNP_DISCOVERY_STOPPED: PnP Discovery stopped (Config Wizard)\r\n' +
+        'Switch#show spanning-tree \r\n', block, 'Switch#'], {rows: 60});
+    const read = events.map(e => interpret(e.kind, e.command, e.lines, e.partial)).filter(Boolean);
+    assert.equal(read.length, 2, JSON.stringify(events.map(e => e.command)));
+    for (const res of read) {
+        assert.equal(res.label, 'show spanning-tree');
+        assert.equal(res.fragment.stp.mode, 'rapid-pvst');
+        assert.deepEqual(res.fragment.stp.vlans[1].root, {priority: 32769, mac: 'aa:bb:cc:00:01:00'});
+        assert.equal(ifc(res, 'Ethernet0/0').stp.vlans[1].role, 'root');
+        assert.equal(ifc(res, 'Ethernet0/3').stp.vlans[1].state, 'forwarding');
+    }
 });
 
 for (const [name, fn] of queue) {
