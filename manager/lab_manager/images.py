@@ -16,6 +16,9 @@ member of a segment. `preconfig` in public() says whether it can.
 random_ifnames (qemu with a /bin/sh net_config only): the guest can take random interface names (ifnames.py), so the
 lab editor offers the teacher a checkbox for nodes of the image. public() carries `random_ifnames: true` then.
 
+extra_disks (qemu only): the teacher may give a node of the image additional blank disks (node field `disks`,
+CONTRACTS 2.6 and 4.2). public() then carries how many and how large; the numbers are the manager's, not the catalog's.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -33,6 +36,8 @@ PORTS_PER_ADAPTER = {"iou": 4, "qemu": 1, "vpcs": 1}
 DEFAULT_SYMBOLS = {"iou": ":/symbols/router.svg", "qemu": ":/symbols/computer.svg",
                    "vpcs": ":/symbols/vpcs_guest.svg"}
 MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")  # netconfig.MECHANISMS: /bin/sh guests
+MAX_EXTRA_DISKS = 3  # GNS3 2.2.61 has hda..hdd, hda is the image
+EXTRA_DISK_GB = {"default": 1, "min": 1, "max": 20}
 VPCS_MEMORY_MB = 32  # Counted for the CT size; VPCS has no memory setting
 
 
@@ -85,6 +90,7 @@ class Image(Strict):
     adapters: Range | None = None
     capture: bool | None = None
     random_ifnames: bool = False
+    extra_disks: bool = False
     uplink_port: int | None = Field(default=None, strict=True, ge=0, le=15)
     # What a node of the image is beyond its kind (NodeSpec.role, CONTRACTS 4.2): "switch" is the Linux switch,
     # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
@@ -116,6 +122,8 @@ class Image(Strict):
             raise ValueError("net_config is for qemu only")
         if self.random_ifnames and (self.kind != "qemu" or self.net_config not in MECHANISMS):
             raise ValueError("random_ifnames needs qemu and net_config ifupdown, networkmanager, netplan or networkd")
+        if self.extra_disks and (self.kind != "qemu" or self.uplink_port is not None):
+            raise ValueError("extra_disks is for qemu images without uplink_port")
         if self.console_type == "vnc" and self.kind != "qemu":
             raise ValueError("console_type vnc is for qemu only")  # CONTRACTS 2.6
         if self.uplink_port is not None:
@@ -159,6 +167,7 @@ class Image(Strict):
             # The plugin picks console snippets by it; only RouterOS images carry the field (CONTRACTS 2.6).
             **({"guest": "routeros"} if self.net_config == "routeros" else {}),
             **({"random_ifnames": True} if self.random_ifnames else {}),
+            **({"extra_disks": {"max": MAX_EXTRA_DISKS, "size_gb": dict(EXTRA_DISK_GB)}} if self.extra_disks else {}),
             **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }
 

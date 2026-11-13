@@ -37,7 +37,7 @@ async def test_info_images_and_site_limits(tmp_path, dsn):
         info = (await env.client.get("/api/v1/info")).json()
         assert {"images", "lab_definitions"} <= set(info["features"])
         assert info["lab_formats"] == ["gns3lab.lab/1", "gns3lab.lab/2"] and "lab_constructor" in info["features"]
-        assert info["limits"] == {"max_nodes": 30, "max_memory_mb": 16384, "max_cpus": 8,
+        assert info["limits"] == {"max_nodes": 30, "max_memory_mb": 16384, "max_cpus": 8, "max_disk_gb": None,
                                   "images": ["cisco-iou-l2", "debian12"]}
         images = (await env.client.get("/api/v1/images")).json()["images"]
         assert [i["id"] for i in images] == ["cisco-iou-l2", "debian12"]  # Only what the site may use

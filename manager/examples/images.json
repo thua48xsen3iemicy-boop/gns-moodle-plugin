@@ -48,6 +48,7 @@
       "symbol": ":/symbols/computer.svg",
       "net_config": "ifupdown",
       "random_ifnames": true,
+      "extra_disks": true,
       "file": "debian12.qcow2",
       "ram_mb": {"default": 768, "min": 512, "max": 4096},
       "cpus": {"default": 1, "min": 1, "max": 2},
