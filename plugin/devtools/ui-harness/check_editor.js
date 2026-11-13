@@ -140,6 +140,22 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await until(async() => !('random_ifnames' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {random_ifnames: 1})));
         check('unticking drops the field', !('random_ifnames' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
 
+        // ---- no pasting into the console: a checkbox on every node with a console, only true is saved
+        await tap(page, SW1);
+        check('a node without a console offers no paste checkbox', (await page.locator('[data-field="nopaste"]').count()) === 0);
+        await tap(page, PC1);
+        const nopaste = page.locator('[data-field="nopaste"]');
+        check('a node with a console offers it, off by default', (await nopaste.count()) === 1 && !(await nopaste.isChecked()));
+        await nopaste.check();
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.find(n => n.name === 'PC1')?.nopaste === true);
+        check('the ticked node is saved with nopaste', (await saved(page)).nodes.find(n => n.name === 'PC1').nopaste === true
+            && !(await saved(page)).nodes.some(n => n.name !== 'PC1' && 'nopaste' in n));
+        await page.locator('[data-field="nopaste"]').uncheck();
+        await act(page, 'save').click();
+        await until(async() => !('nopaste' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {nopaste: 1})));
+        check('unticking drops nopaste', !('nopaste' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
+
         // ---- a manager without the lab constructor: no segments, no preview
         await page.goto(`${BASE}/editor.en.plain.html${MIN}`);
         await until(async() => (await page.locator('.node').count()) === 5);

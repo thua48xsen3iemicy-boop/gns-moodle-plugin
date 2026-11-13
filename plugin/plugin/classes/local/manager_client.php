@@ -208,7 +208,9 @@ class manager_client {
      * @return \stdClass lab_def (hash), resources {cores, memory_mb}, warnings [{path, code, message}]
      */
     public function validate_lab(array $lab): \stdClass {
-        $result = $this->expect_object($this->request('POST', '/api/v1/labs/validate', ['lab' => $lab]));
+        $result = $this->expect_object(
+            $this->request('POST', '/api/v1/labs/validate', ['lab' => lab_definition::for_manager($lab)])
+        );
         if (!isset($result->lab_def) || !is_string($result->lab_def) || $result->lab_def === '') {
             throw new manager_exception('badresponse', 200, 'validate without lab_def');
         }
@@ -286,7 +288,7 @@ class manager_client {
         $body = [
             'user_id' => $userid,
             'instance_id' => $instanceid,
-            is_array($lab) ? 'lab' : 'lab_ref' => $lab,
+            is_array($lab) ? 'lab' : 'lab_ref' => is_array($lab) ? lab_definition::for_manager($lab) : $lab,
             'course_id' => $courseid,
         ];
         $info = $this->get_info();
@@ -335,7 +337,7 @@ class manager_client {
      */
     public function create_authoring_session(int $userid, int $labid, array $definition): \stdClass {
         return $this->expect_session($this->request('POST', '/api/v1/sessions', [
-            'user_id' => $userid, 'library_lab_id' => $labid, 'lab' => $definition,
+            'user_id' => $userid, 'library_lab_id' => $labid, 'lab' => lab_definition::for_manager($definition),
             'options' => ['mode' => 'authoring'],
         ]));
     }

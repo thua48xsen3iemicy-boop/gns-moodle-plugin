@@ -37,6 +37,8 @@ $data = [
     'factsview' => 'live', 'seatmode' => 'off', 'authoring' => $id,
     'definition' => lab_definition::to_json($def),
 ];
+// The author prepares the lab: the clipboard is never kept out of the consoles here.
+lab_definition::allow_paste($data['topology']);
 $PAGE->add_body_class('gns3lab-fullscreen');
 echo $OUTPUT->header();
 echo $OUTPUT->render_from_template('mod_gns3lab/viewer', [

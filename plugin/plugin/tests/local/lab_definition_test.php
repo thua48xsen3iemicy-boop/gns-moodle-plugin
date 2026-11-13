@@ -51,6 +51,30 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json(json_encode($raw), 'Names');
     }
 
+    public function test_no_paste_mark_stays_in_moodle(): void {
+        $raw = ['nodes' => [['name' => 'R1', 'image' => 'cisco-iou-l3', 'x' => 0, 'y' => 0, 'nopaste' => true],
+            ['name' => 'PC1', 'image' => 'debian12', 'x' => 100, 'y' => 0, 'nopaste' => false]], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'Paste');
+        $this->assertTrue($def['nodes'][0]['nopaste']);
+        $this->assertArrayNotHasKey('nopaste', $def['nodes'][1], 'only true is kept');
+
+        $sent = lab_definition::for_manager($def);
+        $this->assertArrayNotHasKey('nopaste', $sent['nodes'][0], 'the lab manager refuses unknown fields');
+        $this->assertTrue($def['nodes'][0]['nopaste'], 'the stored definition keeps the mark');
+
+        $images = [(object) ['id' => 'cisco-iou-l3', 'kind' => 'iou', 'console_type' => 'telnet', 'ports_per_adapter' => 4,
+            'port_name' => 'Ethernet{adapter}/{port}']];
+        $data = lab_definition::to_topology($def, $images);
+        $this->assertTrue($data->topology->nodes[0]['nopaste']);
+        $this->assertArrayNotHasKey('nopaste', $data->topology->nodes[1]);
+        lab_definition::allow_paste($data);
+        $this->assertArrayNotHasKey('nopaste', $data->topology->nodes[0], 'a teacher or an author may paste');
+
+        $raw['nodes'][1]['nopaste'] = 1;
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode($raw), 'Paste');
+    }
+
     public function test_marks_mikrotik_nodes_for_their_console_snippets(): void {
         $raw = ['nodes' => [['name' => 'R1', 'image' => 'mikrotik-chr7', 'x' => 0, 'y' => 0],
             ['name' => 'PC1', 'image' => 'debian12', 'x' => 100, 'y' => 0]], 'links' => []];

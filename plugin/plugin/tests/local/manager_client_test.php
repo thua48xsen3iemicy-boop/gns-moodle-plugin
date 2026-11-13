@@ -145,6 +145,20 @@ final class manager_client_test extends \advanced_testcase {
         $this->assertCount(1, $this->manager->requests_to('GET', '/api/v1/info'), 'info is cached');
     }
 
+    public function test_lab_definitions_reach_the_manager_without_plugin_fields(): void {
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+        $lab = fake_manager::lab();
+        $lab['nodes'][0]['nopaste'] = true;
+
+        $this->client->create_session(42, 7, 3, $lab);
+        $this->client->create_authoring_session(42, 5, $lab);
+
+        foreach ($this->manager->requests_to('POST', '/api/v1/sessions') as $request) {
+            $this->assertArrayNotHasKey('nopaste', $request['body']['lab']['nodes'][0]);
+            $this->assertSame('R1', $request['body']['lab']['nodes'][0]['name']);
+        }
+    }
+
     public function test_old_manager_without_info_gets_spec_fields_only(): void {
         $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
 

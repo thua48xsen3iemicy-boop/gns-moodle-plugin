@@ -763,6 +763,12 @@ export const init = (prefix) => {
       n.random_ifnames ? " checked" : ""}> <span>${esc(str("ed_randomifnames"))}</span><small>${
       esc(str("ed_randomifnames_help"))}</small></label>`;
 
+  /* no pasting into the console (lab_definition::NOPASTE, plugin only): every node that has a console offers it */
+  const nopasteField = (n, img) => img && img.console_type === "none" && !n.nopaste ? "" :
+    `<label class="ed-field ed-check"><input type="checkbox" data-field="nopaste"${
+      n.nopaste ? " checked" : ""}> <span>${esc(str("ed_nopaste"))}</span><small>${
+      esc(str("ed_nopaste_help"))}</small></label>`;
+
   const nodeHTML = i => {
     const n = st.lab.nodes[i], img = imageOf(n), used = usedPorts();
     const ports = portsOf(n).map(p => {
@@ -783,6 +789,7 @@ export const init = (prefix) => {
       ${numberField(n, "ram_mb", str("ed_ram"))}
       ${numberField(n, "cpus", str("ed_cpus"))}
       ${ifnamesField(n, img)}
+      ${nopasteField(n, img)}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
       <h3>${esc(str("ed_ports"))}</h3>
       <table class="ed-ports"><tbody>${ports}</tbody></table>
@@ -1294,12 +1301,12 @@ export const init = (prefix) => {
       });
       return;
     }
-    if (field === "random_ifnames") {
+    if (field === "random_ifnames" || field === "nopaste") {
       change(() => {
         if (t.checked) {
-          n.random_ifnames = true;
+          n[field] = true;
         } else {
-          delete n.random_ifnames;
+          delete n[field];
         }
       });
       return;

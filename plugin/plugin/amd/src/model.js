@@ -209,6 +209,8 @@ export const buildModel = doc => {
             x, y, w, h, cx: x + w / 2, cy: y + h / 2, props: n.properties || {}, ports: Array.isArray(n.ports) ? n.ports : null,
             consoleType: n.console_type || (n.properties && n.properties.console_type) || null,
             status: n.status || null,
+            // The lab keeps the clipboard out of the console of this node (lab_definition::NOPASTE).
+            nopaste: n.nopaste === true,
         };
         node.cat = catOf(node);
         node.guest = guestOf(n);

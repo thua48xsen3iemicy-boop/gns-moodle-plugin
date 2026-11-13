@@ -181,7 +181,6 @@ class LabPage {
             api: this.api,
             userid,
             readonly: userid !== 0,
-            nopaste: !!this.data.nopaste,
             nodeStatus: nodeId => (this.session
                 ? this.session.freshNodeStatus(nodeId)
                 : Promise.resolve({status: null, stale: false})),
@@ -447,11 +446,18 @@ class LabPage {
             return;
         }
         const types = new Map(s.nodes.map(n => [n.nodeid, n.consoletype]));
+        // No pasting into the console is a mark of the lab, not of the project: it goes over by node name.
+        const ref = this.data.topology && this.data.topology.topology;
+        const nopaste = new Set(((ref && ref.nodes) || []).filter(n => n && n.nopaste === true).map(n => n.name));
         // Node states come from the live data of the session, not from the saved project.
         ((doc.topology && doc.topology.nodes) || []).forEach(n => {
             delete n.status;
+            delete n.nopaste;
             if (types.get(n.node_id)) {
                 n.console_type = types.get(n.node_id);
+            }
+            if (nopaste.has(n.name)) {
+                n.nopaste = true;
             }
         });
         // The project name of a session is technical (lab-…-s-…): the title stays the name of the lab.
