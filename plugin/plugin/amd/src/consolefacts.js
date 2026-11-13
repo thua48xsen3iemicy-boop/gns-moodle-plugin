@@ -419,13 +419,23 @@ const STP_ROLES = {root: 'root', desg: 'designated', altn: 'alternate', back: 'b
 const STP_STATES = {fwd: 'forwarding', blk: 'blocking', lis: 'listening', lrn: 'learning', dis: 'disabled', bkn: 'broken'};
 const STP_MODES = {ieee: 'pvst', rstp: 'rapid-pvst', mstp: 'mst'};
 
-/** "VLAN0010" → 10; anything else (MST0, a port name) → null. */
+/**
+ * "VLAN0010" → 10; anything else (MST0, a port name) → null.
+ *
+ * @param {string} text a word of the output
+ * @returns {number|null}
+ */
 const stpVlan = text => {
     const m = /^VLAN0*(\d{1,4})$/i.exec(text || '');
     return m && +m[1] >= 1 && +m[1] <= VLAN_MAX ? +m[1] : null;
 };
 
-/** "aabb.cc00.0100" → "aa:bb:cc:00:01:00". */
+/**
+ * "aabb.cc00.0100" → "aa:bb:cc:00:01:00".
+ *
+ * @param {string} text a MAC address in the IOS notation
+ * @returns {string|null}
+ */
 const dottedMac = text => {
     const hex = String(text).toLowerCase().replace(/\./g, '');
     return /^[0-9a-f]{12}$/.test(hex) ? hex.match(/../g).join(':') : null;
@@ -454,7 +464,14 @@ const stpRow = line => {
  */
 const stpResult = () => ({ports: new Map(), trees: new Map(), mode: null, complete: new Set()});
 
-/** Puts what a port does in a VLAN into the result. */
+/**
+ * Puts what a port does in a VLAN into the result.
+ *
+ * @param {object} res see stpResult(), changed
+ * @param {string} name port name as the output gives it
+ * @param {number} vlan VLAN
+ * @param {object} info role, state, cost …
+ */
 const stpPort = (res, name, vlan, info) => {
     const key = iosName(name);
     if (!res.ports.has(key)) {
@@ -463,7 +480,13 @@ const stpPort = (res, name, vlan, info) => {
     res.ports.get(key)[vlan] = Object.assign(res.ports.get(key)[vlan] || {}, info);
 };
 
-/** Puts what the bridge knows of a VLAN tree into the result. */
+/**
+ * Puts what the bridge knows of a VLAN tree into the result.
+ *
+ * @param {object} res see stpResult(), changed
+ * @param {number} vlan VLAN
+ * @param {object} info root, priority …
+ */
 const stpTree = (res, vlan, info) => {
     res.trees.set(vlan, Object.assign(res.trees.get(vlan) || {}, info));
 };
@@ -610,11 +633,11 @@ const parseStpBlocked = lines => {
         if (vlan === null) {
             continue;
         }
-        list.split(',').map(p => p.trim()).filter(Boolean).forEach(p => {
+        for (const p of list.split(',').map(x => x.trim()).filter(Boolean)) {
             if (iosKind(iosName(p))) {
                 stpPort(res, p, vlan, {state: 'blocking'});
             }
-        });
+        }
     }
     return res;
 };
@@ -1276,6 +1299,7 @@ const kindOnDevice = (kind, s) => {
  * @param {object} item the interface, changed
  * @param {object} s the interface as seen
  * @param {object|null} known the interface in the deciding facts
+ * @param {number[]} [full] VLANs whose spanning tree was shown in full (rec.stpFull)
  * @returns {string[]} the fields that came from the console
  */
 const applyFields = (item, s, known, full = []) => {
