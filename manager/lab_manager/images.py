@@ -19,6 +19,11 @@ lab editor offers the teacher a checkbox for nodes of the image. public() carrie
 extra_disks (qemu only): the teacher may give a node of the image additional blank disks (node field `disks`,
 CONTRACTS 2.6 and 4.2). public() then carries how many and how large; the numbers are the manager's, not the catalog's.
 
+qga (qemu only): false for an image without a QEMU guest agent. Nodes of the image get `qga: false` in the slot's ticket
+(labdef.deploy_ticket): the slot never asks them anything (no facts, no guest shutdown). Absent means true, and nodes of
+other images get no such field. Everything that works through the agent - net_config, random_ifnames, role, uplink_port,
+slot.provisioning - is refused with it. Not in public().
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -95,6 +100,7 @@ class Image(Strict):
     # What a node of the image is beyond its kind (NodeSpec.role, CONTRACTS 4.2): "switch" is the Linux switch,
     # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
     role: Literal["switch"] | None = None
+    qga: bool = Field(default=True, strict=True)  # False: no guest agent in the image (CONTRACTS 2.6, 4.2)
     sha256: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     derived: dict | None = None
     featured: bool = False
@@ -134,6 +140,12 @@ class Image(Strict):
             self.capture = False
         if self.role is not None and (self.kind != "qemu" or self.uplink_port is not None):
             raise ValueError("role is for qemu images without uplink_port")
+        if not self.qga:
+            if self.kind != "qemu":
+                raise ValueError("qga false is for qemu only")
+            if (self.net_config is not None or self.random_ifnames or self.role is not None
+                    or self.uplink_port is not None or self.slot.provisioning):
+                raise ValueError("qga false excludes net_config, random_ifnames, role, uplink_port and slot.provisioning")
         if self.slot.cli_prompt is not None:
             try:
                 pattern = re.compile(self.slot.cli_prompt.encode())

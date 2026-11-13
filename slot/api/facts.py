@@ -934,6 +934,8 @@ class Facts:
                         continue
                     if spec.get("uplink_port") is not None and collector is not LINUX_NET:
                         continue  # the "Internet" node: its cabled ports only (cabled_ports_only)
+                    if collector.local is None and spec.get("qga", True) is False:
+                        continue  # no guest agent (NodeSpec.qga false): nothing to ask, nothing published
                     if collector.local is None and family is not None and collector.family != family:
                         continue
                     key = (lab["project_id"], node["node_id"], collector.name)

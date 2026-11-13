@@ -364,6 +364,9 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
         if image.role is not None:
             # Only a node of an image with a role carries it (CONTRACTS 4.2), like uplink_port.
             spec["role"] = image.role
+        if not image.qga:
+            # Only a node of an image without a guest agent carries it (CONTRACTS 4.2), like role.
+            spec["qga"] = False
         if image.console_type == "vnc":
             # Only vnc nodes carry the field: a telnet node stays byte for byte what it was, so the
             # canonical JSON and the lab_revision of existing labs do not change (CONTRACTS 4.2).

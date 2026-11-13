@@ -33,7 +33,10 @@ class NodeSpec(BaseModel):
         default=r"(?m)^[^\r\n]+[>#]\s*$", min_length=1, max_length=256
     )
     provisioning: list[ProvisionCommand] = Field(default_factory=list)
-    qga: Literal[True] = True
+    # QEMU only. False: the image has no guest agent (CONTRACTS.md 4.2). The node gets no QGA channel,
+    # readiness is its console port, no collector asks it, shutdown and guest commands are refused at once.
+    # Dumped as before (true included): the representation of existing tickets does not change.
+    qga: bool = True
     l1_keepalives: bool = True
     startup_script: str = ""  # VPCS only
     # QEMU only. "telnet" is the serial console; "vnc" is the graphic screen and the node then
@@ -101,6 +104,13 @@ class NodeSpec(BaseModel):
             raise ValueError("role is only supported for qemu nodes")
         if self.role is not None and self.uplink_port is not None:
             raise ValueError("a node with uplink_port has no role")
+        if not self.qga:
+            if self.kind != "qemu":
+                raise ValueError("qga false is only supported for qemu nodes")
+            if self.provisioning:
+                raise ValueError("a node without qga has no provisioning")
+            if self.role is not None or self.uplink_port is not None:
+                raise ValueError("a node without qga has no role or uplink_port")
         if self.disks and self.kind != "qemu":
             raise ValueError("disks are only supported for qemu nodes")
         if self.nvram_config is not None:
