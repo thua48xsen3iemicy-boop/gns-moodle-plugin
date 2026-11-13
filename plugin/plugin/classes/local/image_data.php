@@ -53,6 +53,14 @@ class image_data {
             'capture' => new external_value(PARAM_BOOL, 'Capture allowed'),
             'uplink_port' => new external_value(PARAM_INT, 'Reserved external adapter', VALUE_OPTIONAL),
             'random_ifnames' => new external_value(PARAM_BOOL, 'Guest interface names can be random', VALUE_DEFAULT, false),
+            'extra_disks' => new external_single_structure([
+                'max' => new external_value(PARAM_INT, 'Disks per node'),
+                'size_gb' => new external_single_structure([
+                    'default' => new external_value(PARAM_INT, 'Default'),
+                    'min' => new external_value(PARAM_INT, 'Minimum'),
+                    'max' => new external_value(PARAM_INT, 'Maximum'),
+                ], 'Size of one disk, GiB'),
+            ], 'Additional blank disks a node may take', VALUE_OPTIONAL),
             'authorname' => new external_value(PARAM_TEXT, 'Moodle display name', VALUE_DEFAULT, ''),
             'featured' => new external_value(PARAM_BOOL, 'Featured', VALUE_DEFAULT, false),
             'retired' => new external_value(PARAM_BOOL, 'Retired', VALUE_DEFAULT, false),

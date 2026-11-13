@@ -356,7 +356,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
-            features += ["images", "lab_definitions", "lab_constructor", "random_ifnames"]
+            features += ["images", "lab_definitions", "lab_constructor", "random_ifnames", "extra_disks"]
             body["lab_formats"] = list(labdef.FORMATS)
             body["limits"] = site.limits.public()
         if await services.derived.enabled():

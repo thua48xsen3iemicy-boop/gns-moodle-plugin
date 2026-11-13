@@ -97,9 +97,11 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 - ✅ `images` и `lab_definitions` — есть каталог образов (§2.6) и запуск лабы по определению из
   Moodle. Только вместе с ними в ответе есть `lab_formats: ["gns3lab.lab/1"]` и `limits` сайта:
   `{"max_nodes": 30, "max_memory_mb": 16384, "max_cpus": 8, "images": "*"}` (`null` — без
-  ограничения; `images` — список `id` или `"*"`). Без них плагин работает только по `lab_ref`.
+  ограничения; 🆕 с менеджера 0.22.0 ещё `max_disk_gb` — сумма дополнительных дисков лабы, ГиБ, §2.6; `images` — список `id` или `"*"`). Без них плагин работает только по `lab_ref`.
 - 🆕 `random_ifnames` (менеджер 0.21.0, вместе с `images`) — менеджер принимает поле ноды `random_ifnames` в определении
   лабы (§2.6). Без этой возможности плагин поле не присылает: старый менеджер ответил бы `unknown_field`.
+- 🆕 `extra_disks` (менеджер 0.22.0, вместе с `images`) — менеджер принимает поле ноды `disks` в определении лабы и
+  отдаёт `extra_disks` у образов и `max_disk_gb` в `limits` (§2.6). Без этой возможности плагин поле не присылает.
 
 ### 2.2. ✅ `POST /api/v1/sessions`
 
@@ -242,6 +244,12 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 каталоге только у `qemu` с `net_config` `ifupdown`, `networkmanager`, `netplan` или `networkd` (иначе каталог
 отклоняется при чтении): в госте нужны `ip`, udev systemd и `/etc/systemd/network`. У остальных образов поля нет.
 
+🆕 `extra_disks` (менеджер 0.22.0) — к ноде образа можно подключить дополнительные пустые диски (поле ноды `disks` ниже):
+`{"max": 3, "size_gb": {"default": 1, "min": 1, "max": 20}}` — сколько дисков и какого размера, ГиБ. Администратор включает
+это в каталоге полем `extra_disks: true`, только у `qemu` и не у образа с `uplink_port` (иначе каталог отклоняется при
+чтении); производный образ наследует его от базы. Числа задаёт менеджер, а не каталог: три диска — предел GNS3 2.2.61
+(`hdb`, `hdc`, `hdd`). У остальных образов поля нет. Для таких лаб на слотах нужен пустой образ `blank.qcow2` (§4.2).
+
 🆕 `guest: "routeros"` (менеджер 0.16.2) — у образа с `net_config: "routeros"`: в ноде MikroTik RouterOS, а не то, что обычно у
 `qemu`. У остальных образов поля нет. Плагин выбирает по нему подсказки консоли; менеджер переносит его в ноды эталонной
 топологии лабы из каталога и в `session.topology` (§2.3) по имени ноды, как `symbol`.
@@ -280,6 +288,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `links[]` | до 1000. Концы — `{node, adapter, port}` (`adapter`/`port` по умолчанию 0); порт существует у ноды (`adapter < adapters`, `port < ports_per_adapter`), занят не больше одним линком; нода не соединяется сама с собой |
 | `uplink_port` | Необязательно, только у ноды `qemu` (иначе `unknown_field`): номер адаптера в пределах `adapters` (`out_of_range`) — внешний порт. У ISP автоматически берётся из образа, у обычного QEMU может быть задан явно. Не больше одного узла в лабе (`too_many_uplinks`); к этому порту нет линков (`uplink_port_in_use`). Менеджер кладёт нормализованное поле в `NodeSpec` (§4.2); оно входит в `lab_def`. В эталонной лабе (`ticket.json`) поле стоит прямо в узле, каталог проверяет те же правила |
 | `random_ifnames` | 🆕 Необязательно, `true`/`false` (иначе `bad_type`). `true` — только у ноды образа с `random_ifnames: true` в каталоге (иначе `unsupported_image`): интерфейсы гостя получают случайные имена (ниже). В `lab_def` входит только `true`: `false` равносильно отсутствию поля, и `lab_def` лабы без галочек не меняется. Есть и в `lab/1`, и в `lab/2` |
+| `disks` | 🆕 Необязательно, список до 3 объектов `{"size_gb": N}` (иначе `bad_type`, лишний ключ — `unknown_field`, больше трёх — `out_of_range`) — дополнительные пустые диски ноды по порядку: `hdb`, `hdc`, `hdd`. Только у ноды образа с `extra_disks` в каталоге (иначе `unsupported_image`); `size_gb` — целое в пределах `extra_disks.size_gb` образа (`out_of_range`, путь `nodes[i].disks[j].size_gb`). Сумма по всем нодам лабы — не больше `limits.max_disk_gb` (`limit_exceeded`, путь `nodes`). В `lab_def` входит только непустой список: `[]` равносильно отсутствию поля. Менеджер переносит список в `NodeSpec.disks` (§4.2). Есть и в `lab/1`, и в `lab/2` |
 | прочее | неизвестное поле на любом уровне — `unknown_field`; весь документ — до 256 КБ |
 
 🆕 **Случайные имена интерфейсов** (`random_ifnames: true` у ноды, менеджер 0.21.0). Менеджер добавляет ноде в билете
@@ -335,7 +344,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 Новые `code` в `problems` (путь вида `segments[i].members[j]`, `segments[i].gateway`, `segments[i].subnet.fixed`):
 `segment_not_connected` (участник или шлюз не связан по L2 с первым участником через `links` и ноды категории `switch`; на
 хосте и маршрутизаторе путь заканчивается), `segment_overlap` (два сегмента на общем коммутаторе: оба без VLAN или с одной VLAN),
-`member_in_two_segments`, `gateway_not_router`, `unsupported_image` (участник с образом без `preconfig`; 🆕 `nodes[i].random_ifnames` у образа без `random_ifnames`), `subnet_too_small`
+`member_in_two_segments`, `gateway_not_router`, `unsupported_image` (участник с образом без `preconfig`; 🆕 `nodes[i].random_ifnames` у образа без `random_ifnames`; 🆕 `nodes[i].disks` у образа без `extra_disks`), `subnet_too_small`
 (длиннее `/30` или адресов не хватает на участников и шлюз), `bad_subnet`, `vlan_out_of_range`, `host_out_of_range`,
 `host_in_use` (два участника или шлюз на одном адресе; путь — второй), `multiple_gateways`, `duplicate_segment`,
 🆕 `gateway_port_conflict` (один порт — шлюз двух сегментов без `vlan` или с одной `vlan`, либо за портом не коммутатор, а хост;
@@ -390,7 +399,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
   `links[i].a|b`, `links[i].a.node`, `nodes`, `format`, `""` (весь документ). `code`: `required`,
   `unknown_field`, `bad_type`, `bad_format`, `bad_name`, `duplicate_name`, `unknown_image`,
   `image_not_allowed`, `out_of_range`, `unknown_node`, `bad_port`, `port_in_use`, `self_link`,
-  `too_many_nodes`, `limit_exceeded` (память или ядра CT сверх `limits`), `too_large`,
+  `too_many_nodes`, `limit_exceeded` (память или ядра CT сверх `limits`; 🆕 сумма `disks` сверх `limits.max_disk_gb`), `too_large`,
   🆕 `too_many_uplinks` (второй узел с `uplink_port`; путь — `nodes[i].uplink_port`), `uplink_port_in_use` (к порту `uplink_port`
   подключён линк; путь — `links[i].a|b`). `message` —
   для отладки. Новые коды могут появиться: незнакомый показывайте общим текстом.
@@ -946,6 +955,19 @@ JSON и `lab_revision` прежних лаб оно не появляется (�
 запасные LAN-порты с их заранее заданными адресами, `hostname` и сохранённая настройка (`linux.sys`, `linux.config`) не
 публикуются. Факты LAN-портов с кабелем нужны и самому слоту: по их `admin` он ведёт несущую и keepalive IOL на этих кабелях.
 
+🆕 **`NodeSpec.disks`** (менеджер 0.22.0, слот 0.18.0) — дополнительные пустые диски узла: список до 3 объектов
+`{"size_gb": N}` (`1 ≤ N ≤ 64`, лишний ключ — `422`), только `kind: "qemu"`. Диск `i` — это `hdb`, `hdc`, `hdd` по порядку, на
+том же `disk_interface`, что и системный. При создании проекта слот даёт узлу `hd?_disk_image: "blank.qcow2"` (имя файла в
+`/opt/gns3/images/QEMU`; `SLOT_BLANK_DISK` задаёт другое), а до первого старта растягивает связанный клон до `size_gb`
+запросом GNS3 `resize_disk` и сверяет размер по заголовку qcow2 файла `hd?_disk.qcow2` узла. Не вышло — лаба `FAILED` с кодом
+`DISK_CREATE_FAILED`. `blank.qcow2` — пустой qcow2 без backing file, не больше 1 ГиБ и кратный 1 МиБ; его один раз кладёт
+администратор (`qemu-img create -f qcow2 blank.qcow2 1M`), слот общие образы не меняет. Возобновлённый проект диски не трогает:
+данные студента на них сохраняются вместе с проектом. Гость получает диск неразмеченным. В «Сохранить с образами» (§2.8)
+дополнительные диски не входят: снимается только `hda`. Поле есть лишь у узлов с дисками: канонический JSON и `lab_revision`
+прочих лаб не меняются. Слот объявляет возможность `extra-disks`, пока `blank.qcow2` на месте и годен; билет с `disks` без
+неё он отклоняет `422`, ничего не создавая. Менеджер слот не опрашивает (как с `uplink`) и по слотам такие лабы не делит:
+каталог образов у слотов общий, а `extra_disks: true` в `IMAGES_FILE` администратор ставит после того, как положил `blank.qcow2`.
+
 🆕 **`NodeSpec.role`** (менеджер 0.18.1, слот 0.17.1) — что такое узел сверх `kind`, из поля `role` образа в каталоге
 (`IMAGES_FILE`, у производного образа — от базы). Пока одно значение: `"switch"` — Linux-коммутатор (`images/linux-switch/`);
 только такой узел слот спрашивает коллекторами `switch.net/1` и `switch.fdb/1` (§4.6). Только `kind: "qemu"` и не вместе с
@@ -1424,6 +1446,8 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | `iol-cli` | слот | provisioning IOL через CLI (`cli_prompt`) |
 | `routeros` | слот | 🆕 (0.15.0) гость MikroTik RouterOS (CHR): готовность без `serial-getty`, `provisioning` и `qga/exec` — скрипты RouterOS, коллектор `routeros.net/1` (§4.2, §4.6). Нужна для образов с `net_config: "routeros"`; менеджер и слот выпускаются вместе |
 | `iol-nvram` | слот | 🆕 `NodeSpec.nvram_config`: `startup-config` IOL кладётся в NVRAM при создании проекта, до первого старта (§4.2) |
+| `extra_disks` | менеджер | 🆕 (0.22.0) поле ноды `disks` в определении лабы, `extra_disks` образов и `limits.max_disk_gb` (§2.1, §2.6) |
+| `extra-disks` | слот | 🆕 (0.18.0) `NodeSpec.disks`: дополнительные пустые диски QEMU-узла (§4.2). Только при годном `blank.qcow2` в `/opt/gns3/images/QEMU`; менеджер и слот выпускаются вместе |
 | `uplink` | слот; менеджер | 🆕 `NodeSpec.uplink_port`: узел «Интернет», его внешний порт получает `SLOT_UPLINK_MAC` и подключается к `eth1` слота через облако GNS3 (§4.2). Только при заданном `SLOT_UPLINK_MAC` и наличии `eth1`; лаба с `uplink_port` выбирает только такие слоты. Менеджер не опрашивает слот (свободный слот — выключенный LXC): возможность записывает администратор в `slots.json` (`"features": ["uplink"]`, `lab-provision secrets` делает это при заданном `INET_BRIDGE`); сам слот в любом случае отклонит такую лабу `422` |
 | `student-state` | слот | 🆕 состояние лабы переносится вместе с каталогом студента (`/opt/gns3/projects`): проект продолжается в любом слоте. Без этой возможности межслотовый `resume` не включается |
 

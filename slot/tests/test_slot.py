@@ -78,6 +78,21 @@ def mock_server(tmp_path, monkeypatch):
                         if n["node_id"] == path[3]:
                             return reply(200, n)
                     return reply(404, {"message": "No node"})
+                if len(path) == 5 and path[4] == "resize_disk" and req.method == "POST":
+                    # GNS3 makes the linked clone of the drive if there is none, then `qemu-img resize +<extend>M`.
+                    from api import disks
+
+                    obj = json.loads(req.content)
+                    node = next(n for n in nodes[pid] if n["node_id"] == path[3])
+                    image = node["properties"][obj["drive_name"] + "_disk_image"]
+                    clone = disks.clone_path(pid, node, obj["drive_name"])
+                    clone.parent.mkdir(parents=True, exist_ok=True)
+                    size = disks.virtual_size(clone) or disks.virtual_size(labs.IMAGES / "QEMU" / image)
+                    if node["name"] != "bad-resize":
+                        size += obj["extend"] * 1024 * 1024
+                    clone.write_bytes(b"QFI\xfb" + bytes(20) + size.to_bytes(8, "big"))
+                    node.setdefault("resized", []).append([obj["drive_name"], obj["extend"]])
+                    return httpx.Response(201)
                 if len(path) == 4 and path[3] in ("start", "stop"):
                     for n in nodes[pid]:
                         if n["name"] != "bad-start":

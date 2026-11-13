@@ -185,7 +185,8 @@ const image = (id, title, kind, category, extra = {}) => ({
 const EDITOR_IMAGES = [
     image('lab-uplink', 'ISP', 'qemu', 'router', {uplink_port: 0, console_type: 'none', capture: false,
         adapters: {default: 3, min: 3, max: 16}}),
-    image('debian12', 'Debian 12', 'qemu', 'host', {preconfig: true, random_ifnames: true}),
+    image('debian12', 'Debian 12', 'qemu', 'host', {preconfig: true, random_ifnames: true,
+        extra_disks: {max: 3, size_gb: {default: 1, min: 1, max: 20}}}),
     image('vpcs', 'VPCS', 'vpcs', 'host', {preconfig: true, adapters: null, port_name: 'Ethernet0'}),
     image('linux-switch', 'Linux Switch', 'qemu', 'switch', {adapters: {default: 8, min: 1, max: 16}, console_type: 'none'}),
     image('cisco-iou-l3', 'Cisco IOU L3', 'iou', 'router', {adapters: {default: 2, min: 1, max: 4}}),

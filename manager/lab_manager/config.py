@@ -34,6 +34,7 @@ class SiteLimits(BaseModel):
     max_nodes: int = Field(default=100, ge=1, le=100)
     max_memory_mb: int | None = Field(default=None, ge=256)
     max_cpus: int | None = Field(default=None, ge=1)
+    max_disk_gb: int | None = Field(default=None, ge=1)  # Additional disks of all nodes of a lab together
     images: list[str] | None = None  # Allowed image ids; None (or "*" in the file) = all
 
     @field_validator("images", mode="before")
@@ -53,6 +54,7 @@ class SiteLimits(BaseModel):
 
     def public(self) -> dict:
         return {"max_nodes": self.max_nodes, "max_memory_mb": self.max_memory_mb, "max_cpus": self.max_cpus,
+                "max_disk_gb": self.max_disk_gb,
                 "images": "*" if self.images is None else list(self.images)}
 
 

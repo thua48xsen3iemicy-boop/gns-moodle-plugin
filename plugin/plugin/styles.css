@@ -540,6 +540,10 @@ body.gns3lab-fullscreen {
     grid-column: 2;
     color: var(--muted);
 }
+.gns3lab-editor .ed-diskrow {
+    display: flex;
+    gap: 4px;
+}
 .gns3lab-editor .ed-error {
     color: var(--bad);
     font-size: 13px;

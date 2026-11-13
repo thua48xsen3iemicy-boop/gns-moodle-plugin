@@ -12,7 +12,7 @@ from release import VERSION, verify
 
 from api.auth import require_token
 from api.client import call
-from api import uplink
+from api import disks, labs, uplink
 from api.facts import COLLECTOR_IDS
 
 router = APIRouter(tags=["health"])
@@ -36,7 +36,8 @@ async def capabilities():
         "schema": "gns3lab.capabilities/1",
         "slot_version": VERSION,
         "deploy_schemas": ["gns3lab.deploy/1"],
-        "features": FEATURES + (["uplink"] if uplink.enabled() else []),
+        "features": FEATURES + (["uplink"] if uplink.enabled() else [])
+        + (["extra-disks"] if disks.enabled(labs.IMAGES) else []),
         "collectors": COLLECTOR_IDS,
     }
 

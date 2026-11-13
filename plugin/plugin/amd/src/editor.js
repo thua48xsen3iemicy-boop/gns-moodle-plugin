@@ -763,6 +763,25 @@ export const init = (prefix) => {
       n.random_ifnames ? " checked" : ""}> <span>${esc(str("ed_randomifnames"))}</span><small>${
       esc(str("ed_randomifnames_help"))}</small></label>`;
 
+  /* additional blank disks (CONTRACTS §2.6): only images that take them offer the block; disks an image no longer
+     takes stay visible, so that they can be removed */
+  const disksField = (n, img) => {
+    const spec = img && img.extra_disks, disks = Array.isArray(n.disks) ? n.disks : [];
+    if (!spec && !disks.length) {
+      return "";
+    }
+    const size = spec ? spec.size_gb : {min: 1, max: 1024};
+    const rows = disks.map((d, j) => `<label class="ed-field ed-disk"><span>${esc(str("ed_disk", j + 1))}</span>
+      <span class="ed-diskrow"><input type="number" class="form-control form-control-sm" data-disk="${j}" min="${size.min}"
+        max="${size.max}" step="1" value="${Number.isInteger(d.size_gb) ? d.size_gb : ""}">
+      <button type="button" class="btn btn-sm btn-outline-danger" data-act="removedisk" data-disk="${j}"
+        title="${esc(str("ed_removedisk"))}" aria-label="${esc(str("ed_removedisk"))}">×</button></span>
+      <small>${size.min}…${size.max} ${esc(str("ed_diskgb"))}</small></label>`).join("");
+    const add = spec && disks.length < spec.max
+      ? `<button type="button" class="btn btn-sm btn-outline-primary" data-act="adddisk">${esc(str("ed_adddisk"))}</button>` : "";
+    return `<h3>${esc(str("ed_disks"))}</h3>${rows}${add}<p class="ed-note">${esc(str("ed_disks_help"))}</p>`;
+  };
+
   const nodeHTML = i => {
     const n = st.lab.nodes[i], img = imageOf(n), used = usedPorts();
     const ports = portsOf(n).map(p => {
@@ -784,6 +803,7 @@ export const init = (prefix) => {
       ${numberField(n, "cpus", str("ed_cpus"))}
       ${ifnamesField(n, img)}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
+      ${disksField(n, img)}
       <h3>${esc(str("ed_ports"))}</h3>
       <table class="ed-ports"><tbody>${ports}</tbody></table>
       <button type="button" class="btn btn-sm btn-outline-danger" data-act="delete">${esc(str("ed_deletenode"))}</button>
@@ -1264,6 +1284,19 @@ export const init = (prefix) => {
       return;
     }
     const n = st.lab.nodes[s.i], field = t.dataset.field;
+    if (n && t.dataset.disk !== undefined && Array.isArray(n.disks) && n.disks[+t.dataset.disk]) {
+      const img = imageOf(n), size = img && img.extra_disks ? img.extra_disks.size_gb : {min: 1, max: 1024};
+      const v = Number(t.value.trim()), disk = n.disks[+t.dataset.disk];
+      if (!Number.isInteger(v) || v < size.min || v > size.max) {
+        fieldError(str("ed_range", `${size.min}…${size.max}`));
+        t.value = disk.size_gb;
+        return;
+      }
+      change(() => {
+        disk.size_gb = v;
+      });
+      return;
+    }
     if (!n || !field) {
       return;
     }
@@ -1359,6 +1392,23 @@ export const init = (prefix) => {
     const name = act && act.dataset.act;
     if (name === "delete") {
       deleteSel();
+    } else if (name === "adddisk" && st.sel && st.sel.kind === "node") {
+      const n = st.lab.nodes[st.sel.i], img = n && imageOf(n), spec = img && img.extra_disks;
+      if (spec && (n.disks || []).length < spec.max) {
+        change(() => {
+          n.disks = (n.disks || []).concat([{"size_gb": spec.size_gb.default}]);
+        });
+      }
+    } else if (name === "removedisk" && st.sel && st.sel.kind === "node") {
+      const n = st.lab.nodes[st.sel.i];
+      if (n && Array.isArray(n.disks)) {
+        change(() => {
+          n.disks.splice(+act.dataset.disk, 1);
+          if (!n.disks.length) {
+            delete n.disks; // no field at all, so the lab_def of a lab without disks does not change
+          }
+        });
+      }
     } else if (name === "addsegment") {
       addSegment();
     } else if (name === "addmembers" && st.sel && st.sel.kind === "segment") {

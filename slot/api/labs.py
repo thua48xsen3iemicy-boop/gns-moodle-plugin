@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api import iol_nvram, uplink
+from api import disks, iol_nvram, uplink
 from api.client import call, get_lifecycle
 from api.models import DeployTicket, NodeSpec
 
@@ -50,6 +50,7 @@ def node_payload(spec: NodeSpec, node_id: str):
                 "hda_disk_interface": spec.disk_interface,
                 "linked_clone": True,
                 "options": options,
+                **disks.properties(spec),
                 **(
                     {"mac_address": uplink.base_mac(spec.uplink_port, spec.adapters)}
                     if spec.uplink_port is not None
@@ -87,6 +88,16 @@ def require_uplink(ticket: DeployTicket):
         )
 
 
+def require_disks(ticket: DeployTicket):
+    """A ticket with disks needs the `extra-disks` feature of this slot: 422, nothing is created."""
+    if any(node.disks for node in ticket.nodes) and not disks.enabled(IMAGES):
+        raise HTTPException(
+            422,
+            "disks need the extra-disks feature of the slot: "
+            f"a blank qcow2 image {disks.blank_name()} in the QEMU images directory",
+        )
+
+
 @router.get("")
 async def list_labs(request: Request):
     return await call(request, "GET", "projects")
@@ -116,6 +127,7 @@ async def create_project(request: Request, ticket: DeployTicket):
             409, "Project name already exists; specify its project_id to resume"
         )
     require_uplink(ticket)
+    require_disks(ticket)
     prepared = [(node, node_payload(node, str(uuid4()))) for node in ticket.nodes]
     cloud = None
     if uplink.spec_of(ticket) is not None:
@@ -141,6 +153,18 @@ async def create_project(request: Request, ticket: DeployTicket):
             try:
                 iol_nvram.preset(project_id, created, node.nvram_config)
             except iol_nvram.NvramError as exc:
+                from api.lifecycle import LabError
+
+                raise LabError(exc.code, str(exc)) from exc
+        if node.disks:
+            # Once, here, like the NVRAM: the node has not started yet, and a resumed project keeps its disks.
+            async def resize(drive, extend, node_id=created["node_id"]):
+                await call(request, "POST", f"projects/{project_id}/nodes/{node_id}/resize_disk",
+                           {"drive_name": drive, "extend": extend})
+
+            try:
+                await disks.grow(resize, IMAGES, project_id, created, node)
+            except disks.DiskError as exc:
                 from api.lifecycle import LabError
 
                 raise LabError(exc.code, str(exc)) from exc
@@ -209,6 +233,7 @@ async def topology(request: Request, project_id: UUID):
 @router.post("/deploy", status_code=202)
 async def deploy(request: Request, ticket: DeployTicket):
     require_uplink(ticket)
+    require_disks(ticket)
     return get_lifecycle(request).submit(
         "deploy", ticket=ticket, key=request.headers.get("Idempotency-Key")
     )
