@@ -181,6 +181,7 @@ class LabPage {
             api: this.api,
             userid,
             readonly: userid !== 0,
+            nopaste: !!this.data.nopaste,
             nodeStatus: nodeId => (this.session
                 ? this.session.freshNodeStatus(nodeId)
                 : Promise.resolve({status: null, stale: false})),

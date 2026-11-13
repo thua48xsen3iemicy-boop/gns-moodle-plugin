@@ -228,5 +228,16 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         upgrade_mod_savepoint(true, 2026111200, 'gns3lab');
     }
 
+    if ($oldversion < 2026111300) {
+        // No pasting into the consoles (docs/SPEC.md 5.1): an option of the activity, off for the existing ones.
+        $table = new xmldb_table('gns3lab');
+        $field = new xmldb_field('nopaste', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'seatmode');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_mod_savepoint(true, 2026111300, 'gns3lab');
+    }
+
     return true;
 }

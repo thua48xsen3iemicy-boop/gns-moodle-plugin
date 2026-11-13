@@ -128,6 +128,8 @@ function gns3lab_prepare_view_settings(stdClass $data): void {
     $data->fogstart = $mode === \mod_gns3lab\local\reveal::FOG ? \mod_gns3lab\local\reveal::encode_names($names) : '';
     // Who may drive the lab of a student at the same time (docs/seat.md); an unknown value becomes the default.
     $data->seatmode = \mod_gns3lab\local\seat::mode((object) ['seatmode' => $data->seatmode ?? '']);
+    // Whether the consoles of a student refuse the clipboard.
+    $data->nopaste = empty($data->nopaste) ? 0 : 1;
 }
 
 /**

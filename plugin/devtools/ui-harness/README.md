@@ -91,6 +91,11 @@ PYTHON=python3 node check_vnc.js --shots /tmp/vnc-shots   # нужен Playwrigh
 `.bump(userid)` двигает rev фактов. Сквозная проверка в Chromium — `check_course.js` (таблица, цифры в ячейках, «без изменений N мин» на часах Playwright, поиск,
 сортировка, группа, карточка и её адрес, телефон 360 px, ошибка по лабе, экранирование имён): `node check_course.js [--min] [--shots <каталог>]`.
 
+Запрет вставки в консоли (поле `nopaste` активности, `docs/SPEC.md` §5.1): `index.<язык>.nopaste.html`. Проверка —
+`node check_nopaste.js [--min]` (порт 18131, Playwright с Chromium): событие `paste`, Ctrl+V, Ctrl+Shift+V, Shift+Insert, перетаскивание
+и ввод одним длинным куском до устройства не доходят, набор с клавиатуры и сниппет доходят, у экрана VNC нет кнопки «Вставить»;
+на обычной странице вставка работает.
+
 Одно место на лабу (`docs/seat.md`): `index.<язык>.seat.html` — активность в режиме «одна страница»; `?seat=othertab` и
 `?seat=otherlogin` открывают её с местом, занятым другой страницей того же входа или другим входом; в консоли браузера
 `window.__stub.seat.give('me'|'othertab'|'otherlogin')` передаёт место, `__stub.seat.claims` и `.gated` показывают, что и с каким

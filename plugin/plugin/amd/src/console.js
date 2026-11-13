@@ -95,7 +95,7 @@ export const THEME = {
 /** Strings of the connection and of the key strip. */
 export const STRING_KEYS = [
     'consoleconnecting', 'consoleconnected', 'consolereconnected', 'consolereconnecting', 'consolenodestopped',
-    'consoleerror', 'consolecopied', 'consolecopyfailed', 'consolekeys',
+    'consoleerror', 'consolecopied', 'consolecopyfailed', 'consolekeys', 'consolenopaste',
     'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown', 'consoleunavailable',
 ];
 
@@ -150,7 +150,7 @@ export class ConsoleConnection {
      * @param {object} options.strings language strings
      * @param {Function} options.nodeStatus async () => {status, stale} from a fresh session state
      * @param {Function} options.onState called with the new state name
-     * @param {Function} [options.transform] changes typed input before it is sent
+     * @param {Function} [options.transform] changes typed input before it is sent; an empty result sends nothing
      * @param {boolean} [options.paced] send long pastes line by line (Cisco IOS)
      * @param {Function} [options.api] the transport of web service calls, Ajax.call by default
      */
@@ -179,7 +179,12 @@ export class ConsoleConnection {
         this.pendingNote = null;
         this.encoder = new TextEncoder();
         this.disposables = [
-            term.onData(data => this.send(transform(data))),
+            term.onData(data => {
+                const input = transform(data);
+                if (input) {
+                    this.send(input);
+                }
+            }),
             term.onResize(() => this.sendSize()),
         ];
     }
