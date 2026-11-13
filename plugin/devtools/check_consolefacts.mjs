@@ -175,7 +175,8 @@ const rec = (kind, cmd) => {
 };
 
 check('recognize IOS: abbreviations, case, do', () => {
-    for (const cmd of ['show ip interface brief', 'sh ip int b', 'sh ip int br', 'SH IP INT BRIEF', 'do show ip int br', 'Show Ip Interface Brief  ']) {
+    for (const cmd of ['show ip interface brief', 'sh ip int b', 'sh ip int br', 'sh ip in b', 'SH IP INT BRIEF', 'do show ip int br',
+        'Show Ip Interface Brief  ']) {
         assert.equal(rec('ios', cmd), 'show ip interface brief', cmd);
     }
     for (const cmd of ['show interfaces status', 'sh int status', 'sh interface stat', 'do sh int status']) {
@@ -204,10 +205,11 @@ check('recognize IOS: a filter or one interface makes the output partial', () =>
     assert.equal(rec('ios', 'sh vlan brief | i USERS'), 'show vlan brief (partial)');
 });
 check('recognize IOS: saving the configuration', () => {
-    for (const cmd of ['write', 'wr', 'write memory', 'wr mem', 'copy running-config startup-config', 'copy run start', 'do write', 'do wr mem']) {
+    for (const cmd of ['write', 'wr', 'write memory', 'wr m', 'wr mem', 'copy running-config startup-config', 'copy run start',
+        'copy ru st', 'do write', 'do wr mem']) {
         assert.ok(recognize('ios', cmd).save, cmd);
     }
-    for (const cmd of ['write erase', 'wr term', 'copy run tftp:', 'copy start run', 'write memory now']) {
+    for (const cmd of ['w', 'write erase', 'wr term', 'copy run tftp:', 'copy start run', 'copy r s', 'co run start', 'write memory now']) {
         assert.ok(!(recognize('ios', cmd) || {}).save, cmd);
     }
 });
@@ -835,10 +837,15 @@ check('recognize IOS: the spanning tree commands', () => {
     assert.equal(rec('ios', 'sh span int e0/1'), 'show spanning-tree interface (partial)');
     assert.equal(rec('ios', 'sh span int Ethernet 0/1'), 'show spanning-tree interface (partial)');
     assert.equal(rec('ios', 'sh span root'), 'show spanning-tree root');
+    assert.equal(rec('ios', 'sh sp r'), 'show spanning-tree root');
+    assert.equal(rec('ios', 'sh sp a'), 'show spanning-tree');
+    assert.equal(rec('ios', 'sh sp s'), 'show spanning-tree summary');
+    assert.equal(rec('ios', 'sh sp bl'), 'show spanning-tree blockedports');
+    assert.equal(rec('ios', 'sh sp v 1'), 'show spanning-tree');
     assert.equal(rec('ios', 'sh span blockedports'), 'show spanning-tree blockedports');
     assert.equal(rec('ios', 'sh span summ'), 'show spanning-tree summary');
     assert.equal(rec('ios', 'sh span | i BLK'), 'show spanning-tree (partial)');
-    for (const cmd of ['sh s', 'sh span detail', 'sh span vlan', 'sh span int', 'spanning-tree vlan 1 priority 4096']) {
+    for (const cmd of ['sh s', 'sh sp b', 'sh span detail', 'sh span vlan', 'sh span int', 'spanning-tree vlan 1 priority 4096']) {
         assert.equal(rec('ios', cmd), null, cmd);
     }
 });

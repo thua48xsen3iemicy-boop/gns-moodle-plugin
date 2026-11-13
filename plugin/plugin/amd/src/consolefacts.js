@@ -723,7 +723,7 @@ const recognizeStp = toks => {
     if (word(rest[0], 'vlan', 1) && rest.length === 2 && /^[\d,-]+$/.test(rest[1])) {
         return {label, parse: (lines, whole) => stpFragment(parseStp(lines, whole))};
     }
-    if (word(rest[0], 'active', 2) && rest.length === 1) {
+    if (word(rest[0], 'active', 1) && rest.length === 1) {
         // Only the active ports: the blocks are not complete.
         return {label, parse: lines => stpFragment(parseStp(lines, false))};
     }
@@ -731,13 +731,13 @@ const recognizeStp = toks => {
         const name = iosName(rest.slice(1).join(''));
         return {label: label + ' interface', partial: true, parse: lines => stpFragment(parseStpInterface(name, lines))};
     }
-    if (word(rest[0], 'root', 2) && rest.length === 1) {
+    if (word(rest[0], 'root', 1) && rest.length === 1) {
         return {label: label + ' root', parse: lines => stpFragment(parseStpRoot(lines))};
     }
     if (word(rest[0], 'blockedports', 2) && rest.length === 1) {
         return {label: label + ' blockedports', parse: lines => stpFragment(parseStpBlocked(lines))};
     }
-    if (word(rest[0], 'summary', 2) && rest.length === 1) {
+    if (word(rest[0], 'summary', 1) && rest.length === 1) {
         return {label: label + ' summary', parse: (lines, whole) => stpFragment(parseStpSummary(lines, whole))};
     }
     return null;
@@ -904,10 +904,28 @@ const parseVpcs = lines => {
 
 /* ---------------- the commands ---------------- */
 
+/**
+ * Commands of IOS whose output is taken, with the minimum of each word.
+ *
+ * IOS takes any prefix of a keyword that no other keyword at that place shares. A minimum here is never longer than
+ * what IOS needs (IOL L2 and L3, IOS 15): a valid abbreviation must not be missed. One may be shorter: an ambiguous
+ * abbreviation makes IOS print `% Ambiguous command`, and nothing is parsed from that. Where IOS needs more letters
+ * than the minimum, the reason is in the comment.
+ *
+ * - `show` 2: `s` is also `set`, `ssh`, `systat`; `ip` 2: `i` is also `interfaces`, `inventory`, `ipv6`.
+ * - `show ip interface` 2: IOS needs `int` where `show ip inspect` exists (IOL L3).
+ * - `show interfaces` 3: `in` is also `inventory`. `status` 3: IOS needs `statu` (`stats`). `trunk` 2: IOS needs `tru`
+ *   (`transceiver`).
+ * - `show vlan` 2: `v` is also `version`, `vtp`, `vrf`. `brief` 1.
+ * - `write` 2: `w` is also `where`, `which-route`. `memory` 1. `copy` 3: `co` is also `configure`, `connect`.
+ *   `running-config` 2 (`rcp:`), `startup-config` 2 (`scp:`, `system:`).
+ * - `show spanning-tree` (recognizeStp): `spanning-tree` 2; `vlan`, `active`, `root`, `summary` 1; `blockedports` 2
+ *   (`backbonefast`, `bridge`); `interface` 2: IOS needs `int` (`inconsistentports`).
+ */
 const IOS_COMMANDS = [
-    {label: 'show ip interface brief', words: [['show', 2], ['ip', 2], ['interface', 3], ['brief', 1]],
+    {label: 'show ip interface brief', words: [['show', 2], ['ip', 2], ['interface', 2], ['brief', 1]],
         parse: lines => ({interfaces: parseIpBrief(lines)})},
-    {label: 'show ip interface', words: [['show', 2], ['ip', 2], ['interface', 3]],
+    {label: 'show ip interface', words: [['show', 2], ['ip', 2], ['interface', 2]],
         parse: lines => ({interfaces: parseIpInterface(lines)})},
     {label: 'show interfaces status', words: [['show', 2], ['interfaces', 3], ['status', 3]], intfAfter: 1,
         parse: lines => ({interfaces: parseStatus(lines)})},
@@ -916,7 +934,7 @@ const IOS_COMMANDS = [
     {label: 'show vlan brief', words: [['show', 2], ['vlan', 2], ['brief', 1]], parse: lines => parseVlanBrief(lines), lists: true},
     {label: 'write memory', words: [['write', 2], ['memory', 1]], exact: true, save: true},
     {label: 'write memory', words: [['write', 2]], exact: true, save: true},
-    {label: 'copy running-config startup-config', words: [['copy', 3], ['running-config', 3], ['startup-config', 3]],
+    {label: 'copy running-config startup-config', words: [['copy', 3], ['running-config', 2], ['startup-config', 2]],
         exact: true, save: true},
 ];
 
