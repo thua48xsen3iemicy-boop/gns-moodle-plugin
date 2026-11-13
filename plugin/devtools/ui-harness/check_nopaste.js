@@ -1,11 +1,12 @@
 'use strict';
 /**
- * Checks the option "no pasting into consoles" of an activity in Chromium:
+ * Checks "no pasting into the console" of the nodes of a library lab in Chromium:
  *
  *   clipboard or dragged text → the terminal of the lab page → fake gateway of server.js (it echoes what it gets).
  *
- * With the option on, a paste (Ctrl+V, the paste event), a drop and input that arrives in one long piece do not reach
- * the device, typing and the snippets do, and a screen has no Paste button. Without the option a paste goes through.
+ * On a marked node (SW1), a paste (Ctrl+V, the paste event), a drop and input that arrives in one long piece do not
+ * reach the device, typing and the snippets do; a marked screen has no Paste button. An unmarked node of the same lab
+ * (R1) and a lab without marks take a paste.
  * It starts the fake gateway itself and drives the page with Playwright.
  *
  *   cd plugin/devtools/ui-harness && npm install && node check_nopaste.js [--min]
@@ -63,6 +64,7 @@ const get = url => new Promise((resolve, reject) => {
 
 const demo = JSON.parse(fs.readFileSync(path.join(__dirname, '../../plugin/demo/ospf-multi-area.gns3'), 'utf8')).topology;
 const SW1 = demo.nodes.find(n => n.name === 'SW1').node_id;
+const R1 = demo.nodes.find(n => n.name === 'R1').node_id;
 const VNC = demo.nodes.find(n => n.console_type === 'vnc').node_id;
 
 /**
@@ -130,14 +132,15 @@ async function start(page, name) {
 }
 
 /**
- * Opens a page of the harness with a running lab and the console of SW1.
+ * Opens a page of the harness with a running lab and the console of a node.
  *
  * @param {Browser} browser browser
  * @param {string} name page name
  * @param {string[]} problems collects the errors of the page
+ * @param {string} nodeName name of the node, SW1 or R1
  * @returns {Promise<Page>}
  */
-async function labPage(browser, name, problems) {
+async function labPage(browser, name, problems, nodeName = 'SW1') {
     const context = await browser.newContext({viewport: {width: 1440, height: 860}});
     // The scenario reads the terminal of the one console on the screen: the panel mode (windows are the default).
     await context.addInitScript(() => localStorage.setItem('gns3lab.mode', JSON.stringify('panel')));
@@ -150,9 +153,9 @@ async function labPage(browser, name, problems) {
         }
     });
     await start(page, name);
-    await openConsole(page, SW1);
-    const up = await until(async() => /SW1[#>]/.test(await screenText(page)), 10000);
-    check(`${name}: the console of SW1 is open`, !!up);
+    await openConsole(page, nodeName === 'R1' ? R1 : SW1);
+    const up = await until(async() => new RegExp(`${nodeName}[#>]`).test(await screenText(page)), 10000);
+    check(`${name}: the console of ${nodeName} is open`, !!up);
     await page.locator('.xterm-helper-textarea').focus();
     return page;
 }
@@ -169,14 +172,14 @@ async function labPage(browser, name, problems) {
         }
         const problems = [];
 
-        // The option is on.
+        // SW1 is marked.
         let page = await labPage(browser, 'index.en.nopaste.html', problems);
         await page.keyboard.type('typed1');
         check('typing reaches the device', await shows(page, 'typed1'));
 
         await pasteEvent(page, 'PASTE-EVENT');
         check('a paste event does not reach the device', !(await shows(page, 'PASTE-EVENT', 800)));
-        check('...and the student is told', /Pasting is turned off/.test(await toast(page)), await toast(page));
+        check('...and the student is told', /Pasting into this console is turned off/.test(await toast(page)), await toast(page));
 
         await page.evaluate(() => navigator.clipboard.writeText('CTRL-V-TEXT'));
         await page.keyboard.press('Control+V');
@@ -221,7 +224,13 @@ async function labPage(browser, name, problems) {
         }
         await context.close();
 
-        // The option is off: a paste goes through.
+        // R1 of the same lab is not marked: a paste goes through.
+        page = await labPage(browser, 'index.en.nopaste.html', problems, 'R1');
+        await pasteEvent(page, 'PASTE-EVENT');
+        check('an unmarked node of the same lab takes a paste', await shows(page, 'PASTE-EVENT'));
+        await page.context().close();
+
+        // A lab without marks: a paste goes through.
         page = await labPage(browser, 'index.en.html', problems);
         await pasteEvent(page, 'PASTE-EVENT');
         check('without the option a paste reaches the device', await shows(page, 'PASTE-EVENT'));

@@ -97,10 +97,6 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         $mform->setDefault('seatmode', \mod_gns3lab\local\seat::TAB);
         $mform->addHelpButton('seatmode', 'seatmode', 'gns3lab');
 
-        // No pasting into the consoles: the page of a student refuses the clipboard, a deterrent and not a protection.
-        $mform->addElement('advcheckbox', 'nopaste', get_string('nopaste', 'gns3lab'));
-        $mform->addHelpButton('nopaste', 'nopaste', 'gns3lab');
-
         if (self::manager_offers_checks()) {
             $this->checks_elements();
         }

@@ -22,6 +22,7 @@ use core\output\templatable;
 use core\url;
 use mod_gns3lab\local\checks;
 use mod_gns3lab\local\demo;
+use mod_gns3lab\local\lab_definition;
 use mod_gns3lab\local\lab_preview;
 use mod_gns3lab\local\reveal;
 use mod_gns3lab\local\seat;
@@ -78,9 +79,11 @@ class viewer implements renderable, templatable {
         $data->fogstart = reveal::start_names($this->instance);
         // Who may drive the lab at the same time (docs/seat.md): the page claims the seat unless the mode is `off`.
         $data->seatmode = seat::mode($this->instance);
-        // No pasting into the consoles: an option of the activity for students. Whoever may look at the labs of others
-        // (a teacher) is not held by it. The page only draws it: the gateway takes whatever a browser sends.
-        $data->nopaste = !empty($this->instance->nopaste) && !has_capability('mod/gns3lab:observe', $this->cm->context);
+        // No pasting into the consoles of some nodes (lab_definition::NOPASTE) holds students only: whoever may look at
+        // the labs of others (a teacher) is not held by it. The page only draws it: the gateway takes whatever comes.
+        if (is_object($data->topology ?? null) && has_capability('mod/gns3lab:observe', $this->cm->context)) {
+            lab_definition::allow_paste($data->topology);
+        }
         // Auto-checks (docs/autochecks.md): the page asks for the details (mod_gns3lab_get_checks) only when they are on.
         $data->checks = checks::enabled($this->instance);
         $mode = $data->factsview;

@@ -64,7 +64,7 @@ const FONT_WHEEL_STEP = 50;
 const PASTE_MAX = 8192;
 
 /**
- * With pasting turned off, input that arrives from the terminal in one piece longer than this many characters is
+ * With pasting turned off for a node, input that arrives from the terminal in one piece longer than this many characters is
  * taken for a paste and dropped. A key gives one character, a word picked on a phone keyboard a few more.
  */
 const TYPED_MAX = 16;
@@ -107,6 +107,8 @@ class Con {
         this.conn = null;
         this.state = 'idle';
         this.vnc = node.consoleType === 'vnc';
+        // The lab keeps the clipboard out of this console (a node of a library lab, lab_definition::NOPASTE).
+        this.nopaste = !!node.nopaste;
         this.font = owner.loadFont(node.id);
         this.win = null;
         this.wpos = null;
@@ -400,8 +402,8 @@ class Con {
             if (this.conn && this.conn.ctrlAltDel()) this.focus();
             else o.toast(fill(o.s('ui_not_connected'), this.n.name));
         });
-        // The only way of the clipboard to a screen; an activity may turn it off.
-        if (!o.nopaste) button(o.s('consolevncpaste'), o.s('consolevncpastehint'), () => this.pasteText());
+        // The only way of the clipboard to a screen; the lab may turn it off for the node.
+        if (!this.nopaste) button(o.s('consolevncpaste'), o.s('consolevncpastehint'), () => this.pasteText());
     }
 
     /** Puts the text of the clipboard of the browser into the clipboard of the node. */
@@ -502,7 +504,7 @@ class Con {
     }
 
     /**
-     * With pasting turned off in the activity, keeps the clipboard and dragged text away from the terminal.
+     * With pasting turned off for the node, keeps the clipboard and dragged text away from the terminal.
      *
      * xterm.js takes a paste (Ctrl+V, Shift+Insert, the menu of the browser, the middle button) from the paste event
      * of its text area, so the event stops here, on the way down. This holds a student back and no more: the page is
@@ -510,7 +512,7 @@ class Con {
      */
     blockPaste() {
         const o = this.owner;
-        if (!o.nopaste) return;
+        if (!this.nopaste) return;
         const refuse = event => {
             event.preventDefault();
             event.stopPropagation();
@@ -522,7 +524,7 @@ class Con {
     }
 
     /**
-     * Whether input of the terminal is a paste that the activity does not allow: the second line after blockPaste().
+     * Whether input of the terminal is a paste that the lab does not allow: the second line after blockPaste().
      *
      * Typing arrives a character at a time. What the terminal itself reports (arrows, function keys, the mouse)
      * is longer but starts with Esc. Snippets and the key strip do not come this way.
@@ -532,7 +534,7 @@ class Con {
      */
     pasted(data) {
         const o = this.owner;
-        if (!o.nopaste) return false;
+        if (!this.nopaste) return false;
         const paste = data.includes(PASTE_MARK) || (data[0] !== '\x1b' && [...data].length > TYPED_MAX);
         if (paste) o.toast(o.s('consolenopaste'));
         return paste;
@@ -699,14 +701,13 @@ export class Consoles {
      * @param {number} options.cmid course module id
      * @param {number} options.userid whose lab, 0 for the current user
      * @param {boolean} options.readonly observer: input is disabled
-     * @param {boolean} [options.nopaste] the activity does not let the clipboard into the consoles
      * @param {Function} options.nodeStatus async nodeId => {status, stale} from a fresh session state
      * @param {Function} options.toast shows a short message
      * @param {Function} [options.onSeen] called with {nodeId, kind, command, lines, partial} for a command seen in a console
      * @param {Function} [options.onScreen] called with the node id when the screen of a node answers (a fog opens the node)
      * @param {Function} [options.api] the transport of web service calls, passed to the consoles
      */
-    constructor(root, {stage, strings, cmid, userid, readonly, nopaste = false, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}, api}) {
+    constructor(root, {stage, strings, cmid, userid, readonly, nodeStatus, toast, onSeen = () => {}, onScreen = () => {}, api}) {
         this.api = api;
         this.root = root;
         this.stage = stage;
@@ -714,7 +715,6 @@ export class Consoles {
         this.cmid = cmid;
         this.userid = userid;
         this.readonly = readonly;
-        this.nopaste = nopaste;
         this.nodeStatus = nodeStatus;
         this.toast = toast;
         this.onSeen = onSeen;

@@ -70,6 +70,13 @@ class lab_definition {
     /** Longest title the lab manager takes. */
     public const TITLE_MAX = 200;
 
+    /**
+     * Node field of the plugin alone: students may not paste the clipboard into the console of the node.
+     *
+     * The lab manager refuses unknown fields (CONTRACTS 2.6), so for_manager() takes it out of whatever goes there.
+     */
+    public const NOPASTE = 'nopaste';
+
     /** Node fields besides name, image, x and y; the lab manager uses the image default for a missing one. */
     protected const NUMBERS = ['ram_mb', 'cpus', 'adapters', 'uplink_port'];
 
@@ -81,6 +88,36 @@ class lab_definition {
      */
     public static function empty(string $title): array {
         return ['format' => self::FORMAT, 'title' => $title, 'nodes' => [], 'links' => []];
+    }
+
+    /**
+     * The definition as the lab manager takes it: without the node fields that only the plugin knows.
+     *
+     * @param array $def clean definition
+     * @return array
+     */
+    public static function for_manager(array $def): array {
+        foreach ($def['nodes'] ?? [] as $i => $node) {
+            if (is_array($node)) {
+                unset($def['nodes'][$i][self::NOPASTE]);
+            }
+        }
+        return $def;
+    }
+
+    /**
+     * Lets the clipboard into every console of a lab page: takes the mark of to_topology() off the nodes.
+     *
+     * @param \stdClass $doc lab as to_topology() gives it (a .gns3 document: topology.nodes), changed
+     */
+    public static function allow_paste(\stdClass $doc): void {
+        foreach ($doc->topology->nodes ?? [] as $i => $node) {
+            if (is_array($node)) {
+                unset($doc->topology->nodes[$i][self::NOPASTE]);
+            } else if (is_object($node)) {
+                unset($node->{self::NOPASTE});
+            }
+        }
     }
 
     /**
@@ -133,6 +170,15 @@ class lab_definition {
                 }
                 if ($node['random_ifnames']) {
                     $clean['random_ifnames'] = true;
+                }
+            }
+            // No pasting into the console of the node: like random_ifnames, only true is kept.
+            if (array_key_exists(self::NOPASTE, $node) && $node[self::NOPASTE] !== null) {
+                if (!is_bool($node[self::NOPASTE])) {
+                    throw self::invalid("nodes[{$i}]." . self::NOPASTE);
+                }
+                if ($node[self::NOPASTE]) {
+                    $clean[self::NOPASTE] = true;
                 }
             }
             // Additional blank disks (manager CONTRACTS 2.6): an empty list is no field, like the lab manager does.
@@ -375,6 +421,10 @@ class lab_definition {
                 'ports' => $ports,
                 'properties' => new \stdClass(),
             ];
+            if (!empty($node[self::NOPASTE])) {
+                // The lab page keeps the clipboard out of the console of this node (consoles.js).
+                $nodes[count($nodes) - 1][self::NOPASTE] = true;
+            }
             if (($image->guest ?? '') === 'routeros') {
                 // MikroTik RouterOS: the console snippets of the node are those of RouterOS (snippets.js kindOf).
                 $nodes[count($nodes) - 1]['guest'] = 'routeros';
