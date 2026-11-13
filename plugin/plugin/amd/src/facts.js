@@ -200,6 +200,10 @@ const sends = (w, t) => w.set.has(t) && !(t === "u" && w.sw && w.sp.mode === "tr
 /**
  * What a port does in the spanning tree of a VLAN: `stp.vlans[vlan]`, or the one tree of a bridge that has no
  * per-VLAN trees (`stp: {state, role}`, docs/live-state.md §3.1). Null when nothing is known.
+ *
+ * @param {object} i interface of the facts
+ * @param {number} vlan VLAN
+ * @returns {object|null}
  */
 export const portStp = (i, vlan) => {
   const stp = i && i.stp;
@@ -207,18 +211,39 @@ export const portStp = (i, vlan) => {
   if (stp.vlans && typeof stp.vlans === "object" && stp.vlans[vlan]) return stp.vlans[vlan];
   return stp.state || stp.role ? { state: stp.state, role: stp.role } : null;
 };
-/** The port forwards nothing in this tree (blocking, listening, broken …), as STP decided. */
+/**
+ * The port forwards nothing in this tree (blocking, listening, broken …), as STP decided.
+ *
+ * @param {object|null} p see portStp()
+ * @returns {boolean}
+ */
 export const stpBlocks = p => !!p && !!p.state && !["forwarding", "learning"].includes(p.state);
-/** The bridge is the root of the tree of the VLAN: true, false, or null when not known. */
+/**
+ * The bridge is the root of the tree of the VLAN: true, false, or null when not known.
+ *
+ * @param {object} f facts of a node
+ * @param {number} vlan VLAN
+ * @returns {boolean|null}
+ */
 export const stpRoot = (f, vlan) => {
   const t = f && f.stp && f.stp.vlans && f.stp.vlans[vlan];
   return t && typeof t.is_root === "boolean" ? t.is_root : null;
 };
 const STP_SHORT = { root: "Root", designated: "Desg", alternate: "Altn", backup: "Back", master: "Mstr", disabled: "Dis",
   forwarding: "FWD", blocking: "BLK", listening: "LIS", learning: "LRN", broken: "BKN" };
-/** Role and state of a port in the IOS notation: "Altn BLK". */
+/**
+ * Role and state of a port in the IOS notation: "Altn BLK".
+ *
+ * @param {object} p see portStp()
+ * @returns {string}
+ */
 export const stpShort = p => [p.role, p.state].filter(Boolean).map(x => STP_SHORT[x] || x).join(" ");
-/** The spanning tree of a port for a table: "VLAN 1: Altn BLK · VLAN 10: Desg FWD", or "—". */
+/**
+ * The spanning tree of a port for a table: "VLAN 1: Altn BLK · VLAN 10: Desg FWD", or "—".
+ *
+ * @param {object} i interface of the facts
+ * @returns {string}
+ */
 export const stpText = i => {
   const stp = i && i.stp;
   if (!stp || typeof stp !== "object") return "—";
