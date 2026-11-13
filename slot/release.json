@@ -1,10 +1,10 @@
 {
-  "version": "0.18.0",
-  "build_id": "sha256:aed86e009f7d6699f5937f70a32f3f21298a69cb3aeffddb5512e3ee9d0ad754",
+  "version": "0.18.1",
+  "build_id": "sha256:69d0b7b400e07977c188ebc3c51de1e2de2966e827826ce185426b5f2e15ce4b",
   "files": {
     "AGENTS.md": "2022c85b1d62f4815d4daad8618bee150d40e1d16e095943d0867b14052cb068",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
-    "README.md": "bff199c7f4dc2422012924ee1eb218f8ce8e771bbb28f080085be51f3460a2aa",
+    "README.md": "6db28d8ac9b9f6aaedc9043dd1cd51d96b757ab3a78160239d36c9374abfa617",
     "api/__init__.py": "b61bb532c208db9570b32a1b4903291e1cb21600ea4bd89c101ca995f7ec324d",
     "api/auth.py": "3b6238c07a3068450132d3051b7cd6aa7a979381809607daf305c1203879ae9f",
     "api/carrier.py": "672f3ecfb27386af60d17d50a044e191996a24ecb69b2fb410dfdcb548e6dc4d",
@@ -17,7 +17,7 @@
     "api/iol_nvram.py": "1fbe3af314122fb5217cdb734837280135d499dd260edcfae84b6a7a1f6adebe",
     "api/ios_config.py": "9e76dd068f9d7493223697cccd0b16349e7093adb5704ffd6b1e1a3ef0a0edf4",
     "api/l1.py": "2b881f339d227e77d559fd4e68f9af5c9ed07dc7dac602671268c6b3702a4acd",
-    "api/labs.py": "824f24193dfa717629fad308a4bdf53274e32066c53a6723ae96de7b281fe238",
+    "api/labs.py": "f2eaf05b0560e02281fac7bce8a9586defe46d3f46ae8117924e1e4a8788dd00",
     "api/lifecycle.py": "0920dea2befafc3d646370854fb519348fe6f933abc2948e6bcce059a63be5ce",
     "api/linux_facts.py": "ef15992f0bcfe8d82b3cd306a9c04106403150aafbac073c1574ca4b361cf1f6",
     "api/models.py": "73ed24e9ba9158009a3ac7e1b5626efe34bae2917b2cf7da04997fb0b2210b96",
@@ -28,7 +28,7 @@
     "examples/cisco-3x2.json": "c96f71ffb6f753998dc7bf0fbf9f5517e51a613df839f51e2cc09d167903aeab",
     "lab-slot.service": "6d4af7568b72bd18abf137d0c2659c53e39ec2433544e35a0087c382d4bfa754",
     "main.py": "fcaec46145f1feadab4953865fe9bcce311ba9aa5fbcf773b0efdabf491b257d",
-    "release.py": "4590c1f7b3a69ac68e4f350a1e24ddc8cd2e3a687cac30c30110792d46736407",
+    "release.py": "e327bb575acec7391d38f12fbea1d3a4bc75310b04af2421bfc7c87feab37abf",
     "requirements.txt": "4c096559578f14792cece3b25e61ae0df1d3589b75016be731a3dd9553994e4b",
     "run.py": "5f0776bd540d202c4b751011f438b331ca5e90aad245057b31a48c2e8242c92c",
     "slot.env.example": "5ae6ccd358be8ef1771bf5dafa363d86cbd225734a06e16bddf770846ddf479f",
@@ -50,7 +50,7 @@
     "tests/test_slot.py": "7e95979efe5fe7e18b73e183705640ae99c5cf64d184fa565a097495d47cfeda",
     "tests/test_student_state.py": "df830da5ebf588f9b7d4548dcde03b472332ee71e5261d8e264be58044ddf546",
     "tests/test_uplink.py": "f421d9c2abafaab5efc50982725328a76f170684c1e58389f28c747c2a99a107",
-    "tests/test_vnc.py": "dc7f4192a33c0bd36b7d787cf69258b6c5a484f3def4fa61f327b9dadd1bfe5b",
+    "tests/test_vnc.py": "436ab177e08cd91ad2c30699501b09ece3ff6762403a5ffb9a1d69443e9dfd91",
     "tools/check_slot.py": "a951dab74d9a7a8c72e29ea98214ed02ccee3cb0beb77f9ff53b5b78adb6b4fd"
   }
 }

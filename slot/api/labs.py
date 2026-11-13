@@ -37,7 +37,13 @@ def node_payload(spec: NodeSpec, node_id: str):
         # "vnc": GNS3 2.2.61 picks a free port from 5900 up (display = port - 5900) and starts
         # QEMU with "-vnc <console_host>:<display>"; console_host is the "[Server] host" of
         # gns3_server.conf (127.0.0.1 here). The node gets no serial port ("-serial" is added
-        # for telnet only), so there is nothing for serial-getty to talk to.
+        # for telnet only), so there is nothing for serial-getty to talk to. GNS3 itself appends
+        # "-machine usb=on -device usb-tablet" for vnc (absolute pointer, no mouse offset), so the
+        # slot adds only the display adapter: virtio-vga instead of QEMU's default std VGA. It is
+        # VGA compatible (BIOS, boot loader and text mode work as before) and gives Linux guests
+        # the virtio_gpu driver with resolutions a desktop needs.
+        if spec.console == "vnc":
+            options = f"{options} -vga virtio".strip()
         common.update(
             console_type=spec.console,
             properties={
