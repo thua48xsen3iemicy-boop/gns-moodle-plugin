@@ -51,6 +51,18 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json(json_encode($raw), 'Names');
     }
 
+    public function test_keeps_additional_disks_and_drops_an_empty_list(): void {
+        $raw = ['nodes' => [['name' => 'PC1', 'image' => 'debian12', 'x' => 0, 'y' => 0,
+            'disks' => [['size_gb' => 5, 'format' => 'raw'], ['size_gb' => 1]]],
+            ['name' => 'PC2', 'image' => 'debian12', 'x' => 100, 'y' => 0, 'disks' => []]], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'Disks');
+        $this->assertSame([['size_gb' => 5], ['size_gb' => 1]], $def['nodes'][0]['disks']);
+        $this->assertArrayNotHasKey('disks', $def['nodes'][1]);
+        $raw['nodes'][1]['disks'] = array_fill(0, 4, ['size_gb' => 1]);
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode($raw), 'Disks');
+    }
+
     public function test_marks_mikrotik_nodes_for_their_console_snippets(): void {
         $raw = ['nodes' => [['name' => 'R1', 'image' => 'mikrotik-chr7', 'x' => 0, 'y' => 0],
             ['name' => 'PC1', 'image' => 'debian12', 'x' => 100, 'y' => 0]], 'links' => []];

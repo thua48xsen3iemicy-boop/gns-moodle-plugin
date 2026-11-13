@@ -182,7 +182,9 @@ IMAGES.extend([
 for _image in IMAGES:  # Random guest interface names (CONTRACTS 2.6): the Debian guests can take them
     if _image["id"] in ("debian12", "debian12-server"):
         _image["random_ifnames"] = True
-LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "images": "*"}
+        # Additional blank disks (CONTRACTS 2.6): the numbers are the manager's
+        _image["extra_disks"] = {"max": 3, "size_gb": {"default": 1, "min": 1, "max": 20}}
+LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "max_disk_gb": None, "images": "*"}
 LAB_FORMAT = "gns3lab.lab/1"
 # Проверка определения — перенос manager/lab_manager/labdef.py (ветка менеджера claude/determined-brown-lfgnxy):
 # те же правила, коды и пути замечаний, хэш без title, тот же размер CT.
@@ -260,7 +262,7 @@ def lab_problems(lab):
         if not isinstance(node, dict):
             bad(path, "bad_type", "object expected")
             continue
-        unknown(node, {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "random_ifnames"}, path)
+        unknown(node, {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "random_ifnames", "disks"}, path)
         out, ok = {}, True
         name = node.get("name")
         if not isinstance(name, str) or not NAME_RE.fullmatch(name):
@@ -301,6 +303,24 @@ def lab_problems(lab):
                 bad(f"{path}.random_ifnames", "unsupported_image", f"{image['id']} cannot rename its interfaces")
             elif value:
                 out["random_ifnames"] = True
+        if node.get("disks") != [] and "disks" in node:
+            value, spec = node["disks"], (image or {}).get("extra_disks")
+            if not isinstance(value, list):
+                bad(f"{path}.disks", "bad_type", "list")
+            elif image is not None and not spec:
+                bad(f"{path}.disks", "unsupported_image", f"{image['id']} takes no additional disks")
+            elif spec and len(value) > spec["max"]:
+                bad(f"{path}.disks", "out_of_range", f"max {spec['max']} disks")
+            elif spec:
+                rng, sizes = spec["size_gb"], []
+                for j, disk in enumerate(value):
+                    size = disk.get("size_gb") if isinstance(disk, dict) else None
+                    if not is_int(size) or not rng["min"] <= size <= rng["max"]:
+                        bad(f"{path}.disks[{j}].size_gb", "out_of_range", f"{rng['min']}..{rng['max']}")
+                    else:
+                        sizes.append({"size_gb": size})
+                if len(sizes) == len(value):
+                    out["disks"] = sizes
         if ok and image is not None:
             out = {"name": name, "image": image["id"], **out}
             by_name[name] = out
@@ -622,7 +642,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance", "random_ifnames"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance", "random_ifnames", "extra_disks"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})

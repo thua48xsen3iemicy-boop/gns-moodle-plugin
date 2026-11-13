@@ -140,6 +140,37 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await until(async() => !('random_ifnames' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {random_ifnames: 1})));
         check('unticking drops the field', !('random_ifnames' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
 
+        // ---- additional blank disks: a block on nodes of images that take them, up to three, an empty list is no field
+        await tap(page, PC3);
+        check('a VPCS node offers no additional disks', (await page.locator('[data-act="adddisk"]').count()) === 0);
+        await tap(page, PC1);
+        const addDisk = page.locator('[data-act="adddisk"]');
+        check('a Debian node offers additional disks, none by default',
+            (await addDisk.count()) === 1 && (await page.locator('[data-disk]').count()) === 0);
+        await addDisk.click();
+        await addDisk.click();
+        await page.locator('input[data-disk="1"]').fill('5');
+        await page.locator('input[data-disk="1"]').dispatchEvent('change');
+        await page.locator('input[data-disk="0"]').fill('21');
+        await page.locator('input[data-disk="0"]').dispatchEvent('change');
+        check('a size out of the range of the image is refused',
+            (await page.locator('input[data-disk="0"]').inputValue()) === '1'
+            && !(await page.locator('[data-region="fielderror"]').isHidden()));
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.find(n => n.name === 'PC1')?.disks?.length === 2);
+        check('the disks are saved in order, on that node only',
+            JSON.stringify((await saved(page)).nodes.find(n => n.name === 'PC1').disks) === '[{"size_gb":1},{"size_gb":5}]'
+            && !(await saved(page)).nodes.some(n => n.name !== 'PC1' && 'disks' in n));
+        await addDisk.click();
+        check('the fourth disk is not offered', (await page.locator('[data-act="adddisk"]').count()) === 0
+            && (await page.locator('input[data-disk]').count()) === 3);
+        for (let k = 0; k < 3; k++) {
+            await page.locator('button[data-act="removedisk"]').first().click();
+        }
+        await act(page, 'save').click();
+        await until(async() => !('disks' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {disks: 1})));
+        check('removing every disk drops the field', !('disks' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
+
         // ---- a manager without the lab constructor: no segments, no preview
         await page.goto(`${BASE}/editor.en.plain.html${MIN}`);
         await until(async() => (await page.locator('.node').count()) === 5);
