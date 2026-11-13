@@ -451,6 +451,10 @@ const sends = (w, t) => w.set.has(t) && !(t === "u" && w.sw && w.sp.mode === "tr
 /**
  * What a port does in the spanning tree of a VLAN: `stp.vlans[vlan]`, or the one tree of a bridge that has no
  * per-VLAN trees (`stp: {state, role}`, docs/live-state.md §3.1). Null when nothing is known.
+ *
+ * @param {object} i interface of the facts
+ * @param {number} vlan VLAN
+ * @returns {object|null}
  */
 const portStp = (i, vlan) => {
   const stp = i && i.stp;
@@ -458,18 +462,39 @@ const portStp = (i, vlan) => {
   if (stp.vlans && typeof stp.vlans === "object" && stp.vlans[vlan]) return stp.vlans[vlan];
   return stp.state || stp.role ? { state: stp.state, role: stp.role } : null;
 };
-/** The port forwards nothing in this tree (blocking, listening, broken …), as STP decided. */
+/**
+ * The port forwards nothing in this tree (blocking, listening, broken …), as STP decided.
+ *
+ * @param {object|null} p see portStp()
+ * @returns {boolean}
+ */
 const stpBlocks = p => !!p && !!p.state && !["forwarding", "learning"].includes(p.state);
-/** The bridge is the root of the tree of the VLAN: true, false, or null when not known. */
+/**
+ * The bridge is the root of the tree of the VLAN: true, false, or null when not known.
+ *
+ * @param {object} f facts of a node
+ * @param {number} vlan VLAN
+ * @returns {boolean|null}
+ */
 const stpRoot = (f, vlan) => {
   const t = f && f.stp && f.stp.vlans && f.stp.vlans[vlan];
   return t && typeof t.is_root === "boolean" ? t.is_root : null;
 };
 const STP_SHORT = { root: "Root", designated: "Desg", alternate: "Altn", backup: "Back", master: "Mstr", disabled: "Dis",
   forwarding: "FWD", blocking: "BLK", listening: "LIS", learning: "LRN", broken: "BKN" };
-/** Role and state of a port in the IOS notation: "Altn BLK". */
+/**
+ * Role and state of a port in the IOS notation: "Altn BLK".
+ *
+ * @param {object} p see portStp()
+ * @returns {string}
+ */
 const stpShort = p => [p.role, p.state].filter(Boolean).map(x => STP_SHORT[x] || x).join(" ");
-/** The spanning tree of a port for a table: "VLAN 1: Altn BLK · VLAN 10: Desg FWD", or "—". */
+/**
+ * The spanning tree of a port for a table: "VLAN 1: Altn BLK · VLAN 10: Desg FWD", or "—".
+ *
+ * @param {object} i interface of the facts
+ * @returns {string}
+ */
 const stpText = i => {
   const stp = i && i.stp;
   if (!stp || typeof stp !== "object") return "—";
@@ -1187,13 +1212,23 @@ const STP_ROLES = {root: 'root', desg: 'designated', altn: 'alternate', back: 'b
 const STP_STATES = {fwd: 'forwarding', blk: 'blocking', lis: 'listening', lrn: 'learning', dis: 'disabled', bkn: 'broken'};
 const STP_MODES = {ieee: 'pvst', rstp: 'rapid-pvst', mstp: 'mst'};
 
-/** "VLAN0010" → 10; anything else (MST0, a port name) → null. */
+/**
+ * "VLAN0010" → 10; anything else (MST0, a port name) → null.
+ *
+ * @param {string} text a word of the output
+ * @returns {number|null}
+ */
 const stpVlan = text => {
     const m = /^VLAN0*(\d{1,4})$/i.exec(text || '');
     return m && +m[1] >= 1 && +m[1] <= VLAN_MAX ? +m[1] : null;
 };
 
-/** "aabb.cc00.0100" → "aa:bb:cc:00:01:00". */
+/**
+ * "aabb.cc00.0100" → "aa:bb:cc:00:01:00".
+ *
+ * @param {string} text a MAC address in the IOS notation
+ * @returns {string|null}
+ */
 const dottedMac = text => {
     const hex = String(text).toLowerCase().replace(/\./g, '');
     return /^[0-9a-f]{12}$/.test(hex) ? hex.match(/../g).join(':') : null;
@@ -1222,7 +1257,14 @@ const stpRow = line => {
  */
 const stpResult = () => ({ports: new Map(), trees: new Map(), mode: null, complete: new Set()});
 
-/** Puts what a port does in a VLAN into the result. */
+/**
+ * Puts what a port does in a VLAN into the result.
+ *
+ * @param {object} res see stpResult(), changed
+ * @param {string} name port name as the output gives it
+ * @param {number} vlan VLAN
+ * @param {object} info role, state, cost …
+ */
 const stpPort = (res, name, vlan, info) => {
     const key = iosName(name);
     if (!res.ports.has(key)) {
@@ -1231,7 +1273,13 @@ const stpPort = (res, name, vlan, info) => {
     res.ports.get(key)[vlan] = Object.assign(res.ports.get(key)[vlan] || {}, info);
 };
 
-/** Puts what the bridge knows of a VLAN tree into the result. */
+/**
+ * Puts what the bridge knows of a VLAN tree into the result.
+ *
+ * @param {object} res see stpResult(), changed
+ * @param {number} vlan VLAN
+ * @param {object} info root, priority …
+ */
 const stpTree = (res, vlan, info) => {
     res.trees.set(vlan, Object.assign(res.trees.get(vlan) || {}, info));
 };
@@ -1378,11 +1426,11 @@ const parseStpBlocked = lines => {
         if (vlan === null) {
             continue;
         }
-        list.split(',').map(p => p.trim()).filter(Boolean).forEach(p => {
+        for (const p of list.split(',').map(x => x.trim()).filter(Boolean)) {
             if (iosKind(iosName(p))) {
                 stpPort(res, p, vlan, {state: 'blocking'});
             }
-        });
+        }
     }
     return res;
 };
@@ -1457,7 +1505,7 @@ const stpFragment = res => {
  */
 const recognizeStp = toks => {
     const word = (t, keyword, min) => !!t && t.length >= min && keyword.startsWith(t.toLowerCase());
-    if (!word(toks[0], 'show', 2) || !word(toks[1], 'spanning-tree', 4)) {
+    if (!word(toks[0], 'show', 2) || !word(toks[1], 'spanning-tree', 2)) {
         return null;
     }
     const rest = toks.slice(2);
@@ -1468,7 +1516,7 @@ const recognizeStp = toks => {
     if (word(rest[0], 'vlan', 1) && rest.length === 2 && /^[\d,-]+$/.test(rest[1])) {
         return {label, parse: (lines, whole) => stpFragment(parseStp(lines, whole))};
     }
-    if (word(rest[0], 'active', 2) && rest.length === 1) {
+    if (word(rest[0], 'active', 1) && rest.length === 1) {
         // Only the active ports: the blocks are not complete.
         return {label, parse: lines => stpFragment(parseStp(lines, false))};
     }
@@ -1476,13 +1524,13 @@ const recognizeStp = toks => {
         const name = iosName(rest.slice(1).join(''));
         return {label: label + ' interface', partial: true, parse: lines => stpFragment(parseStpInterface(name, lines))};
     }
-    if (word(rest[0], 'root', 2) && rest.length === 1) {
+    if (word(rest[0], 'root', 1) && rest.length === 1) {
         return {label: label + ' root', parse: lines => stpFragment(parseStpRoot(lines))};
     }
     if (word(rest[0], 'blockedports', 2) && rest.length === 1) {
         return {label: label + ' blockedports', parse: lines => stpFragment(parseStpBlocked(lines))};
     }
-    if (word(rest[0], 'summary', 2) && rest.length === 1) {
+    if (word(rest[0], 'summary', 1) && rest.length === 1) {
         return {label: label + ' summary', parse: (lines, whole) => stpFragment(parseStpSummary(lines, whole))};
     }
     return null;
@@ -1649,10 +1697,28 @@ const parseVpcs = lines => {
 
 /* ---------------- the commands ---------------- */
 
+/**
+ * Commands of IOS whose output is taken, with the minimum of each word.
+ *
+ * IOS takes any prefix of a keyword that no other keyword at that place shares. A minimum here is never longer than
+ * what IOS needs (IOL L2 and L3, IOS 15): a valid abbreviation must not be missed. One may be shorter: an ambiguous
+ * abbreviation makes IOS print `% Ambiguous command`, and nothing is parsed from that. Where IOS needs more letters
+ * than the minimum, the reason is in the comment.
+ *
+ * - `show` 2: `s` is also `set`, `ssh`, `systat`; `ip` 2: `i` is also `interfaces`, `inventory`, `ipv6`.
+ * - `show ip interface` 2: IOS needs `int` where `show ip inspect` exists (IOL L3).
+ * - `show interfaces` 3: `in` is also `inventory`. `status` 3: IOS needs `statu` (`stats`). `trunk` 2: IOS needs `tru`
+ *   (`transceiver`).
+ * - `show vlan` 2: `v` is also `version`, `vtp`, `vrf`. `brief` 1.
+ * - `write` 2: `w` is also `where`, `which-route`. `memory` 1. `copy` 3: `co` is also `configure`, `connect`.
+ *   `running-config` 2 (`rcp:`), `startup-config` 2 (`scp:`, `system:`).
+ * - `show spanning-tree` (recognizeStp): `spanning-tree` 2; `vlan`, `active`, `root`, `summary` 1; `blockedports` 2
+ *   (`backbonefast`, `bridge`); `interface` 2: IOS needs `int` (`inconsistentports`).
+ */
 const IOS_COMMANDS = [
-    {label: 'show ip interface brief', words: [['show', 2], ['ip', 2], ['interface', 3], ['brief', 1]],
+    {label: 'show ip interface brief', words: [['show', 2], ['ip', 2], ['interface', 2], ['brief', 1]],
         parse: lines => ({interfaces: parseIpBrief(lines)})},
-    {label: 'show ip interface', words: [['show', 2], ['ip', 2], ['interface', 3]],
+    {label: 'show ip interface', words: [['show', 2], ['ip', 2], ['interface', 2]],
         parse: lines => ({interfaces: parseIpInterface(lines)})},
     {label: 'show interfaces status', words: [['show', 2], ['interfaces', 3], ['status', 3]], intfAfter: 1,
         parse: lines => ({interfaces: parseStatus(lines)})},
@@ -1661,7 +1727,7 @@ const IOS_COMMANDS = [
     {label: 'show vlan brief', words: [['show', 2], ['vlan', 2], ['brief', 1]], parse: lines => parseVlanBrief(lines), lists: true},
     {label: 'write memory', words: [['write', 2], ['memory', 1]], exact: true, save: true},
     {label: 'write memory', words: [['write', 2]], exact: true, save: true},
-    {label: 'copy running-config startup-config', words: [['copy', 3], ['running-config', 3], ['startup-config', 3]],
+    {label: 'copy running-config startup-config', words: [['copy', 3], ['running-config', 2], ['startup-config', 2]],
         exact: true, save: true},
 ];
 
@@ -2044,6 +2110,7 @@ const kindOnDevice = (kind, s) => {
  * @param {object} item the interface, changed
  * @param {object} s the interface as seen
  * @param {object|null} known the interface in the deciding facts
+ * @param {number[]} [full] VLANs whose spanning tree was shown in full (rec.stpFull)
  * @returns {string[]} the fields that came from the console
  */
 const applyFields = (item, s, known, full = []) => {
