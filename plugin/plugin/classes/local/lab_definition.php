@@ -58,6 +58,9 @@ class lab_definition {
     /** Most nodes a Lab Slot takes. */
     public const MAX_NODES = 100;
 
+    /** @var int additional disks of a node: GNS3 has hdb, hdc and hdd */
+    public const MAX_DISKS = 3;
+
     /** Most links: four times the nodes is more than any real lab. */
     public const MAX_LINKS = 400;
 
@@ -176,6 +179,20 @@ class lab_definition {
                 }
                 if ($node[self::NOPASTE]) {
                     $clean[self::NOPASTE] = true;
+                }
+            }
+            // Additional blank disks (manager CONTRACTS 2.6): an empty list is no field, like the lab manager does.
+            if (array_key_exists('disks', $node) && $node['disks'] !== null) {
+                $disks = $node['disks'];
+                if (!is_array($disks) || !array_is_list($disks) || count($disks) > self::MAX_DISKS) {
+                    throw self::invalid("nodes[{$i}].disks");
+                }
+                foreach ($disks as $j => $disk) {
+                    $size = is_array($disk) ? ($disk['size_gb'] ?? null) : null;
+                    if (!is_int($size) || $size < 1 || $size > 1024) {
+                        throw self::invalid("nodes[{$i}].disks[{$j}]");
+                    }
+                    $clean['disks'][] = ['size_gb' => $size];
                 }
             }
             $def['nodes'][] = $clean;

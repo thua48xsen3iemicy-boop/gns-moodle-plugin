@@ -118,6 +118,22 @@ python3 install/check-derived-images.py /mnt/pve/cfs/<IMAGES_DIR>/QEMU \
 образом, три уровня backing-chain, запуск ноды и продолжение в другом слоте
 (`docs/derived-images/TASK.md`). Сама проверка файлов этого не доказывает.
 
+### Пустой образ для дополнительных дисков (`blank.qcow2`)
+
+Дополнительные диски нод (Manager 0.22.0, Slot 0.18.0, CONTRACTS §4.2) — связанные клоны одного пустого образа.
+Положите его один раз рядом с базами, на любом узле с CephFS:
+
+```sh
+qemu-img create -f qcow2 /mnt/pve/cfs/<IMAGES_DIR>/QEMU/blank.qcow2 1M
+chmod 0444 /mnt/pve/cfs/<IMAGES_DIR>/QEMU/blank.qcow2
+```
+
+Образ без backing file, не больше 1 ГиБ и кратен 1 МиБ; слот растягивает клон до нужного размера сам. Как и базу,
+его нельзя удалять или заменять: диски в проектах студентов ссылаются на него как на backing. Только после этого
+ставьте `"extra_disks": true` нужным образам в `IMAGES_FILE` (Linux, Windows; только `qemu`) и перезапускайте
+менеджер. Сумму дисков одной лабы ограничивает `limits.max_disk_gb` сайта в `sites.json`. Диски лежат в проекте
+студента на CephFS и занимают столько, сколько в них записано.
+
 ## Шаги
 
 ```sh

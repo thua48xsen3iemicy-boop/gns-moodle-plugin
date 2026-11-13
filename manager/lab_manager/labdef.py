@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from . import ifnames, iosconfig, netconfig
 from . import checks as checks_mod
 from . import segments as segments_mod
-from .images import PORTS_PER_ADAPTER, VPCS_MEMORY_MB
+from .images import EXTRA_DISK_GB, MAX_EXTRA_DISKS, PORTS_PER_ADAPTER, VPCS_MEMORY_MB
 
 FORMAT = "gns3lab.lab/1"
 FORMAT_2 = "gns3lab.lab/2"
@@ -36,7 +36,7 @@ MAX_LINKS = 1000
 COORD = 100_000
 TOP_KEYS = {"format", "title", "nodes", "links"}
 TOP_KEYS_2 = TOP_KEYS | {"segments", "checks"}
-NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port", "random_ifnames"}
+NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port", "random_ifnames", "disks"}
 ENDPOINT_KEYS = {"node", "adapter", "port"}
 CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "duplicate_name", "unknown_image",
          "image_not_allowed", "out_of_range", "unknown_node", "bad_port", "port_in_use", "self_link",
@@ -212,6 +212,31 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
                 problem(f"{path}.random_ifnames", "unsupported_image", f"{image.id} cannot rename its interfaces")
             elif value:
                 out["random_ifnames"] = True
+        if node.get("disks") != [] and "disks" in node:
+            # Additional blank disks (CONTRACTS 2.6): an empty list is no field, so the lab_def does not change.
+            value, sizes = node["disks"], []
+            low, high = EXTRA_DISK_GB["min"], EXTRA_DISK_GB["max"]
+            if not isinstance(value, list):
+                problem(f"{path}.disks", "bad_type", "list")
+            elif image is not None and not image.extra_disks:
+                problem(f"{path}.disks", "unsupported_image", f"{image.id} takes no additional disks")
+            elif len(value) > MAX_EXTRA_DISKS:
+                problem(f"{path}.disks", "out_of_range", f"max {MAX_EXTRA_DISKS} disks")
+            else:
+                for j, disk in enumerate(value):
+                    if not isinstance(disk, dict):
+                        problem(f"{path}.disks[{j}]", "bad_type", "object expected")
+                        continue
+                    unknown(disk, {"size_gb"}, f"{path}.disks[{j}]")
+                    size = disk.get("size_gb")
+                    if size is None:
+                        problem(f"{path}.disks[{j}].size_gb", "required")
+                    elif not is_int(size) or not low <= size <= high:
+                        problem(f"{path}.disks[{j}].size_gb", "out_of_range", f"{low}..{high}")
+                    else:
+                        sizes.append({"size_gb": size})
+                if len(sizes) == len(value):
+                    out["disks"] = sizes
         if ok and image is not None:
             out = {"name": name, "image": image.id, **out}
             by_name[name] = out
@@ -289,6 +314,9 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
         problem("nodes", "limit_exceeded", f"memory {resources['memory_mb']} > {limits.max_memory_mb} MiB")
     if limits.max_cpus is not None and resources["cores"] > limits.max_cpus:
         problem("nodes", "limit_exceeded", f"cores {resources['cores']} > {limits.max_cpus}")
+    disk_gb = sum(d["size_gb"] for n in out_nodes for d in n.get("disks", []))
+    if limits.max_disk_gb is not None and disk_gb > limits.max_disk_gb:
+        problem("nodes", "limit_exceeded", f"additional disks {disk_gb} > {limits.max_disk_gb} GiB")
     if problems:
         raise LabInvalid(problems)
     definition = {"format": fmt, "title": title, "nodes": out_nodes, "links": out_links}
@@ -330,6 +358,9 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
             # Only the "Internet" node carries it: other nodes, and the canonical JSON and lab_revision of
             # labs without one, do not change (CONTRACTS 4.2).
             spec["uplink_port"] = node["uplink_port"]
+        if node.get("disks"):
+            # Only a node with additional disks carries the field (CONTRACTS 4.2), like uplink_port.
+            spec["disks"] = [{"size_gb": d["size_gb"]} for d in node["disks"]]
         if image.role is not None:
             # Only a node of an image with a role carries it (CONTRACTS 4.2), like uplink_port.
             spec["role"] = image.role

@@ -226,6 +226,11 @@ def test_vnc_node_is_created_with_vnc_console_type(mock_server):
     assert "console_type" not in created["SW1"]
     # QGA is independent of the console: the guest agent channel stays on the vnc node.
     assert "guest_agent.0" in created["D1"]["properties"]["options"]
+    # The screen gets virtio-vga; the tablet pointer is GNS3's own, the slot does not repeat it.
+    assert created["D1"]["properties"]["options"].endswith(" -vga virtio")
+    assert "usb-tablet" not in created["D1"]["properties"]["options"]
+    # A telnet node has no display at all (GNS3 adds "-display none"): no adapter option.
+    assert "-vga" not in created["D2"]["properties"]["options"]
 
 
 def test_vnc_payload_leaves_the_port_to_gns3(mock_server):
