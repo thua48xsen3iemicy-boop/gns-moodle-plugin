@@ -50,7 +50,7 @@ cmd_install() {
   log "packages: QEMU, Python 3.12, ubridge, VPCS, Dynamips, IOU libraries"
   apt-get update -qq
   apt-get install -y -qq software-properties-common ca-certificates curl openssl libcap2-bin \
-    python3.12 python3.12-venv qemu-system-x86 qemu-utils >/dev/null
+    python3.12 python3.12-venv qemu-system-x86 qemu-utils ovmf >/dev/null
   add-apt-repository -y ppa:gns3/ppa >/dev/null
   dpkg --add-architecture i386
   apt-get update -qq
@@ -142,6 +142,7 @@ cmd_verify() {
     die "gns3 cannot use /dev/kvm: set dev0 on the host and restart the CT (the node needs /dev/kvm, Proxmox VE 8.1+)"
   test -c /dev/net/tun || die "no /dev/net/tun: set dev1 on the host and restart the CT"
   getcap /usr/bin/ubridge | grep -q cap_net_admin || die "ubridge has no capabilities"
+  test -f /usr/share/OVMF/OVMF_CODE_4M.fd -a -f /usr/share/OVMF/OVMF_VARS_4M.fd || die "no OVMF firmware: apt-get install ovmf"
   qemu-system-x86_64 --version | head -1
   log "verified. Next: slot-template-setup clean"
 }
