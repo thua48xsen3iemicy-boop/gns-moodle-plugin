@@ -18,6 +18,11 @@ CPU_PATTERN = (
 # Only the type, no properties: no comma, no spaces, no "%". The manager checks the catalog with the same pattern.
 MACHINE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 
+# QEMU network adapter models a node may have (CONTRACTS.md 4.2): GNS3 passes the value as "-device <model>". The
+# manager checks the catalog against the same list.
+AdapterType = Literal["e1000", "e1000e", "virtio-net-pci", "vmxnet3", "rtl8139"]
+DEFAULT_ADAPTER_TYPE = "e1000"
+
 
 class ProvisionCommand(BaseModel):
     command: str = Field(min_length=1, max_length=8192)
@@ -75,6 +80,8 @@ class NodeSpec(BaseModel):
     # QEMU only: the firmware of the node, from the image catalog. "uefi": OVMF with its own variables store (GNS3's
     # "uefi" property). Absent: GNS3's default, SeaBIOS.
     firmware: Literal["uefi"] | None = None
+    # QEMU only: the network adapter model of the node, from the image catalog (GNS3's "adapter_type"). Absent: "e1000".
+    adapter_type: AdapterType | None = None
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -102,6 +109,8 @@ class NodeSpec(BaseModel):
                 data.pop("machine", None)
             if data.get("firmware") is None:
                 data.pop("firmware", None)
+            if data.get("adapter_type") is None:
+                data.pop("adapter_type", None)
         return data
 
     @model_validator(mode="after")
@@ -143,6 +152,8 @@ class NodeSpec(BaseModel):
             raise ValueError("machine is only supported for qemu nodes")
         if self.firmware is not None and self.kind != "qemu":
             raise ValueError("firmware is only supported for qemu nodes")
+        if self.adapter_type is not None and self.kind != "qemu":
+            raise ValueError("adapter_type is only supported for qemu nodes")
         if self.disks and self.kind != "qemu":
             raise ValueError("disks are only supported for qemu nodes")
         if self.nvram_config is not None:
