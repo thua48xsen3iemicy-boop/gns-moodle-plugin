@@ -17,7 +17,10 @@ export async function resolve(specifier, context, next) {
 export async function load(url, context, next) {
     return next(url, url.startsWith(src) ? {...context, format: 'module'} : context);
 }`));
-const {layoutVlans, pillWidth, PILL_H} = await import(srcUrl + 'canvasmodel.js');
+const {layoutVlans, pillWidth, PILL_H, canvasL2} = await import(srcUrl + 'canvasmodel.js');
+const {buildModel} = await import(srcUrl + 'model.js');
+const {derive} = await import(srcUrl + 'facts.js');
+const fs = await import('node:fs');
 
 const node = (id, cx, cy) => [id, {id, cx, cy, name: id}];
 const boxes = (model, vlans) => layoutVlans(model, vlans).map(({orig, items}) => {
@@ -49,4 +52,21 @@ ok('a switch next to a host does not cover the host', () => {
 });
 
 ok('pill width grows with the VLAN number', () => assert.ok(pillWidth(1000) > pillWidth(1)));
+
+ok('an access port towards an end node without facts is drawn as passing, marked assumed; a stopped node is not', () => {
+    const demo = new URL('../plugin/demo/', import.meta.url);
+    const model = buildModel(JSON.parse(fs.readFileSync(new URL('ospf-multi-area.gns3', demo))));
+    const facts = JSON.parse(fs.readFileSync(new URL('ospf-multi-area.facts.json', demo)));
+    const id = name => [...model.nodes.values()].find(n => n.name === name).id;
+    delete facts.nodes[id('PC1')];
+    const {fx, der} = derive(model, facts);
+    const {segments} = canvasL2({model, fx, der});
+    const towards = name => segments.filter(x => [x.link.a.nodeId, x.link.b.nodeId].includes(id(name)));
+    const pc1 = towards('PC1');
+    assert.equal(pc1.length, 1);
+    assert.deepEqual([pc1[0].active, pc1[0].assumed, pc1[0].unknown, pc1[0].vlan], [true, true, true, 10]);
+    assert.ok(towards('PC2').every(x => x.active && !x.assumed), 'PC2 has facts: a plain passing line');
+    assert.ok(towards('SRV1').every(x => !x.active && !x.assumed), 'SRV1 is suspended: L1 is down');
+    assert.ok(towards('PC3').every(x => !x.active && !x.assumed), 'PC3 is stopped');
+});
 console.log(`${n} checks passed`);

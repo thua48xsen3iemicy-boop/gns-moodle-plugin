@@ -4586,6 +4586,9 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
   font:600 10px var(--mono);font-size:calc(10px * var(--inv,1));text-anchor:middle;pointer-events:none;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .l2-path.down .caption{fill:#e49c97}
+/* Not enough facts to tell (as on L1): grey, not the red of a line that does not pass. Assumed: solid, paler. */
+.gns3lab-student.canvas-ui .l2-path.down.unknown .stroke{stroke:#8aa3ad;stroke-dasharray:3 6;opacity:.7}
+.gns3lab-student.canvas-ui .l2-path.assumed .stroke{stroke-opacity:.6}
 .gns3lab-student.canvas-ui .l2-path.problem .stroke{stroke:#ff927d;stroke-width:2.6;stroke-dasharray:6 5}
 .gns3lab-student.canvas-ui .l2-path.problem .caption{fill:#ffb5a5}
 .gns3lab-student.canvas-ui .l2-path.mismatch .stroke{stroke:#ffbc69;stroke-width:2.6;stroke-dasharray:9 4}

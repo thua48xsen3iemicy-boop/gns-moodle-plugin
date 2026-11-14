@@ -126,10 +126,16 @@ export const canvasL2 = stage => {
             note(va); note(vb);
             const vlan = wa && wa.sw ? wa.map(tag) : wb && wb.sw ? wb.map(tag) : null;
             const mismatch = accepted && tag === 'u' && wa.sw && wb.sw && wa.map(tag) !== wb.map(tag);
+            // An access port of a switch towards an end node whose facts are missing: the VLAN of the port is known, and
+            // an end node takes frames without a tag. The line is drawn as passing, marked as assumed, unless L1 is down.
+            const access = w => w && w.sw && w.sp.mode === 'access';
+            const endNode = e => model.nodes.get(e.nodeId)?.cat !== 'switch';
+            const assumed = !r.known && tag === 'u' && !der.l1.links.get(link.id).down
+                && ((access(wa) && !wb && endNode(link.b)) || (access(wb) && !wa && endNode(link.a)));
             const port = (wire, iface) => !iface ? null : !wire || wire.sw || tag === 'u' ? iface
                 : (wire.subs.find(i => Number(i.dot1q) === tag) || iface);
             const name = (wire, iface) => port(wire, iface)?.name || '?';
-            segments.push({id: link.id + '|' + tag, link, tag, va, vb, vlan, active: accepted,
+            segments.push({id: link.id + '|' + tag, link, tag, va, vb, vlan, active: accepted || assumed, assumed,
                 blocked, mismatch, unknown: !r.known || der.l1.links.get(link.id).unknown,
                 aname: name(wa, ia), bname: name(wb, ib), pa: port(wa, ia), pb: port(wb, ib), domain: accepted ? der.l2.domOf.get(va) : null});
         });

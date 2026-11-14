@@ -948,6 +948,13 @@ check('facts: a port blocked by STP, the root of a VLAN, the text of the card', 
     assert.equal(stpText(e01), 'VLAN 1: Altn BLK · VLAN 10: Root FWD');
     assert.deepEqual(portStp({stp: {state: 'blocking', role: 'alternate'}}, 5), {state: 'blocking', role: 'alternate'}, 'one tree for all VLANs');
     assert.equal(stpText({name: 'x'}), '—');
+    // A cut is where STP breaks a loop; a designated port on its way to forwarding (towards a host) is not one.
+    assert.equal(stpBlocks({role: 'designated', state: 'listening'}), false);
+    assert.equal(stpBlocks({role: 'designated', state: 'blocking'}), false, 'the BLK of RSTP while it negotiates');
+    assert.equal(stpBlocks({role: 'root', state: 'learning'}), false);
+    assert.equal(stpBlocks({role: 'backup', state: 'blocking'}), true);
+    assert.equal(stpBlocks({role: 'designated', state: 'broken'}), true);
+    assert.equal(stpBlocks({state: 'blocking'}), true, 'show spanning-tree blockedports gives no role');
 });
 
 const IOL_STP_RSTP = `

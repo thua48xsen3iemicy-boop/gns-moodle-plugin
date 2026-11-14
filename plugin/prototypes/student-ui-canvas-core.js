@@ -214,6 +214,8 @@ const buildModel = doc => {
             x, y, w, h, cx: x + w / 2, cy: y + h / 2, props: n.properties || {}, ports: Array.isArray(n.ports) ? n.ports : null,
             consoleType: n.console_type || (n.properties && n.properties.console_type) || null,
             status: n.status || null,
+            // The lab keeps the clipboard out of the console of this node (lab_definition::NOPASTE).
+            nopaste: n.nopaste === true,
         };
         node.cat = catOf(node);
         node.guest = guestOf(n);
@@ -463,12 +465,15 @@ const portStp = (i, vlan) => {
   return stp.state || stp.role ? { state: stp.state, role: stp.role } : null;
 };
 /**
- * The port forwards nothing in this tree (blocking, listening, broken …), as STP decided.
+ * STP cuts a loop at this port: an alternate or backup port, an inconsistent one (BKN*), or one `show spanning-tree
+ * blockedports` named without its role. A designated or root port that is not forwarding yet (LIS, LRN, the BLK of
+ * RSTP for 30 s after its link came up) is on its way to forwarding: no cut, only its state in the tooltip.
  *
  * @param {object|null} p see portStp()
  * @returns {boolean}
  */
-const stpBlocks = p => !!p && !!p.state && !["forwarding", "learning"].includes(p.state);
+const stpBlocks = p => !!p && (p.state === "broken"
+  || (["alternate", "backup"].includes(p.role) && p.state !== "forwarding") || (!p.role && p.state === "blocking"));
 /**
  * The bridge is the root of the tree of the VLAN: true, false, or null when not known.
  *

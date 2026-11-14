@@ -68,7 +68,7 @@ export const objectData = (s, selected, layer, panel = 'ports') => {
     if (segment && layer === 'l2') {
         const l = segment.link;
         return {kind: 'L2 / ' + t('logical_link'), title: name(l.a.nodeId) + ' ↔ ' + name(l.b.nodeId),
-            sub: segment.active ? t('passing') : segment.unknown ? t('unknown') : t('blocked'),
+            sub: segment.active && !segment.assumed ? t('passing') : segment.unknown ? t('unknown') : t('blocked'),
             heads: [t('node'), t('port'), t('tag')], rows: [[name(l.a.nodeId), s.endShown(l.a) ? segment.aname : '?', segment.tag === 'u' ? t('untagged') : segment.tag],
                 [name(l.b.nodeId), s.endShown(l.b) ? segment.bname : '?', segment.tag === 'u' ? t('untagged') : segment.tag]],
             related: [{kind: 'link', id: l.id, label: t('physical')}], messages: s.der.l2.links.get(l.id)?.issues || [],
