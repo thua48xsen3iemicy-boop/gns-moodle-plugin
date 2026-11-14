@@ -33,6 +33,9 @@ QEMU's default "pc" (i440fx). The type must exist in the QEMU of the slots: `qem
 slot.firmware (qemu only): "uefi" for images that boot only under UEFI (NodeSpec.firmware; the slot boots OVMF). Without
 it SeaBIOS. No Secure Boot; the image must boot with empty UEFI variables (\\EFI\\BOOT\\BOOTX64.EFI).
 
+slot.adapter_type (qemu only): the network adapter model, e.g. "virtio-net-pci" (NodeSpec.adapter_type). Without it
+"e1000". The guest needs a driver for it.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -60,6 +63,8 @@ CPU_PATTERN = (
 )
 # slot.machine: the QEMU machine type, "-machine type=" (NodeSpec.machine). slot/api/models.py MACHINE_PATTERN.
 MACHINE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
+# slot.adapter_type: the QEMU network adapter models (NodeSpec.adapter_type). slot/api/models.py AdapterType.
+AdapterType = Literal["e1000", "e1000e", "virtio-net-pci", "vmxnet3", "rtl8139"]
 VPCS_MEMORY_MB = 32  # Counted for the CT size; VPCS has no memory setting
 
 
@@ -102,6 +107,8 @@ class SlotOptions(Strict):
     machine: str | None = Field(default=None, pattern=MACHINE_PATTERN)
     # QEMU only: the firmware of the nodes; "uefi" boots OVMF. Absent: SeaBIOS.
     firmware: Literal["uefi"] | None = None
+    # QEMU only: the network adapter model of the nodes, e.g. "virtio-net-pci". Absent: the slot's "e1000".
+    adapter_type: AdapterType | None = None
 
 
 class Image(Strict):
@@ -182,6 +189,8 @@ class Image(Strict):
             raise ValueError("slot.machine is for qemu only")
         if self.slot.firmware is not None and self.kind != "qemu":
             raise ValueError("slot.firmware is for qemu only")
+        if self.slot.adapter_type is not None and self.kind != "qemu":
+            raise ValueError("slot.adapter_type is for qemu only")
         if self.slot.startup_script is not None and self.kind != "vpcs":
             raise ValueError("slot.startup_script is for vpcs only")
         if self.kind == "iou" and any("\n" in c.command or "\r" in c.command for c in self.slot.provisioning):
