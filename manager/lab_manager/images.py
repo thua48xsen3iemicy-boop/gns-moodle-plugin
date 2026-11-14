@@ -24,6 +24,9 @@ qga (qemu only): false for an image without a QEMU guest agent. Nodes of the ima
 other images get no such field. Everything that works through the agent - net_config, random_ifnames, role, uplink_port,
 slot.provisioning - is refused with it. Not in public().
 
+slot.cpu (qemu only): the QEMU CPU model and its flags, the value of "-cpu" (CONTRACTS 2.6, 4.2). It reaches the ticket
+as NodeSpec.cpu through the slot options. Without it the slot uses its own default, "host".
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -43,6 +46,12 @@ DEFAULT_SYMBOLS = {"iou": ":/symbols/router.svg", "qemu": ":/symbols/computer.sv
 MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")  # netconfig.MECHANISMS: /bin/sh guests
 MAX_EXTRA_DISKS = 3  # GNS3 2.2.61 has hda..hdd, hda is the image
 EXTRA_DISK_GB = {"default": 1, "min": 1, "max": 20}
+# slot.cpu: the value of QEMU "-cpu" (NodeSpec.cpu). The same pattern as slot/api/models.py CPU_PATTERN: no spaces
+# and no "%", so the value never becomes another QEMU option.
+CPU_PATTERN = (
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+    r"(,[+-]?[A-Za-z0-9][A-Za-z0-9._-]{0,63}(=[A-Za-z0-9._-]{1,64})?){0,32}$"
+)
 VPCS_MEMORY_MB = 32  # Counted for the CT size; VPCS has no memory setting
 
 
@@ -79,6 +88,8 @@ class SlotOptions(Strict):
     l1_keepalives: bool | None = None
     provisioning: list[ProvisionCommand] = Field(default_factory=list, max_length=32)
     startup_script: str | None = Field(default=None, max_length=8192)  # VPCS only
+    # QEMU only: "-cpu" of the nodes, e.g. "host" or "SandyBridge,+rdrand,+avx2". Absent: the slot's default ("host").
+    cpu: str | None = Field(default=None, max_length=512, pattern=CPU_PATTERN)
 
 
 class Image(Strict):
@@ -153,6 +164,8 @@ class Image(Strict):
                 raise ValueError("slot.cli_prompt is not a valid regular expression") from exc
             if pattern.search(b""):
                 raise ValueError("slot.cli_prompt must not match an empty response")
+        if self.slot.cpu is not None and self.kind != "qemu":
+            raise ValueError("slot.cpu is for qemu only")
         if self.slot.startup_script is not None and self.kind != "vpcs":
             raise ValueError("slot.startup_script is for vpcs only")
         if self.kind == "iou" and any("\n" in c.command or "\r" in c.command for c in self.slot.provisioning):
