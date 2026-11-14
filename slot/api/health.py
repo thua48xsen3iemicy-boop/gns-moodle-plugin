@@ -38,7 +38,8 @@ async def capabilities():
         "slot_version": VERSION,
         "deploy_schemas": ["gns3lab.deploy/1"],
         "features": FEATURES + (["uplink"] if uplink.enabled() else [])
-        + (["extra-disks"] if disks.enabled(labs.IMAGES) else []),
+        + (["extra-disks"] if disks.enabled(labs.IMAGES) else [])
+        + (["qemu-uefi"] if labs.uefi_enabled() else []),
         "collectors": COLLECTOR_IDS,
     }
 

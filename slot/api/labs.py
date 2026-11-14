@@ -14,6 +14,8 @@ from api.models import CPU_PATTERN, DeployTicket, NodeSpec
 router = APIRouter(prefix="/v1/labs", tags=["labs"])
 IMAGES = Path("/opt/gns3/images")
 QGA_DIR = Path("/opt/gns3/qga")
+OVMF_DIR = Path("/usr/share/OVMF")  # GNS3 2.2.61's default ovmf_firmware_dir; the "ovmf" package of Ubuntu 24.04
+OVMF_FILES = ("ovmf_code_4m.fd", "ovmf_vars_4m.fd")  # what GNS3 looks for there, case-insensitively
 DEFAULT_CPU = "host"  # KVM is required in the slot (lab-provision); nested virtualization needs the host's flags
 
 
@@ -25,6 +27,15 @@ def qemu_cpu(spec: NodeSpec):
     if value and not re.fullmatch(CPU_PATTERN, value):
         raise HTTPException(500, "SLOT_QEMU_CPU is not a valid QEMU CPU model")
     return value or None
+
+
+def uefi_enabled() -> bool:
+    """Can GNS3 boot a node with "uefi": true? It takes the OVMF code and the variables store template from OVMF_DIR."""
+    try:
+        names = {f.name.lower() for f in OVMF_DIR.iterdir() if f.is_file()}
+    except OSError:
+        return False
+    return all(name in names for name in OVMF_FILES)
 
 
 def node_payload(spec: NodeSpec, node_id: str):
@@ -79,6 +90,9 @@ def node_payload(spec: NodeSpec, node_id: str):
                 "hda_disk_interface": spec.disk_interface,
                 "linked_clone": True,
                 "options": options,
+                # GNS3 2.2.61 then boots OVMF from pflash and copies the variables store into the node directory, so
+                # boot entries persist with the project. No Secure Boot: under KVM GNS3 adds "-machine smm=off".
+                **({"uefi": True} if spec.firmware == "uefi" else {}),
                 **disks.properties(spec),
                 **(
                     {"mac_address": uplink.base_mac(spec.uplink_port, spec.adapters)}
@@ -127,6 +141,16 @@ def require_disks(ticket: DeployTicket):
         )
 
 
+def require_uefi(ticket: DeployTicket):
+    """A ticket with firmware "uefi" needs the `qemu-uefi` feature of this slot: 422, nothing is created."""
+    if any(node.firmware == "uefi" for node in ticket.nodes) and not uefi_enabled():
+        raise HTTPException(
+            422,
+            "firmware uefi needs the qemu-uefi feature of the slot: "
+            f"OVMF_CODE_4M.fd and OVMF_VARS_4M.fd in {OVMF_DIR} (the ovmf package)",
+        )
+
+
 @router.get("")
 async def list_labs(request: Request):
     return await call(request, "GET", "projects")
@@ -157,6 +181,7 @@ async def create_project(request: Request, ticket: DeployTicket):
         )
     require_uplink(ticket)
     require_disks(ticket)
+    require_uefi(ticket)
     prepared = [(node, node_payload(node, str(uuid4()))) for node in ticket.nodes]
     cloud = None
     if uplink.spec_of(ticket) is not None:
@@ -263,6 +288,7 @@ async def topology(request: Request, project_id: UUID):
 async def deploy(request: Request, ticket: DeployTicket):
     require_uplink(ticket)
     require_disks(ticket)
+    require_uefi(ticket)
     return get_lifecycle(request).submit(
         "deploy", ticket=ticket, key=request.headers.get("Idempotency-Key")
     )

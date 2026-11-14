@@ -1,4 +1,9 @@
-# Lab Slot — 0.21.0
+# Lab Slot — 0.22.0
+
+0.22.0: UEFI для QEMU-ноды (возможность `qemu-uefi`, CONTRACTS §4.2). `NodeSpec.firmware: "uefi"` (поле `slot.firmware` образа в
+каталоге менеджера) слот превращает в свойство GNS3 `"uefi": true` при создании проекта: GNS3 2.2.61 грузит OVMF и держит копию
+переменных UEFI в каталоге ноды. Нужен пакет `ovmf` (`/usr/share/OVMF/OVMF_CODE_4M.fd` и `OVMF_VARS_4M.fd`); без него слот
+не объявляет `qemu-uefi` и отклоняет такой билет `422`. Secure Boot нет: под KVM GNS3 добавляет `-machine smm=off`.
 
 0.21.0: тип машины QEMU-ноды (возможность `qemu-machine`, CONTRACTS §4.2). `NodeSpec.machine` (поле `slot.machine` образа в
 каталоге менеджера, например `pc-q35-2.11`) слот добавляет в опции ноды как `-machine type=…` при создании проекта; без поля
