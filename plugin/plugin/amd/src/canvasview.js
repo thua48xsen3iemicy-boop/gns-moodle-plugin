@@ -152,7 +152,8 @@ export class CanvasView {
             const trunk = s.der.l2.links.get(link.id)?.kind === 'trunk';
             segment.trunk = trunk;
             const g = el('g', {class: 'link l2-path dimmable' + (vlan == null ? ' l2-p2p' : '') + (trunk ? ' l2-trunk' : '') + (!segment.active ? ' down' : '') +
-                (segment.blocked ? ' problem' : '') + (segment.mismatch ? ' mismatch' : '') + (segment.unknown ? ' unknown' : ''),
+                (segment.blocked ? ' problem' : '') + (segment.mismatch ? ' mismatch' : '') + (segment.unknown ? ' unknown' : '') +
+                (segment.assumed ? ' assumed' : ''),
                 'data-link': link.id, 'data-segment': segment.id, tabindex: '0', role: 'button',
                 'aria-label': s.model.nodes.get(link.a.nodeId).name + ' ↔ ' + s.model.nodes.get(link.b.nodeId).name + ' · ' +
                     (vlan == null ? 'p2p' : (trunk ? 'trunk · ' : '') + 'VLAN ' + vlan + (trunk && segment.tag === 'u' ? ' (native)' : ''))}, lines);
@@ -161,6 +162,7 @@ export class CanvasView {
             if (trunk) el('path', {d, class: 'casing'}, g);
             el('path', {d, class: 'stroke'}, g);
             // The colour tells the VLAN and the pill the details: a line carries a caption only for a problem.
+            if (segment.assumed) el('title', {}, g).textContent = s.s('ui_canvas_unknown');
             const caption = segment.mismatch ? `native VLAN ${va.split('|')[2]} ↔ ${vb.split('|')[2]} !`
                 : segment.blocked ? `VLAN ${vlan} · ${s.s('ui_canvas_blocked')} !` : '';
             if (caption) {
@@ -245,7 +247,11 @@ export class CanvasView {
             el('title', {}, mark).textContent = `${iface.name} · ${s.s('ui_canvas_stp_blocked')} (${stpShort(port)})`;
             g.classList.add('stp-blocked');
         });
-        if (notes.length) el('title', {}, g).textContent = 'STP · ' + notes.join(' · ');
+        if (notes.length) {
+            // One tooltip per line: an assumed line already says that the facts of its end node are missing.
+            const title = g.querySelector(':scope > title') || el('title', {}, g);
+            title.textContent = (title.textContent ? title.textContent + ' · ' : '') + 'STP · ' + notes.join(' · ');
+        }
     }
 
     renderL3() {
