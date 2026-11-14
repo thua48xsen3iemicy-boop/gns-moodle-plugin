@@ -27,6 +27,9 @@ slot.provisioning - is refused with it. Not in public().
 slot.cpu (qemu only): the QEMU CPU model and its flags, the value of "-cpu" (CONTRACTS 2.6, 4.2). It reaches the ticket
 as NodeSpec.cpu through the slot options. Without it the slot uses its own default, "host".
 
+slot.machine (qemu only): the QEMU machine type, e.g. "pc-q35-2.11" (NodeSpec.machine, "-machine type="). Without it
+QEMU's default "pc" (i440fx). The type must exist in the QEMU of the slots: `qemu-system-x86_64 -machine help`.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -52,6 +55,8 @@ CPU_PATTERN = (
     r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
     r"(,[+-]?[A-Za-z0-9][A-Za-z0-9._-]{0,63}(=[A-Za-z0-9._-]{1,64})?){0,32}$"
 )
+# slot.machine: the QEMU machine type, "-machine type=" (NodeSpec.machine). slot/api/models.py MACHINE_PATTERN.
+MACHINE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 VPCS_MEMORY_MB = 32  # Counted for the CT size; VPCS has no memory setting
 
 
@@ -90,6 +95,8 @@ class SlotOptions(Strict):
     startup_script: str | None = Field(default=None, max_length=8192)  # VPCS only
     # QEMU only: "-cpu" of the nodes, e.g. "host" or "SandyBridge,+rdrand,+avx2". Absent: the slot's default ("host").
     cpu: str | None = Field(default=None, max_length=512, pattern=CPU_PATTERN)
+    # QEMU only: the machine type of the nodes, e.g. "pc-q35-2.11" or "q35". Absent: QEMU's default ("pc").
+    machine: str | None = Field(default=None, pattern=MACHINE_PATTERN)
 
 
 class Image(Strict):
@@ -166,6 +173,8 @@ class Image(Strict):
                 raise ValueError("slot.cli_prompt must not match an empty response")
         if self.slot.cpu is not None and self.kind != "qemu":
             raise ValueError("slot.cpu is for qemu only")
+        if self.slot.machine is not None and self.kind != "qemu":
+            raise ValueError("slot.machine is for qemu only")
         if self.slot.startup_script is not None and self.kind != "vpcs":
             raise ValueError("slot.startup_script is for vpcs only")
         if self.kind == "iou" and any("\n" in c.command or "\r" in c.command for c in self.slot.provisioning):
