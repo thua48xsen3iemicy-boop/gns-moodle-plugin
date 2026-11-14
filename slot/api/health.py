@@ -22,6 +22,7 @@ router = APIRouter(tags=["health"])
 FEATURES = [
     "qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1", "collectors",
     "vnc", "iol-nvram", "guest-shutdown", "routeros", "no-qga",
+    "qemu-cpu",
 ]
 
 

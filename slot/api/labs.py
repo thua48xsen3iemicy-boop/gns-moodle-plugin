@@ -1,5 +1,7 @@
 """Project lifecycle. Never deletes an existing student project implicitly."""
 
+import os
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -7,11 +9,22 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api import disks, iol_nvram, uplink
 from api.client import call, get_lifecycle
-from api.models import DeployTicket, NodeSpec
+from api.models import CPU_PATTERN, DeployTicket, NodeSpec
 
 router = APIRouter(prefix="/v1/labs", tags=["labs"])
 IMAGES = Path("/opt/gns3/images")
 QGA_DIR = Path("/opt/gns3/qga")
+DEFAULT_CPU = "host"  # KVM is required in the slot (lab-provision); nested virtualization needs the host's flags
+
+
+def qemu_cpu(spec: NodeSpec):
+    """"-cpu" of a new QEMU node: the ticket's, else SLOT_QEMU_CPU ("host"); an empty value leaves QEMU's own model."""
+    if spec.cpu is not None:
+        return spec.cpu
+    value = os.getenv("SLOT_QEMU_CPU", DEFAULT_CPU).strip()
+    if value and not re.fullmatch(CPU_PATTERN, value):
+        raise HTTPException(500, "SLOT_QEMU_CPU is not a valid QEMU CPU model")
+    return value or None
 
 
 def node_payload(spec: NodeSpec, node_id: str):
@@ -44,6 +57,12 @@ def node_payload(spec: NodeSpec, node_id: str):
         # the virtio_gpu driver with resolutions a desktop needs.
         if spec.console == "vnc":
             options = f"{options} -vga virtio".strip()
+        # GNS3 2.2.61 adds no "-cpu" of its own: without one QEMU emulates a basic model even under KVM, and a guest
+        # that needs newer instructions or runs its own VMs (nested virtualization) does not work. Set once, when
+        # the node is created: nodes of existing projects keep the options they were created with.
+        cpu = qemu_cpu(spec)
+        if cpu:
+            options = f"{options} -cpu {cpu}".strip()
         common.update(
             console_type=spec.console,
             properties={

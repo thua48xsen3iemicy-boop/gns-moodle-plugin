@@ -6,6 +6,15 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_serializer, model_validator
 
 
+# The value of QEMU "-cpu": a model and its flags, "host" or "SandyBridge,+rdrand,+avx2" (CONTRACTS.md 4.2).
+# No spaces and no "%": GNS3 splits the options with shlex and substitutes %...% placeholders, so the value
+# can never become another QEMU option. The manager checks the catalog with the same pattern.
+CPU_PATTERN = (
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+    r"(,[+-]?[A-Za-z0-9][A-Za-z0-9._-]{0,63}(=[A-Za-z0-9._-]{1,64})?){0,32}$"
+)
+
+
 class ProvisionCommand(BaseModel):
     command: str = Field(min_length=1, max_length=8192)
     timeout_seconds: int = Field(default=20, ge=1, le=120)
@@ -55,6 +64,8 @@ class NodeSpec(BaseModel):
     # QEMU only: additional blank disks, hdb..hdd in this order, on the disk interface of the image.
     # Clones of blank.qcow2 grown to size_gb before the first start (CONTRACTS.md 4.2, api/disks.py).
     disks: list[DiskSpec] = Field(default_factory=list, max_length=3)
+    # QEMU only: "-cpu" of the node, from the image catalog. Absent: SLOT_QEMU_CPU of the slot ("host" by default).
+    cpu: str | None = Field(default=None, max_length=512, pattern=CPU_PATTERN)
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -76,6 +87,8 @@ class NodeSpec(BaseModel):
                 data.pop("role", None)
             if not data.get("disks"):
                 data.pop("disks", None)
+            if data.get("cpu") is None:
+                data.pop("cpu", None)
         return data
 
     @model_validator(mode="after")
@@ -111,6 +124,8 @@ class NodeSpec(BaseModel):
                 raise ValueError("a node without qga has no provisioning")
             if self.role is not None or self.uplink_port is not None:
                 raise ValueError("a node without qga has no role or uplink_port")
+        if self.cpu is not None and self.kind != "qemu":
+            raise ValueError("cpu is only supported for qemu nodes")
         if self.disks and self.kind != "qemu":
             raise ValueError("disks are only supported for qemu nodes")
         if self.nvram_config is not None:
