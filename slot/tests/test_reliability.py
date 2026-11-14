@@ -359,6 +359,7 @@ def test_capabilities(mock_server):
     assert set(body["features"]) == {
         "qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1", "collectors",
         "vnc", "iol-nvram", "guest-shutdown", "routeros", "no-qga", "qemu-cpu", "qemu-machine",
+        "qemu-adapter-type",
     }
     assert body["collectors"] == [
         "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1",

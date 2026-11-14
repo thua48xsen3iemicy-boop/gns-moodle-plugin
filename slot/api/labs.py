@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api import disks, iol_nvram, uplink
 from api.client import call, get_lifecycle
-from api.models import CPU_PATTERN, DeployTicket, NodeSpec
+from api.models import CPU_PATTERN, DEFAULT_ADAPTER_TYPE, DeployTicket, NodeSpec
 
 router = APIRouter(prefix="/v1/labs", tags=["labs"])
 IMAGES = Path("/opt/gns3/images")
@@ -85,7 +85,9 @@ def node_payload(spec: NodeSpec, node_id: str):
                 "ram": spec.ram_mb,
                 "cpus": spec.cpus,
                 "adapters": spec.adapters,
-                "adapter_type": "e1000",
+                # GNS3 2.2.61 starts QEMU with "-device <adapter_type>,mac=…" per adapter and adds
+                # "speed=10000,duplex=full" to virtio-net-pci itself.
+                "adapter_type": spec.adapter_type or DEFAULT_ADAPTER_TYPE,
                 "hda_disk_image": spec.image,
                 "hda_disk_interface": spec.disk_interface,
                 "linked_clone": True,
