@@ -14,6 +14,10 @@ CPU_PATTERN = (
     r"(,[+-]?[A-Za-z0-9][A-Za-z0-9._-]{0,63}(=[A-Za-z0-9._-]{1,64})?){0,32}$"
 )
 
+# The QEMU machine type, the value of "-machine type=": "pc-q35-2.11", "q35", "pc-i440fx-8.2" (CONTRACTS.md 4.2).
+# Only the type, no properties: no comma, no spaces, no "%". The manager checks the catalog with the same pattern.
+MACHINE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
+
 
 class ProvisionCommand(BaseModel):
     command: str = Field(min_length=1, max_length=8192)
@@ -66,6 +70,8 @@ class NodeSpec(BaseModel):
     disks: list[DiskSpec] = Field(default_factory=list, max_length=3)
     # QEMU only: "-cpu" of the node, from the image catalog. Absent: SLOT_QEMU_CPU of the slot ("host" by default).
     cpu: str | None = Field(default=None, max_length=512, pattern=CPU_PATTERN)
+    # QEMU only: "-machine type=" of the node, from the image catalog. Absent: GNS3 leaves QEMU's default ("pc").
+    machine: str | None = Field(default=None, pattern=MACHINE_PATTERN)
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -89,6 +95,8 @@ class NodeSpec(BaseModel):
                 data.pop("disks", None)
             if data.get("cpu") is None:
                 data.pop("cpu", None)
+            if data.get("machine") is None:
+                data.pop("machine", None)
         return data
 
     @model_validator(mode="after")
@@ -126,6 +134,8 @@ class NodeSpec(BaseModel):
                 raise ValueError("a node without qga has no role or uplink_port")
         if self.cpu is not None and self.kind != "qemu":
             raise ValueError("cpu is only supported for qemu nodes")
+        if self.machine is not None and self.kind != "qemu":
+            raise ValueError("machine is only supported for qemu nodes")
         if self.disks and self.kind != "qemu":
             raise ValueError("disks are only supported for qemu nodes")
         if self.nvram_config is not None:

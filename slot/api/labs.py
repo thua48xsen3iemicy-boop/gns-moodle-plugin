@@ -63,6 +63,10 @@ def node_payload(spec: NodeSpec, node_id: str):
         cpu = qemu_cpu(spec)
         if cpu:
             options = f"{options} -cpu {cpu}".strip()
+        # GNS3 2.2.61 sets no machine type (QEMU's "pc" then) but may add "-machine usb=on" (vnc) or "smm=off":
+        # QEMU merges several -machine options, so the type of the ticket and those properties coexist.
+        if spec.machine is not None:
+            options = f"{options} -machine type={spec.machine}".strip()
         common.update(
             console_type=spec.console,
             properties={

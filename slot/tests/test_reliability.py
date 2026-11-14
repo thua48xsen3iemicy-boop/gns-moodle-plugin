@@ -358,7 +358,7 @@ def test_capabilities(mock_server):
     assert body["deploy_schemas"] == ["gns3lab.deploy/1"]
     assert set(body["features"]) == {
         "qemu", "iou", "vpcs", "qga", "iol-cli", "student-state", "command-fencing-v1", "collectors",
-        "vnc", "iol-nvram", "guest-shutdown", "routeros", "no-qga", "qemu-cpu",
+        "vnc", "iol-nvram", "guest-shutdown", "routeros", "no-qga", "qemu-cpu", "qemu-machine",
     }
     assert body["collectors"] == [
         "linux.net/1", "switch.net/1", "switch.fdb/1", "windows.net/1", "routeros.net/1", "ios.config/1",
