@@ -25,6 +25,7 @@ def mock_server(tmp_path, monkeypatch):
             raise RuntimeError("mandatory provisioning failed")
 
     monkeypatch.setattr(Lifecycle, "provision", provision)
+    monkeypatch.setattr(labs, "OVMF_DIR", tmp_path / "ovmf")  # no OVMF unless a test puts it there
     labs.IMAGES = tmp_path / "images"
     labs.QGA_DIR = tmp_path / "qga"
     for group, filename in (("QEMU", "debian12.qcow2"), ("IOU", "cisco.bin")):

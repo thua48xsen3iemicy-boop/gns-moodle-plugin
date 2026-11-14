@@ -72,6 +72,9 @@ class NodeSpec(BaseModel):
     cpu: str | None = Field(default=None, max_length=512, pattern=CPU_PATTERN)
     # QEMU only: "-machine type=" of the node, from the image catalog. Absent: GNS3 leaves QEMU's default ("pc").
     machine: str | None = Field(default=None, pattern=MACHINE_PATTERN)
+    # QEMU only: the firmware of the node, from the image catalog. "uefi": OVMF with its own variables store (GNS3's
+    # "uefi" property). Absent: GNS3's default, SeaBIOS.
+    firmware: Literal["uefi"] | None = None
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -97,6 +100,8 @@ class NodeSpec(BaseModel):
                 data.pop("cpu", None)
             if data.get("machine") is None:
                 data.pop("machine", None)
+            if data.get("firmware") is None:
+                data.pop("firmware", None)
         return data
 
     @model_validator(mode="after")
@@ -136,6 +141,8 @@ class NodeSpec(BaseModel):
             raise ValueError("cpu is only supported for qemu nodes")
         if self.machine is not None and self.kind != "qemu":
             raise ValueError("machine is only supported for qemu nodes")
+        if self.firmware is not None and self.kind != "qemu":
+            raise ValueError("firmware is only supported for qemu nodes")
         if self.disks and self.kind != "qemu":
             raise ValueError("disks are only supported for qemu nodes")
         if self.nvram_config is not None:

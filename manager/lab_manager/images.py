@@ -30,6 +30,9 @@ as NodeSpec.cpu through the slot options. Without it the slot uses its own defau
 slot.machine (qemu only): the QEMU machine type, e.g. "pc-q35-2.11" (NodeSpec.machine, "-machine type="). Without it
 QEMU's default "pc" (i440fx). The type must exist in the QEMU of the slots: `qemu-system-x86_64 -machine help`.
 
+slot.firmware (qemu only): "uefi" for images that boot only under UEFI (NodeSpec.firmware; the slot boots OVMF). Without
+it SeaBIOS. No Secure Boot; the image must boot with empty UEFI variables (\\EFI\\BOOT\\BOOTX64.EFI).
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -97,6 +100,8 @@ class SlotOptions(Strict):
     cpu: str | None = Field(default=None, max_length=512, pattern=CPU_PATTERN)
     # QEMU only: the machine type of the nodes, e.g. "pc-q35-2.11" or "q35". Absent: QEMU's default ("pc").
     machine: str | None = Field(default=None, pattern=MACHINE_PATTERN)
+    # QEMU only: the firmware of the nodes; "uefi" boots OVMF. Absent: SeaBIOS.
+    firmware: Literal["uefi"] | None = None
 
 
 class Image(Strict):
@@ -175,6 +180,8 @@ class Image(Strict):
             raise ValueError("slot.cpu is for qemu only")
         if self.slot.machine is not None and self.kind != "qemu":
             raise ValueError("slot.machine is for qemu only")
+        if self.slot.firmware is not None and self.kind != "qemu":
+            raise ValueError("slot.firmware is for qemu only")
         if self.slot.startup_script is not None and self.kind != "vpcs":
             raise ValueError("slot.startup_script is for vpcs only")
         if self.kind == "iou" and any("\n" in c.command or "\r" in c.command for c in self.slot.provisioning):

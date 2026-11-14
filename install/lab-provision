@@ -1065,7 +1065,7 @@ export DEBIAN_FRONTEND=noninteractive
 for _ in $(seq 1 30); do getent hosts archive.ubuntu.com >/dev/null && break; sleep 2; done
 apt-get update -qq
 apt-get install -y -qq software-properties-common ca-certificates curl openssl libcap2-bin \
-  python3.12 python3.12-venv qemu-system-x86 qemu-utils >/dev/null
+  python3.12 python3.12-venv qemu-system-x86 qemu-utils ovmf >/dev/null
 add-apt-repository -y ppa:gns3/ppa >/dev/null
 dpkg --add-architecture i386
 apt-get update -qq
@@ -1145,6 +1145,7 @@ case $v in *"$GNS3_VERSION"*) echo "GNS3: $v" ;; *) echo "ERROR: GNS3 $GNS3_VERS
 runuser -u gns3 -- test -r /dev/kvm -a -w /dev/kvm || { echo "ERROR: gns3 cannot use /dev/kvm"; exit 1; }
 test -c /dev/net/tun || { echo "ERROR: no /dev/net/tun"; exit 1; }
 getcap /usr/bin/ubridge | grep -q cap_net_admin || { echo "ERROR: ubridge has no capabilities"; exit 1; }
+test -f /usr/share/OVMF/OVMF_CODE_4M.fd -a -f /usr/share/OVMF/OVMF_VARS_4M.fd || { echo "ERROR: no OVMF firmware (the ovmf package)"; exit 1; }
 qemu-system-x86_64 --version | head -1
 '
 
