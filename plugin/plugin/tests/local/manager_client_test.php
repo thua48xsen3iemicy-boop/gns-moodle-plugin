@@ -114,6 +114,7 @@ final class manager_client_test extends \advanced_testcase {
 
         $this->assertSame('running', $exported['status']);
         $this->assertSame(strtotime('2026-10-17T11:30:00Z'), $exported['expiresat']);
+        $this->assertSame(9012, $exported['slotvmid']);
         $this->assertStringContainsString('"properties":{}', $exported['topology']);
         $this->assertCount(2, $exported['nodes']);
         $this->assertSame(
@@ -127,6 +128,21 @@ final class manager_client_test extends \advanced_testcase {
 
         $this->assertSame('', $exported['topology']);
         $this->assertSame([], $exported['nodes']);
+        $this->assertSame(9012, $exported['slotvmid']); // The slot is still named while the lab stops.
+    }
+
+    public function test_session_export_slot_vmid_only_for_a_live_session(): void {
+        $stopped = fake_manager::session('stopped');
+        $stopped['slot_vmid'] = 9012;
+        $this->assertSame(0, session_data::export(json_decode(json_encode($stopped)))['slotvmid']);
+
+        $old = fake_manager::session(); // A manager older than 0.28.0 does not send the field.
+        unset($old['slot_vmid']);
+        $this->assertSame(0, session_data::export(json_decode(json_encode($old)))['slotvmid']);
+
+        $odd = fake_manager::session();
+        $odd['slot_vmid'] = '9012';
+        $this->assertSame(0, session_data::export(json_decode(json_encode($odd)))['slotvmid']);
     }
 
     public function test_options_and_client_only_when_info_allows(): void {

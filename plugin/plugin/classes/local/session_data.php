@@ -59,6 +59,7 @@ class session_data {
                 'consoletype' => new external_value(PARAM_ALPHA, 'telnet, vnc or none'),
             ]), 'Node states, empty unless running'),
             'nodesstale' => new external_value(PARAM_BOOL, 'Node states are an old snapshot: the slot did not answer'),
+            'slotvmid' => new external_value(PARAM_INT, 'Proxmox VMID of the slot container running the lab, 0 if none'),
             'features' => new external_multiple_structure(
                 new external_value(PARAM_ALPHANUMEXT, 'Feature name, such as consoles or facts'),
                 'What this session offers (CONTRACTS §7), empty if the manager did not say'
@@ -105,8 +106,23 @@ class session_data {
             'topology' => $topology,
             'nodes' => $nodes,
             'nodesstale' => $running && ($session->nodes_stale ?? false) === true,
+            'slotvmid' => self::slot_vmid($session),
             'features' => self::features($session),
         ];
+    }
+
+    /**
+     * Proxmox VMID of the slot of a live session (manager CONTRACTS §2.3), 0 if the manager did not give one.
+     *
+     * Only for showing: the student can name it when asking an administrator for help.
+     *
+     * @param \stdClass $session session from manager_client
+     * @return int
+     */
+    private static function slot_vmid(\stdClass $session): int {
+        $vmid = $session->slot_vmid ?? null;
+        $live = in_array($session->status, ['starting', 'running', 'stopping'], true);
+        return $live && is_int($vmid) && $vmid > 0 ? $vmid : 0;
     }
 
     /**

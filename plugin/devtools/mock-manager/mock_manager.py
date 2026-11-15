@@ -550,6 +550,8 @@ class Manager:
         }
         if progress is not None:
             body["progress"] = progress
+        if status in ("starting", "running", "stopping"):
+            body["slot_vmid"] = 9000 + s.workspace % 1000  # CONTRACTS 2.3: VMID of the slot CT
         if maintenance:
             body["maintenance"] = maintenance
         if s.mode:

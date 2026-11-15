@@ -231,17 +231,19 @@ async def test_session_fields_stage_progress_features(tmp_path, dsn):
         s = await start(env)
         assert s["schema"] == "gns3lab.session/1" and s["lab_ref"] == "cisco-3x2"
         assert s["stage"] == "wait_slot" and s["error"] is None and s["features"] == []
-        assert "progress" not in s
+        assert "progress" not in s and "slot_vmid" not in s  # No slot yet
         env.slots[201].op_polls = 10**6
         await env.run(6)
         s = (await env.client.get(f"/api/v1/sessions/{s['session_id']}")).json()
-        assert s["stage"] == "lab_wait" and s["progress"] == 50
+        assert s["stage"] == "lab_wait" and s["progress"] == 50 and s["slot_vmid"] == 201
         for op in env.slots[201].ops.values():
             op["remaining"] = 0
         await env.run()
         s = (await env.client.get(f"/api/v1/sessions/{s['session_id']}")).json()
         assert s["status"] == "running" and s["stage"] == "ready" and "progress" not in s
-        assert s["features"] == ["consoles"] and "nodes_stale" not in s
+        assert s["features"] == ["consoles"] and "nodes_stale" not in s and s["slot_vmid"] == 201
+        listed = (await env.client.get("/api/v1/sessions", params={"instance_id": 1})).json()
+        assert listed[0]["slot_vmid"] == 201  # The observer list names the slot too
         ports = s["topology"]["topology"]["nodes"][0]["ports"]
         assert ports[0]["short_name"] == "e0"  # Port names kept for the console port links (П7)
 
@@ -357,6 +359,7 @@ async def test_stop_by_teacher(tmp_path, dsn):
         await env.run()
         s = (await env.client.get(f"/api/v1/sessions/{s['session_id']}")).json()
         assert s["status"] == "stopped" and s["status_message"] == "Лаба остановлена преподавателем"
+        assert "slot_vmid" not in s  # The slot went back to the pool
         async with env.services.pool.connection() as conn:
             cur = await conn.execute("SELECT detail FROM events WHERE kind = 'stop_requested_by'")
             assert (await cur.fetchone())["detail"] == {"user_id": 17}

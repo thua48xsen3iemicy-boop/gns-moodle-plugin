@@ -280,6 +280,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         }
         if s["progress"] is not None:
             body["progress"] = s["progress"]
+        if s.get("slot_vmid") is not None and s["status"] in ("starting", "running", "stopping"):
+            body["slot_vmid"] = s["slot_vmid"]  # CONTRACTS 2.3: Proxmox VMID of the slot CT, for the student
         if s.get("mode"):
             body["mode"] = s["mode"]
         if maintenance and maintenance["state"] != "off":

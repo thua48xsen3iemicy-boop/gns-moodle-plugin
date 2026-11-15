@@ -47,7 +47,7 @@ export const STRING_KEYS = [
     'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
     'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'managernotconfigured', 'labnotready',
     'failedretry', 'failedadmin', 'stopconfirmtitle', 'stopconfirm', 'stopconfirmkept', 'conflictlink',
-    'maintenanceannounced', 'maintenanceactive', 'maintenancenote',
+    'maintenanceannounced', 'maintenanceactive', 'maintenancenote', 'slotvmid',
     ...STAGES.map(stage => 'stage_' + stage),
 ];
 
@@ -90,6 +90,7 @@ export class Session {
         const region = name => root.querySelector(`[data-region="${name}"]`);
         this.statusEl = region('status');
         this.timeEl = region('timeleft');
+        this.slotEl = region('slot');
         this.startBtn = region('start');
         this.stopBtn = region('stop');
         this.messageEl = region('message');
@@ -236,6 +237,7 @@ export class Session {
         this.statusEl.title = (session && session.statusmessage) || '';
 
         const live = session && !['stopped', 'failed'].includes(status);
+        this.renderSlot(live ? session.slotvmid : 0);
         const retry = status === 'failed' && session.errorretryable;
         this.startBtn.textContent = retry ? this.strings.startagain : this.strings.startlab;
         this.startBtn.hidden = !state.canuse || !!live;
@@ -244,6 +246,19 @@ export class Session {
         this.startBtn.disabled = this.busy || !state.labready || this.maintenance.state !== 'off';
         this.stopBtn.disabled = this.busy;
         this.renderTime();
+    }
+
+    /**
+     * Number of the slot (Proxmox VMID of its container) that runs the lab, to name when asking for help.
+     *
+     * @param {number} vmid VMID, 0 while no slot is given (queued) or once the lab is over
+     */
+    renderSlot(vmid) {
+        if (!this.slotEl) {
+            return;
+        }
+        this.slotEl.textContent = vmid > 0 ? this.strings.slotvmid.replace('{$a}', vmid) : '';
+        this.slotEl.hidden = !(vmid > 0);
     }
 
     /**
