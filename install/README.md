@@ -268,7 +268,8 @@ pct shutdown $V && pct template $V
 После каждой сессии агент откатывает слот к снимку `lab-clean`. Поэтому пакет, поставленный в работающий
 слот, пропадёт после первой же сессии. Сохранить его можно только новым снимком: слот выводят из работы,
 ставят пакет в выключенный CT, переснимают и возвращают. Снимок пересоздаёт шаг `slot`: заодно он
-проверяет, что GNS3 и QEMU после apt живы.
+проверяет, что GNS3 и QEMU после apt живы. Так удобно поправить один-два слота. Для всех слотов проще
+поставить пакет один раз в новый шаблон и пересоздать слоты (см. ниже, «Много слотов»).
 
 Переменные `$MGR` и `$ADM` — как в [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md). Команды `$ADM` выполняются на ноде
 менеджера, а `pct` и `$P slot` — на ноде слота.
@@ -304,20 +305,50 @@ $P enable $id
   пока не исправите.
 - Образы устройств GNS3 (QEMU, IOU) так не ставят: они лежат в `IMAGES_DIR` на CephFS (см. «Образы GNS3 на CephFS»).
 
-**Шаблон.** Слоты, которые потом склонирует `create`, возьмут пакеты из шаблона, а не из уже исправленных
-слотов. Шаблон (`template: 1`) не запускается, поэтому новый делают из его клона под новым VMID. Новый VMID
-должен быть вне `SLOTS` и диапазонов слотов. Старый шаблон оставьте, пока живы его связанные клоны.
+#### Много слотов: новый шаблон и пересоздание слотов
+
+Чтобы не ставить пакет в каждый слот, его ставят один раз в шаблон, а слоты удаляют и создают заново из
+нового шаблона с теми же VMID и IP. Секреты, база менеджера и каталоги студентов остаются. **`reset` для этого
+не нужен и вреден**: он удаляет менеджер вместе с базой. Записи владельцев у агентов (`/var/lib/lab-node-agent/<vmid>.json`)
+не удаляйте: база менеджера жива, её эпохи только растут, и агент примет новый CT с тем же VMID.
+
+Шаблон (`template: 1`) не запускается, а `template` в `deploy` собирает шаблон, только если его VMID ещё нет.
+Поэтому новый шаблон делают из клона старого под новым VMID. Новый VMID должен быть вне `SLOTS` и диапазонов слотов.
 
 ```sh
-pct clone 2000 2010 --full 1 --hostname lab-slot-template   # 2000 — текущий SLOT_TEMPLATE
+# 1. Новый шаблон: клон текущего (2000 — SLOT_TEMPLATE), пакеты, проверка, чистка (на ноде шаблона)
+pct clone 2000 2010 --full 1 --hostname lab-slot-template
 pct start 2010
+pct exec 2010 -- env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 pct exec 2010 -- env DEBIAN_FRONTEND=noninteractive apt-get install -y <пакеты>
 pct push 2010 /mnt/pve/cfs/gns3-ro/install/slot-template-setup /root/slot-template-setup --perms 0755
 pct exec 2010 -- env GNS3_ID=1500 /root/slot-template-setup verify   # GNS3_ID = SLOT_GNS3_ID
 pct exec 2010 -- /root/slot-template-setup clean
 pct shutdown 2010 && pct template 2010
-# lab.conf: SLOT_TEMPLATE="2010=<нода>:dhcp"
+
+# 2. secrets/lab.conf: SLOT_TEMPLATE="2010=<нода>:dhcp"; в CREATE_SLOTS — ВСЕ слоты со своими нодами и IP
+#    (если слоты создавались вручную, впишите их: create клонирует только то, что там описано)
+
+# 3. Остановить работу и вывести слоты (на ноде менеджера)
+pct exec $MGR -- $ADM maintenance on --in 10m
+pct exec $MGR -- $ADM maintenance wait
+$P check                                          # не должно быть QUARANTINED: такой слот сначала разберите
+for id in 2001 2002 2101 2102; do pct exec $MGR -- $ADM slot-maintenance $id --message "новый шаблон"; done
+
+# 4. Удалить слоты (каждый — на своей ноде). --purge убирает CT и из пула lab-slots, его вернёт secrets
+pct stop 2001; pct destroy 2001 --purge 1 --destroy-unreferenced-disks 1
+
+# 5. Создать заново и провизить: create, secrets (пул lab-slots), slot на каждой ноде, ..., check, enable
+$P deploy
+pct exec $MGR -- $ADM maintenance off
 ```
+
+- Вместо `deploy` можно выполнить только нужные шаги: `$P create` → `$P secrets` → `$P slot` на каждой ноде со слотами →
+  `$P check` → `$P enable`. Шаги `agent` и `manager` не нужны: VMID, IP и `slots.json` не изменились. `deploy`
+  проходит и их, и `venv slot`: это дольше, но безопасно, пока стенд в обслуживании.
+- Старый шаблон 2000 удаляйте (`pct destroy 2000`) только после того, как удалены слоты: со связанными клонами
+  (`SLOT_CLONE=linked`) Proxmox его не удалит. Можно и оставить его для отката: верните `SLOT_TEMPLATE` и повторите шаги 3–5.
+- Новые MAC слоты получат при клонировании. Если DHCP или firewall привязаны к MAC, обновите их.
 
 ### Добавить ноду со слотами
 
