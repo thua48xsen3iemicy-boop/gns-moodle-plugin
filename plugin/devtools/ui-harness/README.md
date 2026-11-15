@@ -86,10 +86,12 @@ PYTHON=python3 node check_vnc.js --shots /tmp/vnc-shots   # нужен Playwrigh
 пауза переподключения, шторка телефона) — в каталоге `--shots` (по умолчанию `dist/shots`).
 
 Страница преподавателя «Лабы курса» (`course.php`, `docs/teacher-dashboard.md`): `index.<язык>.course.html` — настоящий шаблон `course.mustache`
-и модуль `course.js` против заглушки `mod_gns3lab_get_course_overview` (пять студентов, две лабы, две группы; у студентов 11 и 12 есть факты — верные и с
-ошибками). `?laberror` — менеджер не ответил по второй лабе, `?coursefail` — вызов не удался. `window.__stub.course.set(cmid, userid, сводка|null)` меняет ячейку,
-`.bump(userid)` двигает rev фактов. Сквозная проверка в Chromium — `check_course.js` (таблица, цифры в ячейках, «без изменений N мин» на часах Playwright, поиск,
-сортировка, группа, карточка и её адрес, телефон 360 px, ошибка по лабе, экранирование имён): `node check_course.js [--min] [--shots <каталог>]`.
+и модуль `course.js` против заглушки `mod_gns3lab_get_course_overview` (пять студентов, три лабы с оценками журнала и прогонами
+проверок, две группы; у студентов 11 и 12 есть факты — верные и с ошибками). Открывается сводка, `&lab=<cmid>` — вкладка лабы. `?laberror` — менеджер не ответил
+по второй лабе, `?coursefail` — вызов не удался, `?nogrades` — преподаватель без права видеть оценки. `window.__stub.course.set(cmid, userid, сводка|null)` меняет
+ячейку, `.result(cmid, userid, оценка|null, проверки|null)` — её оценку и проверки, `.bump(userid)` двигает rev фактов. Сквозная проверка в Chromium —
+`check_course.js` (сводка и итоги, вкладка лабы, цифры фактов, «без изменений N мин» на часах Playwright, поиск, сортировка, группа, карточка с оценкой и историей
+проверок, адреса и «назад» браузера, телефон 360 px, ошибка по лабе, экранирование имён): `node check_course.js [--min] [--shots <каталог>]`.
 
 Запрет вставки в консоль (поле ноды `nopaste` лабы библиотеки, `docs/SPEC.md` §5.1): `index.<язык>.nopaste.html` — помечены SW1
 и нода с экраном VNC. Проверка — `node check_nopaste.js [--min]` (порт 18131, Playwright с Chromium): в консоли SW1 событие `paste`,

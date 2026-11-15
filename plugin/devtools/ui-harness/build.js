@@ -309,14 +309,20 @@ for (const lang of ['ru', 'en']) {
     })));
 }
 
-// The course page of a teacher (course.php): index.<lang>.course.html, with two groups to pick from; the stub plays four
-// students in two labs (stubs/ajax.js). ?laberror makes the second lab fail, ?coursefail the whole call.
-const COURSE_INIT = "window.GNS3LAB_STUB.course = true; require(['mod_gns3lab/course'], function(course) { course.init('u1', 2); });";
+// The course page of a teacher (course.php): index.<lang>.course.html, with two groups to pick from; the stub plays five
+// students in three labs (stubs/ajax.js); &lab=<cmid> opens a lab. ?laberror makes the second lab fail, ?coursefail the
+// whole call, ?nogrades hides the grades.
+// The lab of the address (?lab=<cmid>) is passed the way course.php does; the harness reads it in the browser.
+const COURSE_INIT = "window.GNS3LAB_STUB.course = true; require(['mod_gns3lab/course'], function(course) {"
+    + " course.init('u1', 2, parseInt(new URLSearchParams(location.search).get('lab'), 10) || 0); });";
 for (const lang of ['en', 'ru']) {
     const str = strings(lang);
     const view = {
         uniqid: 'u1', courseid: 2, coursename: 'Networks 101', courseurl: '#course', labbase: 'lab.html',
         hasgroups: true, groups: [{id: 5, name: 'Group A'}, {id: 6, name: 'Group B'}],
+        labid: 0, gradebookurl: '#gradebook', summaryurl: `index.${lang}.course.html?id=2`,
+        labs: [[1, 'Lab 4 · OSPF multi-area'], [2, 'Lab 5 · Linux switch'], [3, 'Lab 6 · Warm-up']].map(([cmid, name]) => ({
+            cmid, name, url: `index.${lang}.course.html?id=2&lab=${cmid}`, current: false})),
         str: () => (text, render) => {
             const key = render(text).split(',')[0].trim();
             if (!(key in str)) {

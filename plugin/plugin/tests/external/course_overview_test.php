@@ -31,6 +31,7 @@ use mod_gns3lab\tests\fake_manager;
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\external\get_course_overview::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\course_labs::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\activity_sessions::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\course_results::class)]
 final class course_overview_test extends \advanced_testcase {
     /** @var fake_manager */
     protected fake_manager $manager;
@@ -85,13 +86,57 @@ final class course_overview_test extends \advanced_testcase {
      * Calls the function and cleans the result like the web service layer does.
      *
      * @param int $groupid group
+     * @param int $cmid one lab, 0 for all
      * @return array
      */
-    protected function overview(int $groupid = 0): array {
+    protected function overview(int $groupid = 0, int $cmid = 0): array {
         return external_api::clean_returnvalue(
             get_course_overview::execute_returns(),
-            get_course_overview::execute((int) $this->course->id, $groupid)
+            get_course_overview::execute((int) $this->course->id, $groupid, $cmid)
         );
+    }
+
+    /**
+     * The lab of an answer.
+     *
+     * @param array $result result of the function
+     * @param \stdClass $lab activity
+     * @return array
+     */
+    protected function lab(array $result, \stdClass $lab): array {
+        foreach ($result['labs'] as $entry) {
+            if ($entry['cmid'] == $lab->cmid) {
+                return $entry;
+            }
+        }
+        $this->fail('the lab is not in the answer');
+    }
+
+    /**
+     * A lab graded out of 10 with 6 to pass: the student has 8 from the checks, the other student 9 lowered to 4 by hand.
+     *
+     * @return \stdClass activity
+     */
+    protected function graded_lab(): \stdClass {
+        global $CFG, $DB;
+        require_once($CFG->libdir . '/gradelib.php');
+        require_once($CFG->dirroot . '/mod/gns3lab/lib.php');
+
+        $lab = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id, 'grade' => 10]);
+        $instance = $DB->get_record('gns3lab', ['id' => $lab->id], '*', MUST_EXIST);
+        gns3lab_grade_item_update($instance, [
+            (int) $this->student->id => (object) ['userid' => (int) $this->student->id, 'rawgrade' => 8],
+            (int) $this->other->id => (object) ['userid' => (int) $this->other->id, 'rawgrade' => 9],
+        ]);
+        $item = \grade_item::fetch([
+            'courseid' => $this->course->id, 'itemtype' => 'mod', 'itemmodule' => 'gns3lab',
+            'iteminstance' => $lab->id, 'itemnumber' => 0,
+        ]);
+        $item->gradepass = 6;
+        $item->update();
+        // The teacher changes a grade in the gradebook: the final grade is overridden.
+        $item->update_final_grade((int) $this->other->id, 4, 'gradebook');
+        return $lab;
     }
 
     /**
@@ -266,5 +311,95 @@ final class course_overview_test extends \advanced_testcase {
 
         $this->assertSame('notconfigured', $result['labs'][0]['error']);
         $this->assertCount(2, $result['students']);
+    }
+
+    public function test_the_grades_are_the_final_grades_of_the_gradebook(): void {
+        $graded = $this->graded_lab();
+        $this->setUser($this->teacher);
+
+        $result = $this->overview();
+
+        $this->assertTrue($result['showgrades']);
+        $lab = $this->lab($result, $graded);
+        $this->assertSame('value', $lab['gradetype']);
+        $this->assertSame('10.00', $lab['grademax']);
+        $this->assertSame('6.00', $lab['gradepass']);
+        $this->assertSame('6.00', $lab['average'], 'the average of 8 and the overridden 4');
+        $mine = $this->cell($result, $graded, $this->student)['grade'];
+        $this->assertSame('8.00', $mine['text']);
+        $this->assertSame('yes', $mine['passed']);
+        $this->assertFalse($mine['overridden']);
+        $this->assertEqualsWithDelta(0.8, $mine['ratio'], 0.0001);
+        $theirs = $this->cell($result, $graded, $this->other)['grade'];
+        $this->assertSame('4.00', $theirs['text'], 'the grade changed by hand, not the one of the checks');
+        $this->assertSame('no', $theirs['passed']);
+        $this->assertTrue($theirs['overridden']);
+        $this->assertSame('none', $this->lab($result, $this->lab)['gradetype'], 'a lab without a grade');
+        $this->assertNull($this->cell($result, $this->lab, $this->student)['grade']);
+    }
+
+    public function test_a_teacher_who_may_not_see_grades_gets_none(): void {
+        global $DB;
+        $graded = $this->graded_lab();
+        $roleid = $DB->get_field('role', 'id', ['shortname' => 'teacher'], MUST_EXIST);
+        assign_capability('moodle/grade:viewall', CAP_PROHIBIT, $roleid, \context_course::instance($this->course->id));
+        $this->setUser($this->teacher);
+
+        $result = $this->overview();
+
+        $this->assertFalse($result['showgrades']);
+        $lab = $this->lab($result, $graded);
+        $this->assertSame('none', $lab['gradetype']);
+        $this->assertSame('', $lab['average']);
+        $this->assertNull($this->cell($result, $graded, $this->student)['grade']);
+        $this->assertNull($this->cell($result, $graded, $this->other)['grade']);
+    }
+
+    public function test_one_lab_by_its_cmid(): void {
+        $second = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id]);
+        $this->setUser($this->teacher);
+
+        $result = $this->overview(0, (int) $second->cmid);
+
+        $this->assertSame([(int) $second->cmid], array_column($result['labs'], 'cmid'));
+        $this->assertSame([(int) $second->cmid], array_values(array_unique(array_column($result['cells'], 'cmid'))));
+        foreach ($this->manager->requests_to('GET', '/api/v1/sessions') as $request) {
+            $this->assertSame("instance_id={$second->id}", $request['query'], 'the other labs are not asked about');
+        }
+    }
+
+    public function test_a_lab_the_teacher_may_not_observe_cannot_be_asked_for(): void {
+        global $DB;
+        $second = $this->getDataGenerator()->create_module('gns3lab', ['course' => $this->course->id]);
+        $roleid = $DB->get_field('role', 'id', ['shortname' => 'teacher'], MUST_EXIST);
+        assign_capability('mod/gns3lab:observe', CAP_PROHIBIT, $roleid, \context_module::instance($second->cmid));
+        $this->setUser($this->teacher);
+
+        $this->expectException(\invalid_parameter_exception::class);
+        $this->overview(0, (int) $second->cmid);
+    }
+
+    public function test_the_checks_of_a_student_are_summed_up(): void {
+        global $DB;
+        $now = time();
+        $run = fn(string $runid, string $status, string $outcome, ?int $mark, int $created, int $finished) => (object) [
+            'gns3labid' => $this->lab->id, 'userid' => $this->student->id, 'sessionid' => 's-1', 'runid' => $runid,
+            'requestedby' => $this->student->id, 'status' => $status, 'outcome' => $outcome, 'mark' => $mark,
+            'topmark' => 5, 'failmark' => 2, 'critical' => 0, 'major' => 0, 'minor' => 0, 'note' => 0, 'errorcode' => '',
+            'timecreated' => $created, 'timemodified' => $finished ?: $created, 'timefinished' => $finished,
+        ];
+        $DB->insert_record('gns3lab_check_runs', $run('r1', 'done', 'graded', 4, $now - 600, $now - 590));
+        $DB->insert_record('gns3lab_check_runs', $run('r2', 'done', 'incomplete', null, $now - 300, $now - 290));
+        $DB->insert_record('gns3lab_check_runs', $run('r3', 'running', '', null, $now - 10, 0));
+        $this->setUser($this->teacher);
+
+        $result = $this->overview();
+
+        $checks = $this->cell($result, $this->lab, $this->student)['checks'];
+        $this->assertSame(1, $checks['attempts'], 'only the graded run is an attempt');
+        $this->assertSame('running', $checks['laststatus']);
+        $this->assertSame('', $checks['lastoutcome']);
+        $this->assertSame($now - 10, $checks['lastat']);
+        $this->assertNull($this->cell($result, $this->lab, $this->other)['checks']);
     }
 }

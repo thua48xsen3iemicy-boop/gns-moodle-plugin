@@ -17,11 +17,16 @@
 {{!
     @template mod_gns3lab/course
 
-    The labs of a course for the teacher, full screen: students by labs with the live state of their sessions and the card
-    of a student in a lab. The table and the card are drawn by the AMD module mod_gns3lab/course; the template is the frame.
+    The labs of a course for the teacher, full screen: the summary (grades of the gradebook by students and labs) or one lab
+    (the live state of the sessions of its students), and the card of a student in a lab. The views, the table and the card
+    are drawn by the AMD module mod_gns3lab/course; the template is the frame.
 
     Context variables required for this template:
     * courseid - course id
+    * labid - course module id of the lab to show first, 0 for the summary
+    * gradebookurl - URL of the grader report, empty if the user may not open it
+    * summaryurl - URL of the summary view
+    * labs - labs of the course the user may observe: cmid, name, url, current (the lab shown first)
     * coursename - course name
     * courseurl - URL of the course
     * labbase - URL of the lab page (the card adds id, userid and from)
@@ -31,6 +36,10 @@
     Example context (json):
     {
         "courseid": 2,
+        "labid": 0,
+        "gradebookurl": "https://example.org/grade/report/grader/index.php?id=2",
+        "summaryurl": "https://example.org/mod/gns3lab/course.php?id=2",
+        "labs": [{"cmid": 7, "name": "Lab 4", "url": "https://example.org/mod/gns3lab/course.php?id=2&lab=7", "current": false}],
         "coursename": "Networks 101",
         "courseurl": "https://example.org/course/view.php?id=2",
         "labbase": "https://example.org/mod/gns3lab/lab.php",
@@ -63,8 +72,17 @@
             </label>
             {{/hasgroups}}
             <input type="search" data-region="search" placeholder="{{#str}}cl_search, mod_gns3lab{{/str}}" aria-label="{{#str}}cl_search, mod_gns3lab{{/str}}" autocomplete="off">
+            {{#gradebookurl}}
+            <a class="gradebook" href="{{gradebookurl}}" data-region="gradebook">{{#str}}cl_gradebook, mod_gns3lab{{/str}}</a>
+            {{/gradebookurl}}
         </div>
     </header>
+    <nav class="views" data-region="views" aria-label="{{#str}}cl_views, mod_gns3lab{{/str}}">
+        <a class="view" href="{{summaryurl}}" data-view="0"{{^labid}} aria-current="page"{{/labid}}>{{#str}}cl_summary, mod_gns3lab{{/str}}</a>
+        {{#labs}}
+        <a class="view" href="{{url}}" data-view="{{cmid}}"{{#current}} aria-current="page"{{/current}}>{{name}}</a>
+        {{/labs}}
+    </nav>
 
     <main class="body">
         <section class="main" data-region="main">
@@ -80,6 +98,6 @@
 </div>
 {{#js}}
 require(['mod_gns3lab/course'], function(course) {
-    course.init('{{uniqid}}', {{courseid}});
+    course.init('{{uniqid}}', {{courseid}}, {{labid}});
 });
 {{/js}}

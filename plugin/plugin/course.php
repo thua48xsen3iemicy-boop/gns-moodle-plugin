@@ -15,7 +15,8 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Labs of a course for the teacher: students by labs, the live state of their sessions and a card per student and lab.
+ * Labs of a course for the teacher: a summary of the grades by students and labs, one lab with the live state of the sessions
+ * of its students, and a card per student and lab.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -25,6 +26,8 @@
 require('../../config.php');
 
 $id = required_param('id', PARAM_INT);
+// The lab shown on its own; 0 is the summary of all labs. The page follows it in the address while the teacher switches.
+$labid = optional_param('lab', 0, PARAM_INT);
 
 $course = get_course($id);
 require_login($course);
@@ -35,13 +38,13 @@ if (!\mod_gns3lab\local\course_labs::has_observable($course)) {
     throw new required_capability_exception($context, 'mod/gns3lab:observe', 'nopermissions', '');
 }
 
-$PAGE->set_url('/mod/gns3lab/course.php', ['id' => $course->id]);
+$PAGE->set_url('/mod/gns3lab/course.php', ['id' => $course->id] + ($labid ? ['lab' => $labid] : []));
 $PAGE->set_pagelayout('embedded');
 $PAGE->add_body_class('gns3lab-fullscreen');
 $PAGE->set_title(format_string($course->shortname, true, ['context' => $context]) . ': ' . get_string('courselabs', 'gns3lab'));
 $PAGE->set_heading(format_string($course->fullname, true, ['context' => $context]));
 
-$overview = new \mod_gns3lab\output\course_overview($course);
+$overview = new \mod_gns3lab\output\course_overview($course, $labid);
 
 echo $OUTPUT->header();
 echo \mod_gns3lab\local\maintenance::notification();
