@@ -48,8 +48,7 @@ class mod_gns3lab_mod_form extends moodleform_mod {
 
         $mform->addElement('header', 'labsettings', get_string('labsettings', 'gns3lab'));
         $mform->setExpanded('labsettings');
-        $menu = [0 => get_string('labfrommanager', 'gns3lab')] + \mod_gns3lab\local\lab_library::published_menu();
-        $mform->addElement('select', 'labversionid', get_string('librarylab', 'gns3lab'), $menu);
+        $mform->addElement('selectgroups', 'labversionid', get_string('librarylab', 'gns3lab'), $this->lab_menu());
         $mform->setDefault('labversionid', 0);
         $mform->addHelpButton('labversionid', 'librarylab', 'gns3lab');
         if (has_capability('mod/gns3lab:managelabs', context_system::instance())) {
@@ -232,6 +231,28 @@ class mod_gns3lab_mod_form extends moodleform_mod {
     }
 
     /**
+     * Choice of the lab in groups: the teacher's own labs, labs used in the course, labs of other authors,
+     * then the lab on the lab manager.
+     *
+     * @return array<string, array<int, string>> group label => (version id => label)
+     */
+    protected function lab_menu(): array {
+        global $USER;
+
+        $groups = \mod_gns3lab\local\lab_library::activity_menu(
+            (int) $USER->id,
+            (int) $this->get_course()->id,
+            (int) ($this->current->labversionid ?? 0)
+        );
+        $menu = [];
+        foreach ($groups as $group => $options) {
+            $menu[get_string('labgroup' . $group, 'gns3lab')] = $options;
+        }
+        $menu[get_string('labgroupnone', 'gns3lab')] = [0 => get_string('labfrommanager', 'gns3lab')];
+        return $menu;
+    }
+
+    /**
      * Validates the form data.
      *
      * @param array $data submitted data
@@ -241,7 +262,7 @@ class mod_gns3lab_mod_form extends moodleform_mod {
     public function validation($data, $files): array {
         $errors = parent::validation($data, $files);
         $versionid = (int) ($data['labversionid'] ?? 0);
-        if ($versionid && !array_key_exists($versionid, \mod_gns3lab\local\lab_library::published_menu())) {
+        if ($versionid && !\mod_gns3lab\local\lab_library::is_published($versionid)) {
             $errors['labversionid'] = get_string('labversionmissing', 'gns3lab');
         }
         if (isset($data['maxduration']) && (int) $data['maxduration'] < 0) {

@@ -146,7 +146,7 @@ final class lab_library_test extends \advanced_testcase {
         $this->assertFalse($DB->record_exists('gns3lab_lab_versions', ['labid' => $labid]));
     }
 
-    public function test_list_by_tag_and_menu_of_published_versions(): void {
+    public function test_list_by_tag(): void {
         [$ospf, $def] = $this->lab('OSPF', ['ospf', 'routing']);
         $this->lab('VLAN', ['vlan']);
         lab_library::publish($ospf, $def);
@@ -156,7 +156,64 @@ final class lab_library_test extends \advanced_testcase {
         $this->assertSame(['OSPF'], array_column($labs, 'name'));
         $this->assertSame(['ospf', 'routing'], $labs[0]->tags);
         $this->assertSame(1, (int) $labs[0]->published->version);
-        $this->assertSame(['OSPF (version 1)'], array_values(lab_library::published_menu()));
+    }
+
+    public function test_activity_menu_groups_latest_versions_by_date(): void {
+        global $DB;
+        $teacher = $this->getDataGenerator()->create_user(['firstname' => 'Tom', 'lastname' => 'Teacher']);
+        $other = $this->getDataGenerator()->create_user(['firstname' => 'Olga', 'lastname' => 'Other']);
+        $course = $this->getDataGenerator()->create_course();
+
+        $this->setUser($teacher);
+        [$ospf, $def] = $this->lab('OSPF');
+        $ospf1 = lab_library::publish($ospf, $def);
+        $this->manager->with_lab_definitions('sha256:bbbb');
+        $ospf2 = lab_library::publish($ospf, $def);
+        $this->lab('Draft only');
+
+        $this->setUser($other);
+        [$vlan, $def] = $this->lab('VLAN');
+        $vlan1 = lab_library::publish($vlan, $def);
+        [$bgp, $def] = $this->lab('BGP');
+        $bgp1 = lab_library::publish($bgp, $def);
+        [$stp, $def] = $this->lab('STP');
+        $stp1 = lab_library::publish($stp, $def);
+        // A co-author: the teacher edits a lab of another author, it becomes theirs too.
+        [$nat, $def] = $this->lab('NAT');
+        $this->setUser($teacher);
+        $nat1 = lab_library::publish($nat, $def);
+        $this->getDataGenerator()->create_module('gns3lab', ['course' => $course->id, 'labversionid' => $bgp1->id]);
+
+        $dates = [$ospf1->id => 100, $ospf2->id => 400, $nat1->id => 300, $vlan1->id => 200, $bgp1->id => 100, $stp1->id => 500];
+        foreach ($dates as $id => $time) {
+            $DB->set_field('gns3lab_lab_versions', 'timepublished', $time, ['id' => $id]);
+        }
+
+        $menu = lab_library::activity_menu((int) $teacher->id, (int) $course->id);
+        $this->assertSame(['mine', 'course', 'others'], array_keys($menu));
+        // One entry per lab at its latest version, the newest publication first.
+        $this->assertSame([(int) $ospf2->id, (int) $nat1->id], array_keys($menu['mine']));
+        $this->assertSame([(int) $bgp1->id], array_keys($menu['course']));
+        $this->assertSame([(int) $stp1->id, (int) $vlan1->id], array_keys($menu['others']));
+        $this->assertStringStartsWith('OSPF · v2 · ', $menu['mine'][$ospf2->id]);
+        $this->assertStringNotContainsString('Teacher', $menu['mine'][$ospf2->id]);
+        $this->assertStringStartsWith('BGP · v1 · Olga Other · ', $menu['course'][$bgp1->id]);
+
+        // The version an activity runs stays in the menu, right after the latest one.
+        $menu = lab_library::activity_menu((int) $teacher->id, (int) $course->id, (int) $ospf1->id);
+        $this->assertSame([(int) $ospf2->id, (int) $ospf1->id, (int) $nat1->id], array_keys($menu['mine']));
+        $this->assertStringStartsWith('OSPF · v1 · ', $menu['mine'][$ospf1->id]);
+        $this->assertStringEndsWith(')', $menu['mine'][$ospf1->id]);
+
+        // Another teacher sees the same labs from their side: their own labs first, no course group without activities.
+        $menu = lab_library::activity_menu((int) $other->id, (int) $this->getDataGenerator()->create_course()->id);
+        $this->assertSame(['mine', 'others'], array_keys($menu));
+        $this->assertSame([(int) $stp1->id, (int) $nat1->id, (int) $vlan1->id, (int) $bgp1->id], array_keys($menu['mine']));
+        $this->assertStringNotContainsString('Draft only', implode(' ', array_merge(...array_values($menu))));
+
+        $this->assertTrue(lab_library::is_published((int) $ospf1->id));
+        $this->assertFalse(lab_library::is_published((int) lab_library::save_draft($ospf, $def)->id));
+        $this->assertFalse(lab_library::is_published(0));
     }
 
     public function test_activity_lab(): void {

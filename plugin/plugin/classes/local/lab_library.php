@@ -408,28 +408,107 @@ class lab_library {
     }
 
     /**
-     * Published versions for the activity form, newest first within each lab.
+     * Whether a version is published: only a published version can be chosen in an activity.
      *
-     * @return array<int, string> version id => "lab name (version N)"
+     * @param int $versionid version id
+     * @return bool
      */
-    public static function published_menu(): array {
+    public static function is_published(int $versionid): bool {
+        global $DB;
+
+        return $versionid > 0 && $DB->record_exists('gns3lab_lab_versions', ['id' => $versionid, 'status' => self::PUBLISHED]);
+    }
+
+    /**
+     * Labs for the activity form, in groups: the user's own labs, labs already used in the course, labs of other authors.
+     *
+     * A lab is offered once, at its latest published version; the version the activity already runs stays in the
+     * menu too, so editing the activity never changes its lab silently. A lab of the user is never repeated in the
+     * course group. Within a group the most recently published lab comes first.
+     *
+     * @param int $userid the teacher: their labs are the ones they created or edited
+     * @param int $courseid course of the activity
+     * @param int $currentversionid version the activity runs now, 0 for none
+     * @return array<string, array<int, string>> group => (version id => label); groups mine, course, others, empty ones left out
+     */
+    public static function activity_menu(int $userid, int $courseid, int $currentversionid = 0): array {
         global $DB;
 
         $rows = $DB->get_records_sql(
-            "SELECT v.id, v.version, l.name
+            "SELECT v.id, v.labid, v.version, v.timepublished, l.name, l.usercreated
                FROM {gns3lab_lab_versions} v
                JOIN {gns3lab_labs} l ON l.id = v.labid
               WHERE v.status = :status
-           ORDER BY l.name ASC, l.id ASC, v.version DESC",
+           ORDER BY v.version DESC",
             ['status' => self::PUBLISHED]
         );
-        $menu = [];
+        $latest = [];
+        $current = null;
         foreach ($rows as $row) {
-            $menu[$row->id] = get_string('labversionname', 'gns3lab', [
-                'name' => format_string($row->name, true, ['context' => self::context()]),
-                'version' => $row->version,
-            ]);
+            $latest[$row->labid] ??= $row;
+            if ((int) $row->id === $currentversionid) {
+                $current = $row;
+            }
         }
-        return $menu;
+        if (!$latest) {
+            return [];
+        }
+
+        $mine = array_flip(array_map('intval', $DB->get_fieldset_sql(
+            "SELECT id FROM {gns3lab_labs} WHERE usercreated = :creator
+              UNION
+             SELECT labid FROM {gns3lab_lab_versions} WHERE usermodified = :editor",
+            ['creator' => $userid, 'editor' => $userid]
+        )));
+        $incourse = array_flip(array_map('intval', $DB->get_fieldset_sql(
+            "SELECT DISTINCT v.labid
+               FROM {gns3lab} g
+               JOIN {gns3lab_lab_versions} v ON v.id = g.labversionid
+              WHERE g.course = :course",
+            ['course' => $courseid]
+        )));
+
+        uasort($latest, fn($a, $b) => [(int) $b->timepublished, $a->name, (int) $a->labid]
+            <=> [(int) $a->timepublished, $b->name, (int) $b->labid]);
+        $authorids = array_filter(array_map(fn($row) => (int) $row->usercreated, array_values($latest)));
+        $authors = $authorids ? $DB->get_records_list(
+            'user',
+            'id',
+            array_unique($authorids),
+            '',
+            'id, ' . implode(', ', \core_user\fields::get_name_fields())
+        ) : [];
+
+        $groups = ['mine' => [], 'course' => [], 'others' => []];
+        foreach ($latest as $labid => $row) {
+            $group = isset($mine[$labid]) ? 'mine' : (isset($incourse[$labid]) ? 'course' : 'others');
+            $author = $group !== 'mine' && isset($authors[$row->usercreated]) ? fullname($authors[$row->usercreated]) : '';
+            $groups[$group][(int) $row->id] = self::menu_label($row, $author);
+            if ($current && (int) $current->labid === (int) $labid && (int) $current->id !== (int) $row->id) {
+                $groups[$group][(int) $current->id] = get_string('labversioncurrent', 'gns3lab', self::menu_label($current, ''));
+            }
+        }
+        return array_filter($groups);
+    }
+
+    /**
+     * Label of a published version in the activity form: name, version, author when given, date of publication.
+     *
+     * @param \stdClass $row version with name and timepublished
+     * @param string $author full name of the author, empty to leave it out
+     * @return string
+     */
+    private static function menu_label(\stdClass $row, string $author): string {
+        $parts = [
+            format_string($row->name, true, ['context' => self::context()]),
+            get_string('labversionshort', 'gns3lab', $row->version),
+        ];
+        if ($author !== '') {
+            $parts[] = $author;
+        }
+        if ((int) $row->timepublished > 0) {
+            $parts[] = userdate((int) $row->timepublished, get_string('strftimedatefullshort', 'langconfig'));
+        }
+        return implode(' · ', $parts);
     }
 }
