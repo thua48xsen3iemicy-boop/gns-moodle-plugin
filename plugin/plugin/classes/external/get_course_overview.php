@@ -23,15 +23,16 @@ use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\activity_sessions;
 use mod_gns3lab\local\course_labs;
+use mod_gns3lab\local\course_results;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
 
 /**
  * Students by labs of a course for the teacher page (course.php): who runs which lab and in which state.
  *
- * Only the sessions are here, as short summaries from one list per lab. The topology and the facts of a student
- * come from mod_gns3lab_get_state and mod_gns3lab_get_facts, which check observe and groups on their own.
- * The session id is not part of the answer.
+ * Only the sessions are here, as short summaries from one list per lab, with the final grade of the gradebook and a
+ * summary of the auto-check runs. The topology and the facts of a student come from mod_gns3lab_get_state and
+ * mod_gns3lab_get_facts, which check observe and groups on their own. The session id is not part of the answer.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -47,6 +48,7 @@ class get_course_overview extends external_api {
         return new external_function_parameters([
             'courseid' => new external_value(PARAM_INT, 'Course id'),
             'groupid' => new external_value(PARAM_INT, 'Only the members of this group, 0 for all', VALUE_DEFAULT, 0),
+            'cmid' => new external_value(PARAM_INT, 'Only this lab of the course, 0 for all', VALUE_DEFAULT, 0),
         ]);
     }
 
@@ -55,12 +57,15 @@ class get_course_overview extends external_api {
      *
      * @param int $courseid course id
      * @param int $groupid group, 0 for all
+     * @param int $cmid one lab, 0 for all
      * @return array
      */
-    public static function execute(int $courseid, int $groupid = 0): array {
-        ['courseid' => $courseid, 'groupid' => $groupid] = self::validate_parameters(
+    public static function execute(int $courseid, int $groupid = 0, int $cmid = 0): array {
+        global $DB;
+
+        ['courseid' => $courseid, 'groupid' => $groupid, 'cmid' => $cmid] = self::validate_parameters(
             self::execute_parameters(),
-            ['courseid' => $courseid, 'groupid' => $groupid]
+            ['courseid' => $courseid, 'groupid' => $groupid, 'cmid' => $cmid]
         );
         $course = get_course($courseid);
         $coursecontext = \context_course::instance($course->id);
@@ -74,6 +79,16 @@ class get_course_overview extends external_api {
         if ($groupid && !array_key_exists($groupid, course_labs::groups($course))) {
             throw new \invalid_parameter_exception('The group is not available to the user');
         }
+        if ($cmid) {
+            if (!isset($cms[$cmid])) {
+                throw new \invalid_parameter_exception('The lab is not available to the user');
+            }
+            $cms = [$cmid => $cms[$cmid]];
+        }
+        $showgrades = course_results::can_see_grades($coursecontext);
+        $gradesettings = $showgrades
+            ? $DB->get_records_list('gns3lab', 'id', array_map(fn($cm) => (int) $cm->instance, array_values($cms)), '', 'id, grade')
+            : [];
 
         $configured = manager_client::is_configured();
         $client = $configured ? \core\di::get(manager_client::class) : null;
@@ -92,9 +107,18 @@ class get_course_overview extends external_api {
                 $lab['error'] = $entry->error;
                 $sessions = $entry->sessions;
             }
-            $labs[] = $lab;
             // The students are enrolled with mod/gns3lab:use already (course_labs::students), only the groups are left.
-            $shared = array_flip($access->share_group(array_map('intval', array_keys($found))));
+            $shared = $access->share_group(array_map('intval', array_keys($found)));
+            // Grades and checks only of the students the user may observe in this lab: the average counts them alone.
+            $results = course_results::grades(
+                $course,
+                $cm,
+                $showgrades ? (int) ($gradesettings[$cm->instance]->grade ?? 0) : 0,
+                $shared
+            );
+            $checks = course_results::checks((int) $cm->instance, $shared);
+            $labs[] = $lab + $results['lab'];
+            $shared = array_flip($shared);
             foreach ($found as $user) {
                 $students[$user->id] = $user;
                 $observable = isset($shared[(int) $user->id]);
@@ -103,6 +127,8 @@ class get_course_overview extends external_api {
                     'userid' => (int) $user->id,
                     'observable' => $observable,
                     'session' => $observable ? ($sessions[$user->id] ?? null) : null,
+                    'grade' => $observable ? ($results['grades'][(int) $user->id] ?? null) : null,
+                    'checks' => $observable ? ($checks[(int) $user->id] ?? null) : null,
                 ];
             }
         }
@@ -115,8 +141,10 @@ class get_course_overview extends external_api {
         foreach ($students as $user) {
             $row = [];
             foreach ($cms as $cm) {
-                $row[] = $cells[$cm->id][$user->id]
-                    ?? ['cmid' => $cm->id, 'userid' => (int) $user->id, 'observable' => false, 'session' => null];
+                $row[] = $cells[$cm->id][$user->id] ?? [
+                    'cmid' => $cm->id, 'userid' => (int) $user->id, 'observable' => false,
+                    'session' => null, 'grade' => null, 'checks' => null,
+                ];
             }
             if (!array_filter($row, fn($cell) => $cell['observable'])) {
                 continue;
@@ -128,7 +156,7 @@ class get_course_overview extends external_api {
             ];
             array_push($allcells, ...$row);
         }
-        return ['labs' => $labs, 'students' => $list, 'cells' => $allcells];
+        return ['showgrades' => $showgrades, 'labs' => $labs, 'students' => $list, 'cells' => $allcells];
     }
 
     /**
@@ -138,11 +166,12 @@ class get_course_overview extends external_api {
      */
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
+            'showgrades' => new external_value(PARAM_BOOL, 'The user may see the grades of the gradebook'),
             'labs' => new external_multiple_structure(new external_single_structure([
                 'cmid' => new external_value(PARAM_INT, 'Course module id'),
                 'name' => new external_value(PARAM_TEXT, 'Activity name'),
                 'error' => new external_value(PARAM_ALPHANUMEXT, 'Why the lab manager gave nothing for this lab, empty if it did'),
-            ]), 'Labs of the course the user can observe, in the order of the course'),
+            ] + course_results::lab_fields()), 'Labs of the course the user can observe, in the order of the course'),
             'students' => new external_multiple_structure(new external_single_structure([
                 'userid' => new external_value(PARAM_INT, 'User id'),
                 'fullname' => new external_value(PARAM_TEXT, 'Full name'),
@@ -153,6 +182,8 @@ class get_course_overview extends external_api {
                 'userid' => new external_value(PARAM_INT, 'User id'),
                 'observable' => new external_value(PARAM_BOOL, 'The user may observe this student in this lab'),
                 'session' => \mod_gns3lab\local\session_data::summary_structure(),
+                'grade' => course_results::grade_structure(),
+                'checks' => course_results::checks_structure(),
             ]), 'One cell per student and lab'),
         ]);
     }

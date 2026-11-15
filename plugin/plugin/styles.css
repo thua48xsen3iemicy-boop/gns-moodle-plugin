@@ -3558,7 +3558,7 @@ body.gns3lab-fullscreen {
     }
 }
 
-/* Course page of a teacher (course.php, amd/src/course.js): students by labs and the card of a student in a lab. */
+/* Course page of a teacher (course.php, amd/src/course.js): the summary, one lab and the card of a student in a lab. */
 .gns3lab-course {
     --bg: var(--bs-secondary-bg,#e8ecef);
     --canvas: var(--bs-tertiary-bg,#f4f6f8);
@@ -4027,6 +4027,303 @@ body.gns3lab-fullscreen {
 .gns3lab-course .devs .dev-off {
     color: var(--muted);
 }
+/* Views of the course page: the summary and one lab. */
+.gns3lab-course .gradebook {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 14px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.gns3lab-course .gradebook:hover {
+    border-color: var(--wire);
+    color: var(--fg);
+    text-decoration: none;
+}
+.gns3lab-course .views {
+    display: flex;
+    gap: 4px;
+    flex: none;
+    overflow-x: auto;
+    padding: 6px max(16px,env(safe-area-inset-left,0px)) 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    scrollbar-width: thin;
+}
+.gns3lab-course .view {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    min-height: 40px;
+    max-width: 260px;
+    padding: 0 14px;
+    border-bottom: 3px solid transparent;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gns3lab-course .view:hover {
+    color: var(--fg);
+    text-decoration: none;
+}
+.gns3lab-course .view[aria-current="page"] {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+.gns3lab-course .view[data-view="0"] {
+    margin-right: 8px;
+}
+.gns3lab-course .muted {
+    color: var(--muted);
+}
+.gns3lab-course .labbtn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding: 0 6px;
+    border-radius: 6px;
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+.gns3lab-course .labbtn:hover {
+    text-decoration: underline;
+}
+.gns3lab-course .grid th.total,
+.gns3lab-course .grid td.total {
+    min-width: 90px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    border-left: 1px solid var(--line);
+}
+.gns3lab-course .grid td.total {
+    font-weight: 600;
+}
+.gns3lab-course .grid tfoot th,
+.gns3lab-course .grid tfoot td {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    border-top: 1px solid var(--line);
+    border-bottom: 0;
+    background: var(--canvas);
+    font-size: 12.5px;
+    color: var(--muted);
+}
+.gns3lab-course .grid tfoot .stud {
+    z-index: 3;
+}
+.gns3lab-course .labsum span {
+    display: block;
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-course .labsum .avg {
+    color: var(--fg);
+    font-weight: 600;
+}
+.gns3lab-course .sumbtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 44px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-course .sumbtn:hover {
+    border-color: var(--wire);
+}
+.gns3lab-course .sumbtn[aria-current="true"] {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.gns3lab-course .sumbtn[data-kind="none"],
+.gns3lab-course .sumbtn[data-kind="started"] {
+    color: var(--muted);
+    background: transparent;
+    border-style: dashed;
+}
+.gns3lab-course .sumbtn[data-kind="running"],
+.gns3lab-course .sumbtn[data-kind="checking"] {
+    border-left: 4px solid var(--ok);
+}
+.gns3lab-course .sumbtn[data-kind="failed"] {
+    border-left: 4px solid var(--bad);
+    color: var(--bad);
+}
+.gns3lab-course .sumbtn .grade,
+.gns3lab-course .gradecell .grade,
+.gns3lab-course .cgrade .grade {
+    font-weight: 700;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-course [data-pass="yes"] .grade {
+    color: var(--ok);
+}
+.gns3lab-course [data-pass="no"] .grade {
+    color: var(--bad);
+}
+.gns3lab-course .sumbtn[data-pass="yes"] {
+    border-left: 4px solid var(--ok);
+}
+.gns3lab-course .sumbtn[data-pass="no"] {
+    border-left: 4px solid var(--bad);
+}
+.gns3lab-course .over {
+    margin-left: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: help;
+}
+.gns3lab-course .sumbtn .live {
+    margin-left: auto;
+    color: var(--ok);
+    font-size: 10px;
+}
+.gns3lab-course .grid.lab thead th {
+    min-width: 0;
+}
+.gns3lab-course .grid.lab td {
+    padding: 6px 10px;
+    font-size: 13px;
+}
+.gns3lab-course .labrow {
+    cursor: pointer;
+}
+.gns3lab-course .labrow:hover td,
+.gns3lab-course .labrow:hover th {
+    background: var(--canvas);
+}
+.gns3lab-course .labrow[aria-current="true"] td,
+.gns3lab-course .labrow[aria-current="true"] th {
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+.gns3lab-course .namebtn {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-course .namebtn:hover .name {
+    text-decoration: underline;
+}
+.gns3lab-course .grid.lab td.state {
+    min-width: 130px;
+    border-left: 4px solid var(--off);
+}
+.gns3lab-course .grid.lab td.state span {
+    display: block;
+}
+.gns3lab-course .grid.lab td.state .state {
+    font-weight: 600;
+}
+.gns3lab-course .grid.lab td.state[data-status="queued"],
+.gns3lab-course .grid.lab td.state[data-status="starting"],
+.gns3lab-course .grid.lab td.state[data-status="stopping"],
+.gns3lab-course .grid.lab td.state[data-status="running"][data-level="warn"] {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .grid.lab td.state[data-status="running"] {
+    border-left-color: var(--ok);
+}
+.gns3lab-course .grid.lab td.state[data-status="running"][data-level="bad"],
+.gns3lab-course .grid.lab td.state[data-status="failed"] {
+    border-left-color: var(--bad);
+}
+.gns3lab-course .grid.lab td.state[data-status="running"][data-level="stale"] {
+    border-left-color: var(--off);
+}
+.gns3lab-course .grid.lab td.state[data-status="failed"] .state {
+    color: var(--bad);
+}
+.gns3lab-course .grid.lab td.state[data-status="none"] .state,
+.gns3lab-course .grid.lab td.state[data-status="stopped"] .state {
+    color: var(--muted);
+    font-weight: 500;
+}
+.gns3lab-course .grid.lab .time,
+.gns3lab-course .grid.lab .idle {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-course .grid.lab td.facts {
+    min-width: 150px;
+}
+.gns3lab-course .grid.lab td.checks span {
+    display: block;
+}
+.gns3lab-course .checking {
+    color: var(--accent);
+    font-weight: 600;
+}
+.gns3lab-course .cgrade {
+    margin: 4px 0 12px;
+    font-size: 13px;
+}
+.gns3lab-course .cgrade .lbl,
+.gns3lab-course .cgrade .sub {
+    color: var(--muted);
+}
+.gns3lab-course .historylist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-course .historylist li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    margin: 0 0 4px;
+    padding: 5px 8px;
+    border-left: 3px solid var(--line);
+    font-size: 13px;
+}
+.gns3lab-course .historylist li[data-result="graded"] {
+    border-left-color: var(--ok);
+}
+.gns3lab-course .historylist li[data-result="failed"],
+.gns3lab-course .historylist li[data-result="incomplete"] {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .historylist li[data-result="pending"] {
+    border-left-color: var(--accent);
+}
+.gns3lab-course .historylist .when {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+.gns3lab-course .historylist .counts {
+    flex-basis: 100%;
+    color: var(--muted);
+    font-size: 12px;
+}
 @media (max-width: 720px) {
     .gns3lab-course .card {
         position: fixed;
@@ -4061,6 +4358,13 @@ body.gns3lab-fullscreen {
     }
     .gns3lab-course .stud .pic {
         display: none;
+    }
+    .gns3lab-course .gradebook {
+        flex: 1;
+        justify-content: center;
+    }
+    .gns3lab-course .grid.lab thead th {
+        min-width: 110px;
     }
 }
 

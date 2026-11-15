@@ -14,12 +14,14 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * The course page of a teacher: students by labs, the live state of their sessions and the card of a student in a lab
- * (docs/teacher-dashboard.md).
+ * The course page of a teacher (docs/teacher-dashboard.md): the summary of the grades by students and labs, one lab with the
+ * live state of the sessions of its students, and the card of a student in a lab with the history of the checks.
  *
- * The table polls mod_gns3lab_get_course_overview every 15 s while the page is visible. The facts of a running session are
- * read by the calls the lab page uses (get_state once per session, get_facts with sincerev every minute, at most four
- * requests at a time); the figures are computed by coursefacts.js. The open card reads its own facts like the lab page.
+ * The table polls mod_gns3lab_get_course_overview every 15 s while the page is visible: the summary asks for all labs, the
+ * view of a lab for that lab only. The grades are the final grades of the gradebook, read by the server. In the view of a
+ * lab the facts of a running session are read by the calls the lab page uses (get_state once per session, get_facts with
+ * sincerev every minute, at most four requests at a time); the figures are computed by coursefacts.js. The open card reads
+ * its own facts like the lab page and the runs of the checks from get_checks.
  * Everything from the server is put into the page as text, never as HTML.
  *
  * @module     mod_gns3lab/course
@@ -35,14 +37,24 @@ import {card, idleSince, summarize, trackRev} from 'mod_gns3lab/coursefacts';
 
 /** Language strings of the page. */
 const STRING_KEYS = [
-    'cl_allgroups', 'cl_back', 'cl_bad', 'cl_card_back', 'cl_card_close', 'cl_card_devices', 'cl_card_findings',
-    'cl_card_nofacts', 'cl_card_nofindings', 'cl_card_notstarted', 'cl_card_open', 'cl_counts', 'cl_dev_ifs', 'cl_dev_ip',
-    'cl_dev_name', 'cl_dev_off', 'cl_dev_on', 'cl_dev_state', 'cl_dev_unknown', 'cl_elapsed', 'cl_factsok',
-    'cl_factsunknown', 'cl_history', 'cl_history_soon', 'cl_idlemin', 'cl_idlesince', 'cl_labfailed', 'cl_layer_l1',
-    'cl_layer_l2', 'cl_layer_l3', 'cl_layer_rt', 'cl_left', 'cl_loadfailed', 'cl_loading', 'cl_nostudents', 'cl_sortname',
-    'cl_sortstate', 'cl_state_failed', 'cl_state_none', 'cl_state_queued', 'cl_state_running', 'cl_state_starting',
-    'cl_state_stopped', 'cl_state_stopping', 'cl_student', 'cl_unobservable', 'cl_updated', 'cl_warn',
+    'cl_allgroups', 'cl_attempts', 'cl_avg', 'cl_back', 'cl_bad', 'cl_card_back', 'cl_card_close', 'cl_card_devices',
+    'cl_card_findings', 'cl_card_grade', 'cl_card_nofacts', 'cl_card_nofindings', 'cl_card_nograde', 'cl_card_notstarted',
+    'cl_card_open', 'cl_card_outof', 'cl_card_passmark', 'cl_checking', 'cl_col_checks', 'cl_col_facts', 'cl_col_grade',
+    'cl_col_state', 'cl_counts', 'cl_counts_graded', 'cl_counts_passed', 'cl_dev_ifs', 'cl_dev_ip', 'cl_dev_name',
+    'cl_dev_off', 'cl_dev_on', 'cl_dev_state', 'cl_dev_unknown', 'cl_elapsed', 'cl_factsok', 'cl_factsunknown',
+    'cl_graded_n', 'cl_history', 'cl_history_failed', 'cl_history_none', 'cl_history_off', 'cl_idlemin', 'cl_idlesince',
+    'cl_labfailed', 'cl_lastcheck', 'cl_layer_l1', 'cl_layer_l2', 'cl_layer_l3', 'cl_layer_rt', 'cl_left', 'cl_live',
+    'cl_loadfailed', 'cl_loading', 'cl_nochecks', 'cl_nograde', 'cl_nogradeitem', 'cl_nostudents', 'cl_openlab',
+    'cl_overridden', 'cl_passed_n', 'cl_sortgrade', 'cl_sortname', 'cl_sortstate', 'cl_sorttotal', 'cl_started',
+    'cl_state_failed', 'cl_state_none', 'cl_state_queued', 'cl_state_running', 'cl_state_starting', 'cl_state_stopped',
+    'cl_state_stopping', 'cl_student', 'cl_total', 'cl_total_title', 'cl_unobservable', 'cl_updated', 'cl_warn',
+    'chk_hist_failed', 'chk_hist_incomplete', 'chk_hist_mark', 'chk_hist_pending', 'chk_n_critical', 'chk_n_major',
+    'chk_n_minor', 'chk_n_note',
 ];
+/** Statuses of a check run that is not over yet. */
+const RUN_PENDING = ['queued', 'running'];
+/** Statuses of a session that has a lab up or on its way. */
+const LIVE = ['queued', 'starting', 'running'];
 
 /** The table is read this often while the page is visible, ms. */
 const OVERVIEW_POLL = 15000;
@@ -86,6 +98,22 @@ const rank = (cell, fact) => {
 };
 
 /**
+ * Order of the cells by grade: the best first when ascending is turned round, no grade last.
+ *
+ * @param {object|null} cell cell of the table
+ * @returns {number}
+ */
+const gradeRank = cell => (cell && cell.observable && cell.grade ? cell.grade.ratio : -1);
+
+/**
+ * Whether a cell counts as passed: graded, and not below the grade to pass if the gradebook sets one.
+ *
+ * @param {object|null} cell cell of the table
+ * @returns {boolean}
+ */
+const passed = cell => !!(cell && cell.observable && cell.grade && cell.grade.passed !== 'no');
+
+/**
  * The course page.
  */
 class CoursePage {
@@ -95,8 +123,9 @@ class CoursePage {
      * @param {HTMLElement} root the application element
      * @param {number} courseid course id
      * @param {object} strings language strings
+     * @param {number} labid the lab to show first, 0 for the summary
      */
-    constructor(root, courseid, strings) {
+    constructor(root, courseid, strings, labid) {
         this.root = root;
         this.courseid = courseid;
         this.strings = strings;
@@ -105,8 +134,11 @@ class CoursePage {
         this.region = region;
         this.groupId = 0;
         this.search = '';
-        // Sorting: by the name of the student, or by the state in a lab (cmid).
-        this.sort = {by: 'name', dir: 1};
+        // What the page shows: 0 for the summary of all labs, else the course module id of one lab.
+        this.view = labid || 0;
+        // Sorting: by the name of the student, the total, the state or the grade.
+        this.sort = this.defaultSort();
+        this.showgrades = false;
         this.labs = [];
         this.students = [];
         this.cells = new Map();
@@ -118,6 +150,8 @@ class CoursePage {
         this.cardTimer = null;
         this.open = null;
         this.pushed = false;
+        // The runs of the checks of the open card: {key, sign, data, error}.
+        this.history = null;
         this.drawPending = false;
         this.loaded = false;
         // The markup on the screen, so that a redraw with the same content leaves the elements (and the focus) alone.
@@ -146,6 +180,100 @@ class CoursePage {
             }
         });
         window.addEventListener('hashchange', () => this.followHash());
+        window.addEventListener('popstate', () => {
+            const view = parseInt(new URLSearchParams(location.search).get('lab'), 10) || 0;
+            if (view !== this.view) {
+                this.setView(view, false);
+            }
+        });
+        for (const link of root.querySelectorAll('[data-region="views"] [data-view]')) {
+            link.addEventListener('click', event => {
+                if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+                    return; // A new tab is the browser's business.
+                }
+                event.preventDefault();
+                this.setView(parseInt(link.dataset.view, 10) || 0, true);
+            });
+        }
+        this.markView();
+        this.poll();
+    }
+
+    /**
+     * Sorting a view starts with: the names in the summary, what needs a look first in a lab.
+     *
+     * @returns {object} {by, dir}
+     */
+    defaultSort() {
+        return {by: this.view ? 'state' : 'name', dir: 1};
+    }
+
+    /**
+     * The address of a view.
+     *
+     * @param {number} view 0 for the summary, else a course module id
+     * @returns {string}
+     */
+    viewUrl(view) {
+        const params = new URLSearchParams(location.search);
+        if (view) {
+            params.set('lab', String(view));
+        } else {
+            params.delete('lab');
+        }
+        return `${location.pathname}?${params.toString()}`;
+    }
+
+    /**
+     * Marks the current view in the list of views and keeps it in sight.
+     */
+    markView() {
+        for (const link of this.root.querySelectorAll('[data-region="views"] [data-view]')) {
+            const current = (parseInt(link.dataset.view, 10) || 0) === this.view;
+            if (current) {
+                link.setAttribute('aria-current', 'page');
+                if (link.scrollIntoView && link.parentElement.scrollWidth > link.parentElement.clientWidth) {
+                    link.scrollIntoView({block: 'nearest', inline: 'nearest'});
+                }
+            } else {
+                link.removeAttribute('aria-current');
+            }
+        }
+        this.root.dataset.view = this.view ? 'lab' : 'summary';
+    }
+
+    /**
+     * Switches between the summary and a lab.
+     *
+     * @param {number} view 0 for the summary, else a course module id
+     * @param {boolean} push write the address (a click), not follow it (back and forward of the browser)
+     */
+    setView(view, push) {
+        if (view === this.view) {
+            return;
+        }
+        if (this.open) {
+            // The card belongs to the view that is left; its entry in the history is left behind as well.
+            this.pushed = false;
+            this.hide();
+        }
+        if (push) {
+            history.pushState(null, '', this.viewUrl(view));
+        } else if (location.hash) {
+            history.replaceState(null, '', location.pathname + location.search);
+        }
+        this.view = view;
+        this.sort = this.defaultSort();
+        this.labs = [];
+        this.students = [];
+        this.cells = new Map();
+        this.facts.clear();
+        this.queue = [];
+        this.loaded = false;
+        this.tableHtml = '';
+        this.markView();
+        this.region('empty').textContent = this.str('cl_loading');
+        this.draw();
         this.poll();
     }
 
@@ -187,12 +315,13 @@ class CoursePage {
             return;
         }
         const groupId = this.groupId;
+        const view = this.view;
         try {
             const [result] = await Promise.all(Ajax.call([{
                 methodname: 'mod_gns3lab_get_course_overview',
-                args: {courseid: this.courseid, groupid: groupId},
+                args: {courseid: this.courseid, groupid: groupId, cmid: view},
             }]));
-            if (groupId === this.groupId) {
+            if (groupId === this.groupId && view === this.view) {
                 this.take(result);
             }
         } catch (error) {
@@ -213,6 +342,7 @@ class CoursePage {
     take(result) {
         this.loaded = true;
         this.notice('');
+        this.showgrades = result.showgrades;
         this.labs = result.labs;
         this.students = result.students;
         this.cells = new Map(result.cells.map(c => [this.key(c.cmid, c.userid), c]));
@@ -220,6 +350,9 @@ class CoursePage {
         this.followHash(true);
         this.draw();
         this.wantFacts();
+        if (this.open) {
+            this.wantHistory(this.cells.get(this.key(this.open.cmid, this.open.userid)));
+        }
     }
 
     /**
@@ -244,6 +377,20 @@ class CoursePage {
     }
 
     /**
+     * Date and time of day for the screen: the time alone today.
+     *
+     * @param {number} ms time, ms
+     * @returns {string}
+     */
+    when(ms) {
+        const date = new Date(ms);
+        if (date.toDateString() === new Date().toDateString()) {
+            return this.clock(ms);
+        }
+        return date.toLocaleString([], {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+    }
+
+    /**
      * Hours and minutes for a time span.
      *
      * @param {number} seconds seconds
@@ -255,13 +402,15 @@ class CoursePage {
     }
 
     /**
-     * Cells with a running session that offers facts: the figures of the table come from them.
+     * Cells with a running session that offers facts in the lab shown, and the open card: their figures are read.
      *
      * @returns {object[]} cells
      */
     factCells() {
+        const open = this.open;
         return [...this.cells.values()].filter(c => c.observable && c.session && c.session.status === 'running'
-            && c.session.facts !== 'no');
+            && c.session.facts !== 'no'
+            && (this.view === c.cmid || (open && open.cmid === c.cmid && open.userid === c.userid)));
     }
 
     /**
@@ -433,10 +582,25 @@ class CoursePage {
         let rows = this.students.filter(s => !this.search || s.fullname.toLocaleLowerCase().includes(this.search));
         const by = this.sort.by;
         const dir = this.sort.dir;
+        const cmid = this.view;
+        const order = student => {
+            const cell = this.cells.get(this.key(cmid, student.userid));
+            switch (by) {
+                case 'state':
+                    return rank(cell, this.factOf(cmid, student.userid));
+                case 'grade':
+                    // The best grade first.
+                    return -gradeRank(cell);
+                case 'total':
+                    return -this.total(student).passed;
+                default:
+                    return 0;
+            }
+        };
         rows = [...rows].sort((a, b) => {
             if (by !== 'name') {
-                const ra = rank(this.cells.get(this.key(by, a.userid)), this.factOf(by, a.userid));
-                const rb = rank(this.cells.get(this.key(by, b.userid)), this.factOf(by, b.userid));
+                const ra = order(a);
+                const rb = order(b);
                 if (ra !== rb) {
                     return (ra - rb) * dir;
                 }
@@ -459,22 +623,85 @@ class CoursePage {
         }
         const table = document.createElement('table');
         if (this.labs.length && rows.length) {
-            this.drawTable(table, rows);
+            if (this.view) {
+                this.drawLab(table, rows, this.labs[0]);
+            } else {
+                this.drawSummary(table, rows);
+            }
         }
-        const html = table.innerHTML;
+        const html = table.className + table.innerHTML;
         if (html !== this.tableHtml) {
             this.tableHtml = html;
+            this.region('table').className = table.className || 'grid';
             this.region('table').replaceChildren(...table.childNodes);
         }
     }
 
     /**
-     * Fills the table: the header with a button per lab and a row per student.
+     * The cell of a student: the picture and the name; in a lab a button that opens the card.
+     *
+     * @param {HTMLElement} tr row
+     * @param {object} student student of the table
+     * @param {object|null} cell the cell the name opens, in the view of a lab
+     */
+    drawName(tr, student, cell) {
+        const th = hel('th', 'stud', tr);
+        th.scope = 'row';
+        const holder = cell && cell.observable ? hel('button', 'namebtn', th) : th;
+        if (holder !== th) {
+            holder.type = 'button';
+            holder.addEventListener('click', () => this.show(cell.cmid, cell.userid, true));
+        }
+        const img = hel('img', 'pic', holder);
+        img.src = student.pictureurl;
+        img.alt = '';
+        img.width = 24;
+        img.height = 24;
+        hel('span', 'name', holder).textContent = student.fullname;
+    }
+
+    /**
+     * Labs passed by a student out of the labs with a grade the user may observe the student in.
+     *
+     * @param {object} student student of the table
+     * @returns {object} {passed, total}
+     */
+    total(student) {
+        const out = {passed: 0, total: 0};
+        for (const lab of this.labs) {
+            const cell = this.cells.get(this.key(lab.cmid, student.userid));
+            if (lab.gradetype === 'none' || !cell || !cell.observable) {
+                continue;
+            }
+            out.total++;
+            if (passed(cell)) {
+                out.passed++;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * How many of the students shown passed a lab, how many have a grade, out of how many can be observed in it.
+     *
+     * @param {object} lab lab of the table
+     * @param {object[]} rows students shown
+     * @returns {object} {passed, graded, total}
+     */
+    gradeCounts(lab, rows) {
+        const cells = rows.map(s => this.cells.get(this.key(lab.cmid, s.userid))).filter(c => c && c.observable);
+        return {passed: cells.filter(passed).length, graded: cells.filter(c => c.grade).length, total: cells.length};
+    }
+
+    /**
+     * The summary: a column per lab with the grades of the gradebook, the total per student and per lab.
      *
      * @param {HTMLTableElement} table the table
      * @param {object[]} rows students shown
      */
-    drawTable(table, rows) {
+    drawSummary(table, rows) {
+        table.className = 'grid summary';
+        const graded = this.showgrades && this.labs.some(lab => lab.gradetype !== 'none');
         const head = hel('tr', '', hel('thead', '', table));
         const corner = hel('th', 'stud', head);
         corner.scope = 'col';
@@ -482,28 +709,258 @@ class CoursePage {
         for (const lab of this.labs) {
             const th = hel('th', 'lab', head);
             th.scope = 'col';
-            this.sortButton(th, lab.name, lab.cmid, this.str('cl_sortstate'));
+            // The header leads to the lab, where its students are looked at closely.
+            const link = hel('a', 'labbtn', th);
+            link.href = this.viewUrl(lab.cmid);
+            link.textContent = lab.name;
+            link.title = this.str('cl_openlab');
+            link.addEventListener('click', event => {
+                if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+                    return;
+                }
+                event.preventDefault();
+                this.setView(lab.cmid, true);
+            });
             if (lab.error) {
                 const warn = hel('span', 'laberr', th);
                 warn.textContent = '!';
                 warn.title = this.str('cl_labfailed', lab.error);
             }
         }
+        if (graded) {
+            const th = hel('th', 'total', head);
+            th.scope = 'col';
+            this.sortButton(th, this.str('cl_total'), 'total', this.str('cl_sorttotal'));
+            th.querySelector('button').title = this.str('cl_total_title');
+        }
         const body = hel('tbody', '', table);
         for (const student of rows) {
             const tr = hel('tr', '', body);
-            const th = hel('th', 'stud', tr);
-            th.scope = 'row';
-            const img = hel('img', 'pic', th);
-            img.src = student.pictureurl;
-            img.alt = '';
-            img.width = 24;
-            img.height = 24;
-            hel('span', 'name', th).textContent = student.fullname;
+            this.drawName(tr, student, null);
             for (const lab of this.labs) {
                 const td = hel('td', '', tr);
-                this.drawCell(td, lab, student, this.cells.get(this.key(lab.cmid, student.userid)));
+                this.drawSummaryCell(td, lab, student, this.cells.get(this.key(lab.cmid, student.userid)));
             }
+            if (graded) {
+                const total = this.total(student);
+                const td = hel('td', 'total', tr);
+                td.textContent = total.total ? `${total.passed} / ${total.total}` : '—';
+                td.title = this.str('cl_total_title');
+            }
+        }
+        // Per lab: the average of the gradebook and how many passed of the students shown.
+        if (this.showgrades) {
+            const foot = hel('tr', '', hel('tfoot', '', table));
+            hel('th', 'stud', foot).scope = 'row';
+            for (const lab of this.labs) {
+                const td = hel('td', 'labsum', foot);
+                if (lab.gradetype === 'none') {
+                    td.classList.add('muted');
+                    td.textContent = this.str('cl_nogradeitem');
+                    continue;
+                }
+                const count = this.gradeCounts(lab, rows);
+                if (lab.average) {
+                    hel('span', 'avg', td).textContent = this.str('cl_avg', lab.average);
+                }
+                hel('span', 'cnt', td).textContent = lab.gradepass
+                    ? this.str('cl_passed_n', count) : this.str('cl_graded_n', count);
+            }
+            if (graded) {
+                hel('td', 'total', foot);
+            }
+        }
+    }
+
+    /**
+     * The cell of a student in a lab of the summary: the grade of the gradebook, or how far the student got.
+     *
+     * @param {HTMLElement} td table cell
+     * @param {object} lab lab of the table
+     * @param {object} student student of the table
+     * @param {object|undefined} cell cell from the server
+     */
+    drawSummaryCell(td, lab, student, cell) {
+        if (!cell || !cell.observable) {
+            td.className = 'none';
+            td.textContent = '—';
+            td.title = this.str('cl_unobservable');
+            return;
+        }
+        const button = hel('button', 'sumbtn', td);
+        button.type = 'button';
+        const session = cell.session;
+        const live = !!session && LIVE.includes(session.status);
+        if (this.open && this.open.cmid === cell.cmid && this.open.userid === cell.userid) {
+            button.setAttribute('aria-current', 'true');
+        }
+        if (cell.grade) {
+            button.dataset.kind = 'graded';
+            if (cell.grade.passed) {
+                button.dataset.pass = cell.grade.passed;
+            }
+            this.gradeText(button, cell.grade);
+        } else {
+            const pending = cell.checks && RUN_PENDING.includes(cell.checks.laststatus);
+            let kind = 'none';
+            if (pending) {
+                kind = 'checking';
+            } else if (session && session.status === 'running') {
+                kind = 'running';
+            } else if (session && session.status === 'failed') {
+                kind = 'failed';
+            } else if (session || cell.checks) {
+                kind = 'started';
+            }
+            button.dataset.kind = kind;
+            const text = {
+                none: this.str('cl_state_none'),
+                checking: this.str('cl_checking'),
+                running: this.str('cl_state_running'),
+                failed: this.str('cl_state_failed'),
+                started: this.showgrades && lab.gradetype !== 'none' ? this.str('cl_nograde') : this.str('cl_started'),
+            }[kind];
+            hel('span', 'state', button).textContent = text;
+        }
+        if (live && (cell.grade || session.status !== 'running')) {
+            // A grade and a lab that is up again: both are worth knowing.
+            const dot = hel('span', 'live', button);
+            dot.textContent = '●';
+            dot.title = this.str('cl_live');
+        }
+        button.setAttribute('aria-label', `${student.fullname}, ${lab.name}: ${button.textContent}`);
+        button.addEventListener('click', () => this.show(cell.cmid, cell.userid, true));
+    }
+
+    /**
+     * The grade of the gradebook: the value and the mark of a grade changed by hand.
+     *
+     * @param {HTMLElement} el where it goes
+     * @param {object} grade grade of a cell
+     */
+    gradeText(el, grade) {
+        hel('span', 'grade', el).textContent = grade.text;
+        if (grade.overridden) {
+            const mark = hel('span', 'over', el);
+            mark.textContent = '✎';
+            mark.title = this.str('cl_overridden');
+            mark.setAttribute('aria-label', this.str('cl_overridden'));
+        }
+    }
+
+    /**
+     * One lab: a row per student with the session, the live state of the scheme, the checks and the grade.
+     *
+     * @param {HTMLTableElement} table the table
+     * @param {object[]} rows students shown
+     * @param {object} lab the lab
+     */
+    drawLab(table, rows, lab) {
+        table.className = 'grid lab';
+        const grades = this.showgrades && lab.gradetype !== 'none';
+        const head = hel('tr', '', hel('thead', '', table));
+        const corner = hel('th', 'stud', head);
+        corner.scope = 'col';
+        this.sortButton(corner, this.str('cl_student'), 'name', this.str('cl_sortname'));
+        const th = (cls, label, by, title) => {
+            const cell = hel('th', cls, head);
+            cell.scope = 'col';
+            if (by) {
+                this.sortButton(cell, label, by, title);
+            } else {
+                hel('span', 'colname', cell).textContent = label;
+            }
+            return cell;
+        };
+        const state = th('col-state', this.str('cl_col_state'), 'state', this.str('cl_sortstate'));
+        if (lab.error) {
+            const warn = hel('span', 'laberr', state);
+            warn.textContent = '!';
+            warn.title = this.str('cl_labfailed', lab.error);
+        }
+        th('col-facts', this.str('cl_col_facts'));
+        th('col-checks', this.str('cl_col_checks'));
+        if (grades) {
+            th('col-grade', this.str('cl_col_grade'), 'grade', this.str('cl_sortgrade'));
+        }
+        const body = hel('tbody', '', table);
+        for (const student of rows) {
+            const cell = this.cells.get(this.key(lab.cmid, student.userid));
+            const tr = hel('tr', 'labrow', body);
+            this.drawName(tr, student, cell);
+            if (!cell || !cell.observable) {
+                const td = hel('td', 'none', tr);
+                td.colSpan = grades ? 4 : 3;
+                td.textContent = '—';
+                td.title = this.str('cl_unobservable');
+                continue;
+            }
+            if (this.open && this.open.cmid === cell.cmid && this.open.userid === cell.userid) {
+                tr.setAttribute('aria-current', 'true');
+            }
+            // A click anywhere in the row opens the card; the button of the name is the way for the keyboard.
+            tr.addEventListener('click', event => {
+                if (!event.target.closest('button, a')) {
+                    this.show(cell.cmid, cell.userid, true);
+                }
+            });
+            const session = cell.session;
+            const status = session ? session.status : 'none';
+            const fact = this.factOf(cell.cmid, cell.userid);
+            const td = hel('td', 'state', tr);
+            td.dataset.status = status;
+            const level = status === 'running' && fact && fact.summary ? fact.summary.level : '';
+            if (level) {
+                td.dataset.level = level;
+            }
+            hel('span', 'state', td).textContent = this.stateText(status);
+            const time = this.timeText(session);
+            if (time) {
+                hel('span', 'time', td).textContent = time;
+            }
+            const facts = hel('td', 'facts', tr);
+            if (status === 'running') {
+                this.drawFacts(facts, fact, session.facts === 'no');
+            }
+            if (!facts.childNodes.length) {
+                facts.textContent = '—';
+                facts.classList.add('muted');
+            }
+            this.drawChecks(hel('td', 'checks', tr), cell.checks);
+            if (grades) {
+                const grade = hel('td', 'gradecell', tr);
+                if (cell.grade) {
+                    if (cell.grade.passed) {
+                        grade.dataset.pass = cell.grade.passed;
+                    }
+                    this.gradeText(grade, cell.grade);
+                } else {
+                    grade.textContent = '—';
+                    grade.classList.add('muted');
+                }
+            }
+        }
+    }
+
+    /**
+     * The checks of a student in a lab: graded attempts and the last run.
+     *
+     * @param {HTMLElement} td table cell
+     * @param {object|null} checks summary of the runs
+     */
+    drawChecks(td, checks) {
+        if (!checks) {
+            td.textContent = this.str('cl_nochecks');
+            td.classList.add('muted');
+            return;
+        }
+        if (RUN_PENDING.includes(checks.laststatus)) {
+            hel('span', 'checking', td).textContent = this.str('cl_checking');
+        } else {
+            hel('span', '', td).textContent = this.str('cl_attempts', checks.attempts);
+        }
+        if (checks.lastat) {
+            hel('span', 'time', td).textContent = this.str('cl_lastcheck', this.when(checks.lastat * 1000));
         }
     }
 
@@ -532,49 +989,9 @@ class CoursePage {
     }
 
     /**
-     * Draws the cell of a student in a lab.
-     *
-     * @param {HTMLElement} td table cell
-     * @param {object} lab lab of the table
-     * @param {object} student student of the table
-     * @param {object|undefined} cell cell from the server
-     */
-    drawCell(td, lab, student, cell) {
-        if (!cell || !cell.observable) {
-            td.className = 'none';
-            td.textContent = '—';
-            td.title = this.str('cl_unobservable');
-            return;
-        }
-        const session = cell.session;
-        const status = session ? session.status : 'none';
-        const button = hel('button', 'cellbtn', td);
-        button.type = 'button';
-        button.dataset.status = status;
-        const fact = this.factOf(cell.cmid, cell.userid);
-        const level = status === 'running' && fact && fact.summary ? fact.summary.level : '';
-        if (level) {
-            button.dataset.level = level;
-        }
-        if (this.open && this.open.cmid === cell.cmid && this.open.userid === cell.userid) {
-            button.setAttribute('aria-current', 'true');
-        }
-        hel('span', 'state', button).textContent = this.stateText(status);
-        const time = this.timeText(session);
-        if (time) {
-            hel('span', 'time', button).textContent = time;
-        }
-        if (status === 'running') {
-            this.drawFacts(button, fact, session.facts === 'no');
-        }
-        button.setAttribute('aria-label', `${student.fullname}, ${lab.name}: ${button.textContent}`);
-        button.addEventListener('click', () => this.show(cell.cmid, cell.userid, true));
-    }
-
-    /**
      * What the facts say in a cell: the findings, how long nothing changed, or that nothing is known.
      *
-     * @param {HTMLElement} button cell button
+     * @param {HTMLElement} button where the figures go
      * @param {object|undefined} fact figures of the cell
      * @param {boolean} nofacts the list of the server says the session reports no facts
      */
@@ -661,13 +1078,16 @@ class CoursePage {
     }
 
     /**
-     * Counters per lab above the table: running, errors, not started.
+     * Counters of the lab shown above the table: running, errors, not started, and the grades.
      *
      * @param {object[]} rows students shown
      */
     drawCounts(rows) {
         const list = this.region('counts');
         list.replaceChildren();
+        if (!this.view) {
+            return; // The summary counts in its last row.
+        }
         for (const lab of this.labs) {
             const count = {running: 0, failed: 0, none: 0};
             for (const student of rows) {
@@ -687,6 +1107,15 @@ class CoursePage {
             const li = hel('li', lab.error ? 'has-error' : '', list);
             hel('b', '', li).textContent = lab.name;
             hel('span', '', li).textContent = lab.error ? this.str('cl_labfailed', lab.error) : this.str('cl_counts', count);
+            if (this.showgrades && lab.gradetype !== 'none') {
+                const grades = this.gradeCounts(lab, rows);
+                const line = hel('li', 'grades', list);
+                hel('span', '', line).textContent = lab.gradepass
+                    ? this.str('cl_counts_passed', grades) : this.str('cl_counts_graded', grades);
+                if (lab.average) {
+                    hel('span', '', line).textContent = this.str('cl_avg', lab.average);
+                }
+            }
         }
     }
 
@@ -715,9 +1144,11 @@ class CoursePage {
         }
         this.open = {cmid, userid};
         this.cardHtml = '';
+        this.history = null;
         this.root.classList.add('has-card');
         this.region('card').hidden = false;
         this.readCardFacts(cell);
+        this.wantHistory(cell);
         this.renderCard();
         this.pollCard();
         this.draw();
@@ -741,6 +1172,7 @@ class CoursePage {
      */
     hide() {
         this.open = null;
+        this.history = null;
         clearTimeout(this.cardTimer);
         this.root.classList.remove('has-card');
         this.region('card').hidden = true;
@@ -859,6 +1291,27 @@ class CoursePage {
         if (session && session.startedat) {
             hel('span', '', state).textContent = ' · ' + this.clock(session.startedat * 1000);
         }
+        if (this.showgrades && lab.gradetype !== 'none') {
+            const grade = hel('p', 'cgrade', el);
+            hel('span', 'lbl', grade).textContent = this.str('cl_card_grade') + ': ';
+            if (cell.grade) {
+                if (cell.grade.passed) {
+                    grade.dataset.pass = cell.grade.passed;
+                }
+                this.gradeText(grade, cell.grade);
+                if (lab.grademax) {
+                    hel('span', 'sub', grade).textContent = ' ' + this.str('cl_card_outof', lab.grademax);
+                }
+                if (cell.grade.overridden) {
+                    hel('span', 'sub', grade).textContent = ' · ' + this.str('cl_overridden');
+                }
+            } else {
+                hel('span', 'sub', grade).textContent = this.str('cl_card_nograde');
+            }
+            if (lab.gradepass) {
+                hel('span', 'sub', grade).textContent = ' · ' + this.str('cl_card_passmark', lab.gradepass);
+            }
+        }
         // The lab of the student, read only.
         const open = hel('a', 'btn', el);
         open.href = `${this.labbase}?id=${cmid}&userid=${userid}&from=course`;
@@ -870,7 +1323,7 @@ class CoursePage {
         } else if (status === 'running') {
             this.renderCardFacts(el, cell);
         }
-        this.renderHistory(el);
+        this.renderHistory(el, cell);
         if (el.innerHTML !== this.cardHtml) {
             this.cardHtml = el.innerHTML;
             this.region('card').replaceChildren(...el.childNodes);
@@ -952,18 +1405,96 @@ class CoursePage {
     }
 
     /**
-     * The place for the history of attempts and checks: the heading and a line now, a list when the checks exist.
+     * Reads the runs of the checks of the open card: when it opens and when the table shows a new run.
+     *
+     * @param {object|undefined} cell cell of the card
+     */
+    async wantHistory(cell) {
+        if (!cell || !cell.observable) {
+            return;
+        }
+        const key = this.key(cell.cmid, cell.userid);
+        const sign = cell.checks ? `${cell.checks.laststatus}|${cell.checks.lastat}|${cell.checks.attempts}` : '';
+        if (this.history && this.history.key === key && this.history.sign === sign) {
+            return;
+        }
+        const entry = {key, sign, data: this.history && this.history.key === key ? this.history.data : null, error: ''};
+        this.history = entry;
+        try {
+            const [data] = await Promise.all(Ajax.call([{
+                methodname: 'mod_gns3lab_get_checks',
+                args: {cmid: cell.cmid, userid: cell.userid},
+            }]));
+            entry.data = data;
+            entry.error = '';
+        } catch (error) {
+            entry.error = error && error.message ? error.message : String(error);
+            // The next answer of the table tries again.
+            entry.sign = '';
+        }
+        if (this.history === entry) {
+            this.renderCard();
+        }
+    }
+
+    /**
+     * The history of the checks of the card: a line per run, the newest first.
      *
      * @param {HTMLElement} el card
+     * @param {object} cell cell of the card
      */
-    renderHistory(el) {
+    renderHistory(el, cell) {
         const section = hel('section', 'chistory', el);
         section.dataset.region = 'history';
         hel('h3', '', section).textContent = this.str('cl_history');
+        const entry = this.history && this.history.key === this.key(cell.cmid, cell.userid) ? this.history : null;
+        const note = text => {
+            hel('p', 'cnote', section).textContent = text;
+        };
+        if (!entry || (!entry.data && !entry.error)) {
+            note(this.str('cl_loading'));
+            return;
+        }
+        if (!entry.data) {
+            note(this.str('cl_history_failed', entry.error));
+            return;
+        }
+        if (!entry.data.enabled && !entry.data.runs.length) {
+            note(this.str('cl_history_off'));
+            return;
+        }
+        if (!entry.data.runs.length) {
+            note(this.str('cl_history_none'));
+            return;
+        }
         const list = hel('ul', 'historylist', section);
         list.dataset.region = 'historylist';
-        list.hidden = true;
-        hel('p', 'cnote', section).textContent = this.str('cl_history_soon');
+        for (const run of entry.data.runs) {
+            const li = hel('li', '', list);
+            let result;
+            if (RUN_PENDING.includes(run.status)) {
+                result = this.str('chk_hist_pending');
+                li.dataset.result = 'pending';
+            } else if (run.status === 'failed') {
+                result = this.str('chk_hist_failed');
+                li.dataset.result = 'failed';
+            } else if (run.outcome === 'graded' && run.mark >= 0) {
+                result = this.str('chk_hist_mark', run.mark);
+                li.dataset.result = 'graded';
+            } else {
+                result = this.str('chk_hist_incomplete');
+                li.dataset.result = 'incomplete';
+            }
+            hel('span', 'when', li).textContent = this.when((run.finishedat || run.requestedat) * 1000);
+            hel('b', 'what', li).textContent = result;
+            if (run.status === 'done') {
+                const counts = ['critical', 'major', 'minor', 'note'].filter(k => run.counts[k])
+                    .map(k => this.str('chk_n_' + k, run.counts[k]));
+                if (counts.length) {
+                    hel('span', 'counts', li).textContent = counts.join(', ');
+                }
+            }
+        }
     }
 }
 
@@ -972,8 +1503,9 @@ class CoursePage {
  *
  * @param {string} prefix id prefix of the template ({{uniqid}})
  * @param {number} courseid course id
+ * @param {number} [labid] the lab to show first, 0 for the summary
  */
-export const init = async(prefix, courseid) => {
+export const init = async(prefix, courseid, labid = 0) => {
     const root = document.getElementById(prefix + '-app');
     if (!root || root.dataset.courseReady) {
         return;
@@ -981,5 +1513,5 @@ export const init = async(prefix, courseid) => {
     root.dataset.courseReady = '1';
     const values = await getStrings(STRING_KEYS.map(key => ({key, component: 'mod_gns3lab'})));
     const strings = Object.fromEntries(STRING_KEYS.map((key, i) => [key, values[i]]));
-    new CoursePage(root, courseid, strings);
+    new CoursePage(root, courseid, strings, labid);
 };

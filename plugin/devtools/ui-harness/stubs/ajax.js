@@ -15,9 +15,11 @@
  * fail(nodeId, code) (the last collection of a node failed), stale(true) (the collection stopped long ago).
  *
  * The course page of a teacher (course.php, amd/src/course.js): mod_gns3lab_get_course_overview answers with five students
- * and two labs (`window.__stub.course`); get_state and get_facts called with the id of a student of the page (11 to 14)
- * play that student's lab: 11 has correct facts, 12 the broken ones, `?laberror` makes the second lab fail like a manager
- * that does not answer. window.__stub.course.set(cmid, userid, session|null) changes a cell, .bump(userid) moves the rev of facts.
+ * and three labs with grades and checks (`window.__stub.course`), for one lab when asked with cmid; get_state and get_facts
+ * called with the id of a student of the page (11 to 14) play that student's lab: 11 has correct facts, 12 the broken ones,
+ * get_checks with a userid gives the runs of that student. `?laberror` makes the second lab fail like a manager that does
+ * not answer, `?nogrades` plays a teacher who may not see grades. window.__stub.course.set(cmid, userid, session|null)
+ * changes a cell, .result(cmid, userid, grade|null, checks|null) its grade and checks, .bump(userid) moves the rev of facts.
  */
 define([], function() {
     const cfg = window.GNS3LAB_STUB || {};
@@ -160,8 +162,16 @@ define([], function() {
 
     // The course page of a teacher: students 11 to 14 in two labs, the cells as get_course_overview sends them.
     const COURSE_USERS = {11: 'ok', 12: 'broken'};
+    // Lab 4 is graded out of 5 with 3 to pass, lab 5 on points without a pass grade, lab 6 has no grade. ?nogrades plays a
+    // teacher without moodle/grade:viewall.
+    const gradeLab = (gradetype, grademax, gradepass) => cfg.nogrades
+        ? {gradetype: 'none', grademax: '', gradepass: '', average: ''} : {gradetype, grademax, gradepass, average: ''};
     const course = {
-        labs: [{cmid: 1, name: 'Lab 4 · OSPF multi-area', error: ''}, {cmid: 2, name: 'Lab 5 · Linux switch', error: cfg.laberror ? 'unreachable' : ''}],
+        labs: [
+            {cmid: 1, name: 'Lab 4 · OSPF multi-area', error: '', ...gradeLab('value', '5.00', '3.00')},
+            {cmid: 2, name: 'Lab 5 · Linux switch', error: cfg.laberror ? 'unreachable' : '', ...gradeLab('value', '100.00', '')},
+            {cmid: 3, name: 'Lab 6 · Warm-up', error: '', ...gradeLab('none', '', '')},
+        ],
         students: [
             {userid: 11, fullname: 'Alice Ivanova', groups: [5]}, {userid: 12, fullname: 'Boris Petrov', groups: [5]},
             {userid: 13, fullname: 'Chen Wei', groups: [6]}, {userid: 14, fullname: 'Dana Kim', groups: [6]},
@@ -171,6 +181,7 @@ define([], function() {
         rev: {},
         cells: new Map(),
         calls: [],
+        historyCalls: [],
     };
     const summary = (status, facts = 'unknown', left = 3 * 3600) => ({
         status,
@@ -178,7 +189,17 @@ define([], function() {
         expiresat: status === 'running' ? now() + left : 0,
         facts,
     });
-    const setCell = (cmid, userid, session, observable = true) => course.cells.set(cmid + ':' + userid, {cmid, userid, observable, session});
+    const setCell = (cmid, userid, session, observable = true) => {
+        const old = course.cells.get(cmid + ':' + userid) || {grade: null, checks: null};
+        course.cells.set(cmid + ':' + userid, {cmid, userid, observable, session, grade: old.grade, checks: old.checks});
+    };
+    // The final grade of the gradebook and the summary of the checks of a cell.
+    const grade = (text, ratio, passed = '', overridden = false) => ({text, ratio, passed, overridden, gradedat: now() - 3600});
+    const setResult = (cmid, userid, g, c = null) => {
+        const cell = course.cells.get(cmid + ':' + userid);
+        cell.grade = g;
+        cell.checks = c;
+    };
     setCell(1, 11, summary('running'));
     setCell(1, 12, summary('running'));
     setCell(1, 13, summary('failed'));
@@ -189,17 +210,36 @@ define([], function() {
     setCell(2, 14, null, false);
     setCell(1, 15, null);
     setCell(2, 15, null);
+    [11, 12, 13, 14, 15].forEach(u => setCell(3, u, null));
+    setCell(3, 11, summary('stopped'));
+    setResult(1, 11, grade('5.00', 1, 'yes'), {attempts: 2, laststatus: 'done', lastoutcome: 'graded', lastat: now() - 3600});
+    setResult(1, 12, grade('2.00', 0.4, 'no', true), {attempts: 1, laststatus: 'running', lastoutcome: '', lastat: now() - 30});
+    setResult(2, 11, grade('85.00', 0.85));
+    setResult(2, 13, null, {attempts: 0, laststatus: 'failed', lastoutcome: '', lastat: now() - 7200});
 
     const courseOverview = async args => {
         course.calls.push(args);
         if (cfg.coursefail) {
             throw new Error('The course could not be read.');
         }
-        const students = course.students.filter(s => !args.groupid || s.groups.includes(args.groupid));
+        const labs = course.labs.filter(lab => !args.cmid || lab.cmid === args.cmid);
+        if (!labs.length) {
+            throw new Error('The lab is not available to the user');
+        }
+        const students = course.students.filter(s => (!args.groupid || s.groups.includes(args.groupid))
+            && labs.some(lab => course.cells.get(lab.cmid + ':' + s.userid).observable));
         const cells = [];
-        students.forEach(st => course.labs.forEach(lab => cells.push({...course.cells.get(lab.cmid + ':' + st.userid)})));
+        const hide = cell => (cfg.nogrades ? {...cell, grade: null} : {...cell});
+        students.forEach(st => labs.forEach(lab => cells.push(hide(course.cells.get(lab.cmid + ':' + st.userid)))));
+        // The average of the gradebook over the graded students of the answer (two decimals, as the gradebook formats).
+        const out = labs.map(lab => {
+            const values = cells.filter(c => c.cmid === lab.cmid && c.observable && c.grade).map(c => parseFloat(c.grade.text));
+            return {...lab, average: lab.gradetype === 'value' && values.length
+                ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2) : ''};
+        });
         return {
-            labs: course.labs,
+            showgrades: !cfg.nogrades,
+            labs: out,
             students: students.map(st => ({userid: st.userid, fullname: st.fullname, pictureurl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'})),
             cells,
         };
@@ -279,6 +319,26 @@ define([], function() {
             attempts: {max: cfg.checksmax || 0, used, left}, runs: checks.runs.slice().reverse().map(checkSummary)};
     };
 
+    // The runs of a student of the course page, as get_checks sends them to a teacher.
+    const courseChecks = async args => {
+        course.historyCalls.push(args);
+        if (args.cmid === 3) {
+            return {enabled: false, available: false, canstart: false, report: 'full', detailsfrom: 0,
+                attempts: {max: 0, used: 0, left: -1}, runs: []};
+        }
+        const run = (runid, status, outcome, mark, counts, ago) => ({runid, status, outcome, mark,
+            counts: {critical: 0, major: 0, minor: 0, note: 0, ...counts}, errorcode: status === 'failed' ? 'SLOT_UNAVAILABLE' : '',
+            requestedat: now() - ago - 60, finishedat: status === 'done' || status === 'failed' ? now() - ago : 0});
+        const runs = {
+            '1:11': [run('r2', 'done', 'graded', 5, {}, 3600), run('r1', 'done', 'graded', 3, {major: 2, minor: 1}, 90000)],
+            '1:12': [run('r4', 'running', '', -1, {}, 0), run('r3', 'done', 'graded', 2, {critical: 1, major: 1}, 5400)],
+            '2:13': [run('r5', 'failed', '', -1, {}, 7200)],
+        }[args.cmid + ':' + args.userid] || [];
+        const used = runs.filter(r => r.outcome === 'graded').length;
+        return {enabled: true, available: true, canstart: false, report: 'full', detailsfrom: 0,
+            attempts: {max: 0, used, left: -1}, runs};
+    };
+
     const handlers = {
         mod_gns3lab_authoring: async args => {
             const response = await fetch('/authoring-api', {method: 'POST',
@@ -287,7 +347,12 @@ define([], function() {
             if (!response.ok) throw new Error(result.message || result.error);
             return result;
         },
-        mod_gns3lab_get_checks: async() => checksOverview(),
+        mod_gns3lab_get_checks: async args => {
+            if (cfg.course && args.userid) {
+                return courseChecks(args);
+            }
+            return checksOverview();
+        },
         mod_gns3lab_start_check: async args => {
             needSeat(args, 'start_check');
             const s = await view();
@@ -522,6 +587,9 @@ define([], function() {
         },
         course: {
             set: setCell,
+            result: setResult,
+            grade,
+            historyCalls: course.historyCalls,
             // The facts of a student changed: the next read sees a new rev.
             bump: userid => {
                 course.rev[userid] = (course.rev[userid] || 1) + 1;
