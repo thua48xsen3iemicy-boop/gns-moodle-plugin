@@ -99,6 +99,7 @@ define([], function() {
                 consoletype: n.console_type || 'none',
             })) : [],
             nodesstale: false,
+            slotvmid: ['starting', 'running', 'stopping'].includes(session.status) ? 9012 : 0,
             features: running ? (cfg.nofacts ? ['consoles'] : ['consoles', 'facts', 'checks']) : [],
         };
     };
@@ -212,7 +213,7 @@ define([], function() {
             sessionid: 's-' + userid, status: 'running', stage: 'ready', progress: 100, statusmessage: '', errorcode: '',
             errorretryable: false, startedat: now() - 600, expiresat: now() + 3 * 3600, topology: JSON.stringify(doc),
             nodes: doc.topology.nodes.map(n => ({nodeid: n.node_id, status: 'started', consoletype: n.console_type || 'none'})),
-            nodesstale: false, features: ['consoles', 'facts'],
+            nodesstale: false, slotvmid: 9000 + userid, features: ['consoles', 'facts'],
         };
     };
     const courseFacts = async args => {

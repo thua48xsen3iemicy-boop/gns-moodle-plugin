@@ -221,6 +221,9 @@ class fake_manager {
             'expires_at' => '2026-10-17T11:30:00Z',
             'features' => $status === 'running' ? ['consoles', 'facts'] : [],
         ];
+        if (in_array($status, ['starting', 'running', 'stopping'], true)) {
+            $session['slot_vmid'] = 9012;
+        }
         if ($status === 'running') {
             $session['topology'] = [
                 'name' => 'cisco-3x2-w17',
