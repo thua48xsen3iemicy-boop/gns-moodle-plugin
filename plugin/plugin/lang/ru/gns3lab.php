@@ -733,7 +733,7 @@ $string['ui_canvas_card_layers'] = 'Факты объекта по слоям';
 $string['ui_canvas_interface'] = 'Интерфейс';
 $string['ui_canvas_admin'] = 'Административно';
 $string['ui_canvas_oper'] = 'Рабочее состояние';
-$string['ui_assignments'] = 'Задания';
+$string['ui_assignments'] = 'Задание';
 $string['ui_assignments_empty'] = 'Преподаватель ещё не добавил инструкции в описание этой активности.';
 
 $string['ui_canvas_practice'] = 'ПРАКТИКА НА ТОПОЛОГИИ';

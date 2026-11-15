@@ -733,7 +733,7 @@ $string['ui_canvas_card_layers'] = 'Object facts by layer';
 $string['ui_canvas_interface'] = 'Interface';
 $string['ui_canvas_admin'] = 'Admin';
 $string['ui_canvas_oper'] = 'Oper';
-$string['ui_assignments'] = 'Assignments';
+$string['ui_assignments'] = 'Assignment';
 $string['ui_assignments_empty'] = 'No instructions have been added to this activity yet.';
 
 $string['ui_canvas_practice'] = 'PRACTICE ON THE TOPOLOGY';

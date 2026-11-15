@@ -4987,8 +4987,8 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .object-content .card-empty{padding:18px 0}
 .gns3lab-student.canvas-ui .object-content .mac-toggle{margin-bottom:10px}
 .gns3lab-student.canvas-ui .tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:#203d49;border-color:#54838a;border-radius:10px;box-shadow:var(--shadow)}
-.gns3lab-student.canvas-ui .hud-tools{position:absolute;left:29px;top:106px;z-index:5;display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
-.gns3lab-student.canvas-ui .canvas-actions{display:flex;gap:6px}
+.gns3lab-student.canvas-ui .hud-tools{position:absolute;left:29px;top:106px;z-index:4;display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
+.gns3lab-student.canvas-ui .canvas-actions{display:flex;gap:6px;width:max-content}
 .gns3lab-student.canvas-ui .canvas-actions .tasks-toggle{position:static;box-shadow:none}
 .gns3lab-student.canvas-ui .canvas-actions .btn{height:28px;min-height:0;padding:0 10px;font-size:12px;line-height:1;background:#203d49;border-color:#3d6270;border-radius:8px}
 .gns3lab-student.canvas-ui .canvas-actions .btn[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
