@@ -733,6 +733,9 @@ $string['ui_canvas_card_layers'] = 'Факты объекта по слоям';
 $string['ui_canvas_interface'] = 'Интерфейс';
 $string['ui_canvas_admin'] = 'Административно';
 $string['ui_canvas_oper'] = 'Рабочее состояние';
+$string['ui_assignment_collapse'] = 'Свернуть задание в заголовок';
+$string['ui_assignment_drag'] = 'Перетащите, чтобы переместить; двойной щелчок сворачивает';
+$string['ui_assignment_expand'] = 'Развернуть задание';
 $string['ui_assignments'] = 'Задание';
 $string['ui_assignments_empty'] = 'Преподаватель ещё не добавил инструкции в описание этой активности.';
 

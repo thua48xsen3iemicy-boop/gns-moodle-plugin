@@ -997,7 +997,7 @@ export class Consoles {
         this.box.style.gridTemplateColumns = '';
         this.box.style.gridTemplateRows = '';
         if (mobile) {
-            this.wins.textContent = '';
+            this.wins.querySelectorAll(':scope > .win').forEach(w => w.remove());
             this.cons.forEach(c => { c.win = null; });
             if (this.diving && this.cons.get(this.active)) this.cons.get(this.active).attach(this.diveBody);
         } else if (this.mode === 'panel') {
@@ -1008,7 +1008,7 @@ export class Consoles {
         if (!mobile && this.mode === 'windows') {
             this.renderWindows();
         } else if (!mobile) {
-            this.wins.textContent = '';
+            this.wins.querySelectorAll(':scope > .win').forEach(w => w.remove());
             this.cons.forEach(c => { c.win = null; });
         }
         requestAnimationFrame(() => {

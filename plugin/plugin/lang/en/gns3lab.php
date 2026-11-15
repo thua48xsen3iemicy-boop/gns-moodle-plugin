@@ -733,6 +733,9 @@ $string['ui_canvas_card_layers'] = 'Object facts by layer';
 $string['ui_canvas_interface'] = 'Interface';
 $string['ui_canvas_admin'] = 'Admin';
 $string['ui_canvas_oper'] = 'Oper';
+$string['ui_assignment_collapse'] = 'Fold the assignment to its title';
+$string['ui_assignment_drag'] = 'Drag to move, double-click to fold';
+$string['ui_assignment_expand'] = 'Unfold the assignment';
 $string['ui_assignments'] = 'Assignment';
 $string['ui_assignments_empty'] = 'No instructions have been added to this activity yet.';
 
