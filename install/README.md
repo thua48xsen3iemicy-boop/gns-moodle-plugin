@@ -263,6 +263,62 @@ pct shutdown $V && pct template $V
 `CREATE_SLOTS`, `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`; слоты создаст `lab-provision create`. Шаг `template`
 увидит `template: 1` и ничего не пересоберёт.
 
+### Поставить пакеты в слоты
+
+После каждой сессии агент откатывает слот к снимку `lab-clean`. Поэтому пакет, поставленный в работающий
+слот, пропадёт после первой же сессии. Сохранить его можно только новым снимком: слот выводят из работы,
+ставят пакет в выключенный CT, переснимают и возвращают. Снимок пересоздаёт шаг `slot`: заодно он
+проверяет, что GNS3 и QEMU после apt живы.
+
+Переменные `$MGR` и `$ADM` — как в [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md). Команды `$ADM` выполняются на ноде
+менеджера, а `pct` и `$P slot` — на ноде слота.
+
+```sh
+P=/mnt/pve/cfs/gns3-ro/install/lab-provision
+id=2001
+# 1. Вывести из работы (на ноде менеджера). «Slot is in use» — идёт сессия: повторите после неё.
+pct exec $MGR -- $ADM slot-maintenance $id --message "ставлю пакеты"
+# 2. На ноде слота: CT выключен, точки агента сняты (CephFS в госте не нужен, агент вернёт их сам)
+pct status $id                                   # stopped
+pct set $id --delete mp0,mp1,mp2                 # mp2 — только если он есть
+pct start $id
+pct exec $id -- getent hosts archive.ubuntu.com  # слоту нужен выход в интернет (шлюз и DNS в net0)
+pct exec $id -- env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+pct exec $id -- env DEBIAN_FRONTEND=noninteractive apt-get install -y <пакеты>
+pct exec $id -- apt-get clean
+pct shutdown $id
+# 3. Проверки GNS3, slot.env, mp2 с образами и новый снимок lab-clean (на ноде слота)
+$P slot $id
+# 4. Вернуть в работу (на ноде менеджера): enable откатывает слот к снимку, поэтому только после шага 3
+$P enable $id
+```
+
+- Шаги 2–3 повторяются **для каждого слота**. Шаг `slot` без номеров обработает все слоты ноды, но каждый
+  из них должен быть выключен и в `maintenance`. Чтобы разом освободить все слоты стенда, включите режим обслуживания
+  `pct exec $MGR -- $ADM maintenance on --in 10m`: лабы остановятся к сроку, и новые не начнутся. Затем переведите
+  слоты в `slot-maintenance` и выполните шаги. В конце: `$P enable` и `$ADM maintenance off`.
+- Пакеты, нужные GNS3 (QEMU, ubridge, VPCS, Dynamips), не обновляйте без нужды. Сервер GNS3 живёт
+  в своём venv `/opt/gns3-server`, закреплён на 2.2.61, и apt его не трогает. `openssh-server` не ставьте:
+  слоты обслуживаются через `pct`.
+- Если шаг `slot` выдал `WARNING: GNS3 2.2.61 does not answer`, apt сломал GNS3: не включайте слот,
+  пока не исправите.
+- Образы устройств GNS3 (QEMU, IOU) так не ставят: они лежат в `IMAGES_DIR` на CephFS (см. «Образы GNS3 на CephFS»).
+
+**Шаблон.** Слоты, которые потом склонирует `create`, возьмут пакеты из шаблона, а не из уже исправленных
+слотов. Шаблон (`template: 1`) не запускается, поэтому новый делают из его клона под новым VMID. Новый VMID
+должен быть вне `SLOTS` и диапазонов слотов. Старый шаблон оставьте, пока живы его связанные клоны.
+
+```sh
+pct clone 2000 2010 --full 1 --hostname lab-slot-template   # 2000 — текущий SLOT_TEMPLATE
+pct start 2010
+pct exec 2010 -- env DEBIAN_FRONTEND=noninteractive apt-get install -y <пакеты>
+pct push 2010 /mnt/pve/cfs/gns3-ro/install/slot-template-setup /root/slot-template-setup --perms 0755
+pct exec 2010 -- env GNS3_ID=1500 /root/slot-template-setup verify   # GNS3_ID = SLOT_GNS3_ID
+pct exec 2010 -- /root/slot-template-setup clean
+pct shutdown 2010 && pct template 2010
+# lab.conf: SLOT_TEMPLATE="2010=<нода>:dhcp"
+```
+
 ### Добавить ноду со слотами
 
 Venv слота общий и собран под тот же шаблон, `venv slot` не повторяется. Сессии на других нодах
