@@ -64,7 +64,10 @@ export class Assignment {
 
         toggle.addEventListener('click', () => this.toggle());
         this.foldBtn.addEventListener('click', () => this.fold(!this.st.folded));
-        this.closeBtn.addEventListener('click', () => { this.close(); toggle.focus(); });
+        this.closeBtn.addEventListener('click', () => {
+            this.close();
+            toggle.focus();
+        });
         win.addEventListener('keydown', e => {
             if (e.key === 'Escape') {
                 e.stopPropagation();
@@ -75,30 +78,48 @@ export class Assignment {
         win.addEventListener('pointerdown', () => this.front());
         // A double click on the title folds and unfolds, as the title of a window of the desktop.
         this.head.addEventListener('dblclick', e => {
-            if (!e.target.closest('button') && !this.mobile()) this.fold(!this.st.folded);
+            if (!e.target.closest('button') && !this.mobile()) {
+                this.fold(!this.st.folded);
+            }
         });
         // A phone sheet does not move: a tap on its title folds and unfolds it.
         this.head.addEventListener('click', e => {
-            if (!e.target.closest('button') && this.mobile()) this.fold(!this.st.folded);
+            if (!e.target.closest('button') && this.mobile()) {
+                this.fold(!this.st.folded);
+            }
         });
         this.drag();
         let scrollTimer = null;
         this.body.addEventListener('scroll', () => {
             clearTimeout(scrollTimer);
-            scrollTimer = setTimeout(() => { this.st.scroll = Math.round(this.body.scrollTop); this.save(); }, 250);
+            scrollTimer = setTimeout(() => {
+                this.st.scroll = Math.round(this.body.scrollTop);
+                this.save();
+            }, 250);
         }, {passive: true});
         if (window.ResizeObserver) {
             // The corner of the window resizes it: keep the size it was given.
             new ResizeObserver(() => {
-                if (this.win.hidden || this.st.folded || this.mobile() || !this.win.offsetWidth) return;
-                const w = this.win.offsetWidth, h = this.win.offsetHeight;
+                if (this.win.hidden || this.st.folded || this.mobile() || !this.win.offsetWidth) {
+                    return;
+                }
+                const w = this.win.offsetWidth;
+                const h = this.win.offsetHeight;
                 // Only a size the student gave: not the one place() fitted into a smaller scheme.
-                if (this.placed && w === this.placed.w && h === this.placed.h) return;
-                this.st.w = w; this.st.h = h; this.placed = {w, h};
+                if (this.placed && w === this.placed.w && h === this.placed.h) {
+                    return;
+                }
+                this.st.w = w;
+                this.st.h = h;
+                this.placed = {w, h};
                 this.save();
             }).observe(win);
             // The scheme got smaller: the title stays reachable.
-            new ResizeObserver(() => { if (!this.win.hidden) this.place(); }).observe(layer);
+            new ResizeObserver(() => {
+                if (!this.win.hidden) {
+                    this.place();
+                }
+            }).observe(layer);
         }
         this.render();
     }
@@ -125,10 +146,18 @@ export class Assignment {
     }
 
     close() {
-        if (!this.st.open) return;
+        if (!this.st.open) {
+            return;
+        }
         this.st.open = false;
         // A closed window does not keep talking.
-        this.body.querySelectorAll('video,audio').forEach(m => { try { m.pause(); } catch (e) { /* not a media yet */ } });
+        this.body.querySelectorAll('video,audio').forEach(m => {
+            try {
+                m.pause();
+            } catch (e) {
+                // Not a media element yet: nothing plays.
+            }
+        });
         this.render();
         this.save();
     }
@@ -146,7 +175,9 @@ export class Assignment {
 
     /** On a phone the object card takes the same place: an open assignment folds to its title. */
     yieldPlace() {
-        if (this.mobile() && this.st.open && !this.st.folded) this.fold(true);
+        if (this.mobile() && this.st.open && !this.st.folded) {
+            this.fold(true);
+        }
     }
 
     front() {
@@ -162,11 +193,15 @@ export class Assignment {
         const label = this.foldBtn.dataset[folded ? 'expand' : 'collapse'];
         this.foldBtn.setAttribute('aria-label', label);
         this.foldBtn.title = label;
-        if (!open) return;
+        if (!open) {
+            return;
+        }
         this.place();
         if (!folded && this.st.scroll) {
             // After the body is shown again: a hidden box does not scroll.
-            requestAnimationFrame(() => { this.body.scrollTop = this.st.scroll; });
+            requestAnimationFrame(() => {
+                this.body.scrollTop = this.st.scroll;
+            });
         }
     }
 
@@ -177,8 +212,11 @@ export class Assignment {
             s.left = s.top = s.width = s.height = '';
             return;
         }
-        const W = this.layer.clientWidth, H = this.layer.clientHeight;
-        if (!W || !H) return;
+        const W = this.layer.clientWidth;
+        const H = this.layer.clientHeight;
+        if (!W || !H) {
+            return;
+        }
         if (!this.st.w || !this.st.h) {
             this.st.w = Math.min(440, Math.max(260, W - 28));
             this.st.h = Math.min(520, Math.max(160, H - 28));
@@ -201,19 +239,25 @@ export class Assignment {
     drag() {
         let d = null;
         this.head.addEventListener('pointerdown', e => {
-            if (e.button !== 0 || e.target.closest('button') || this.mobile()) return;
+            if (e.button !== 0 || e.target.closest('button') || this.mobile()) {
+                return;
+            }
             d = {x: e.clientX, y: e.clientY, ox: this.st.x, oy: this.st.y};
             this.head.setPointerCapture(e.pointerId);
             this.head.classList.add('dragging');
         });
         this.head.addEventListener('pointermove', e => {
-            if (!d) return;
+            if (!d) {
+                return;
+            }
             this.st.x = d.ox + e.clientX - d.x;
             this.st.y = d.oy + e.clientY - d.y;
             this.place();
         });
         const end = () => {
-            if (!d) return;
+            if (!d) {
+                return;
+            }
             d = null;
             this.head.classList.remove('dragging');
             this.save();
