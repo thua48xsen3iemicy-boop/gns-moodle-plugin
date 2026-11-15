@@ -45,6 +45,7 @@ import {
 } from 'mod_gns3lab/reveal';
 import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
 import {Checks, STRING_KEYS as CHECK_KEYS} from 'mod_gns3lab/checks';
+import {Assignment} from 'mod_gns3lab/assignment';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
@@ -239,8 +240,8 @@ class LabPage {
                 cmid, userid, api: this.api, strings, toast: (text, ms) => this.toast(text, ms),
                 onOpen: () => {
                     this.details.hide();
-                    if (this.hideAssignments) {
-                        this.hideAssignments();
+                    if (this.assignment) {
+                        this.assignment.yieldPlace();
                     }
                 },
             });
@@ -272,8 +273,8 @@ class LabPage {
         const stage = this.stage, consoles = this.consoles, details = this.details, wheel = this.wheel;
         stage.hooks = {
             details: sel => {
-                if (this.hideAssignments) {
-                    this.hideAssignments();
+                if (this.assignment) {
+                    this.assignment.yieldPlace();
                 }
                 if (this.checks) {
                     this.checks.close();
@@ -292,12 +293,7 @@ class LabPage {
             canConsole: n => this.canConsole(n),
             diveCandidate: n => consoles.diveCandidate(n),
             diveRelease: n => consoles.diveRelease(n),
-            closeOverlays: () => {
-                details.hide();
-                if (this.hideAssignments) {
-                    this.hideAssignments();
-                }
-            },
+            closeOverlays: () => details.hide(),
             viewChanged: () => {
                 if (wheel.node && !wheel.tracking) {
                     wheel.position();
@@ -309,51 +305,31 @@ class LabPage {
             mobileChanged: mobile => {
                 consoles.mobileChanged(mobile);
                 details.hide();
+                if (this.assignment) {
+                    this.assignment.render();
+                }
             },
             toast: text => this.toast(text),
         };
     }
 
     /**
-     * The overview button and the demo switch of the facts.
+     * The assignment window, the overview button and the refresh of the facts.
      *
      * @param {Function} region finds an element of the template
      */
     bindChrome(region) {
-        const assignments = region('assignments'), open = region('assignmentsOpen'), close = region('assignmentsClose');
-        const hideAssignments = () => {
-            if (!assignments) {
-                return;
-            }
-            assignments.hidden = true;
-            open.setAttribute('aria-expanded', 'false');
-            this.stage.canvas.scheduleLabels();
-        };
-        this.hideAssignments = hideAssignments;
-        if (open && assignments) {
-            open.onclick = () => {
-                const show = assignments.hidden;
-                this.details.hide();
-                if (this.checks) {
-                    this.checks.close();
-                }
-                if (show) {
-                    this.stage.select(null);
-                }
-                assignments.hidden = !show;
-                open.setAttribute('aria-expanded', String(show));
-                if (show) {
-                    close.focus();
-                }
-                this.stage.canvas.scheduleLabels();
-            };
-            close.onclick = () => { hideAssignments(); open.focus(); };
-            assignments.addEventListener('keydown', e => {
-                if (e.key === 'Escape') { e.stopPropagation(); hideAssignments(); open.focus(); }
-            });
-        }
+        // The assignment is a floating window over the scheme, beside the object card and the panels, not instead of them.
+        const assignments = region('assignments'), open = region('assignmentsOpen');
+        this.assignment = assignments && open ? new Assignment({
+            win: assignments,
+            toggle: open,
+            layer: region('wins'),
+            cmid: this.cmid,
+            mobile: () => this.stage.mobile,
+            raise: () => ++this.consoles.zTop,
+        }) : null;
         region('overview').onclick = () => {
-            hideAssignments();
             if (this.checks) {
                 this.checks.close();
             }
