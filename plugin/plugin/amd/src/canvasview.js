@@ -75,6 +75,10 @@ export class CanvasView {
         document.fonts.ready.then(() => this.scheduleLabels());
         document.fonts.addEventListener('loadingdone', () => this.scheduleLabels());
         ['pointerdown', 'pointerup', 'wheel', 'keydown'].forEach(type => stage.r('canvasUi').addEventListener(type, e => e.stopPropagation()));
+        // The HUD background is sized to its HTML controls: re-fit it when they change on their own, e.g. the checks
+        // button appears once the checks state arrives or a counter grows a digit.
+        const actions = stage.r('canvasActions');
+        if (actions && window.ResizeObserver) new ResizeObserver(() => { if (this.hudBg) this.renderHud(); }).observe(actions);
     }
 
     reset() {
@@ -479,14 +483,15 @@ export class CanvasView {
             });
         });
         this.scheduleLabels();
-        this.renderHud();
-        this.positionSubnets();
         const status = factsStatus(s);
         s.svg.dataset.source = status.state;
         s.r('factStatus').dataset.state = status.state;
         s.r('canvasFacts').textContent = status.text;
         s.r('issueCount').textContent = layerIssues(s).length;
         s.r('canvasRefresh').disabled = !s.factsLive || !s.liveDoc;
+        // After the texts above: the HUD measures them.
+        this.renderHud();
+        this.positionSubnets();
         let empty = '';
         if (s.layer === 'l4') empty = s.s('ui_canvas_l4');
         else if (s.layer === 'l3' && !this.subnets.length) empty = s.s('ui_canvas_empty_l3');
