@@ -20,6 +20,7 @@ AGENT_DOMAIN=lab.local
 # LXC VMIDs in the cluster. The script finds each CT's node and net0 IP in /etc/pve/nodes itself.
 # Slots: unprivileged, static IP in net0, all from one template (same gns3 uid/gid). The VMIDs of a
 # node's slots form its agent's range (min..max), so blocks per node are handy: 20xx, 21xx.
+# SLOTS takes single VMIDs and ranges: "2001-2025 2101-2125". Empty: the VMIDs of CREATE_SLOTS.
 MANAGER_VMID=1900
 SLOTS="2001"
 
@@ -65,8 +66,11 @@ CT_NAMESERVER=10.10.12.1
 #SLOT_TEMPLATE="2000=pve1:dhcp"
 #SLOT_GNS3_ID=1500
 #SLOT_DISK_GB=32
-# Slots cloned from the template: <vmid>=<node>:<IP>, every VMID also in SLOTS.
+# Slots cloned from the template: <vmid>=<node>:<IP>, every VMID also in SLOTS. A range
+# <first>-<last>=<node>:<IP> plans a block of slots on one node with consecutive IPs from the given one
+# (up to .254): one entry per node is enough. With SLOTS empty, these VMIDs become SLOTS.
 #CREATE_SLOTS="2001=pve1:10.10.12.101 2002=pve1:10.10.12.102"
+#CREATE_SLOTS="2001-2025=pve1:10.10.12.101 2101-2125=pve2:10.10.12.126"
 # Kind of the slot clones. full (default): copies the whole disk, slow. linked: shares the template's
 # disk (a snapshot on RBD), seconds, but the template cannot be removed or rebuilt while clones exist
 # (make a new template under a new VMID instead), and the clones must stay on the template's storage.
