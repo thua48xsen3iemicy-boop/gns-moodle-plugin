@@ -130,6 +130,26 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         // ---- right click deletes a device or a link at once, Ctrl+Z brings it back
         await page.goto(`${BASE}/editor.en.html${MIN}`);
         await until(async() => (await page.locator('.node').count()) === 5);
+        // ---- icon of a node: the picker changes the drawing only, the image icon is no field
+        const nodeIcon = () => page.locator(`.node[data-node="${PC1}"] use`).getAttribute('href');
+        await tap(page, PC1);
+        const imageIconHref = await nodeIcon();
+        check('the icon picker offers the image icon and seven icons, the image icon pressed',
+            (await page.locator('.ed-icon').count()) === 8
+            && (await page.locator('.ed-icon[data-icon=""]').getAttribute('aria-pressed')) === 'true');
+        await page.locator('.ed-icon[data-icon="router"]').click();
+        check('picking an icon redraws the node', (await nodeIcon()).endsWith('-ico-router')
+            && (await page.locator('.ed-icon[data-icon="router"]').getAttribute('aria-pressed')) === 'true');
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.find(n => n.name === 'PC1')?.icon === 'router');
+        check('the icon is saved with the node', (await saved(page)).nodes.find(n => n.name === 'PC1').icon === 'router');
+        await page.locator('.ed-icon[data-icon=""]').click();
+        await act(page, 'save').click();
+        await until(async() => !('icon' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {icon: 1})));
+        check('the image icon removes the field', (await nodeIcon()) === imageIconHref
+            && !('icon' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
+        await page.goto(`${BASE}/editor.en.html${MIN}`);
+        await until(async() => (await page.locator('.node').count()) === 5);
         const linksBefore = await page.locator('[data-link]').count();
         await page.locator(`.node[data-node="${PC3}"] .halo`).click({button: 'right'});
         check('a right click deletes the device and its links',

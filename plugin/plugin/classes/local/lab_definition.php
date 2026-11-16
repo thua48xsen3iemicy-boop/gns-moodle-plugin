@@ -77,6 +77,16 @@ class lab_definition {
      */
     public const NOPASTE = 'nopaste';
 
+    /**
+     * Node field of the plugin alone: the icon the lab pages draw instead of the one of the image category.
+     *
+     * Like NOPASTE, for_manager() takes it out; the device stays what its image is (console snippets, hosts).
+     */
+    public const ICON = 'icon';
+
+    /** Icons a node may take: the symbols of templates/icons.mustache, without unknown. */
+    public const ICONS = ['router', 'switch', 'pc', 'server', 'firewall', 'cloud', 'hypervisor'];
+
     /** Node fields besides name, image, x and y; the lab manager uses the image default for a missing one. */
     protected const NUMBERS = ['ram_mb', 'cpus', 'adapters', 'uplink_port'];
 
@@ -99,7 +109,7 @@ class lab_definition {
     public static function for_manager(array $def): array {
         foreach ($def['nodes'] ?? [] as $i => $node) {
             if (is_array($node)) {
-                unset($def['nodes'][$i][self::NOPASTE]);
+                unset($def['nodes'][$i][self::NOPASTE], $def['nodes'][$i][self::ICON]);
             }
         }
         return $def;
@@ -180,6 +190,13 @@ class lab_definition {
                 if ($node[self::NOPASTE]) {
                     $clean[self::NOPASTE] = true;
                 }
+            }
+            // Icon of the node: one of ICONS, an empty one is no field (the icon of the image category).
+            if (array_key_exists(self::ICON, $node) && $node[self::ICON] !== null && $node[self::ICON] !== '') {
+                if (!in_array($node[self::ICON], self::ICONS, true)) {
+                    throw self::invalid("nodes[{$i}]." . self::ICON);
+                }
+                $clean[self::ICON] = $node[self::ICON];
             }
             // Additional blank disks (manager CONTRACTS 2.6): an empty list is no field, like the lab manager does.
             if (array_key_exists('disks', $node) && $node['disks'] !== null) {
@@ -424,6 +441,10 @@ class lab_definition {
             if (!empty($node[self::NOPASTE])) {
                 // The lab page keeps the clipboard out of the console of this node (consoles.js).
                 $nodes[count($nodes) - 1][self::NOPASTE] = true;
+            }
+            if (!empty($node[self::ICON])) {
+                // The lab pages draw this icon, the category of the node still comes from its image (model.js).
+                $nodes[count($nodes) - 1][self::ICON] = $node[self::ICON];
             }
             if (($image->guest ?? '') === 'routeros') {
                 // MikroTik RouterOS: the console snippets of the node are those of RouterOS (snippets.js kindOf).
