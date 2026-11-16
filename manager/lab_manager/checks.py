@@ -591,6 +591,27 @@ def build_expected(model: Model, roles: dict, definition: dict | None, checks: d
 # ---------------------------------------------------------------------- evaluation
 
 
+def snat_translates(rules, ip, outside) -> bool:
+    """Whether the source NAT rules of a Linux or RouterOS router (`snat`, CONTRACTS.md 4.6) translate a source address
+    going out of `outside`: the first rule whose interface and source fit decides. A rule that translates counts even
+    when it has conditions the slot did not read; one that the slot could not tell (`other`: a jump, a chain of its own)
+    counts too: it cannot be held against the student. An exact `accept` or `return` lets the packet out untranslated."""
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, dict) or rule.get("out") not in (None, outside):
+            continue
+        try:
+            if rule.get("src") is not None and ip not in ipaddress.IPv4Network(str(rule["src"])):
+                continue
+        except ValueError:
+            continue
+        action = rule.get("action")
+        if action in ("masquerade", "snat", "other"):
+            return True
+        if action in ("accept", "return") and rule.get("exact") is True:
+            return False
+    return False
+
+
 def nat_translates(rules, ip, outside) -> bool:
     """Whether the `nat` rules of an IOL router (ios.config/1) translate a source address going out of `outside`.
     An ACL the slot did not understand (`match: null`) counts as translating: it cannot be told otherwise."""
@@ -1454,12 +1475,27 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
             edge = path[-1]
             if edge == nid:
                 continue  # The host itself is cabled to the ISP: no router, no NAT
-            if model.nodes[edge]["type"] != "iou":
-                run.skip("nat_missing", "no_collector")  # NAT of Linux and RouterOS routers is not collected
-                continue
             facts = model.nodes[edge]["facts"]
-            raw = {x.get("name"): x for x in facts.get("interfaces") or [] if isinstance(x, dict)}
             problems = []
+            if model.nodes[edge]["type"] != "iou":
+                # Linux and RouterOS: the source NAT rules (`snat` of linux.sys/1, routeros.sys/1); none from an older
+                # slot or a guest that could not tell, and Windows has none: not checked.
+                if not isinstance(facts.get("snat"), list):
+                    run.skip("nat_missing", "no_collector")
+                    continue
+                if not snat_translates(facts["snat"], ip, egress.name):
+                    problems.append((f"нет правила маскарада (masquerade, srcnat), которое транслирует адреса узлов при "
+                                     f"выходе через {egress.name}", egress))
+                if problems:
+                    texts, ifaces, nids = nat_problems.setdefault(edge, ([], [], []))
+                    nids.append(nid)
+                    for text, iface in problems:
+                        if text not in texts:
+                            texts.append(text)
+                        if iface not in ifaces:
+                            ifaces.append(iface)
+                continue
+            raw = {x.get("name"): x for x in facts.get("interfaces") or [] if isinstance(x, dict)}
             if raw.get(egress.name, {}).get("nat") != "outside":
                 problems.append((f"на {egress.name} (к ISP) нет ip nat outside", egress))
             if ingress is not None and raw.get(ingress.name, {}).get("nat") != "inside":

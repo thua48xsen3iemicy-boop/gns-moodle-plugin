@@ -735,3 +735,45 @@ def test_a_router_without_its_address_or_saved_configuration_explains_the_hosts(
         result = default_run(facts)
         assert codes(result, counted=True) == (["config_not_saved"] if r1 is None else ["address_missing"])
         assert {"gateway_wrong", "unreachable"} <= set(codes(result, counted=False))
+
+
+# The same LAN behind a Linux (VyOS) or RouterOS edge router: NAT from `snat` (linux.sys/1, routeros.sys/1).
+def linux_edge(snat="masquerade", forward=True):
+    facts = router("198.18.1.100/24", "192.168.1.1/24")
+    facts["routes"].append({"dst": "default", "via": "198.18.1.1", "dev": "eth0", "proto": "dhcp"})
+    facts["ip_forward"] = forward
+    if snat == "masquerade":
+        facts["snat"] = [{"action": "masquerade", "out": "eth0", "src": None, "exact": True}]
+    elif snat is not None:
+        facts["snat"] = snat
+    return facts
+
+
+def edge_run(image, r1, **patch):
+    global DNODES
+    saved = DNODES
+    DNODES = [(n, image if n == "R1" else i, a) for n, i, a in saved]
+    try:
+        return default_run(lan_facts(R1=r1, **patch))
+    finally:
+        DNODES = saved
+
+
+@pytest.mark.parametrize("image", ["vyos", "mikrotik-chr7"])
+def test_masquerade_on_a_linux_or_routeros_edge(image):
+    assert edge_run(image, linux_edge())["findings"] == []
+    result = edge_run(image, linux_edge(snat=[]))
+    assert messages(result, "nat_missing") == [
+        "R1: NAT для выхода в интернет не настроен — нет правила маскарада (masquerade, srcnat), которое транслирует "
+        "адреса узлов при выходе через eth0 (не выйдут: PC1, PC2, PC3)."]
+    other_out = [{"action": "masquerade", "out": "eth1", "src": None, "exact": True}]
+    assert codes(edge_run(image, linux_edge(snat=other_out))) == ["nat_missing"]
+    part = [{"action": "accept", "out": None, "src": "192.168.1.11/32", "exact": True},
+            {"action": "snat", "out": "eth0", "src": "192.168.1.0/24", "exact": True}]
+    assert messages(edge_run(image, linux_edge(snat=part)), "nat_missing")[0].endswith("(не выйдут: PC2).")
+    doubt = [{"action": "masquerade", "out": None, "src": None, "exact": False},  # TCP only: the benefit of the doubt
+             {"action": "accept", "out": None, "src": None, "exact": False}]
+    assert edge_run(image, linux_edge(snat=doubt[1:] + doubt[:1]))["findings"] == []
+    unknown = edge_run(image, linux_edge(snat=None))  # an older slot, a guest that could not tell
+    assert unknown["findings"] == [] and rule(unknown, "nat_missing") == {
+        "code": "nat_missing", "group": "routing", "status": "skipped", "reason": "no_collector"}
