@@ -50,6 +50,13 @@ export const natSort = (a, b) => String(a).localeCompare(String(b), undefined, {
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 /**
+ * Icons a lab may give a node instead of the one of its category (lab_definition::ICONS).
+ *
+ * @type {string[]}
+ */
+export const ICONS = ['router', 'switch', 'pc', 'server', 'firewall', 'cloud', 'hypervisor'];
+
+/**
  * Category of a node, it chooses the icon: router, switch, pc, server, cloud, firewall, hypervisor.
  *
  * @param {object} n node of the model
@@ -213,6 +220,8 @@ export const buildModel = doc => {
             nopaste: n.nopaste === true,
         };
         node.cat = catOf(node);
+        // The icon only draws the node: what the device is (snippets, hosts, switches) stays its category.
+        node.icon = ICONS.includes(n.icon) ? n.icon : node.cat;
         node.guest = guestOf(n);
         nodes.set(n.node_id, node);
     }

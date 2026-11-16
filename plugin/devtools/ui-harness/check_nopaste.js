@@ -174,6 +174,12 @@ async function labPage(browser, name, problems, nodeName = 'SW1') {
 
         // SW1 is marked.
         let page = await labPage(browser, 'index.en.nopaste.html', problems);
+        // The icon chosen in the lab editor stays on the live topology of the session (lab.js loadLive).
+        const iconOf = name => page.evaluate(n => [...document.querySelectorAll('.node')]
+            .find(g => g.querySelector('.nname')?.textContent.trim() === n)?.querySelector('use.ico')?.getAttribute('href'), name);
+        check('SW1 is drawn with the icon of the lab, R1 with that of its category',
+            (await iconOf('SW1') || '').endsWith('-ico-router') && (await iconOf('R1') || '').endsWith('-ico-router')
+            && !(await iconOf('PC1') || '').endsWith('-ico-router'), `${await iconOf('SW1')}`);
         await page.keyboard.type('typed1');
         check('typing reaches the device', await shows(page, 'typed1'));
 

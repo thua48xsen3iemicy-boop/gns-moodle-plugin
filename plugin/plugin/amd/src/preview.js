@@ -84,7 +84,7 @@ export const init = prefix => {
     const marks = [];
     model.nodes.forEach(n => {
         const g = el('g', {class: 'pv-node', transform: `translate(${n.cx} ${n.cy})`}, nodes);
-        const icon = el('use', {href: `#${prefix}-ico-${n.cat}`}, g);
+        const icon = el('use', {href: `#${prefix}-ico-${n.icon || n.cat}`}, g);
         const name = el('text', {class: 'pv-name'}, g);
         name.textContent = n.name;
         marks.push({icon, name});

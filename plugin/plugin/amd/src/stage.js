@@ -608,7 +608,7 @@ export class Stage {
             n.g = g;
             g.setAttribute('aria-label', this.nodeLabel(n));
             el('circle', {r: NODE_R, class: 'halo'}, g);
-            el('use', {href: `#${this.prefix}-ico-${sil ? 'unknown' : n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
+            el('use', {href: `#${this.prefix}-ico-${sil ? 'unknown' : n.icon || n.cat}`, x: -22, y: -22, width: 44, height: 44, class: 'ico'}, g);
             const label = el('g', {class: 'auto-label', 'data-priority': 0}, g);
             const title = el('text', {y: L === 'l2' ? 23 : 25, class: 'nname'}, label);
             el('tspan', {}, title).textContent = sil ? this.s('ui_fog_unknown') : n.name;

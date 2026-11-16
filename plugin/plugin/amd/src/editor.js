@@ -29,7 +29,7 @@
 
 import Ajax from 'core/ajax';
 import Notification from 'core/notification';
-import {buildModel} from 'mod_gns3lab/model';
+import {buildModel, ICONS} from 'mod_gns3lab/model';
 import {derive, hostPart} from 'mod_gns3lab/facts';
 import * as Seg from 'mod_gns3lab/segments';
 import {init as initImages} from 'mod_gns3lab/editorimages';
@@ -142,6 +142,9 @@ export const init = (prefix) => {
   const portName = (n, a, p) => String((imageOf(n) || {}).port_name || "{adapter}/{port}")
     .replace("{adapter}", a).replace("{port}", p);
   const category = n => (imageOf(n) || {}).category || "";
+  /* icon of the image category; a node may override it (lab_definition::ICON, plugin only, it only draws the node) */
+  const imageIcon = n => adapterOffset(n) ? "cloud" : ICON[category(n)] || "server";
+  const iconOf = n => ICONS.includes(n.icon) ? n.icon : imageIcon(n);
   const byName = name => st.lab.nodes.find(n => n.name === name) || null;
   const portsOf = n => {
     const out = [];
@@ -220,6 +223,12 @@ export const init = (prefix) => {
       toast(str("ed_maxnodes", maxNodes), true);
       return;
     }
+    /* the manager takes at most one node with an external port per lab (too_many_uplinks) */
+    const uplinked = Number.isInteger(img.uplink_port) && st.lab.nodes.find(o => uplinkOf(o) !== null);
+    if (uplinked) {
+      toast(str("ed_oneuplink", uplinked.name), true);
+      return;
+    }
     change(() => {
       const n = {name: nextName(img), image: img.id, x: snap(cx - W / 2), y: snap(cy - H / 2)};
       if (img.adapters && typeof img.adapters === "object") {
@@ -242,6 +251,9 @@ export const init = (prefix) => {
       if (s.kind === "node") {
         const name = st.lab.nodes[s.i].name;
         st.lab.nodes.splice(s.i, 1);
+        if (st.from === name) {
+          st.from = null;
+        }
         st.lab.links = st.lab.links.filter(l => l.a.node !== name && l.b.node !== name);
         /* a deleted device leaves its segments; a segment keeps existing, the manager reports an empty one */
         st.lab.segments.forEach(seg => {
@@ -475,8 +487,7 @@ export const init = (prefix) => {
         + (imageOf(n) ? "" : " unknown") + role + pickable;
       const g = el("g", {class: cls, "data-node": i, role: "button", "aria-label": n.name}, lyr.nodes);
       el("rect", {class: "halo", x: cx - 31, y: cy - 31, width: 62, height: 62, rx: 12}, g);
-      const icon = adapterOffset(n) ? "cloud" : ICON[category(n)] || "server";
-      el("use", {href: `#${prefix}-ico-${icon}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
+      el("use", {href: `#${prefix}-ico-${iconOf(n)}`, x: cx - 22, y: cy - 22, width: 44, height: 44}, g);
       /* имя — над подписями портов, как во вьюере */
       const t = el("text", {class: "nname", x: cx, y: cy + 42, "text-anchor": "middle", "data-node": i}, lyr.names);
       t.textContent = n.name;
@@ -768,6 +779,18 @@ export const init = (prefix) => {
     `<label class="ed-field ed-check"><input type="checkbox" data-field="nopaste"${
       n.nopaste ? " checked" : ""}> <span>${esc(str("ed_nopaste"))}</span><small>${
       esc(str("ed_nopaste_help"))}</small></label>`;
+  /* icon picker: the first button goes back to the icon of the image */
+  const iconField = n => {
+    const button = (value, icon, title) => {
+      const on = (n.icon || "") === value;
+      return `<button type="button" class="ed-icon${on ? " on" : ""}" data-icon="${value}" aria-pressed="${on}"
+        title="${esc(title)}" aria-label="${esc(title)}"><svg viewBox="0 0 48 48" aria-hidden="true">
+        <use href="#${prefix}-ico-${icon}"/></svg></button>`;
+    };
+    return `<div class="ed-field"><span>${esc(str("ed_icon"))}</span><span class="ed-icons" role="group"
+      aria-label="${esc(str("ed_icon"))}">${button("", imageIcon(n), str("ed_iconauto"))}${
+      ICONS.map(icon => button(icon, icon, str("ui_cat_" + icon))).join("")}</span></div>`;
+  };
   /* additional blank disks (CONTRACTS §2.6): only images that take them offer the block; disks an image no longer
      takes stay visible, so that they can be removed */
   const disksField = (n, img) => {
@@ -803,6 +826,7 @@ export const init = (prefix) => {
       <label class="ed-field"><span>${esc(str("ed_name"))}</span>
         <input type="text" class="form-control form-control-sm" data-field="name" value="${esc(n.name)}" maxlength="80"
           autocomplete="off" spellcheck="false"></label>
+      ${iconField(n)}
       ${numberField(n, "adapters", str(adapterOffset(n) ? "ed_ports" : "ed_adapters"))}
       ${numberField(n, "ram_mb", str("ed_ram"))}
       ${numberField(n, "cpus", str("ed_cpus"))}
@@ -1050,6 +1074,20 @@ export const init = (prefix) => {
     }
     render();
   };
+  /* right click on a device or a link deletes it at once; Ctrl+Z brings it back */
+  svg.addEventListener("contextmenu", e => {
+    const nodeEl = e.target.closest("[data-node]"), linkEl = e.target.closest("[data-link]");
+    if (!nodeEl && !linkEl) {
+      return;
+    }
+    e.preventDefault();
+    /* a long press on a touch screen also opens the context menu: there it must not delete */
+    if (e.pointerType && e.pointerType !== "mouse" || gest) {
+      return;
+    }
+    st.sel = nodeEl ? {kind: "node", i: +nodeEl.dataset.node} : {kind: "link", i: +linkEl.dataset.link};
+    deleteSel();
+  });
   svg.addEventListener("pointerup", endPtr);
   svg.addEventListener("pointercancel", endPtr);
   svg.addEventListener("wheel", e => {
@@ -1417,6 +1455,20 @@ export const init = (prefix) => {
       if (idx >= 0) {
         st.sel = {kind: "node", i: idx};
         render();
+      }
+      return;
+    }
+    const iconButton = e.target.closest("[data-icon]");
+    if (iconButton && st.sel && st.sel.kind === "node") {
+      const n = st.lab.nodes[st.sel.i], icon = iconButton.dataset.icon;
+      if ((n.icon || "") !== icon) {
+        change(() => {
+          if (icon) {
+            n.icon = icon;
+          } else {
+            delete n.icon; // no field at all: the icon of the image
+          }
+        });
       }
       return;
     }

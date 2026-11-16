@@ -75,6 +75,25 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json(json_encode($raw), 'Paste');
     }
 
+    public function test_icon_stays_in_moodle(): void {
+        $raw = ['nodes' => [['name' => 'PC1', 'image' => 'debian12', 'x' => 0, 'y' => 0, 'icon' => 'router'],
+            ['name' => 'PC2', 'image' => 'debian12', 'x' => 100, 'y' => 0, 'icon' => '']], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'Icons');
+        $this->assertSame('router', $def['nodes'][0]['icon']);
+        $this->assertArrayNotHasKey('icon', $def['nodes'][1], 'an empty icon is the icon of the image');
+
+        $sent = lab_definition::for_manager($def);
+        $this->assertArrayNotHasKey('icon', $sent['nodes'][0], 'the lab manager refuses unknown fields');
+
+        $data = lab_definition::to_topology($def, []);
+        $this->assertSame('router', $data->topology->nodes[0]['icon']);
+        $this->assertArrayNotHasKey('icon', $data->topology->nodes[1]);
+
+        $raw['nodes'][1]['icon'] = 'unknown';
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode($raw), 'Icons');
+    }
+
     public function test_keeps_additional_disks_and_drops_an_empty_list(): void {
         $raw = ['nodes' => [['name' => 'PC1', 'image' => 'debian12', 'x' => 0, 'y' => 0,
             'disks' => [['size_gb' => 5, 'format' => 'raw'], ['size_gb' => 1]]],

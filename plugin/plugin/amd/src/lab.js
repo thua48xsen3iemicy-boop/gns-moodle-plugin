@@ -425,15 +425,21 @@ class LabPage {
         // No pasting into the console is a mark of the lab, not of the project: it goes over by node name.
         const ref = this.data.topology && this.data.topology.topology;
         const nopaste = new Set(((ref && ref.nodes) || []).filter(n => n && n.nopaste === true).map(n => n.name));
+        // So is the icon a teacher chose in the lab editor.
+        const icons = new Map(((ref && ref.nodes) || []).filter(n => n && n.icon).map(n => [n.name, n.icon]));
         // Node states come from the live data of the session, not from the saved project.
         ((doc.topology && doc.topology.nodes) || []).forEach(n => {
             delete n.status;
             delete n.nopaste;
+            delete n.icon;
             if (types.get(n.node_id)) {
                 n.console_type = types.get(n.node_id);
             }
             if (nopaste.has(n.name)) {
                 n.nopaste = true;
+            }
+            if (icons.has(n.name)) {
+                n.icon = icons.get(n.name);
             }
         });
         // The project name of a session is technical (lab-…-s-…): the title stays the name of the lab.

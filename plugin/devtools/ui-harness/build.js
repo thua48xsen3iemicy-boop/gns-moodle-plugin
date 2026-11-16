@@ -167,11 +167,13 @@ for (const lang of ['en', 'ru']) {
 }
 
 // No pasting into the consoles of some nodes (`nopaste` of a node of a library lab): index.<lang>.nopaste.html marks SW1
-// and the node with a graphical console, the others take the clipboard.
+// and the node with a graphical console, the others take the clipboard. SW1 is also drawn with the icon of a router
+// (`icon` of a node, chosen in the lab editor).
 for (const lang of ['en', 'ru']) {
     const doc = data.topology;
     const topology = {...doc, topology: {...doc.topology, nodes: doc.topology.nodes.map(n =>
-        (n.name === 'SW1' || n.console_type === 'vnc' ? {...n, nopaste: true} : n))}};
+        (n.name === 'SW1' || n.console_type === 'vnc' ? {...n, nopaste: true, ...(n.name === 'SW1' ? {icon: 'router'} : {})}
+            : n))}};
     const body = page(lang, {datajson: JSON.stringify({...data, topology})});
     fs.writeFileSync(path.join(dist, `index.${lang}.nopaste.html`), shell(lang, '', body));
 }
