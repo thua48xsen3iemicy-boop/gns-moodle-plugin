@@ -1178,3 +1178,79 @@ def test_a_failure_while_the_source_is_written_leaves_the_record_as_it_was(monke
         assert after["ok"] is True and "10.0.12.9/30" in json.dumps(after["data"])
 
     scenario(monkeypatch, body)
+
+
+NAT_ROUTER = """\
+hostname R1
+!
+interface Ethernet0/0
+ ip address dhcp
+ ip nat outside
+!
+interface Ethernet0/1
+ ip address 192.168.1.1 255.255.255.0
+ ip nat inside
+!
+interface Ethernet0/2
+ ip address 192.168.2.1 255.255.255.0
+ ip nat inside
+ no ip nat inside
+!
+ip nat inside source list 1 interface Ethernet0/0 overload
+ip nat inside source list LAN pool PUBLIC
+ip nat inside source list 110 interface Ethernet0/0 overload
+ip nat inside source list 7 interface Ethernet0/0 overload
+ip nat inside source list 1 interface Ethernet0/0 overload
+ip nat inside source static 192.168.1.10 198.18.1.50
+ip nat inside source route-map RM interface Ethernet0/0 overload
+ip nat inside source list 1 interface Ethernet0/0 vrf X overload
+ip route 0.0.0.0 0.0.0.0 dhcp
+!
+ip access-list standard LAN
+ 10 deny   192.168.1.10
+ 20 permit 192.168.1.0 0.0.0.255
+ remark the rest
+!
+ip access-list extended WEB
+ permit tcp any any eq 80
+!
+access-list 1 permit 192.168.1.0 0.0.0.255
+access-list 1 permit host 192.168.2.5
+access-list 1 deny   any log
+access-list 110 permit ip 192.168.3.0 0.0.0.255 any
+access-list 7 permit 10.0.0.0 0.255.0.255
+end
+"""
+
+
+def test_nat_roles_of_interfaces_follow_the_last_line():
+    by_name = interfaces_of(NAT_ROUTER)
+    assert by_name["Ethernet0/0"]["nat"] == "outside"
+    assert by_name["Ethernet0/1"]["nat"] == "inside"
+    assert "nat" not in by_name["Ethernet0/2"]  # `no ip nat inside`
+    assert "nat" not in interfaces_of(L3)["Ethernet0/0"]
+
+
+def test_nat_rules_come_with_what_their_acl_permits():
+    assert parse_ios_config(NAT_ROUTER, PORTS)["nat"] == [
+        {"kind": "list", "acl": "1", "interface": "Ethernet0/0", "overload": True, "match": [
+            {"permit": True, "src": "192.168.1.0/24"}, {"permit": True, "src": "192.168.2.5/32"},
+            {"permit": False, "src": "0.0.0.0/0"}]},
+        {"kind": "list", "acl": "LAN", "pool": "PUBLIC", "overload": False, "match": [
+            {"permit": False, "src": "192.168.1.10/32"}, {"permit": True, "src": "192.168.1.0/24"}]},
+        {"kind": "list", "acl": "110", "interface": "Ethernet0/0", "overload": True, "match": [
+            {"permit": True, "src": "192.168.3.0/24"}]},
+        {"kind": "list", "acl": "7", "interface": "Ethernet0/0", "overload": True, "match": None},  # holes in wildcard
+        {"kind": "static", "local": "192.168.1.10", "global": "198.18.1.50"},
+    ]  # left out: the repeated line, the route map and the VRF
+
+
+def test_an_acl_that_is_missing_or_not_understood_is_unknown():
+    text = ("ip nat inside source list 9 interface Ethernet0/0 overload\n"
+            "ip nat inside source list WEB interface Ethernet0/0 overload\n"
+            "ip access-list extended WEB\n permit tcp any any eq 80\n")
+    assert [rule["match"] for rule in parse_ios_config(text, PORTS)["nat"]] == [None, None]
+
+
+def test_no_nat_lines_is_no_nat_field():
+    assert "nat" not in parse_ios_config(L3, PORTS)
