@@ -291,6 +291,9 @@ for (const lang of ['en', 'ru']) {
         shell(lang, '', editorPage(lang, EDITOR_IOL, true), 'live', '', EDITOR_INIT));
     fs.writeFileSync(path.join(dist, `editor.${lang}.norouter.html`),
         shell(lang, '', editorPage(lang, EDITOR_NOROUTER, true), 'live', '', EDITOR_INIT));
+    // A manager that checks labs (labchecks): the network check switch and the checks document.
+    fs.writeFileSync(path.join(dist, `editor.${lang}.checks.html`),
+        shell(lang, '', editorPage(lang, EDITOR_LAB, true, {labchecks: true}), 'live', '', EDITOR_INIT));
 }
 
 // Authoring uses the real mock manager through the local server's Moodle stand-in.

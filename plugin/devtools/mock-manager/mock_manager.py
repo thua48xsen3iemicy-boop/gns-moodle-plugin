@@ -1105,7 +1105,8 @@ CHECK_ALL_CODES = set(CHECK_RULES) | {  # every code of the catalog takes an ove
     "config_not_saved", "link_suspended", "unused_port_up", "segments_merged", "member_isolated", "vlan_mismatch",
     "tag_not_allowed", "vlan_name_wrong", "vlan_extra_used", "mgmt_vlan_missing", "address_wrong", "mask_wrong",
     "address_misplaced", "address_apipa", "address_not_private", "address_duplicate", "subnet_overlap", "subnet_mixed",
-    "address_not_saved", "config_not_applied", "gateway_missing", "forwarding_off", "forwarding_on_host"}
+    "address_not_saved", "config_not_applied", "gateway_missing", "forwarding_off", "forwarding_on_host",
+    "nat_missing"}
 CHECK_DEFAULT_THRESHOLDS = [{"mark": 5, "critical": 0, "major": 0, "minor": 1},
                             {"mark": 4, "critical": 0, "major": 1, "minor": 3},
                             {"mark": 3, "critical": 0, "major": 3, "minor": None}]

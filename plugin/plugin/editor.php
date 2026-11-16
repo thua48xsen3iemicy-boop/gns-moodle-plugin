@@ -80,6 +80,7 @@ $keys = [
     'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
     'ed_segconfigure', 'ed_segconfigure_help', 'ed_randomifnames', 'ed_randomifnames_help',
     'ed_nopaste', 'ed_nopaste_help', 'ed_disks', 'ed_disks_help', 'ed_disk', 'ed_adddisk', 'ed_removedisk', 'ed_diskgb', 'ed_checks', 'ed_checks_help', 'ed_checkskept', 'ed_checksinvalid',
+    'ed_network', 'ed_network_auto', 'ed_network_off', 'ed_network_help',
 ];
 $keys = array_merge($keys, ['stoplab', 'ed_save']);
 foreach (array_keys(get_string_manager()->load_component_strings('gns3lab', current_language())) as $key) {

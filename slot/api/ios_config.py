@@ -396,6 +396,14 @@ def interface_entry(name, lines, ports, switch):
         entry["ipv4"] = ipv4
     if switch and entry["kind"] == "physical" and (switchport := switchport_of(lines, where)) is not None:
         entry["switchport"] = switchport
+    nat = None
+    for line in lines:
+        if line in ("ip nat inside", "ip nat outside"):
+            nat = line.split()[2]
+        elif line in ("no ip nat inside", "no ip nat outside"):
+            nat = None
+    if nat is not None:
+        entry["nat"] = nat
     return entry
 
 
@@ -410,11 +418,12 @@ def skip_text(rest, lines):
 
 
 def blocks_of(text):
-    """(interfaces, vlans, switch, vtp mode, global lines) by the structure of the text: blocks start in column 0,
-    their commands are indented, `!` separates. Text of banners and macros is skipped: it may look like anything.
-    Global lines are the column-0 commands this module reads beyond blocks: `hostname`, `ip route`, `ip routing`,
-    `ip default-gateway`."""
-    interfaces, vlans, switch, vtp, top = {}, {}, False, None, []
+    """(interfaces, vlans, switch, vtp mode, global lines, named ACLs) by the structure of the text: blocks start in
+    column 0, their commands are indented, `!` separates. Text of banners and macros is skipped: it may look like
+    anything. Global lines are the column-0 commands this module reads beyond blocks: `hostname`, `ip route`,
+    `ip routing`, `ip default-gateway`, `ip nat inside source`, `access-list`. Named ACLs are the blocks
+    `ip access-list {standard|extended} NAME` -> (kind, lines)."""
+    interfaces, vlans, switch, vtp, top, acls = {}, {}, False, None, [], {}
     current = None  # the commands of the open interface block, or the VLANs (dicts) of the open `vlan` block
     lines = iter(text.splitlines())
     for line in lines:
@@ -435,14 +444,17 @@ def blocks_of(text):
         words = stripped.split()
         if words[0] == "interface" and len(words) == 2:
             current = interfaces.setdefault(words[1], [])
+        elif words[:2] == ["ip", "access-list"] and len(words) == 4 and words[2] in ("standard", "extended"):
+            current = acls.setdefault(words[3], (words[2], []))[1]
         elif words[0] == "vlan" and len(words) == 2 and VLAN_LIST.fullmatch(words[1]):
             current = tuple(vlans.setdefault(vlan, {}) for vlan in sorted(vlan_list(words[1], "VLAN")))
         elif words[:2] == ["spanning-tree", "mode"]:
             switch = True
         elif words[:2] == ["vtp", "mode"] and len(words) > 2:
             vtp = words[2]
-        elif words[0] == "hostname" or words[:2] in (["ip", "route"], ["ip", "routing"], ["ip", "default-gateway"]) \
-                or words[:3] == ["no", "ip", "routing"]:
+        elif words[0] in ("hostname", "access-list") \
+                or words[:2] in (["ip", "route"], ["ip", "routing"], ["ip", "default-gateway"]) \
+                or words[:3] == ["no", "ip", "routing"] or words[:4] == ["ip", "nat", "inside", "source"]:
             top.append(words)
         elif words[0] == "banner" and len(words) > 2:
             skip_text(stripped.split(None, 2)[2], lines)
@@ -450,7 +462,7 @@ def blocks_of(text):
             for macro_line in lines:
                 if macro_line.strip() == "@":
                     break
-    return interfaces, vlans, switch, vtp, top
+    return interfaces, vlans, switch, vtp, top, acls
 
 
 def natural(name):
@@ -578,6 +590,117 @@ def routes_of(interfaces, top, switch):
     return sorted(routes, key=lambda r: (r["dst"], r["metric"], r.get("via", ""), r.get("dev", "")))
 
 
+STANDARD_ACL = (range(1, 100), range(1300, 2000))
+EXTENDED_ACL = (range(100, 200), range(2000, 2700))
+
+
+def acl_source(words):
+    """`any` | `host A` | `A [W]` at the start of words -> (network, rest), or None for what is not one: a wildcard
+    with holes in the middle (no network matches it), an object group, a keyword."""
+    try:
+        if words[0] == "any":
+            return ipaddress.IPv4Network("0.0.0.0/0"), words[1:]
+        if words[0] == "host":
+            return ipaddress.IPv4Network(f"{ipaddress.IPv4Address(words[1])}/32"), words[2:]
+        address = ipaddress.IPv4Address(words[0])
+        wildcard, rest = "0.0.0.0", words[1:]
+        if rest:
+            try:
+                ipaddress.IPv4Address(rest[0])
+                wildcard, rest = rest[0], rest[1:]
+            except ValueError:
+                pass
+        holes = int(ipaddress.IPv4Address(wildcard))
+        if holes & (holes + 1):
+            return None
+        return ipaddress.IPv4Network(f"{address}/{32 - holes.bit_length()}", strict=False), rest
+    except (IndexError, ValueError):
+        return None
+
+
+def acl_entry(words, kind):
+    """One line of an ACL without its name or number -> {"permit", "src"}, "skip" for a remark, None when the line is
+    not understood (then the whole ACL is unknown: a deny it hides could change what matches)."""
+    if words and words[0].isdigit():  # the sequence number of a named ACL line
+        words = words[1:]
+    if not words or words[0] == "remark":
+        return "skip"
+    if words[0] not in ("permit", "deny"):
+        return None
+    rest = words[1:]
+    if kind == "extended":
+        if not rest or rest[0] != "ip":
+            return None  # tcp/udp/icmp...: matches only part of the traffic of the source
+        rest = rest[1:]
+    parsed = acl_source(rest)
+    if parsed is None:
+        return None
+    network, rest = parsed
+    if kind == "extended":
+        destination = acl_source(rest)
+        if destination is None or destination[0].prefixlen != 0 or destination[1]:
+            return None  # only `... ip <src> any` says which sources are translated
+    elif rest and rest != ["log"]:
+        return None
+    return {"permit": words[0] == "permit", "src": str(network)}
+
+
+def acls_of(top, named):
+    """Every ACL of the configuration by its name or number -> list of entries in order, or None when not understood."""
+    lines = {}
+    for words in top:
+        if words[0] == "access-list" and len(words) > 2 and words[1].isdigit():
+            number = int(words[1])
+            kind = "standard" if any(number in r for r in STANDARD_ACL) else \
+                "extended" if any(number in r for r in EXTENDED_ACL) else None
+            if kind is not None:
+                lines.setdefault(words[1], (kind, []))[1].append(words[2:])
+    for name, (kind, block) in named.items():
+        lines[name] = (kind, [line.split() for line in block])
+    out = {}
+    for name, (kind, block) in lines.items():
+        entries = []
+        for words in block:
+            entry = acl_entry(words, kind)
+            if entry is None:
+                entries = None
+                break
+            if entry != "skip":
+                entries.append(entry)
+        out[name] = entries
+    return out
+
+
+def nat_of(top, named):
+    """`ip nat inside source` lines -> rules of the `nat` field (CONTRACTS.md 4.6), in the order of the text.
+    Route maps, VRFs and lines this parser does not understand are left out."""
+    acls = None
+    rules = []
+    for words in top:
+        if words[:4] != ["ip", "nat", "inside", "source"]:
+            continue
+        rest = words[4:]
+        if rest[:1] == ["static"] and len(rest) == 3:
+            try:
+                local, global_ = (str(ipaddress.IPv4Address(w)) for w in rest[1:])
+            except ValueError:
+                continue
+            rule = {"kind": "static", "local": local, "global": global_}
+        elif rest[:1] == ["list"] and len(rest) >= 4 and rest[2] in ("interface", "pool"):
+            tail = rest[4:]
+            if tail not in ([], ["overload"]):
+                continue  # vrf, reversible, no-payload...
+            if acls is None:
+                acls = acls_of(top, named)  # IOS treats an ACL that is not configured as empty: nothing translated
+            rule = {"kind": "list", "acl": rest[1], "match": acls.get(rest[1], []), rest[2]: rest[3],
+                    "overload": tail == ["overload"]}
+        else:
+            continue
+        if rule not in rules:
+            rules.append(rule)
+    return rules
+
+
 def parse_ios_config(text, ports):
     """Turn a saved IOS configuration into the fragment of a live-state.md node that `ios.config/1` owns.
 
@@ -586,7 +709,7 @@ def parse_ios_config(text, ports):
     configuration always gives the same `data`.
     """
     try:
-        found, vlans, switch, vtp, top = blocks_of(text)
+        found, vlans, switch, vtp, top, named = blocks_of(text)
         interfaces = [
             entry
             for name in sorted(found, key=natural)
@@ -595,6 +718,8 @@ def parse_ios_config(text, ports):
         data = {"interfaces": interfaces, "routes": routes_of(interfaces, top, switch)}
         if (hostname := hostname_of(top)) is not None:
             data["hostname"] = hostname
+        if nat := nat_of(top, named):
+            data["nat"] = nat
         # The VLAN database sits in the configuration only in VTP transparent and off modes; in server and
         # client mode it is vlan.dat, which this collector does not read (SLOT_REQUESTS.md 8).
         if vtp in ("transparent", "off"):

@@ -843,7 +843,15 @@ export const init = (prefix) => {
       return "";
     }
     const text = st.lab.checks ? JSON.stringify(st.lab.checks, null, 2) : "";
+    /* the default network check (docs/autochecks/README.md §4.6): on unless the lab says `network: "off"` */
+    const off = !!st.lab.checks && st.lab.checks.network === "off";
+    const network = `<label class="ed-field"><span>${esc(str("ed_network"))}</span>
+        <select class="form-select form-select-sm" data-network${withChecks ? "" : " disabled"}>
+          <option value="auto"${off ? "" : " selected"}>${esc(str("ed_network_auto"))}</option>
+          <option value="off"${off ? " selected" : ""}>${esc(str("ed_network_off"))}</option>
+        </select><small>${esc(str("ed_network_help"))}</small></label>`;
     return `<h3>${esc(str("ed_checks"))}</h3>
+      ${network}
       <label class="ed-field"><textarea class="form-control form-control-sm mono" data-checks rows="8" spellcheck="false"
         placeholder='{"format": "${CHECKS_FORMAT}"}'${withChecks ? "" : " readonly"}>${esc(text)}</textarea>
         <small>${esc(str(withChecks ? "ed_checks_help" : "ed_checkskept"))}</small></label>
@@ -1171,6 +1179,21 @@ export const init = (prefix) => {
       st.lab.checks = value;
     });
   };
+  const networkChange = t => {
+    const checks = Object.assign({format: CHECKS_FORMAT}, st.lab.checks || {});
+    if (t.value === "off") {
+      checks.network = "off";
+    } else {
+      delete checks.network;
+    }
+    const value = Object.keys(checks).length > 1 ? checks : null;
+    if (JSON.stringify(value) === JSON.stringify(st.lab.checks)) {
+      return;
+    }
+    change(() => {
+      st.lab.checks = value;
+    });
+  };
   const segmentChange = t => {
     const i = st.sel.i, g = st.lab.segments[i];
     if (t.dataset.pick !== undefined) {
@@ -1270,6 +1293,9 @@ export const init = (prefix) => {
     if (!s) {
       if (t.dataset.checks !== undefined && withChecks) {
         checksChange(t);
+      }
+      if (t.dataset.network !== undefined && withChecks) {
+        networkChange(t);
       }
       return;
     }

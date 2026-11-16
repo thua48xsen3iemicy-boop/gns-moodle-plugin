@@ -364,6 +364,23 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
             && /The lab has no router \(an image of the router category in the catalog\)/.test(
                 await page.locator('[data-region="nogatewayhelp"]').innerText()));
 
+        // ---- the default network check of a manager that checks labs (docs/autochecks/README.md §4.6)
+        await page.goto(`${BASE}/editor.en.checks.html${MIN}`);
+        await until(async() => (await page.locator('[data-network]').count()) === 1);
+        check('the network check is on by default and the checks document stays empty',
+            (await page.locator('[data-network]').inputValue()) === 'auto'
+            && (await page.locator('[data-checks]').inputValue()) === '');
+        await page.locator('[data-network]').selectOption('off');
+        const offDoc = await until(async() => {
+            const text = await page.locator('[data-checks]').inputValue();
+            return text && JSON.parse(text);
+        });
+        check('turning it off writes network: off into the checks document',
+            JSON.stringify(offDoc) === JSON.stringify({format: 'gns3lab.checks/1', network: 'off'}), JSON.stringify(offDoc));
+        await page.locator('[data-network]').selectOption('auto');
+        await until(async() => (await page.locator('[data-checks]').inputValue()) === '');
+        check('turning it back on leaves no document behind', (await page.locator('[data-checks]').inputValue()) === '');
+
         check('no errors in the page', problems.length === 0, problems.join(' | '));
     } catch (e) {
         check('the run went to the end', false, String(e.stack || e));

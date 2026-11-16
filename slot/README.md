@@ -1,4 +1,7 @@
-# Lab Slot — 0.23.0
+# Lab Slot — 0.24.0
+
+0.24.0: NAT в `ios.config/1` (CONTRACTS §4.6): `nat` интерфейса (`inside`/`outside`) и правила `ip nat inside source` с
+записями ACL (`nat` ноды). Нужны менеджеру для типовой проверки выхода в интернет. Схема прежняя, поля необязательные.
 
 0.23.0: модель сетевых адаптеров QEMU-ноды (возможность `qemu-adapter-type`, CONTRACTS §4.2). `NodeSpec.adapter_type` (поле
 `slot.adapter_type` образа в каталоге менеджера): `e1000`, `e1000e`, `virtio-net-pci`, `vmxnet3` или `rtl8139`; слот передаёт
