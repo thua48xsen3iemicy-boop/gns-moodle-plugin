@@ -704,7 +704,11 @@ cmd_slot() {
     ct_push "$id" "$S/slots/$id/slot.env" /etc/lab-slot/slot.env 0600 0 0
     ct_push "$id" "$REPO_DIR/agent/guest/lab-slot-init" /usr/local/sbin/lab-slot-init 0755 0 0
     ct_push "$id" "$REPO_DIR/slot/lab-slot.service" /etc/systemd/system/lab-slot.service 0644 0 0
-    out=$(ct_sh "$id" "$SLOT_SCRIPT")
+    # The output is captured for gns3-ids: on a failure print it, or the step stops without a word.
+    if ! out=$(ct_sh "$id" "$SLOT_SCRIPT"); then
+      printf '%s\n' "$out"
+      die "slot $id: the checks inside the CT failed (the CT is left running: shut it down and repeat slot $id)"
+    fi
     grep -v '^gns3-ids ' <<<"$out" || true
     grep '^gns3-ids ' <<<"$out" | cut -d' ' -f2 >"$S/slots/$id/gns3-ids"
     [[ -s $S/slots/$id/gns3-ids ]] || die "slot $id: cannot read the gns3 uid/gid"
