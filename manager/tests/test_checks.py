@@ -623,9 +623,11 @@ def lan_facts(**patch):
     return facts
 
 
-def default_run(facts, checks=None, grading=GRADING):
+def default_run(facts, checks=None, grading=GRADING, segments=None):
     definition = {"format": "gns3lab.lab/2", "nodes": [{"name": n, "image": i, "adapters": a, **(
         {"uplink_port": 0} if i == "lab-uplink" else {})} for n, i, a in DNODES]}
+    if segments:
+        definition["segments"] = segments
     state = {"nodes": {nid(n): {"name": n, "status": "started", **f} for n, f in facts.items()}}
     return run_checks(topology=topology(DNODES, DLINKS), state=state, statuses={nid(n): "started" for n, _, _ in DNODES},
                       definition=definition, images=IMAGES, checks=checks, grading=grading, stale=set())
@@ -749,12 +751,12 @@ def linux_edge(snat="masquerade", forward=True):
     return facts
 
 
-def edge_run(image, r1, **patch):
+def edge_run(image, r1, segments=None, **patch):
     global DNODES
     saved = DNODES
     DNODES = [(n, image if n == "R1" else i, a) for n, i, a in saved]
     try:
-        return default_run(lan_facts(R1=r1, **patch))
+        return default_run(lan_facts(R1=r1, **patch), segments=segments)
     finally:
         DNODES = saved
 
@@ -777,3 +779,20 @@ def test_masquerade_on_a_linux_or_routeros_edge(image):
     unknown = edge_run(image, linux_edge(snat=None))  # an older slot, a guest that could not tell
     assert unknown["findings"] == [] and rule(unknown, "nat_missing") == {
         "code": "nat_missing", "group": "routing", "status": "skipped", "reason": "no_collector"}
+
+
+MANAGED_LAN = [{"name": "LAN", "subnet": {"fixed": "192.168.1.0/24"},
+                "gateway": {"node": "R1", "adapter": 1, "port": 0, "host": 1},
+                "members": [{"node": "PC1", "host": 10}, {"node": "PC2", "host": 11}, {"node": "PC3", "host": 12}]}]
+
+
+@pytest.mark.parametrize("image", ["vyos", "mikrotik-chr7"])
+def test_internet_and_nat_are_checked_behind_a_segment_the_manager_set_up(image):
+    # Addresses of the segment are the given environment; the way out to the ISP is still the student's task.
+    assert edge_run(image, linux_edge(), segments=MANAGED_LAN)["findings"] == []
+    result = edge_run(image, linux_edge(snat=[]), segments=MANAGED_LAN)
+    assert messages(result, "nat_missing")[0].endswith("(не выйдут: PC1, PC2, PC3).")
+    no_route = linux_edge()
+    no_route["routes"] = [r for r in no_route["routes"] if r["dst"] != "default"]
+    assert messages(edge_run(image, no_route, segments=MANAGED_LAN), "unreachable") == [
+        "Нет выхода в интернет у PC1, PC2, PC3: у R1 нет маршрута в интернет."]
