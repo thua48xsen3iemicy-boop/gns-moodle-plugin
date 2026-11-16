@@ -1245,11 +1245,11 @@ def test_nat_rules_come_with_what_their_acl_permits():
     ]  # left out: the repeated line, the route map and the VRF
 
 
-def test_an_acl_that_is_missing_or_not_understood_is_unknown():
+def test_a_missing_acl_matches_nothing_and_one_not_understood_is_unknown():
     text = ("ip nat inside source list 9 interface Ethernet0/0 overload\n"
             "ip nat inside source list WEB interface Ethernet0/0 overload\n"
             "ip access-list extended WEB\n permit tcp any any eq 80\n")
-    assert [rule["match"] for rule in parse_ios_config(text, PORTS)["nat"]] == [None, None]
+    assert [rule["match"] for rule in parse_ios_config(text, PORTS)["nat"]] == [[], None]
 
 
 def test_no_nat_lines_is_no_nat_field():

@@ -691,8 +691,8 @@ def nat_of(top, named):
             if tail not in ([], ["overload"]):
                 continue  # vrf, reversible, no-payload...
             if acls is None:
-                acls = acls_of(top, named)
-            rule = {"kind": "list", "acl": rest[1], "match": acls.get(rest[1]), rest[2]: rest[3],
+                acls = acls_of(top, named)  # IOS treats an ACL that is not configured as empty: nothing translated
+            rule = {"kind": "list", "acl": rest[1], "match": acls.get(rest[1], []), rest[2]: rest[3],
                     "overload": tail == ["overload"]}
         else:
             continue
