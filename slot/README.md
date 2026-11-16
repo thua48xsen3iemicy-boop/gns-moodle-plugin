@@ -1,4 +1,8 @@
-# Lab Slot — 0.24.0
+# Lab Slot — 0.25.0
+
+0.25.0: исходящий NAT Linux и RouterOS (CONTRACTS §4.6): поле `snat` в `linux.sys/1` (цепочки nat на хуке postrouting из
+`nft -j list ruleset`; `iptables-save -t nat` — у iptables-nf без nft или при таблице nat legacy-iptables) и в `routeros.sys/1`
+(`/ip/firewall/nat`, цепочка `srcnat`). Нечитаемый NAT — поля нет, имя ноды остаётся.
 
 0.24.0: NAT в `ios.config/1` (CONTRACTS §4.6): `nat` интерфейса (`inside`/`outside`) и правила `ip nat inside source` с
 записями ACL (`nat` ноды). Нужны менеджеру для типовой проверки выхода в интернет. Схема прежняя, поля необязательные.

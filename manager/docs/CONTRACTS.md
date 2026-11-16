@@ -596,7 +596,10 @@ SeaBIOS, как раньше. Secure Boot не поддерживается. О�
 Новое правило `nat_missing` (группа `routing`; классы `major` / `critical` / `critical`): путь хоста в интернет доходит до
 порта ISP через IOL, но его NAT не настроен — у интерфейса к ISP нет `nat: "outside"`, у интерфейса к хостам нет
 `nat: "inside"` или правила `nat` (`ios.config/1`, §4.6) не транслируют адрес хоста. Одна находка на маршрутизатор.
-NAT маршрутизаторов Linux и RouterOS не собирается: `skipped` с `no_collector`. Путь в интернет — по таблицам маршрутов к
+У маршрутизаторов Linux и RouterOS NAT — поле `snat` (`linux.sys/1`, `routeros.sys/1`, слот 0.25.0): решает первое правило,
+чьи `out` и `src` подходят к интерфейсу к ISP и адресу хоста; `masquerade`, `snat` и `other` (переход, который не разобрать)
+транслируют, `accept`/`return` с `exact: true` — нет, остальные не решают. Поля `snat` нет (старый слот, гость не ответил,
+Windows) — `skipped` с `no_collector`. Путь в интернет — по таблицам маршрутов к
 адресу вне лабы; интерфейс IOL с `ip address dhcp` в сети ISP получает подключённую сеть ISP и маршрут по умолчанию через
 порт ISP (расстояние 254), как от DHCP. Сбой пути — `unreachable` «Нет выхода в интернет у …», одна находка на причину.
 
@@ -1260,6 +1263,13 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 Вывод не из одной непустой строки — `failed`, прежние `data` остаются. Отдельный коллектор, а не поле `routeros.net`: сбой
 скрипта не отнимает у ноды интерфейсы. Не проверено на стенде.
 
+🆕 Слот 0.25.0: тот же скрипт второй строкой печатает `@@gns3lab-nat <JSON>` — `:serialize to=json [/ip/firewall/nat/print
+as-value]` внутри `:do … on-error`. Из неё поле `snat` (формат — у `linux.sys/1` ниже): включённые правила цепочки `srcnat` по
+порядку; `action` `masquerade`, `src-nat` → `snat`, `accept`, `return`, остальные — `other`; `out` — `out-interface`;
+`src` — `src-address`. `exact: false`, если в правиле есть другие ключи (протокол, порт, `out-interface-list`, списки
+адресов) или отрицание `!`. Строки нет, `@@gns3lab-nat-error` (RouterOS до 7.13) или непонятный JSON — поля `snat` нет,
+`hostname` остаётся. Строки с меткой в имя не входят: имя по-прежнему — ровно одна строка без метки.
+
 #### 🆕 Коллектор `linux.sys/1` (имя, пересылка и DNS гостя Linux)
 
 Слот 0.17.0. `api/linux_facts.py`. Поля ноды `hostname`, `ip_forward`, `dns` (`live-state.md` §3) — для правил `hostname_wrong`,
@@ -1275,13 +1285,14 @@ Linux, а не «сохранённое», как у `ios.config/1`.
 | Правило | Что значит |
 |---|---|
 | ноды | QEMU-ноды с `qga` семейства `posix` — те же, что у `linux.net` (пока семейство неизвестно, записи нет). Linux-коммутатор (`role: "switch"`) тоже. Для коммутатора менеджер эти поля просто не читает |
-| команда | один `exec` `/bin/sh` через брокер (`METRICS`, `wait=False`, `max_age`): `cat /proc/sys/kernel/hostname`, `cat /proc/sys/net/ipv4/ip_forward`, `head -c 65536` файлов `/etc/resolv.conf` и `/run/systemd/resolve/resolv.conf` (каждый — только если читается). Ничего не меняет |
+| команда | один `exec` `/bin/sh` через брокер (`METRICS`, `wait=False`, `max_age`): `cat /proc/sys/kernel/hostname`, `cat /proc/sys/net/ipv4/ip_forward`, `head -c 65536` файлов `/etc/resolv.conf` и `/run/systemd/resolve/resolv.conf` (каждый — только если читается), 🆕 `nft -j list ruleset` и при условии ниже `iptables-save -t nat`. Ничего не меняет |
 | `hostname` | имя ядра как есть (FQDN, если так задано). Сравнение с именем узла (регистр, FQDN) — дело правила менеджера |
 | `ip_forward` | `true`, если значение `ip_forward` не `0` |
 | `dns.servers` | строки `nameserver` `/etc/resolv.conf` по порядку, без повторов, IPv4 и IPv6; нечитаемый адрес пропускается (как у glibc). Все строки, не только три, которыми пользуется glibc |
 | `dns.search` | слова последней строки `search` или `domain` (у glibc побеждает последняя); нет строк — `[]` |
 | systemd-resolved | все `nameserver` — заглушки `127.0.0.53`/`127.0.0.54`, и `/run/systemd/resolve/resolv.conf` читается: `servers` — оттуда (куда resolved пересылает запросы, может быть `[]`), `search` — из `/etc/resolv.conf`, `resolver: "systemd-resolved"`. Файла с вышестоящими серверами нет — `servers: ["127.0.0.53"]` без `resolver` (resolved, скорее всего, не работает) |
 | нет `/etc/resolv.conf` | `dns: {"servers": [], "search": []}` |
+| 🆕 `snat` | (слот 0.25.0) исходящий NAT — правила цепочек `type nat hook postrouting` семейств `ip` и `inet` из `nft -j list ruleset` (там и правила `iptables-nft`, и то, что собирает VyOS), по приоритету цепочки и порядку правил. `iptables-save -t nat` (цепочка `POSTROUTING`) читается, если это iptables-nf, а `nft` нет, или legacy-iptables и в `/proc/net/ip_tables_names` есть `nat` (иначе команда не запускается: она загрузила бы модуль). Правило — `{"action": "masquerade" \| "snat" \| "accept" \| "return" \| "other", "out": <интерфейс> \| null, "src": "A/N" \| null, "exact": bool}`: `out` — `oifname`/`oif` или `-o`, `src` — `ip saddr` или `-s`; `other` — переход в другую цепочку, `drop`, DNAT. `exact: false` — в правиле есть условие, которое разбор не читает (протокол, порт, отрицание, шаблон интерфейса `eth*`/`eth+`, множество, метка); `counter`, `log`, комментарий условиями не считаются. Правило без вердикта пропускается. Нет ни `nft`, ни `iptables-save` для чтения — `[]`. Команда вернула не 0, вывод обрезан (1 МиБ) или не разбирается — поля нет, остальное `data` остаётся |
 | сбои | как у `linux.net` после того, как семейство известно: `cat` не прочитал `/proc` — `failed` с текстом `stderr`; непонятный вывод — `failed` («Unexpected output of …» без текста гостя), прежние `data` остаются; код 127 — `unsupported` |
 | проверено на стенде | нет. Разбор проверен на выводе команды в контейнере разработки (Ubuntu 24.04) и на примерах `resolv.conf` systemd-resolved |
 

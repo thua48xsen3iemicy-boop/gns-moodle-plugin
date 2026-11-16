@@ -31,6 +31,8 @@ from api.facts import (
     guest_is_windows,
     parse_linux_net,
     parse_routeros_net,
+    parse_routeros_sys,
+    NAT_MARK,
     parse_switch_fdb,
     parse_switch_net,
     parse_windows_net,
@@ -549,7 +551,7 @@ LINUX_SYS_SUCCESS = {
     "stdout": "@@gns3lab hostname\nPC1\n@@gns3lab ip_forward\n0\n@@gns3lab resolv\nnameserver 10.0.0.53\n\n",
     "stderr": "",
 }
-LINUX_SYS_DATA = {"hostname": "PC1", "ip_forward": False, "dns": {"servers": ["10.0.0.53"], "search": []}}
+LINUX_SYS_DATA = {"hostname": "PC1", "ip_forward": False, "dns": {"servers": ["10.0.0.53"], "search": []}, "snat": []}
 LINUX_CONFIG_NONE = {"exit_code": 0, "stdout": "@@gns3lab mechanism none\n", "stderr": ""}
 LINUX_CONFIG_DATA = {"net_saved": {"mechanism": "none", "ok": True, "interfaces": []}}
 LINUX_COLLECTORS = ["linux.net", "linux.sys", "linux.config"]  # what an ordinary Linux host gets
@@ -1911,3 +1913,29 @@ def test_a_refusal_of_the_guest_is_published_at_once(monkeypatch):
         assert facts.snapshot("p1")["nodes"]["n1"]["collectors"]["linux.config"]["error"]["code"] == "failed"
 
     scenario(monkeypatch, body)
+
+
+# --- routeros.sys: source NAT ---------------------------------------------------------------------------------------
+
+def test_routeros_srcnat_rules_come_after_the_identity():
+    rules = [
+        {".id": "*1", "chain": "srcnat", "action": "masquerade", "out-interface": "ether1", "src-address": "192.168.88.0/24",
+         "disabled": False, "dynamic": False, "invalid": False, "bytes": 0, "packets": 0},
+        {".id": "*2", "chain": "srcnat", "action": "masquerade", "out-interface-list": "WAN", "disabled": False},
+        {".id": "*3", "chain": "srcnat", "action": "src-nat", "src-address": "!10.0.0.0/8", "to-addresses": "1.2.3.4"},
+        {".id": "*4", "chain": "srcnat", "action": "masquerade", "disabled": True},
+        {".id": "*5", "chain": "dstnat", "action": "dst-nat", "to-addresses": "192.168.88.10"},
+        {".id": "*6", "chain": "srcnat", "action": "accept", "protocol": "tcp"},
+    ]
+    stdout = f"R1\r\n{NAT_MARK} {json.dumps(rules)}\r\n"
+    assert parse_routeros_sys(stdout) == {"hostname": "R1", "snat": [
+        {"action": "masquerade", "out": "ether1", "src": "192.168.88.0/24", "exact": True},
+        {"action": "masquerade", "out": None, "src": None, "exact": False},  # an interface list is not read
+        {"action": "snat", "out": None, "src": None, "exact": False},  # a negation
+        {"action": "accept", "out": None, "src": None, "exact": False},
+    ]}
+    assert parse_routeros_sys(f"R1\n{NAT_MARK} \n")["snat"] == []  # an empty menu prints nothing
+    assert parse_routeros_sys(f"R1\n{NAT_MARK}-error\n") == {"hostname": "R1"}  # RouterOS before 7.13
+    assert parse_routeros_sys(f"R1\n{NAT_MARK} [{{broken\n") == {"hostname": "R1"}
+    with pytest.raises(FactError):
+        parse_routeros_sys(f"R1\nR2\n{NAT_MARK} []\n")
