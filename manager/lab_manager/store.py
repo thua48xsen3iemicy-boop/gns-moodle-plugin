@@ -91,6 +91,9 @@ class Store:
     async def sync_slots(self, slots):
         """Mirror the slots file. New slots start in maintenance until an operator enables them."""
         async with self.pool.connection() as conn, conn.transaction():
+            # Addresses are unique among the slots in the file only: take every slot out first, so a renumbered
+            # slot may reuse the address of a removed one and two slots may swap addresses.
+            await conn.execute("UPDATE slots SET in_config = false WHERE in_config")
             for s in slots:
                 await conn.execute(
                     "INSERT INTO slots (vmid, address, port, state, in_config)"
@@ -99,10 +102,6 @@ class Store:
                     " port = EXCLUDED.port, in_config = true",
                     (s.vmid, s.address, s.port),
                 )
-            await conn.execute(
-                "UPDATE slots SET in_config = false WHERE NOT (vmid = ANY(%s))",
-                ([s.vmid for s in slots],),
-            )
 
     async def slots(self):
         async with self.pool.connection() as conn:

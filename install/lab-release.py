@@ -595,6 +595,7 @@ SOURCE_FILES = (
     'manager/lab_manager/migrations/011_check_runs.sql',
     'manager/lab_manager/migrations/012_purges.sql',
     'manager/lab_manager/migrations/013_maintenance.sql',
+    'manager/lab_manager/migrations/014_slot_address_in_config.sql',
     'manager/lab_manager/migrations/__init__.py',
     'manager/lab_manager/orchestrator.py',
     'manager/lab_manager/netconfig.py',
