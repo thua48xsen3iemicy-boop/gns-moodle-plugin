@@ -357,6 +357,33 @@ san_has() {  # Warn when a kept certificate no longer matches lab.conf
     warn "$1 has no $2 in its SAN: delete it and its .key, then run secrets again"
 }
 
+# pool_sync: lab-slots holds exactly the slots of SLOTS. The manager's token has rights on the pool,
+# so a slot outside it cannot be used and a leftover member (an old slot, a template) must not stay there.
+# Proxmox rejects a whole 'pool modify' when one VMID is a member already: add only the missing ones.
+pool_sync() {
+  local members id out add=() stale=()
+  members=$(pvesh get /pools/lab-slots --output-format json | python3 -c '
+import json, sys
+print(" ".join(str(m["vmid"]) for m in json.load(sys.stdin).get("members", []) if m.get("type") in ("lxc", "qemu")))
+') || die "pool lab-slots: cannot read its members"
+  for id in "${SLOT_IDS[@]}"; do [[ " $members " == *" $id "* ]] || add+=("$id"); done
+  for id in $members; do [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || stale+=("$id"); done
+  if ((${#add[@]})); then
+    log "pool lab-slots: adding ${add[*]}"
+    if ! pveum pool modify lab-slots -vms "$(IFS=,; echo "${add[*]}")" >/dev/null 2>&1; then
+      for id in "${add[@]}"; do  # One by one, to name the slot that cannot be added
+        out=$(pveum pool modify lab-slots -vms "$id" 2>&1) ||
+          warn "pool lab-slots: slot $id: $out (a slot in another pool is unusable for the manager:" \
+            "pveum pool modify lab-slots -vms $id -allow-move 1)"
+      done
+    fi
+  fi
+  for id in "${stale[@]}"; do
+    log "pool lab-slots: removing $id, it is not in SLOTS"
+    out=$(pveum pool modify lab-slots -vms "$id" -delete 1 2>&1) || warn "pool lab-slots: cannot remove $id: $out"
+  done
+}
+
 pve_token() {
   local f=$S/manager/pve-token-secret tid='lab-manager@pve!manager'
   log "Proxmox token $tid, pool lab-slots"
@@ -365,10 +392,7 @@ pve_token() {
   pveum role add LabManagerNodes -privs "Sys.Audit" 2>/dev/null || true
   pveum user add lab-manager@pve 2>/dev/null || true
   pveum pool add lab-slots 2>/dev/null || true
-  local out
-  # A repeat may report the slots as members already; a slot in another pool lacks the token's rights.
-  out=$(pveum pool modify lab-slots -vms "$(IFS=,; echo "${SLOT_IDS[*]}")" 2>&1) ||
-    warn "pool lab-slots: $out (the slots must be members of lab-slots)"
+  pool_sync
   if [[ ! -s $f ]]; then
     # The secret is shown only once: without the file the token is recreated.
     pveum user token remove lab-manager@pve manager 2>/dev/null || true
