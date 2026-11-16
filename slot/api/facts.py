@@ -455,14 +455,57 @@ def parse_routeros_net(stdout, macs):
 
 
 # The identity of a RouterOS guest is its hostname: one line, `/system identity` exists in RouterOS 6 and 7.
-ROUTEROS_SYS_COMMAND = ":put [/system identity get name]"
+# The source NAT rules follow on a marked line (`:serialize`, RouterOS 7.13+); a guest that cannot print them says so
+# on its own marked line and keeps its hostname.
+NAT_MARK = "@@gns3lab-nat"
+ROUTEROS_SYS_COMMAND = (
+    ":put [/system identity get name]\n"
+    f':do {{ :put ("{NAT_MARK} " . [:serialize to=json [/ip/firewall/nat/print as-value]]) }} '
+    f'on-error={{ :put "{NAT_MARK}-error" }}'
+)
+# Keys of a srcnat rule that say nothing about which packets it takes; any other key is a condition this parser does not
+# read (a protocol, a port, an address list...), and the rule is not `exact`.
+ROUTEROS_NAT_PLAIN = {".id", "chain", "action", "disabled", "dynamic", "invalid", "comment", "log", "log-prefix", "bytes",
+                      "packets", "to-addresses", "to-ports", "out-interface", "src-address", ".nextid", ".about"}
+ROUTEROS_NAT_ACTIONS = {"masquerade": "masquerade", "src-nat": "snat", "accept": "accept", "return": "return"}
+
+
+def routeros_snat(rules):
+    """`/ip/firewall/nat` -> `snat` of routeros.sys/1: the enabled rules of the srcnat chain, in order (linux.sys/1)."""
+    out = []
+    for rule in as_list(rules):
+        if not isinstance(rule, dict) or rule.get("chain") != "srcnat" or rule.get("disabled") in (True, "true"):
+            continue
+        exact = set(rule) <= ROUTEROS_NAT_PLAIN
+        iface = rule.get("out-interface")
+        if not isinstance(iface, str) or iface.startswith("!"):
+            exact = exact and iface is None
+            iface = None
+        src = rule.get("src-address")
+        try:
+            src = str(ipaddress.IPv4Network(src, strict=False)) if isinstance(src, str) else None
+        except ValueError:
+            exact, src = False, None  # a negation, a range
+        if "src-address" in rule and src is None:
+            exact = False
+        out.append({"action": ROUTEROS_NAT_ACTIONS.get(rule.get("action"), "other"), "out": iface, "src": src,
+                    "exact": exact})
+    return out
 
 
 def parse_routeros_sys(stdout):
     lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-    if len(lines) != 1:
+    names = [line for line in lines if not line.startswith(NAT_MARK)]
+    if len(names) != 1:
         raise FactError("failed", "Unexpected output of /system identity")
-    return {"hostname": lines[0]}
+    data = {"hostname": names[0]}
+    nat = [line for line in lines if line == NAT_MARK or line.startswith(NAT_MARK + " ")]
+    if len(nat) == 1:
+        try:
+            data["snat"] = routeros_snat(json.loads(nat[0][len(NAT_MARK) + 1 :] or "[]"))
+        except (ValueError, TypeError, AttributeError):
+            pass  # the hostname stays; `snat` is simply not known
+    return data
 
 
 # Linux switch (images/linux-switch): one exec asks the guest API twice. No switchctl means the node

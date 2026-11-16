@@ -13,11 +13,14 @@ The output of both commands is a sequence of sections, each opened by a line `@@
 """
 
 import ipaddress
+import json
 import re
+import shlex
 
 MARK = "@@gns3lab"
 MESSAGE_LIMIT = 200
 TEXT_LIMIT = 65536  # resolv.conf is a few lines; a bigger one is cut, not refused
+NAT_LIMIT = 1 << 20  # the ruleset of a router (VyOS) is tens of KiB; a cut one is not read, the hostname stays
 
 
 class ParseError(ValueError):
@@ -61,6 +64,18 @@ printf '%s hostname\\n%s\\n%s ip_forward\\n%s\\n' "$M" "$h" "$M" "$f"
 if [ -r /etc/resolv.conf ]; then echo "$M resolv"; head -c {TEXT_LIMIT} /etc/resolv.conf; echo; fi
 if [ -r /run/systemd/resolve/resolv.conf ]; then
   echo "$M upstream"; head -c {TEXT_LIMIT} /run/systemd/resolve/resolv.conf; echo
+fi
+n=; if command -v nft >/dev/null 2>&1; then
+  n=1; o=$(nft -j list ruleset 2>/dev/null); r=$?; echo "$M nft $r"; printf '%s' "$o" | head -c {NAT_LIMIT}; echo
+fi
+if command -v iptables-save >/dev/null 2>&1; then
+  case $(iptables-save --version 2>/dev/null) in
+    *nf_tables*) i=; [ -z "$n" ] && i=1 ;;
+    *) i=; grep -qx nat /proc/net/ip_tables_names 2>/dev/null && i=1 ;;
+  esac
+  if [ -n "$i" ]; then
+    o=$(iptables-save -t nat 2>/dev/null); r=$?; echo "$M iptables $r"; printf '%s' "$o" | head -c {NAT_LIMIT}; echo
+  fi
 fi
 """
 
@@ -106,7 +121,170 @@ def parse_linux_sys(stdout):
         dns["servers"] = resolver_config(parts["upstream"][1])[0]
         dns["resolver"] = "systemd-resolved"
     data["dns"] = dns
+    snat = snat_of(parts)
+    if snat is not None:
+        data["snat"] = snat
     return data
+
+
+# --- source NAT of a Linux router (linux.sys/1 `snat`) -------------------------------------------------------------
+#
+# What leaves the node translated: the rules of the nat chains on the postrouting hook, in the order the kernel walks
+# them. nftables shows its own rules, those of iptables-nft and those VyOS compiles. iptables-save is read when it is
+# the nf_tables one and there is no nft (the same rules, seen the other way), or when it is the legacy one and the
+# legacy kernel tables hold a nat table (it is not run otherwise: it would load the module). A rule is
+# {"action": "masquerade" | "snat" | "accept" | "return" | "other", "out": <interface> | None, "src": <net> | None,
+#  "exact": bool}; `exact` is false when the rule has a condition this parser does not read (a protocol, a port, a
+# negation, a wildcard interface, a mark...): the manager then gives it the benefit of the doubt.
+
+TRANSLATE = ("masquerade", "snat")
+XT_TARGETS = {"MASQUERADE": "masquerade", "SNAT": "snat", "ACCEPT": "accept", "RETURN": "return"}
+
+
+def snat_rule(action, out=None, src=None, exact=True):
+    return {"action": action, "out": out, "src": src, "exact": exact}
+
+
+def nft_value(right):
+    """The right side of an nft JSON match -> a network as text, or None when it is not one (sets, ranges...)."""
+    if isinstance(right, str):
+        return str(ipaddress.IPv4Network(right, strict=False))
+    if isinstance(right, dict) and isinstance(right.get("prefix"), dict):
+        prefix = right["prefix"]
+        return str(ipaddress.IPv4Network(f"{prefix['addr']}/{int(prefix['len'])}", strict=False))
+    return None
+
+
+def nft_rule(expressions):
+    out = src = None
+    exact, action = True, None
+    for expr in expressions:
+        if not isinstance(expr, dict) or len(expr) != 1:
+            exact = False
+            continue
+        (key, value), = expr.items()
+        if key in ("counter", "log", "limit"):
+            continue
+        if key == "match" and isinstance(value, dict) and value.get("op") in ("==", "in"):
+            left, right = value.get("left") or {}, value.get("right")
+            meta = left.get("meta", {}).get("key") if isinstance(left.get("meta"), dict) else None
+            payload = left.get("payload") if isinstance(left.get("payload"), dict) else {}
+            if meta in ("oifname", "oif") and isinstance(right, str) and not right.endswith("*"):
+                out = right
+                continue
+            if payload.get("protocol") == "ip" and payload.get("field") == "saddr":
+                try:
+                    src = nft_value(right)
+                except (ValueError, KeyError, TypeError):
+                    src = None
+                if src is not None:
+                    continue
+            exact = False
+        elif key in ("masquerade", "snat", "accept", "return"):
+            action = key
+        elif key == "xt" and isinstance(value, dict):  # iptables-nft: a target or match nft cannot show natively
+            name = str(value.get("name", ""))
+            if value.get("type") == "target":
+                action = XT_TARGETS.get(name, "other")
+            elif name != "comment":
+                exact = False
+        elif key in ("jump", "goto", "drop", "dnat", "redirect"):
+            action = "other"
+        else:
+            exact = False
+    if action is None:
+        return None  # a rule without a verdict changes nothing (a counter): the walk goes on
+    return snat_rule(action, out, src, exact)
+
+
+def parse_nft(text):
+    """`nft -j list ruleset` -> source NAT rules of the nat chains on the postrouting hook, by priority."""
+    document = json.loads(text)
+    items = document.get("nftables") if isinstance(document, dict) else None
+    if not isinstance(items, list):
+        raise ParseError("nft printed no ruleset")
+    chains = {}
+    for item in items:
+        chain = item.get("chain") if isinstance(item, dict) else None
+        if isinstance(chain, dict) and chain.get("type") == "nat" and chain.get("hook") == "postrouting" \
+                and chain.get("family") in ("ip", "inet"):
+            prio = chain.get("prio")
+            chains[(chain["family"], chain.get("table"), chain.get("name"))] = prio if isinstance(prio, int) else 100
+    rules = []
+    for order, item in enumerate(items):
+        rule = item.get("rule") if isinstance(item, dict) else None
+        if not isinstance(rule, dict):
+            continue
+        key = (rule.get("family"), rule.get("table"), rule.get("chain"))
+        if key in chains and (entry := nft_rule(rule.get("expr") or [])) is not None:
+            rules.append((chains[key], order, entry))
+    return [entry for _, _, entry in sorted(rules, key=lambda r: (r[0], r[1]))]
+
+
+def iptables_rule(words):
+    out = src = None
+    exact, action = True, None
+    k = 0
+    while k < len(words):
+        word = words[k]
+        nxt = words[k + 1] if k + 1 < len(words) else None
+        if word in ("-s", "--source") and nxt:
+            try:
+                src = str(ipaddress.IPv4Network(nxt, strict=False))
+            except ValueError:
+                exact = False
+            k += 2
+        elif word in ("-o", "--out-interface") and nxt:
+            if nxt.endswith("+"):
+                exact = False
+            else:
+                out = nxt
+            k += 2
+        elif word in ("-j", "--jump") and nxt:
+            action = XT_TARGETS.get(nxt, "other")
+            k += 2
+        elif word == "-m" and nxt == "comment":
+            k += 2
+        elif word == "--comment" and nxt:
+            k += 2
+        elif word in ("--to-source", "--to-ports", "--random", "--random-fully", "--persistent"):
+            k += 1 if word in ("--random", "--random-fully", "--persistent") else 2
+        else:
+            exact = False  # `!`, a protocol, a port, a match module...
+            k += 1
+    if action is None:
+        return None
+    return snat_rule(action, out, src, exact)
+
+
+def parse_iptables(text):
+    """`iptables-save -t nat` -> source NAT rules of the POSTROUTING chain, in order."""
+    rules = []
+    for line in text.splitlines():
+        words = shlex.split(line) if line.startswith("-A POSTROUTING ") else []
+        if words and (entry := iptables_rule(words[2:])) is not None:
+            rules.append(entry)
+    return rules
+
+
+def snat_of(parts):
+    """`snat` of linux.sys/1, or None when the guest could not tell (no tool answered, a cut or broken output)."""
+    rules, told = [], False
+    for name, parse in (("nft", parse_nft), ("iptables", parse_iptables)):
+        if name not in parts:
+            continue
+        rc, lines = parts[name]
+        if rc != "0":
+            return None
+        text = "\n".join(lines).strip()
+        try:
+            rules += parse(text) if text else []
+        except (ParseError, ValueError, TypeError, KeyError, AttributeError):
+            return None
+        told = True
+    if not told:
+        return [] if "nft" not in parts and "iptables" not in parts else None
+    return rules
 
 
 # --- linux.config/1 -----------------------------------------------------------------------------------------------
