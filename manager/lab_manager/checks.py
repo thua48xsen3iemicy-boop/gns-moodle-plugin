@@ -981,7 +981,8 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
 
     # ---------------------------------------------------------------- the default network check (§4.6): domains
     auto_doms = []  # [(domain, cabled members of hosts and routers, ISP LANs it holds)]
-    if checks.get("network", "auto") == "auto":
+    network_auto = checks.get("network", "auto") == "auto"
+    if network_auto:
         covered = {ep.end for e in expected if e.kind == "segment" and e.match != "auto" for ep in e.endpoints}
         for d in model.domains:
             members = [i for i in d.members if i.node_id not in ignored and roles.get(i.node_id) in ("host", "router")
@@ -1426,11 +1427,13 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                         nodes=[names(na), names(nb)] + [names(x) for x in result[2]],
                         objects=objects | {f"node:{x}" for x in result[2]})
                 break
-    elif not (auto_doms and isp_nodes):
+    elif not (network_auto and isp_nodes):
         run.skip("unreachable", "no_expectation")
 
     # ---------------------------------------------------------------- the default network check: internet and NAT
-    if auto_doms and isp_nodes:
+    # Every host of the lab, not only those of the inferred domains: addresses a segment of the manager gives are the
+    # environment, the way out to the ISP through the router is still the task.
+    if network_auto and isp_nodes:
         run.ran("unreachable", "nat_missing")
         all_lans = set().union(*(isp_lans or {}).values()) if isp_lans else set()
 
@@ -1450,13 +1453,13 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
             return False
 
         hosts = []
-        for d, members, lans in auto_doms:
-            for h in members:
-                ip = next((a.ip for a in h.addrs if a.ip not in APIPA), None)
-                if roles.get(h.node_id) != "host" or ip is None or any(ip in net for net in all_lans):
-                    continue
-                if h.node_id not in {x[0] for x in hosts} and availability(h.node_id) is None:
-                    hosts.append((h.node_id, ip))
+        for nid in model.nodes:
+            if nid in ignored or roles.get(nid) != "host" or availability(nid) is not None:
+                continue
+            ip = next((a.ip for i in model.ifaces.get(nid, []) if i.kind != "loopback" and i.port is not None
+                       and (nid, *i.port) in model.peer for a in i.addrs if a.ip not in APIPA), None)
+            if ip is not None and not any(ip in net for net in all_lans):
+                hosts.append((nid, ip))
         failures, nat_problems = {}, {}
         for nid, ip in sorted(hosts, key=lambda x: names(x[0])):
             if not cabled_to_isp(nid):
