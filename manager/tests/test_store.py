@@ -120,3 +120,26 @@ async def test_new_slots_start_in_maintenance(tmp_path, dsn):
         await env.services.store.sync_slots([extra])
         assert (await env.services.store.slot(201))["in_config"] is False
         assert await env.services.store.free_slots() == []
+
+
+async def test_renumbered_slots_reuse_addresses(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201, 202)) as env:
+        from lab_manager.config import SlotConfig
+
+        store = env.services.store
+        old = {s.vmid: s for s in env.settings.slots.values()}
+        # New VMIDs on the addresses of the removed slots
+        new = [SlotConfig(vmid=v + 100, address=old[v].address, api_token="b" * 40) for v in (201, 202)]
+        await store.sync_slots(new)
+        assert (await store.slot(301))["address"] == old[201].address
+        assert (await store.slot(201))["in_config"] is False
+        # Two slots in the file swap their addresses
+        swapped = [SlotConfig(vmid=301, address=old[202].address, api_token="b" * 40),
+                   SlotConfig(vmid=302, address=old[201].address, api_token="b" * 40)]
+        await store.sync_slots(swapped)
+        assert (await store.slot(302))["address"] == old[201].address
+        # Back to the old numbering: the removed rows return with their addresses
+        await store.sync_slots(list(old.values()))
+        assert (await store.slot(201))["in_config"] is True
+        assert (await store.slot(301))["in_config"] is False
+
