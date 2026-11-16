@@ -500,6 +500,33 @@ def uplink_lans(model: Model, roles: dict, definition: dict | None, images: dict
     return lans
 
 
+LINUX_NET_CONFIG = ("ifupdown", "networkmanager", "netplan", "networkd")
+
+
+def isp_routers(model: Model, roles: dict, definition: dict | None, images: dict) -> dict:
+    """Roles with a Linux host promoted to a router when it is one by its cables: more than one port cabled and one of
+    them reaching an ISP (directly or through switches). A teacher may well cable plain hosts to the ISP for tasks of
+    their own: one cable keeps a host a host. Linux: the slot reads its ip_forward (linux.sys/1), or its image saves
+    addresses the Linux way."""
+    isp = isp_nodes_of(model, definition, images)
+    if not isp:
+        return roles
+    image_of = {n.get("name"): images.get(n.get("image")) for n in (definition or {}).get("nodes", [])}
+    out = dict(roles)
+    for nid, node in model.nodes.items():
+        if roles.get(nid) != "host" or node["type"] != "qemu" or nid in isp:
+            continue
+        image = image_of.get(node["name"])
+        linux = isinstance((node["facts"] or {}).get("ip_forward"), bool) or \
+            (image is not None and image.net_config in LINUX_NET_CONFIG)
+        ports = [end for end in model.peer if end[0] == nid]
+        if not linux or len(ports) < 2:
+            continue
+        if any(x[0] in isp for end in ports for x in l2_reach(model, roles, end)[0]):
+            out[nid] = "router"
+    return out
+
+
 def isp_nodes_of(model: Model, definition: dict | None, images: dict) -> set:
     """Node ids of the ISP nodes of a lab from Moodle: their image has an uplink_port (images/lab-uplink)."""
     out = set()
@@ -1734,7 +1761,7 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
     whose addresses are not the student's.
     """
     model = Model(topology, state, statuses, now, consoles)
-    roles = node_roles(model, definition, images)
+    roles = isp_routers(model, node_roles(model, definition, images), definition, images)
     state, unsaved = with_unsaved_iol(model, roles, state)
     if unsaved:
         model = Model(topology, state, statuses, now, consoles)

@@ -796,3 +796,25 @@ def test_internet_and_nat_are_checked_behind_a_segment_the_manager_set_up(image)
     no_route["routes"] = [r for r in no_route["routes"] if r["dst"] != "default"]
     assert messages(edge_run(image, no_route, segments=MANAGED_LAN), "unreachable") == [
         "Нет выхода в интернет у PC1, PC2, PC3: у R1 нет маршрута в интернет."]
+
+
+def test_a_linux_host_cabled_to_the_isp_and_a_lan_is_a_router():
+    # R1 is a plain Debian (category host): two cables, one to the ISP, so it is checked as the router it is.
+    debian = linux_edge()
+    assert edge_run("debian12", debian)["findings"] == []  # forwarding on is no forwarding_on_host
+    off = edge_run("debian12", linux_edge(forward=False))
+    assert codes(off, counted=True) == ["forwarding_off"]
+    assert {f["code"] for f in off["findings"] if f["caused_by"]} == {"unreachable"}
+    # The hosts take it as the router of their LAN: a gateway elsewhere is wrong, none is missing
+    gw = edge_run("debian12", linux_edge(), PC1=host("192.168.1.10/24"))
+    assert messages(gw, "gateway_missing") == [
+        "PC1: нет шлюза по умолчанию; должен быть адрес маршрутизатора в его сети (192.168.1.1)."]
+
+
+def test_a_linux_host_with_one_cable_to_the_isp_stays_a_host():
+    nodes = [("ISP1", "lab-uplink", 3), ("PC1", "debian12", 2), ("PC2", "debian12", 1)]
+    links = [(("ISP1", 1), ("PC1", 0)), (("ISP1", 2), ("PC2", 0))]
+    pc1 = host("198.18.1.100/24", "198.18.1.1")
+    pc1["ip_forward"] = True  # one cable: an ordinary node of the teacher's own task, forwarding is still a mistake
+    facts = {"PC1": pc1, "PC2": host("198.18.2.100/24", "198.18.2.1")}
+    assert codes(isp_run(facts, links, nodes)) == ["forwarding_on_host"]
