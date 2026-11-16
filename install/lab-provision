@@ -280,7 +280,14 @@ ct_up() {
   [[ $(ct_state "$1") == running ]] || pct start "$1"
   local i
   for i in $(seq 1 60); do
-    pct exec "$1" -- true 2>/dev/null && return 0
+    if pct exec "$1" -- true 2>/dev/null; then
+      # The first answer comes while systemd is still booting the CT: commands attached then may
+      # fail without a word. Wait for the boot to finish; "degraded" (a failed unit) is fine here.
+      timeout 120 pct exec "$1" -- systemctl is-system-running --wait >/dev/null 2>&1 ||
+        [[ $(pct exec "$1" -- systemctl is-system-running 2>/dev/null) == degraded ]] ||
+        warn "CT $1: systemd has not finished booting in 120 s, going on"
+      return 0
+    fi
     sleep 1
   done
   die "CT $1 did not start"
@@ -290,7 +297,10 @@ ct_down() { [[ $(ct_state "$1") == stopped ]] || pct shutdown "$1" --timeout 90;
 ct_sh() {
   local id=$1 script=$2
   shift 2
-  pct exec "$id" -- env "$@" bash -c "umask 022; set -euo pipefail; $script"
+  local rc=0
+  pct exec "$id" -- env "$@" bash -c "umask 022; set -euo pipefail; $script" || rc=$?
+  ((rc == 0)) || printf 'ERROR: CT %s: a command inside failed (exit %s): %s\n' "$id" "$rc" "${script:0:120}" >&2
+  return "$rc"
 }
 # ct_push <vmid> <file> <path in CT> <mode> <uid> <gid> (ids inside the CT)
 ct_push() { pct push "$1" "$2" "$3" --perms "$4" --user "$5" --group "$6"; }
