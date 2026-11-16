@@ -64,10 +64,12 @@ load_conf() {
   # shellcheck source=/dev/null
   . "$CONF"
   local v
-  for v in CEPH_ROOT REPO_DIR STUDENTS_DIR SECRETS_DIR AGENT_DOMAIN MANAGER_VMID SLOTS \
+  for v in CEPH_ROOT REPO_DIR STUDENTS_DIR SECRETS_DIR AGENT_DOMAIN MANAGER_VMID \
            PUBLIC_NAME MOODLE_URL MOODLE_IP SITE_SLUG; do
     [[ -n ${!v:-} ]] || die "$v is not set in $CONF"
   done
+  expand_slots
+  [[ -n $SLOTS ]] || die "SLOTS is not set in $CONF (and CREATE_SLOTS has no slots to take it from)"
   CEPH_ROOT=${CEPH_ROOT%/} REPO_DIR=${REPO_DIR%/} MOODLE_URL=${MOODLE_URL%/} STUDENTS_DIR=${STUDENTS_DIR%/}
   IMAGES_DIR=${IMAGES_DIR:-} IMAGES_DIR=${IMAGES_DIR#/} IMAGES_DIR=${IMAGES_DIR%/}
   [[ -z $IMAGES_DIR || $IMAGES_DIR =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] ||
@@ -134,8 +136,52 @@ load_conf() {
   fi
 }
 
+# expand_slots: unfold the VMID ranges of SLOTS ("2001-2025 2101") and CREATE_SLOTS
+# ("2001-2025=pve1:10.10.12.101": consecutive IPs from the first one) into one entry per slot.
+# An empty SLOTS becomes the VMIDs of CREATE_SLOTS.
+SLOT_RANGE_MAX=1000  # Slots in one range: a typo like 2001-20025 must not plan thousands of CTs
+expand_slots() {
+  local entry ids rest node ip net first last i octet out=() planned=()
+  for entry in ${CREATE_SLOTS:-}; do
+    ids=${entry%%=*} rest=${entry#*=}
+    [[ $entry == *=* && $ids =~ ^([0-9]+)(-([0-9]+))?$ ]] ||
+      die "CREATE_SLOTS: expected <vmid>=<node>:<ip> or <first>-<last>=<node>:<first ip>, got '$entry'"
+    first=$((10#${BASH_REMATCH[1]})) last=$((10#${BASH_REMATCH[3]:-${BASH_REMATCH[1]}}))
+    ((first <= last && last - first < SLOT_RANGE_MAX)) ||
+      die "CREATE_SLOTS: invalid VMID range '$ids' (first <= last, at most $SLOT_RANGE_MAX slots)"
+    if ((first == last)); then
+      out+=("$first=$rest") planned+=("$first")
+      continue
+    fi
+    node=${rest%%:*} ip=${rest#*:}
+    [[ $rest == *:* && $ip =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.([0-9]+)$ ]] ||
+      die "CREATE_SLOTS $ids: a range takes the IP of its first slot, got '$rest'"
+    net=${BASH_REMATCH[1]} octet=$((10#${BASH_REMATCH[2]}))
+    ((octet + last - first <= 254)) ||
+      die "CREATE_SLOTS $ids: the IPs from $ip run past .254 ($((last - first + 1)) slots)"
+    for ((i = first; i <= last; i++)); do
+      out+=("$i=$node:$net.$((octet + i - first))") planned+=("$i")
+    done
+  done
+  CREATE_SLOTS=${out[*]}
+  if [[ -z ${SLOTS:-} || ${SLOTS:-} =~ ^[[:space:]]*$ ]]; then
+    SLOTS=${planned[*]}
+    return
+  fi
+  out=()
+  for entry in $SLOTS; do
+    [[ $entry =~ ^([0-9]+)(-([0-9]+))?$ ]] || die "SLOTS: expected VMIDs or <first>-<last>, got '$entry'"
+    first=$((10#${BASH_REMATCH[1]})) last=$((10#${BASH_REMATCH[3]:-${BASH_REMATCH[1]}}))
+    ((first <= last && last - first < SLOT_RANGE_MAX)) ||
+      die "SLOTS: invalid VMID range '$entry' (first <= last, at most $SLOT_RANGE_MAX slots)"
+    for ((i = first; i <= last; i++)); do out+=("$i"); done
+  done
+  SLOTS=${out[*]}
+}
+
 # Optional CTs the script creates itself: CREATE_MANAGER="<node>:<ip>",
 # CREATE_SLOTS="<vmid>=<node>:<ip> ...", SLOT_TEMPLATE="<vmid>=<node>:<ip|dhcp>".
+# CREATE_SLOTS and SLOTS are already unfolded by expand_slots.
 load_plan() {
   declare -gA PLAN_NODE=() PLAN_IP=()
   local entry id rest used=" "

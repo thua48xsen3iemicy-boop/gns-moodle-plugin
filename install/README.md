@@ -23,6 +23,7 @@
 
 Ноду и IP каждого контейнера скрипт берёт из `/etc/pve/nodes/<нода>/lxc/<vmid>.conf` (строка `net0`):
 его видит любая нода, так что в `lab.conf` перечисляются только ноды (`NODES`) и VMID (`SLOTS`).
+`SLOTS` принимает и диапазоны: `SLOTS="2001-2025 2101-2125"`.
 
 ## Раскладка CephFS
 
@@ -199,7 +200,7 @@ $P enable           # слоты из maintenance в free (или только �
 |---|---|
 | `SLOT_TEMPLATE="2000=pve1:dhcp"` | шаблон слота (`template`): Ubuntu 24.04, GNS3 2.2.61 в своём venv, QEMU/KVM (`dev0` `/dev/kvm`, `dev1` `/dev/net/tun`; нужен Proxmox VE 8.1+), ubridge, VPCS, библиотеки IOU, пользователь `gns3` с uid/gid `SLOT_GNS3_ID`; без sshd и machine-id |
 | `CREATE_MANAGER="pve1:10.10.12.50"` | LXC менеджера `MANAGER_VMID`. PostgreSQL, nginx и службы в нём ставит шаг `manager` |
-| `CREATE_SLOTS="2001=pve1:10.10.12.101 …"` | слоты: клоны шаблона на своих нодах (`CT_STORAGE` общий, RBD), свой IP и MAC; по умолчанию полные, `SLOT_CLONE=linked` делает связанные |
+| `CREATE_SLOTS="2001=pve1:10.10.12.101 …"` | слоты: клоны шаблона на своих нодах (`CT_STORAGE` общий, RBD), свой IP и MAC; по умолчанию полные, `SLOT_CLONE=linked` делает связанные. Диапазон `2001-2025=pve1:10.10.12.101` — блок слотов на одной ноде с IP подряд от указанного (не дальше .254). Если `SLOTS` пуст, он берётся из VMID `CREATE_SLOTS` |
 
 Сеть и диски новых CT — `CT_STORAGE`, `CT_BRIDGE`, `CT_CIDR`, `CT_GATEWAY`, `CT_NAMESERVER`, при
 необходимости `CT_VLAN` (тег попадает в `net0` слотов, шаблона и менеджера; образец — `lab.conf.example`).
