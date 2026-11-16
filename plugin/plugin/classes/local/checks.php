@@ -83,6 +83,7 @@ class checks {
         'address_not_private' => 'addressing', 'address_duplicate' => 'addressing', 'subnet_overlap' => 'addressing',
         'subnet_mixed' => 'addressing', 'address_not_saved' => 'addressing', 'config_not_applied' => 'addressing',
         'gateway_missing' => 'gateways', 'gateway_wrong' => 'gateways', 'unreachable' => 'routing',
+        'nat_missing' => 'routing',
         'hostname_wrong' => 'host', 'forwarding_off' => 'host', 'forwarding_on_host' => 'host',
     ];
 
