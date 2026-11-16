@@ -27,7 +27,7 @@ DEFINITION = {
         {"name": "LAN2", "configure": "student", "vlan": {"fixed": 20}, "subnet": {"fixed": "192.168.20.0/24"},
          "gateway": {"node": "R1", "adapter": 1, "port": 0}, "members": [{"node": "PC3"}]},
     ],
-    "checks": {"format": "gns3lab.checks/1", "reachability": "segments"},
+    "checks": {"format": "gns3lab.checks/1", "reachability": "segments", "addresses": {"match": "plan"}},
 }
 GRADING = normalize_grading(None)
 
@@ -162,7 +162,9 @@ def test_match_subnet_takes_any_address_of_the_segment():
     facts = good_facts()
     facts["PC1"] = host("192.168.10.7/24", "192.168.10.254")
     assert "address_wrong" not in codes(run(facts, definition))
-    assert "address_wrong" in codes(run(facts))  # plan by default
+    assert "address_wrong" in codes(run(facts))  # plan
+    del definition["checks"]["addresses"]
+    assert "address_wrong" not in codes(run(facts, definition))  # auto by default
 
 
 def test_public_addresses_apipa_and_duplicates():
@@ -301,7 +303,8 @@ def test_check_definition_problems():
 
 def test_the_definition_carries_checks_and_student_segments():
     lab = check(copy.deepcopy(DEFINITION), IMAGES, ALL)
-    assert lab.definition["checks"] == {"format": "gns3lab.checks/1", "reachability": "segments"}
+    assert lab.definition["checks"] == {"format": "gns3lab.checks/1", "reachability": "segments",
+                                        "addresses": {"match": "plan"}}
     assert [s["configure"] for s in lab.definition["segments"]] == ["student", "student"]
     assert setup(lab.definition, IMAGES) == {}  # The student sets it up: nothing is preconfigured
     assert not [w for w in lab.warnings if w["code"] in ("gateway_not_configured", "switch_not_configured")]
@@ -567,6 +570,7 @@ def test_an_address_from_the_isp_is_not_outside_the_allowed_ranges():
     links = [(("ISP1", 1), ("R1", 0)), (("R1", 1), ("PC1", 0)), (("ISP1", 2), ("SW1", 0)), (("SW1", 1), ("PC2", 0))]
     facts = {"R1": router("198.18.1.100/24", "192.168.10.254/24"), "SW1": switch([1, 1, 1]),
              "PC1": host("192.168.10.1/24", "192.168.10.254"), "PC2": host("198.18.2.100/24", "198.18.2.1")}
+    facts["R1"]["routes"].append({"dst": "default", "via": "198.18.1.1", "dev": "eth0", "proto": "static"})
     result = isp_run(facts, links)
     assert result["findings"] == []  # Nor is PC2 alone behind SW1, nor its gateway (the ISP port) missing from the lab
     # The LAN of another ISP port, or an ISP address where no cable reaches the ISP, is still outside the ranges.
@@ -582,3 +586,152 @@ def test_an_isp_lan_needs_the_isp_image():
     nodes = [("GW", "debian12", 2), ("R1", "mikrotik-chr7", 2)]
     facts = {"R1": router("198.18.1.100/24", None), "GW": host("192.168.1.1/24")}
     assert not_private(isp_run(facts, [(("GW", 1), ("R1", 0))], nodes)) == ["R1 eth0"]
+
+
+# ---------------------------------------------------------------------- the default network check (§4.6)
+
+# ISP1 → R1 (IOL) e0 WAN, R1 e1 → SW1 (Linux switch) → PC1..PC3. No segments, no `checks`: the check is inferred.
+DNODES = [("ISP1", "lab-uplink", 3), ("R1", "cisco-iou-l3", 2), ("SW1", "linux-switch", 4),
+          ("PC1", "debian12", 1), ("PC2", "debian12", 1), ("PC3", "debian12", 1)]
+DLINKS = [(("ISP1", 1), ("R1", 0)), (("R1", 1), ("SW1", 0)), (("PC1", 0), ("SW1", 1)), (("PC2", 0), ("SW1", 2)),
+          (("PC3", 0), ("SW1", 3))]
+
+
+def iol(lan="192.168.1.1/24", wan=None, nat=True, acl=("192.168.1.0/24",), routes=()):
+    """An IOL router as ios.config/1 tells it: WAN by DHCP unless `wan` is given."""
+    e0 = {"name": "Ethernet0", "kind": "physical", "port": {"adapter": 0, "port": 0}, "admin": "up"}
+    if wan:
+        e0["ipv4"] = [wan]
+    e1 = {"name": "Ethernet1", "kind": "physical", "port": {"adapter": 1, "port": 0}, "admin": "up",
+          "ipv4": [lan] if lan else []}
+    if nat:
+        e0["nat"], e1["nat"] = "outside", "inside"
+    table = [{"dst": str(__import__("ipaddress").IPv4Interface(a).network), "dev": d, "proto": "connected", "metric": 0}
+             for a, d in ((lan, "Ethernet1"), (wan, "Ethernet0")) if a] + list(routes)
+    facts = {"interfaces": [e0, e1], "routes": table, "hostname": "R1"}
+    if acl is not None:
+        facts["nat"] = [{"kind": "list", "acl": "1", "interface": "Ethernet0", "overload": True,
+                         "match": [{"permit": True, "src": src} for src in acl]}]
+    return facts
+
+
+def lan_facts(**patch):
+    facts = {"R1": iol(), "SW1": switch([1, 1, 1, 1]),
+             "PC1": host("192.168.1.10/24", "192.168.1.1"), "PC2": host("192.168.1.11/24", "192.168.1.1"),
+             "PC3": host("192.168.1.12/24", "192.168.1.1")}
+    facts.update(patch)
+    return facts
+
+
+def default_run(facts, checks=None, grading=GRADING):
+    definition = {"format": "gns3lab.lab/2", "nodes": [{"name": n, "image": i, "adapters": a, **(
+        {"uplink_port": 0} if i == "lab-uplink" else {})} for n, i, a in DNODES]}
+    state = {"nodes": {nid(n): {"name": n, "status": "started", **f} for n, f in facts.items()}}
+    return run_checks(topology=topology(DNODES, DLINKS), state=state, statuses={nid(n): "started" for n, _, _ in DNODES},
+                      definition=definition, images=IMAGES, checks=checks, grading=grading, stale=set())
+
+
+def messages(result, code):
+    return [f["message"] for f in result["findings"] if f["code"] == code]
+
+
+def test_a_lab_set_up_right_passes_the_default_check():
+    result = default_run(lan_facts())
+    assert result["findings"] == [] and result["mark"] == 5
+    for code in ("address_missing", "gateway_missing", "unreachable", "nat_missing"):
+        assert rule(result, code)["status"] == "pass"
+
+
+def test_an_untouched_lab_fails_for_missing_addresses():
+    empty = lan_facts(R1=iol(lan=None, nat=False, acl=None), PC1=host(), PC2=host(), PC3=host())
+    result = default_run(empty)
+    assert codes(result, counted=True) == ["address_missing"] * 4
+    assert messages(result, "address_missing")[0] == "PC1 ens3: нет IPv4-адреса; нужен адрес из общей подсети с " \
+                                                     "соседями по L2-домену."
+    assert result["mark"] == 2
+    # Any plan will do: the subnet the neighbours use is named
+    one = default_run(lan_facts(PC2=host()))
+    assert messages(one, "address_missing") == ["PC2 ens3: нет IPv4-адреса; нужен адрес из подсети соседей 192.168.1.0/24."]
+    other = default_run(lan_facts(R1=iol(lan="10.5.0.1/16", acl=("10.5.0.0/16",)), PC1=host("10.5.3.3/16", "10.5.0.1"),
+                                  PC2=host("10.5.3.4/16", "10.5.0.1"), PC3=host("10.5.3.5/16", "10.5.0.1")))
+    assert other["findings"] == []
+
+
+def test_gateways_go_through_the_router_of_the_domain():
+    result = default_run(lan_facts(PC1=host("192.168.1.10/24"), PC2=host("192.168.1.11/24", "192.168.1.12")))
+    assert messages(result, "gateway_missing") == [
+        "PC1: нет шлюза по умолчанию; должен быть адрес маршрутизатора в его сети (192.168.1.1)."]
+    assert messages(result, "gateway_wrong") == [
+        "PC2: шлюз по умолчанию 192.168.1.12, а должен быть адрес маршрутизатора в его сети (192.168.1.1)."]
+    unreachable = [f for f in result["findings"] if f["code"] == "unreachable"]
+    assert unreachable and all(f["caused_by"] for f in unreachable)  # Explained by the gateways
+
+
+def test_internet_needs_a_route_out_of_the_router():
+    static_wan = iol(wan="198.18.1.5/24")  # A WAN address given by hand: no default route from DHCP
+    result = default_run(lan_facts(R1=static_wan))
+    assert messages(result, "unreachable") == ["Нет выхода в интернет у PC1, PC2, PC3: у R1 нет маршрута в интернет."]
+    assert codes(result, counted=True) == ["unreachable"]
+    routed = iol(wan="198.18.1.5/24", routes=[{"dst": "default", "via": "198.18.1.1", "dev": "Ethernet0",
+                                                "proto": "static", "metric": 1}])
+    assert default_run(lan_facts(R1=routed))["findings"] == []
+    wrong = iol(wan="198.18.1.5/24", routes=[{"dst": "default", "via": "198.18.1.7", "dev": "Ethernet0",
+                                               "proto": "static", "metric": 1}])
+    assert messages(default_run(lan_facts(R1=wrong)), "unreachable") == [
+        "Нет выхода в интернет у PC1, PC2, PC3: R1 → 198.18.1.7: узла с адресом 198.18.1.7 нет в сегменте."]
+
+
+def test_nat_on_the_edge_router():
+    result = default_run(lan_facts(R1=iol(nat=False, acl=None)))
+    assert messages(result, "nat_missing") == [
+        "R1: NAT для выхода в интернет не настроен — на Ethernet0 (к ISP) нет ip nat outside; на Ethernet1 (к узлам) "
+        "нет ip nat inside; правила ip nat inside source не транслируют адреса узлов при выходе через Ethernet0 "
+        "(не выйдут: PC1, PC2, PC3)."]
+    nat = next(f for f in result["findings"] if f["code"] == "nat_missing")
+    assert nat["class"] == "critical" and nat["counted"] and result["mark"] == 2
+    # The ACL lets out part of the LAN only; a deny before the permit keeps PC2 in
+    narrow = default_run(lan_facts(R1=iol(acl=("192.168.1.10/32",))))
+    assert messages(narrow, "nat_missing")[0].endswith("(не выйдут: PC2, PC3).")
+    deny = iol()
+    deny["nat"][0]["match"].insert(0, {"permit": False, "src": "192.168.1.11/32"})
+    assert messages(default_run(lan_facts(R1=deny)), "nat_missing")[0].endswith("(не выйдут: PC2).")
+    unknown = iol()
+    unknown["nat"][0]["match"] = None  # The slot did not understand the ACL: it cannot be held against the student
+    assert default_run(lan_facts(R1=unknown))["findings"] == []
+
+
+def test_network_off_and_explicit_plan():
+    empty = lan_facts(R1=iol(lan=None, nat=False, acl=None), PC1=host(), PC2=host(), PC3=host())
+    result = default_run(empty, checks={"format": "gns3lab.checks/1", "network": "off"})
+    assert codes(result) == [] and result["mark"] == 5
+    assert {r["status"] for r in result["rules"] if r["group"] in ("addressing", "gateways", "routing")} == {"off"}
+    assert check_definition({"format": "gns3lab.checks/1", "network": "maybe"}, set())[1] == [
+        {"path": "checks.network", "code": "out_of_range", "message": "auto or off"}]
+    assert check_definition({"format": "gns3lab.checks/1", "network": "off", "addresses": {"match": "auto"}},
+                            set())[0] == {"format": "gns3lab.checks/1", "network": "off", "addresses": {"match": "auto"}}
+
+
+def test_a_student_segment_is_checked_as_a_working_network_by_default():
+    definition = copy.deepcopy(DEFINITION)
+    definition["checks"] = {"format": "gns3lab.checks/1", "reachability": "segments"}
+    facts = good_facts()  # Another plan than the compiler's, the same network
+    facts["R1"] = router("192.168.10.1/24", "192.168.20.1/24")
+    facts["PC1"] = host("192.168.10.50/24", "192.168.10.1")
+    facts["PC2"] = host("192.168.10.51/24", "192.168.10.1")
+    facts["PC3"] = host("192.168.20.50/24", "192.168.20.1")
+    assert run(facts, definition)["findings"] == []
+    facts["PC2"] = host(None, None)
+    assert messages(run(facts, definition), "address_missing") == [
+        "PC2 ens3: нет IPv4-адреса; нужен адрес из подсети соседей 192.168.10.0/24."]
+    # A segment the manager sets up stays exact: it is the given environment
+    for seg in definition["segments"]:
+        del seg["configure"]
+    assert "address_wrong" in codes(run(good_facts() | {"PC1": host("192.168.10.50/24", "192.168.10.254")}, definition))
+
+
+def test_a_router_without_its_address_or_saved_configuration_explains_the_hosts():
+    for r1 in (None, iol(lan=None)):
+        facts = lan_facts(R1=r1) if r1 else {k: v for k, v in lan_facts().items() if k != "R1"}
+        result = default_run(facts)
+        assert codes(result, counted=True) == (["config_not_saved"] if r1 is None else ["address_missing"])
+        assert {"gateway_wrong", "unreachable"} <= set(codes(result, counted=False))

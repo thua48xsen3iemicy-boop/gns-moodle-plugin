@@ -68,6 +68,7 @@ RULES = {
     "gateway_missing": ("gateways", ("major", "major", "critical"), True),
     "gateway_wrong": ("gateways", ("major", "critical", "critical"), False),
     "unreachable": ("routing", ("major", "critical", "critical"), True),
+    "nat_missing": ("routing", ("major", "critical", "critical"), True),
     "hostname_wrong": ("host", ("note", "minor", "major"), False),
     "forwarding_off": ("host", ("major", "critical", "critical"), False),
     "forwarding_on_host": ("host", ("minor", "major", "major"), False),
@@ -98,7 +99,10 @@ CAUSES = {
     "gateway_wrong": L1 | L2_PORT | L2_DOMAIN | ADDRESS,
     "unreachable": L1 | L2_PORT | L2_DOMAIN | ADDRESS | {"gateway_missing", "gateway_wrong", "subnet_mixed",
                                                         "forwarding_off"},
+    "nat_missing": {"node_stopped", "config_not_saved"},
 }
+NETWORK_GROUPS = ("addressing", "gateways", "routing")  # What `network: off` turns off
+INTERNET_PROBE = ipaddress.IPv4Address("8.8.8.8")  # An address outside every lab: where a route to the internet leads
 ORDER = list(RULES)  # Findings are reported in catalog order: lower layers first
 
 DEFAULT_THRESHOLDS = (
@@ -142,7 +146,8 @@ def check_definition(raw, node_names: set, prefix="checks"):
     if not isinstance(raw, dict):
         problem("", "bad_type", "object expected")
         return None, problems
-    keys(raw, {"format", "focus", "persistence", "nodes", "addresses", "groups", "switches", "reachability", "rules"}, "")
+    keys(raw, {"format", "focus", "persistence", "nodes", "addresses", "groups", "switches", "reachability", "rules",
+               "network"}, "")
     out = {"format": FORMAT}
     if raw.get("format") != FORMAT:
         problem("format", "required" if "format" not in raw else "bad_type", FORMAT)
@@ -157,6 +162,12 @@ def check_definition(raw, node_names: set, prefix="checks"):
                 problem("focus", "out_of_range", g)
             if not bad:
                 out["focus"] = sorted(set(focus), key=GROUPS.index)
+
+    if "network" in raw:
+        if raw["network"] not in ("auto", "off"):
+            problem("network", "out_of_range", "auto or off")
+        else:
+            out["network"] = raw["network"]
 
     if "persistence" in raw:
         if raw["persistence"] not in ("saved", "runtime"):
@@ -212,8 +223,8 @@ def check_definition(raw, node_names: set, prefix="checks"):
                     if None not in items:
                         norm["allowed"] = sorted(set(items))
             if "match" in addr:
-                if addr["match"] not in ("plan", "subnet"):
-                    problem("addresses.match", "out_of_range", "plan or subnet")
+                if addr["match"] not in ("auto", "plan", "subnet"):
+                    problem("addresses.match", "out_of_range", "auto, plan or subnet")
                 else:
                     norm["match"] = addr["match"]
             if "forbid_prefix" in addr:
@@ -415,6 +426,8 @@ class Expected:
     gateway: ipaddress.IPv4Address | None
     endpoints: list = field(default_factory=list)
     objects: set = field(default_factory=set)  # Ports, links and switches of its L2 path
+    configure: str = "manager"  # Of a segment: who sets it up (CONTRACTS.md 2.6)
+    match: str = "plan"  # Of a segment: plan | subnet | auto (§4.3); auto = the default network check (§4.6)
 
 
 def node_roles(model: Model, definition: dict | None, images: dict) -> dict:
@@ -487,6 +500,16 @@ def uplink_lans(model: Model, roles: dict, definition: dict | None, images: dict
     return lans
 
 
+def isp_nodes_of(model: Model, definition: dict | None, images: dict) -> set:
+    """Node ids of the ISP nodes of a lab from Moodle: their image has an uplink_port (images/lab-uplink)."""
+    out = set()
+    for node in (definition or {}).get("nodes", []):
+        image = images.get(node.get("image"))
+        if image is not None and image.uplink_port is not None and node.get("name") in model.by_name:
+            out.add(model.by_name[node["name"]])
+    return out
+
+
 def path_objects(model: Model, roles: dict, ends: list) -> set:
     """Ports, links and switches on the L2 paths between the endpoints of a set (segments.Fabric.tree): a switch that
     no endpoint is cabled to and that has one cable at most inside the set (a spur) is not on a path."""
@@ -517,12 +540,15 @@ def path_objects(model: Model, roles: dict, ends: list) -> set:
 
 def build_expected(model: Model, roles: dict, definition: dict | None, checks: dict | None) -> list:
     out = []
+    student_match = ((checks or {}).get("addresses") or {}).get("match", "auto")
     for seg in (definition or {}).get("segments", []):
         network = ipaddress.IPv4Network(seg["subnet"]["fixed"])
         gateway = seg.get("gateway")
         gw, addrs, _ = segments_mod.plan(network, gateway is not None, gateway.get("host") if gateway else None,
                                          [m.get("host") for m in seg["members"]])
         exp = Expected("segment", seg["name"], seg.get("vlan", {}).get("fixed"), network, gw)
+        exp.configure = seg.get("configure", "manager")
+        exp.match = student_match if exp.configure == "student" else "plan"  # A managed segment is given as planned
         if gateway is not None and gateway["node"] in model.by_name:
             exp.endpoints.append(Endpoint(exp, (model.by_name[gateway["node"]], gateway.get("adapter", 0), gateway.get("port", 0)),
                                           ipaddress.IPv4Interface((gw, network.prefixlen)), gateway=True))
@@ -565,6 +591,31 @@ def build_expected(model: Model, roles: dict, definition: dict | None, checks: d
 # ---------------------------------------------------------------------- evaluation
 
 
+def nat_translates(rules, ip, outside) -> bool:
+    """Whether the `nat` rules of an IOL router (ios.config/1) translate a source address going out of `outside`.
+    An ACL the slot did not understand (`match: null`) counts as translating: it cannot be told otherwise."""
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, dict):
+            continue
+        if rule.get("kind") == "static" and rule.get("local") == str(ip):
+            return True
+        if rule.get("kind") != "list" or not (rule.get("interface") == outside or "pool" in rule):
+            continue
+        entries = rule.get("match")
+        if entries is None:
+            return True
+        for entry in entries if isinstance(entries, list) else []:
+            try:
+                hit = isinstance(entry, dict) and ip in ipaddress.IPv4Network(str(entry.get("src")))
+            except ValueError:
+                hit = False
+            if hit:
+                if entry.get("permit") is True:
+                    return True
+                break
+    return False
+
+
 @dataclass
 class Finding:
     code: str
@@ -596,7 +647,7 @@ class Run:
 
 def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, stale: set,
              unsaved: set = frozenset(), persistence: dict | None = None,
-             isp_lans: dict | None = None) -> tuple[list, list]:
+             isp_lans: dict | None = None, isp_nodes: set = frozenset()) -> tuple[list, list]:
     """(rules, findings) of a lab: rules = [{"code", "group", "status"[, "reason"]}], findings as in the run document."""
     checks = checks or {}
     run = Run()
@@ -907,18 +958,61 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
     else:
         run.skip("mgmt_vlan_missing", "no_expectation")
 
+    # ---------------------------------------------------------------- the default network check (§4.6): domains
+    auto_doms = []  # [(domain, cabled members of hosts and routers, ISP LANs it holds)]
+    if checks.get("network", "auto") == "auto":
+        covered = {ep.end for e in expected if e.kind == "segment" and e.match != "auto" for ep in e.endpoints}
+        for d in model.domains:
+            members = [i for i in d.members if i.node_id not in ignored and roles.get(i.node_id) in ("host", "router")
+                       and i.port is not None and (i.node_id, *i.port) in model.peer]
+            if not members or any((i.node_id, *i.port) in covered for i in members):
+                continue
+            lans = set().union(*((isp_lans or {}).get((i.node_id, i.name), set()) for i in members))
+            if len(members) > 1 or lans:
+                auto_doms.append((d, members, lans))
+
+    def dynamic(i):
+        """The interface takes its address from the network: IOL `ip address dhcp` (ios.config/1 gives no `ipv4`)."""
+        raw = (model.nodes[i.node_id]["facts"] or {}).get("interfaces") or []
+        return any(isinstance(x, dict) and x.get("name") == i.name and "ipv4" not in x for x in raw)
+
+    def net_text(nets):
+        return ", ".join(str(n) for n in sorted(nets, key=lambda n: (int(n.network_address), n.prefixlen)))
+
+    if auto_doms:
+        run.ran("address_missing")
+    for d, members, lans in auto_doms:
+        subnets = {a.network for i in members for a in i.addrs if a.ip not in APIPA}
+        for i in members:
+            reason = availability(i.node_id)
+            if reason is not None:
+                if reason:
+                    run.skip("address_missing", reason)
+                continue
+            if i.addrs or dynamic(i):
+                continue
+            if lans:
+                need = f"адрес из сети ISP {net_text(lans)} (по DHCP)"
+            elif len(subnets) == 1:
+                need = f"адрес из подсети соседей {net_text(subnets)}"
+            else:
+                need = "адрес из общей подсети с соседями по L2-домену"
+            run.add("address_missing", f"{i.label}: нет IPv4-адреса; нужен {need}.",
+                    nodes=[i.node], ifaces=[iface_ref(i)], objects={f"port:{(i.node_id, *i.port)}", f"node:{i.node_id}"})
+
     # ---------------------------------------------------------------- addresses of the endpoints
     addr = checks.get("addresses") or {}
-    match = addr.get("match", "plan")
     checked_ifaces = set()
-    if any(e.network for e in expected):
+    planned = [e for e in expected if e.network is not None and e.match != "auto"]
+    if planned:
         run.ran("address_missing", "address_wrong", "address_misplaced", "mask_wrong")
     else:
-        for code in ("address_missing", "address_wrong", "address_misplaced"):
+        for code in ("address_wrong", "address_misplaced"):
             run.skip(code, "no_expectation")
-    for exp in expected:
-        if exp.network is None:
-            continue
+        if not auto_doms:
+            run.skip("address_missing", "no_expectation")
+    for exp in planned:
+        match = exp.match
         for ep in exp.endpoints:
             nid = ep.end[0]
             reason = availability(nid)
@@ -1063,8 +1157,16 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                     continue
         return True, vias
 
-    gw_sets = [e for e in expected if e.gateway is not None or e.kind == "group"]
-    if gw_sets:
+    def near_routers(nid):
+        """Objects of the routers cabled to the node's L2 domain: a router that lost its address or its saved
+        configuration explains a gateway that is not in the lab and a route that leads nowhere."""
+        out = set()
+        for end in (e for e in model.peer if e[0] == nid):
+            out |= {f"node:{x[0]}" for x in l2_reach(model, roles, end)[0] if roles.get(x[0]) == "router"}
+        return out
+
+    gw_sets = [e for e in expected if (e.gateway is not None and e.match != "auto") or e.kind == "group"]
+    if gw_sets or auto_doms:
         run.ran("gateway_missing", "gateway_wrong")
     else:
         run.skip("gateway_missing", "no_expectation")
@@ -1105,6 +1207,40 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                 run.add("gateway_wrong", f"{names(nid)}: шлюз по умолчанию {', '.join(map(str, vias))}, а должен быть "
                                          f"{want_text} ({exp.name}).",
                         nodes=[names(nid)], objects=objects)
+    # The default network check: a host in a domain with a router goes through an address of that router in its subnet.
+    accept, host_port = {}, {}
+    for d, members, lans in auto_doms:
+        routers = [i for i in members if roles.get(i.node_id) == "router"]
+        for h in members:
+            if roles.get(h.node_id) != "host" or not h.addrs:
+                continue
+            ips = {a.ip for r in routers for a in r.addrs if any(ha.ip in a.network for ha in h.addrs)}
+            ips |= {net.network_address + 1 for net in lans if any(ha.ip in net for ha in h.addrs)}
+            if ips:
+                accept.setdefault(h.node_id, set()).update(ips)
+                host_port.setdefault(h.node_id, (h.node_id, *h.port))
+    for nid in sorted(accept, key=names):
+        if nid in gw_checked:
+            continue
+        reason = availability(nid)
+        if reason is not None:
+            if reason:
+                run.skip("gateway_missing", reason)
+                run.skip("gateway_wrong", reason)
+            continue
+        has, vias = default_via(nid)
+        if not has:
+            run.skip("gateway_missing", "no_collector")
+            continue
+        gw_checked.add(nid)
+        want = ", ".join(str(ip) for ip in sorted(accept[nid]))
+        objects = {f"node:{nid}", f"port:{host_port[nid]}"}
+        if not vias:
+            run.add("gateway_missing", f"{names(nid)}: нет шлюза по умолчанию; должен быть адрес маршрутизатора в его "
+                                       f"сети ({want}).", nodes=[names(nid)], objects=objects)
+        elif not any(v in accept[nid] for v in vias):
+            run.add("gateway_wrong", f"{names(nid)}: шлюз по умолчанию {', '.join(map(str, vias))}, а должен быть адрес "
+                                     f"маршрутизатора в его сети ({want}).", nodes=[names(nid)], objects=objects)
     for nid in sorted(model.nodes, key=names):
         if nid in gw_checked or nid in ignored or roles.get(nid) != "host" or availability(nid) is not None:
             continue
@@ -1118,81 +1254,119 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
             if v not in lab_ips or not any(v in net for net in own):
                 why = "такого адреса нет в лабе" if v not in lab_ips else "он не в подсети узла"
                 run.add("gateway_wrong", f"{names(nid)}: шлюз по умолчанию {v} — {why}.",
-                        nodes=[names(nid)], objects={f"node:{nid}"})
+                        nodes=[names(nid)], objects={f"node:{nid}"} | near_routers(nid))
                 break
 
     # ---------------------------------------------------------------- reachability
+    owner = {}
+    for i, a in pairs:
+        owner.setdefault(a.ip, []).append(i)
+    for nid in ignored:
+        for i in model.ifaces.get(nid, []):
+            for a in i.addrs:
+                owner.setdefault(a.ip, []).append(i)
+
+    def routes_of(nid):
+        """The routes of a node; None if it gives none. An IOL interface with `ip address dhcp` in an ISP LAN gets what
+        the ISP's DHCP gives it: the connected LAN and a default route through the ISP port (IOS installs it with
+        distance 254)."""
+        routes = model.nodes[nid]["facts"].get("routes")
+        if not isinstance(routes, list):
+            return None
+        if model.nodes[nid]["type"] != "iou":
+            return routes
+        extra = []
+        for i in model.ifaces.get(nid, []):
+            if i.admin == "down" or not dynamic(i):
+                continue
+            for net in sorted((isp_lans or {}).get((nid, i.name), ()), key=str):
+                extra += [{"dst": str(net), "dev": i.name, "proto": "dhcp", "metric": 0},
+                          {"dst": "default", "via": str(net.network_address + 1), "dev": i.name, "proto": "dhcp",
+                           "metric": 254}]
+        return routes + extra
+
+    def isp_port(nid, iface, hop):
+        """The ISP LAN whose ISP port `hop` is, if it lies behind that interface of the node (or any, unknown)."""
+        for i in ([iface] if iface is not None else model.ifaces.get(nid, [])):
+            for net in (isp_lans or {}).get((nid, i.name), ()):
+                if hop == net.network_address + 1:
+                    return i
+        return None
+
+    def trace(src, dst, internet=False):
+        """('ok', path, ingress, egress) | ('fail', text, path) | ('skip', reason). With `internet`, the route to dst
+        must lead to an ISP port; ingress and egress are the interfaces of the last node (ingress None at src)."""
+        nid, seen, path, ingress = src, set(), [], None
+        for _ in range(32):
+            if not internet and any(a.ip == dst for i in model.ifaces.get(nid, []) for a in i.addrs):
+                return ("ok", path + [nid], ingress, None)
+            if nid in seen:
+                return ("fail", f"петля маршрутизации через {' → '.join(names(x) for x in path)}", path)
+            seen.add(nid)
+            path.append(nid)
+            reason = availability(nid)
+            if reason is not None:
+                return ("skip", reason or "no_collector")
+            routes = routes_of(nid)
+            if routes is None:
+                return ("skip", "no_collector")
+            best = None
+            for r in routes:
+                if not isinstance(r, dict):
+                    continue
+                try:
+                    net = ipaddress.IPv4Network("0.0.0.0/0" if r.get("dst") == "default" else str(r.get("dst")), strict=False)
+                except ValueError:
+                    continue
+                metric = r.get("metric") if is_int(r.get("metric")) else 0
+                if dst in net and (best is None or net.prefixlen > best[0].prefixlen
+                                   or net.prefixlen == best[0].prefixlen and metric < best[2]):
+                    best = (net, r, metric)
+            target = "интернет" if internet else str(dst)
+            if best is None:
+                return ("fail", f"у {names(nid)} нет маршрута в {target}" if internet
+                        else f"у {names(nid)} нет маршрута к {dst}", path)
+            route = best[1]
+            hop = dst
+            if route.get("via"):
+                try:
+                    hop = ipaddress.IPv4Address(route["via"])
+                except ValueError:
+                    return ("fail", f"у {names(nid)} неверный маршрут к {target}", path)
+            egress = model.by_name_if.get(nid, {}).get(route.get("dev"))
+            if internet and hop != dst:
+                out = isp_port(nid, egress, hop)
+                if out is not None:
+                    return ("ok", path, ingress, out)
+            dom = model.dom_of(egress) if egress is not None else None
+            holders = [i for i in owner.get(hop, []) if i.node_id != nid]
+            near = [i for i in holders if dom is not None and model.dom_of(i) is dom] or \
+                   ([] if dom is not None else holders)
+            if not near:
+                if internet and hop == dst:
+                    return ("fail", f"маршрут {names(nid)} в интернет не ведёт к ISP: нет шлюза в маршруте по умолчанию", path)
+                if holders:
+                    return ("fail", f"{names(nid)} → {hop}: {hop} не в одном L2-домене с {names(nid)}", path)
+                return ("fail", f"{names(nid)} → {hop}: узла с адресом {hop} нет в сегменте", path)
+            nid, ingress = near[0].node_id, near[0]
+            if model.nodes[nid]["facts"].get("ip_forward") is False and \
+                    (internet or not any(a.ip == dst for i in model.ifaces.get(nid, []) for a in i.addrs)):
+                return ("fail", f"на {names(nid)} выключена пересылка пакетов (ip_forward)", path + [nid])
+        return ("fail", "слишком длинный путь", path)
+
+    def primary(nid, exp=None):
+        if exp is not None and exp.match != "auto":
+            for ep in exp.endpoints:
+                if ep.end[0] == nid and ep.address is not None:
+                    return ep.address.ip
+        for i in model.ifaces.get(nid, []):
+            if i.kind != "loopback" and i.addrs:
+                return i.addrs[0].ip
+        return None
+
     reach = checks.get("reachability")
     if reach:
         run.ran("unreachable")
-        owner = {}
-        for i, a in pairs:
-            owner.setdefault(a.ip, []).append(i)
-        for nid in ignored:
-            for i in model.ifaces.get(nid, []):
-                for a in i.addrs:
-                    owner.setdefault(a.ip, []).append(i)
-
-        def trace(src, dst):
-            """'ok' | ('fail', text, nodes) | ('skip', reason)."""
-            nid, seen, path = src, set(), []
-            for _ in range(32):
-                if any(a.ip == dst for i in model.ifaces.get(nid, []) for a in i.addrs):
-                    return "ok"
-                if nid in seen:
-                    return ("fail", f"петля маршрутизации через {' → '.join(names(x) for x in path)}", path)
-                seen.add(nid)
-                path.append(nid)
-                reason = availability(nid)
-                if reason is not None:
-                    return ("skip", reason or "no_collector")
-                routes = model.nodes[nid]["facts"].get("routes")
-                if not isinstance(routes, list):
-                    return ("skip", "no_collector")
-                best = None
-                for r in routes:
-                    if not isinstance(r, dict):
-                        continue
-                    try:
-                        net = ipaddress.IPv4Network("0.0.0.0/0" if r.get("dst") == "default" else str(r.get("dst")), strict=False)
-                    except ValueError:
-                        continue
-                    if dst in net and (best is None or net.prefixlen > best[0].prefixlen):
-                        best = (net, r)
-                if best is None:
-                    return ("fail", f"у {names(nid)} нет маршрута к {dst}", path)
-                route = best[1]
-                hop = dst
-                if route.get("via"):
-                    try:
-                        hop = ipaddress.IPv4Address(route["via"])
-                    except ValueError:
-                        return ("fail", f"у {names(nid)} неверный маршрут к {dst}", path)
-                egress = model.by_name_if.get(nid, {}).get(route.get("dev"))
-                dom = model.dom_of(egress) if egress is not None else None
-                holders = [i for i in owner.get(hop, []) if i.node_id != nid]
-                near = [i for i in holders if dom is not None and model.dom_of(i) is dom] or \
-                       ([] if dom is not None else holders)
-                if not near:
-                    if holders:
-                        return ("fail", f"{names(nid)} → {hop}: {hop} не в одном L2-домене с {names(nid)}", path)
-                    return ("fail", f"{names(nid)} → {hop}: узла с адресом {hop} нет в сегменте", path)
-                nid = near[0].node_id
-                if model.nodes[nid]["facts"].get("ip_forward") is False and \
-                        not any(a.ip == dst for i in model.ifaces.get(nid, []) for a in i.addrs):
-                    return ("fail", f"на {names(nid)} выключена пересылка пакетов (ip_forward)", path + [nid])
-            return ("fail", "слишком длинный путь", path)
-
-        def primary(nid, exp=None):
-            if exp is not None:
-                for ep in exp.endpoints:
-                    if ep.end[0] == nid and ep.address is not None:
-                        return ep.address.ip
-            for i in model.ifaces.get(nid, []):
-                if i.kind != "loopback" and i.addrs:
-                    return i.addrs[0].ip
-            return None
-
         pairs_to_check = []
         if reach == "segments":
             segs = [e for e in expected if e.kind == "segment" and e.gateway is not None]
@@ -1201,7 +1375,8 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                     sa = next((ep for ep in a.endpoints if not ep.gateway), None)
                     sb = next((ep for ep in b.endpoints if not ep.gateway), None)
                     if sa and sb:
-                        pairs_to_check.append((f"{a.name} ↔ {b.name}", sa.end[0], sa.address.ip, sb.end[0], sb.address.ip,
+                        pairs_to_check.append((f"{a.name} ↔ {b.name}", sa.end[0], primary(sa.end[0], a),
+                                               sb.end[0], primary(sb.end[0], b),
                                                a.objects | b.objects | {f"set:{a.name}", f"set:{b.name}"}))
         else:
             for x, y in reach:
@@ -1221,7 +1396,7 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                 continue
             for src, dst in ((na, ib), (nb, ia)):
                 result = trace(src, dst)
-                if result == "ok":
+                if result[0] == "ok":
                     continue
                 if result[0] == "skip":
                     run.skip("unreachable", result[1])
@@ -1230,8 +1405,88 @@ def evaluate(model: Model, *, roles: dict, expected: list, checks: dict | None, 
                         nodes=[names(na), names(nb)] + [names(x) for x in result[2]],
                         objects=objects | {f"node:{x}" for x in result[2]})
                 break
-    else:
+    elif not (auto_doms and isp_nodes):
         run.skip("unreachable", "no_expectation")
+
+    # ---------------------------------------------------------------- the default network check: internet and NAT
+    if auto_doms and isp_nodes:
+        run.ran("unreachable", "nat_missing")
+        all_lans = set().union(*(isp_lans or {}).values()) if isp_lans else set()
+
+        def cabled_to_isp(start):
+            """Whether cables lead from the node to an ISP through switches and routers only."""
+            seen, stack = {start}, [start]
+            while stack:
+                nid = stack.pop()
+                for end, peer in model.peer.items():
+                    if end[0] != nid or peer[0] in seen:
+                        continue
+                    if peer[0] in isp_nodes:
+                        return True
+                    if roles.get(peer[0]) in ("switch", "router"):
+                        seen.add(peer[0])
+                        stack.append(peer[0])
+            return False
+
+        hosts = []
+        for d, members, lans in auto_doms:
+            for h in members:
+                ip = next((a.ip for a in h.addrs if a.ip not in APIPA), None)
+                if roles.get(h.node_id) != "host" or ip is None or any(ip in net for net in all_lans):
+                    continue
+                if h.node_id not in {x[0] for x in hosts} and availability(h.node_id) is None:
+                    hosts.append((h.node_id, ip))
+        failures, nat_problems = {}, {}
+        for nid, ip in sorted(hosts, key=lambda x: names(x[0])):
+            if not cabled_to_isp(nid):
+                continue
+            result = trace(nid, INTERNET_PROBE, internet=True)
+            if result[0] == "skip":
+                run.skip("unreachable", result[1])
+                continue
+            if result[0] == "fail":
+                key = result[1]
+                entry = failures.setdefault(key, ([], set()))
+                entry[0].append(nid)
+                entry[1].update({f"node:{nid}"} | {f"node:{x}" for x in result[2]} | near_routers(nid))
+                continue
+            _, path, ingress, egress = result
+            edge = path[-1]
+            if edge == nid:
+                continue  # The host itself is cabled to the ISP: no router, no NAT
+            if model.nodes[edge]["type"] != "iou":
+                run.skip("nat_missing", "no_collector")  # NAT of Linux and RouterOS routers is not collected
+                continue
+            facts = model.nodes[edge]["facts"]
+            raw = {x.get("name"): x for x in facts.get("interfaces") or [] if isinstance(x, dict)}
+            problems = []
+            if raw.get(egress.name, {}).get("nat") != "outside":
+                problems.append((f"на {egress.name} (к ISP) нет ip nat outside", egress))
+            if ingress is not None and raw.get(ingress.name, {}).get("nat") != "inside":
+                problems.append((f"на {ingress.name} (к узлам) нет ip nat inside", ingress))
+            if not nat_translates(facts.get("nat"), ip, egress.name):
+                problems.append((f"правила ip nat inside source не транслируют адреса узлов при выходе через "
+                                 f"{egress.name}", None))
+            if problems:  # One finding per router: NAT is one piece of its configuration
+                texts, ifaces, nids = nat_problems.setdefault(edge, ([], [], []))
+                nids.append(nid)
+                for text, iface in problems:
+                    if text not in texts:
+                        texts.append(text)
+                    if iface is not None and iface not in ifaces:
+                        ifaces.append(iface)
+        for text, (nids, objects) in failures.items():
+            run.add("unreachable", f"Нет выхода в интернет у {', '.join(names(x) for x in nids)}: {text}.",
+                    nodes=[names(x) for x in nids] + [names(o[5:]) for o in sorted(objects) if o[5:] not in nids],
+                    objects=objects)
+        for edge in sorted(nat_problems, key=names):
+            texts, ifaces, nids = nat_problems[edge]
+            objects = {f"node:{edge}"} | {f"port:{(edge, *i.port)}" for i in ifaces if i.port}
+            run.add("nat_missing", f"{names(edge)}: NAT для выхода в интернет не настроен — {'; '.join(texts)} "
+                                   f"(не выйдут: {', '.join(names(x) for x in nids)}).",
+                    nodes=[names(edge)], ifaces=[iface_ref(i) for i in ifaces], objects=objects)
+    else:
+        run.skip("nat_missing", "no_expectation")
 
     # ---------------------------------------------------------------- the node itself
     run.ran("hostname_wrong", "forwarding_off", "forwarding_on_host")
@@ -1364,6 +1619,8 @@ def persistence_of(model: Model, definition: dict | None, images: dict, checks: 
 
 def finish(run: Run, checks: dict):
     off = set((checks.get("rules") or {}))
+    if checks.get("network") == "off":
+        off |= {code for code, (group, _, _) in RULES.items() if group in NETWORK_GROUPS}
     findings = [f for f in run.findings if f.code not in off]
     findings.sort(key=lambda f: ORDER.index(f.code))
     for n, f in enumerate(findings, 1):
@@ -1445,7 +1702,8 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
     expected = build_expected(model, roles, definition, checks)
     rules, findings = evaluate(model, roles=roles, expected=expected, checks=checks, stale=stale, unsaved=unsaved,
                                persistence=persistence_of(model, definition, images, checks),
-                               isp_lans=uplink_lans(model, roles, definition, images))
+                               isp_lans=uplink_lans(model, roles, definition, images),
+                               isp_nodes=isp_nodes_of(model, definition, images))
     return grade(rules, findings, grading, checks)
 
 
