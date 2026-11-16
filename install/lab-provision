@@ -303,8 +303,16 @@ ct_down() { [[ $(ct_state "$1") == stopped ]] || pct shutdown "$1" --timeout 90;
 ct_sh() {
   local id=$1 script=$2
   shift 2
-  local rc=0
-  pct exec "$id" -- env "$@" bash -c "umask 022; set -euo pipefail; $script" || rc=$?
+  local rc=0 try
+  # Exit 129: the command died of SIGHUP. A freshly started CT sometimes sends it to the commands
+  # attached right then; the scripts run here are idempotent, so try again.
+  for try in 1 2 3; do
+    rc=0
+    pct exec "$id" -- env "$@" bash -c "umask 022; set -euo pipefail; $script" || rc=$?
+    ((rc == 129 && try < 3)) || break
+    warn "CT $id: a command inside got SIGHUP (exit 129), repeating it in 5 s"
+    sleep 5
+  done
   ((rc == 0)) || printf 'ERROR: CT %s: a command inside failed (exit %s): %s\n' "$id" "$rc" "${script:0:120}" >&2
   return "$rc"
 }
