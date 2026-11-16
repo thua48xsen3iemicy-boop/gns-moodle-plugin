@@ -220,6 +220,12 @@ export const init = (prefix) => {
       toast(str("ed_maxnodes", maxNodes), true);
       return;
     }
+    /* the manager takes at most one node with an external port per lab (too_many_uplinks) */
+    const uplinked = Number.isInteger(img.uplink_port) && st.lab.nodes.find(o => uplinkOf(o) !== null);
+    if (uplinked) {
+      toast(str("ed_oneuplink", uplinked.name), true);
+      return;
+    }
     change(() => {
       const n = {name: nextName(img), image: img.id, x: snap(cx - W / 2), y: snap(cy - H / 2)};
       if (img.adapters && typeof img.adapters === "object") {
@@ -242,6 +248,9 @@ export const init = (prefix) => {
       if (s.kind === "node") {
         const name = st.lab.nodes[s.i].name;
         st.lab.nodes.splice(s.i, 1);
+        if (st.from === name) {
+          st.from = null;
+        }
         st.lab.links = st.lab.links.filter(l => l.a.node !== name && l.b.node !== name);
         /* a deleted device leaves its segments; a segment keeps existing, the manager reports an empty one */
         st.lab.segments.forEach(seg => {
@@ -1050,6 +1059,20 @@ export const init = (prefix) => {
     }
     render();
   };
+  /* right click on a device or a link deletes it at once; Ctrl+Z brings it back */
+  svg.addEventListener("contextmenu", e => {
+    const nodeEl = e.target.closest("[data-node]"), linkEl = e.target.closest("[data-link]");
+    if (!nodeEl && !linkEl) {
+      return;
+    }
+    e.preventDefault();
+    /* a long press on a touch screen also opens the context menu: there it must not delete */
+    if (e.pointerType && e.pointerType !== "mouse" || gest) {
+      return;
+    }
+    st.sel = nodeEl ? {kind: "node", i: +nodeEl.dataset.node} : {kind: "link", i: +linkEl.dataset.link};
+    deleteSel();
+  });
   svg.addEventListener("pointerup", endPtr);
   svg.addEventListener("pointercancel", endPtr);
   svg.addEventListener("wheel", e => {

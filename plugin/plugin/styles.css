@@ -4382,6 +4382,7 @@ body.gns3lab-fullscreen {
 .gns3lab-editor .ed-capture-dialog fieldset { border: 1px solid var(--line); margin: .7rem 0; padding: .7rem; }
 .gns3lab-editor .ed-capture-dialog input[type="text"],
 .gns3lab-editor .ed-capture-dialog textarea { width: 100%; margin: .4rem 0; color: inherit; background: var(--bg); }
+.gns3lab-editor .ed-capture-dialog textarea { min-height: 9rem; resize: vertical; }
 .gns3lab-editor .ed-capture-dialog label { display: block; }
 .gns3lab-editor .ed-authoring-dialog { width: 97vw; height: 95vh; max-width: none; }
 .gns3lab-editor .ed-authoring-dialog iframe { width: 100%; height: calc(100% - 3rem); border: 0; display: block; }
