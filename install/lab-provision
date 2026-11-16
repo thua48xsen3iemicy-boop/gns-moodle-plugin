@@ -17,7 +17,11 @@ set -euo pipefail
 umask 077
 # pct creates /var/lib/lxc/<vmid> with the umask it inherits: under 077 the directory is 0700 and an
 # unprivileged CT cannot open its rootfs ("Failed to open /var/lib/lxc/<vmid>/rootfs: Permission denied").
-pct() { (umask 022; command pct "$@"); }
+# 'pct exec' never gets the terminal: with a terminal on stdin lxc-attach gives the command a pty, and a
+# CT that is still booting may hang it up, so the command dies of SIGHUP (exit 129) at random.
+pct() {
+  if [[ ${1:-} == exec ]]; then (umask 022; command pct "$@" </dev/null); else (umask 022; command pct "$@"); fi
+}
 
 CONF=${LAB_CONF:-/mnt/pve/cfs/secrets/lab.conf}
 ID_OFFSET=100000  # Standard unprivileged mapping: guest uid N is host uid N + 100000
