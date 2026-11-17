@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
 
 
 # Guest commands can run for minutes. They are admitted under command_lock but do not hold it.
-LONG_COMMAND = re.compile(r"/v1/labs/[^/]+/nodes/[^/]+/(?:qga/exec|serial/enable|shutdown)")
+LONG_COMMAND = re.compile(r"/v1/labs/[^/]+/nodes/[^/]+/(?:qga/exec|serial/enable|shutdown|iso)")
 
 app = FastAPI(
     title="Lab Slot API",

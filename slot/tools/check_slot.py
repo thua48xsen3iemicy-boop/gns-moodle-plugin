@@ -44,6 +44,9 @@ def main():
             ready.raise_for_status()
             if ready.json().get("version") != VERSION:
                 raise ValueError("API version differs from diagnostic client")
+            features = client.get("/v1/capabilities").json().get("features", [])
+            # iso-mount needs xorriso in the LXC template (README, "ISO из каталога гостя").
+            print("iso-mount:", "yes" if "iso-mount" in features else "no (xorriso is not installed)")
             if args.deploy:
                 response = client.post(
                     "/v1/labs/deploy", json=data, headers={"Idempotency-Key": args.key}

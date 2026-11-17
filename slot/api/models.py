@@ -1,9 +1,9 @@
 """Initial ticket format. A published lab template will eventually generate this ticket."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, Field, Strict, model_serializer, model_validator
 
 
 # The value of QEMU "-cpu": a model and its flags, "host" or "SandyBridge,+rdrand,+avx2" (CONTRACTS.md 4.2).
@@ -238,3 +238,23 @@ class WipeTicket(BaseModel):
 class ShutdownTicket(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
     timeout: int = Field(default=120, ge=30, le=300)
+
+
+# The directory of the source guest (CONTRACTS.md 4.7): an absolute POSIX path or a Windows path with a drive letter.
+# It comes from the image catalog of the manager. No control characters: it is quoted into a guest shell command.
+ISO_PATH_PATTERN = r"^(/|[A-Za-z]:\\)[^\x00-\x1f\x7f]{0,254}$"
+
+
+class IsoTicket(BaseModel):
+    """Make an ISO image of `path` in the source guest and put it into the CD-ROM drive of `targets`."""
+
+    model_config = {"extra": "forbid", "strict": True}
+    path: str = Field(pattern=ISO_PATH_PATTERN)
+    targets: list[Annotated[UUID, Strict(False)]] = Field(min_length=1, max_length=32)  # UUID strings in JSON
+    timeout: int = Field(default=600, ge=60, le=1800)
+
+    @model_validator(mode="after")
+    def distinct_targets(self):
+        if len(set(self.targets)) != len(self.targets):
+            raise ValueError("targets must be distinct")
+        return self

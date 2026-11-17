@@ -94,6 +94,12 @@ def mock_server(tmp_path, monkeypatch):
                     clone.write_bytes(b"QFI\xfb" + bytes(20) + size.to_bytes(8, "big"))
                     node.setdefault("resized", []).append([obj["drive_name"], obj["extend"]])
                     return httpx.Response(201)
+                if len(path) == 4 and req.method == "PUT":
+                    node = next((n for n in nodes[pid] if n["node_id"] == path[3]), None)
+                    if node is None:
+                        return reply(404, {"message": "No node"})
+                    node.setdefault("properties", {}).update(json.loads(req.content).get("properties", {}))
+                    return reply(200, node)
                 if len(path) == 4 and path[3] in ("start", "stop"):
                     for n in nodes[pid]:
                         if n["name"] != "bad-start":

@@ -286,7 +286,7 @@ def test_diagnostic_cli_validates_before_http_and_is_readonly(tmp_path, monkeypa
     )
     monkeypatch.setattr("sys.argv", ["check_slot.py"])
     assert main() == 0
-    assert requests == ["GET", "GET"]
+    assert requests == ["GET", "GET", "GET"]  # healthz, readyz, capabilities
 
 
 def test_new_routes_on_old_main_fail_with_diagnostic():
@@ -349,8 +349,9 @@ def test_failed_lab_of_earlier_run_still_blocks_running_project(mock_server):
     assert "Another GNS3 project is running" in op["error"]["message"]
 
 
-def test_capabilities(mock_server):
+def test_capabilities(mock_server, monkeypatch):
     client, _, _ = mock_server
+    monkeypatch.setenv("SLOT_XORRISO", "no-such-xorriso")  # iso-mount depends on the template (test_iso.py)
     assert client.get("/v1/capabilities").status_code == 401
     body = client.get("/v1/capabilities", headers=HEADERS).json()
     assert body["schema"] == "gns3lab.capabilities/1"

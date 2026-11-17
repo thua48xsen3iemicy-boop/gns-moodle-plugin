@@ -5,7 +5,9 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +15,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api import uplink
+from api import iso, uplink
 from api.client import call, get_lifecycle
 from api.facts import Facts, guest_family
 from api.l1 import Keepalives
@@ -21,6 +23,8 @@ from api.models import DeployTicket
 from api.qga import Priority, QgaBroker, QgaCommandError, QgaError
 
 PROVISION_MESSAGE_LIMIT = 200
+# Operations on nodes of a READY laboratory: their progress and result are their own, not the laboratory's.
+NODE_ACTIONS = ("shutdown", "iso")
 
 
 def provision_failure(result):
@@ -310,7 +314,7 @@ class Lifecycle:
         }
         result.update(replayed=replayed, laboratory=current)
         if not compact:
-            source = lab if lab and op["status"] == "RUNNING" and op.get("action") != "shutdown" else op
+            source = lab if lab and op["status"] == "RUNNING" and op.get("action") not in NODE_ACTIONS else op
             result.update(
                 stage=source.get("stage"),
                 progress=source.get("progress", 0),
@@ -318,7 +322,7 @@ class Lifecycle:
                 nodes=self.node_summary(source.get("nodes", [])),
                 updated_at=op.get("updated_at"),
             )
-        if op.get("action") == "shutdown":
+        if op.get("action") in NODE_ACTIONS:
             result["result"] = op.get("result")
         return result
 
@@ -575,6 +579,150 @@ class Lifecycle:
                 self.save("lab", pid, lab)
             op.update(updated_at=time.time(), nodes=[node] if node else [])
             self.save("operation", op["operation_id"], op)
+
+    def submit_iso(self, pid, node_id, ticket, key, admission):
+        """Accept an ISO operation (CONTRACTS.md 4.7). One slot operation at a time: it reads a guest and changes nodes."""
+        body = {"path": ticket.path, "targets": [str(t) for t in ticket.targets], "timeout": ticket.timeout}
+        fingerprint = hashlib.sha256(json.dumps(["iso", pid, node_id, body], sort_keys=True).encode()).hexdigest()
+        for op in self.all("operation"):
+            if key and op["key"] == key:
+                if op["fingerprint"] != fingerprint:
+                    raise HTTPException(409, {"code": "IDEMPOTENCY_KEY_CONFLICT", "message": "ISO key reused"})
+                return self.present(op, replayed=True, compact=True)
+            if op["status"] == "RUNNING":
+                raise HTTPException(409, {"code": "OPERATION_IN_PROGRESS", "message": "Conflicting slot operation"})
+        lab = self.get("lab", pid)
+        if not lab or lab["state"] != "READY":
+            raise HTTPException(409, {"code": "INVALID_TRANSITION", "message": "An ISO image requires a READY laboratory"})
+        if not iso.enabled():
+            raise HTTPException(409, {"code": "NOT_SUPPORTED", "message": "xorriso is not installed on the slot"})
+        op = {"operation_id": str(uuid4()), "project_id": pid, "node_id": node_id,
+              "action": "iso", "status": "RUNNING", "key": key or str(uuid4()),
+              "fingerprint": fingerprint, "updated_at": time.time(), "stage": "iso_pack",
+              "progress": 0, "error": None, "nodes": [], "result": None}
+        self.save("operation", op["operation_id"], op)
+        task = admission.start(self.run_iso(op, body))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return self.present(op, compact=True)
+
+    def iso_stage(self, op, stage, progress):
+        op.update(stage=stage, progress=progress, updated_at=time.time())
+        self.save("operation", op["operation_id"], op)
+
+    async def project_dir(self, pid):
+        project = await self.api("GET", f"projects/{pid}")
+        declared = project.get("path")
+        if isinstance(declared, str) and os.path.isabs(declared):
+            return Path(declared)
+        return Path(os.getenv("SLOT_PROJECTS_DIR", "/opt/gns3/projects")) / pid
+
+    async def run_iso(self, op, body):
+        pid, source = op["project_id"], op["node_id"]
+        family = archive = None
+        work = None
+        try:
+            async with asyncio.timeout(body["timeout"]):
+                node = await self.api("GET", f"projects/{pid}/nodes/{source}")
+                if node.get("node_type") != "qemu" or node.get("status") != "started":
+                    raise iso.IsoError("ISO_SOURCE_UNAVAILABLE", "The source must be a running QEMU node")
+                if not self.has_guest_agent(pid, source):
+                    raise iso.IsoError("GUEST_AGENT_UNAVAILABLE", "The source node has no guest agent")
+                try:
+                    family = await self.guest_family(source, Priority.COMMAND)
+                    shell, command = iso.pack_command(family, body["path"])
+                    packed = await self.qga.exec(source, command, timeout=iso.PACK_TIMEOUT,
+                                                 priority=Priority.COMMAND, shell=shell)
+                except (QgaError, OSError, ValueError) as exc:
+                    raise iso.IsoError("GUEST_AGENT_UNAVAILABLE", "Guest agent is unavailable") from exc
+                if packed["exit_code"] == 3:
+                    raise iso.IsoError("ISO_SOURCE_MISSING", f"No directory {body['path']} in the source guest")
+                if packed["exit_code"] != 0:
+                    raise iso.IsoError("ISO_SOURCE_FAILED", "The guest could not pack the directory")
+                archive, size = iso.parse_packed(family, packed["stdout"])
+                limit = iso.max_bytes()
+                if size > limit:
+                    raise iso.IsoError("ISO_TOO_LARGE", f"The directory is larger than {limit} bytes")
+
+                self.iso_stage(op, "iso_transfer", 20)
+                project = await self.project_dir(pid)
+                project.mkdir(parents=True, exist_ok=True)
+                work = Path(await asyncio.to_thread(tempfile.mkdtemp, prefix=".lab-iso-work-", dir=project))
+                local = work / "archive"
+                try:
+                    await iso.read_guest_file(self.qga, source, archive, local, limit, Priority.COMMAND)
+                except (QgaError, OSError, ValueError) as exc:
+                    raise iso.IsoError("ISO_SOURCE_FAILED", "The archive could not be read from the guest") from exc
+
+                self.iso_stage(op, "iso_build", 50)
+                kind = "zip" if family == "windows" else "tar"
+                files = await asyncio.to_thread(iso.unpack, local, kind, work / "root", limit, iso.max_files())
+                if files == 0:
+                    raise iso.IsoError("ISO_SOURCE_EMPTY", f"No files in {body['path']} of the source guest")
+                name = f"{iso.PREFIX}{op['operation_id']}.iso"
+                built = work / name
+                await iso.build(work / "root", built)
+                image = project / name
+                await asyncio.to_thread(os.replace, built, image)
+
+                self.iso_stage(op, "iso_attach", 80)
+                targets = []
+                for target in body["targets"]:
+                    targets.append(await self.attach_iso(pid, target, image))
+                attached = sum(1 for t in targets if t["status"] == "attached")
+                op["result"] = {"iso": name, "bytes": image.stat().st_size, "files": files, "targets": targets}
+                if attached:
+                    op.update(status="SUCCEEDED", progress=100)
+                else:
+                    op.update(status="FAILED", error={"code": "ISO_ATTACH_FAILED",
+                                                      "message": "The image was not attached to any target"})
+                await self.forget_isos(pid, project)
+        except TimeoutError:
+            op.update(status="FAILED", error={"code": "ISO_TIMEOUT", "message": "The ISO image was not ready in time"})
+        except asyncio.CancelledError:
+            op.update(status="FAILED", error={"code": "SERVICE_RESTART", "message": "ISO operation interrupted"})
+            raise
+        except iso.IsoError as exc:
+            op.update(status="FAILED", error={"code": exc.code, "message": exc.message[:PROVISION_MESSAGE_LIMIT]})
+        except Exception as exc:  # noqa: BLE001 - reported as an operation failure, the lab keeps running
+            op.update(status="FAILED", error={"code": "ISO_FAILED", "message": f"{type(exc).__name__}"})
+        finally:
+            if archive:
+                try:
+                    shell, command = iso.cleanup_command(family, archive)
+                    await self.qga.exec(source, command, timeout=15, priority=Priority.COMMAND, shell=shell)
+                except Exception:  # noqa: BLE001 - a temporary file in the guest is harmless
+                    pass
+            if work is not None:
+                await asyncio.to_thread(shutil.rmtree, work, True)
+            op.update(updated_at=time.time())
+            self.save("operation", op["operation_id"], op)
+
+    async def attach_iso(self, pid, node_id, image):
+        """Put `image` into the CD-ROM drive of one target; a failure is reported for this target only."""
+        try:
+            node = await self.api("GET", f"projects/{pid}/nodes/{node_id}")
+            if node.get("node_type") != "qemu":
+                return {"node_id": node_id, "status": "failed", "error": "NOT_SUPPORTED"}
+            if iso.drive_busy(node.get("properties") or {}):
+                return {"node_id": node_id, "status": "failed", "error": "ISO_DRIVE_BUSY"}
+            await self.api("PUT", f"projects/{pid}/nodes/{node_id}", {"properties": {"cdrom_image": str(image)}})
+        except HTTPException as exc:
+            return {"node_id": node_id, "status": "failed",
+                    "error": "NODE_NOT_FOUND" if exc.status_code == 404 else "GNS3_ERROR"}
+        return {"node_id": node_id, "status": "attached"}
+
+    async def forget_isos(self, pid, project):
+        """Remove the images of this feature no node has in its drive any more."""
+        try:
+            nodes = await self.api("GET", f"projects/{pid}/nodes")
+        except HTTPException:
+            return
+        for path in iso.unreferenced(project, nodes):
+            try:
+                await asyncio.to_thread(path.unlink)
+            except OSError:
+                pass
 
     async def claim(self, epoch, generation):
         """Called under command_lock. Drain accepted work before handing ownership over.
