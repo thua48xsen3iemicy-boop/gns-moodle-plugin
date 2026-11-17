@@ -611,7 +611,7 @@ class Lifecycle:
         return await call(self.request, method, path, payload)
 
     async def wait_nodes(self, lab, expected):
-        deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
+        deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "600"))
         while True:
             nodes = uplink.visible_nodes(
                 lab["ticket"], await self.api("GET", f"projects/{lab['project_id']}/nodes")
@@ -690,7 +690,7 @@ class Lifecycle:
         return family
 
     async def provision(self, lab, node, spec, initial):
-        deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "180"))
+        deadline = time.monotonic() + float(os.getenv("SLOT_READY_TIMEOUT", "600"))
         # A VNC node has no serial console: neither serial-getty nor a Telnet port exist, and
         # readiness is the VNC port accepting a TCP connection. QGA does not depend on the
         # console; it is awaited here only when the initial provisioning commands need it.
