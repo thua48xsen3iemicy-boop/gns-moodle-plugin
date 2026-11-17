@@ -400,6 +400,29 @@ final class course_overview_test extends \advanced_testcase {
         $this->assertSame('running', $checks['laststatus']);
         $this->assertSame('', $checks['lastoutcome']);
         $this->assertSame($now - 10, $checks['lastat']);
+        $this->assertSame(4, $checks['mark'], 'the mark of the last graded run, though the lab has no grade type');
+        $this->assertSame(5, $checks['topmark']);
+        $this->assertSame(2, $checks['failmark']);
+        $this->assertSame($now - 590, $checks['markedat']);
         $this->assertNull($this->cell($result, $this->lab, $this->other)['checks']);
+    }
+
+    public function test_a_teacher_who_may_not_see_grades_gets_no_marks_of_the_checks(): void {
+        global $DB;
+        $now = time();
+        $DB->insert_record('gns3lab_check_runs', (object) [
+            'gns3labid' => $this->lab->id, 'userid' => $this->student->id, 'sessionid' => 's-1', 'runid' => 'r1',
+            'requestedby' => $this->student->id, 'status' => 'done', 'outcome' => 'graded', 'mark' => 5,
+            'topmark' => 5, 'failmark' => 2, 'critical' => 0, 'major' => 0, 'minor' => 0, 'note' => 0, 'errorcode' => '',
+            'timecreated' => $now - 60, 'timemodified' => $now - 50, 'timefinished' => $now - 50,
+        ]);
+        $roleid = $DB->get_field('role', 'id', ['shortname' => 'teacher'], MUST_EXIST);
+        assign_capability('moodle/grade:viewall', CAP_PROHIBIT, $roleid, \context_course::instance($this->course->id));
+        $this->setUser($this->teacher);
+
+        $checks = $this->cell($this->overview(), $this->lab, $this->student)['checks'];
+
+        $this->assertSame(1, $checks['attempts']);
+        $this->assertSame(-1, $checks['mark']);
     }
 }
