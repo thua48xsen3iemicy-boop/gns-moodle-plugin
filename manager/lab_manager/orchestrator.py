@@ -167,6 +167,17 @@ def node_states(topology: dict) -> dict:
     return result
 
 
+def guest_fact_names(ticket: dict) -> set:
+    """Names of the nodes whose facts come from the guest agent: QEMU nodes without `qga: false` (CONTRACTS 4.2).
+
+    The slot gives every such node a collector of its family, and publishes the outcome once the guest answers or
+    SLOT_FACTS_BOOT_GRACE is over (CONTRACTS 4.6). So a started one with no stored result yet is still booting: its
+    facts are not "missing for want of a collector" but not there yet.
+    """
+    return {n["name"] for n in ticket.get("nodes", [])
+            if isinstance(n, dict) and n.get("kind") == "qemu" and n.get("qga", True) is not False}
+
+
 def consoleless_names(ticket: dict, images: dict) -> set:
     """Names of the nodes whose image the catalog declares without a console (`console_type: none`).
 
@@ -195,6 +206,7 @@ class Orchestrator:
         self._check_asked: dict[str, float] = {}  # session id -> monotonic time a check run last asked the slot
         self._live_cache: dict[str, tuple[float, dict]] = {}
         self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
+        self._guest_facts: dict[str, set] = {}  # session id -> node_ids whose facts come from the guest agent
         self.leader = False
         self.epoch = None
         self._claims = set()
@@ -520,6 +532,7 @@ class Orchestrator:
         self._facts_refreshed.pop(s["id"], None)
         self._check_asked.pop(s["id"], None)
         self._consoleless.pop(s["id"], None)
+        self._guest_facts.pop(s["id"], None)
 
     @staticmethod
     def _recorded_slot_state(error, slot_state):
@@ -1053,6 +1066,10 @@ class Orchestrator:
             # The slot stamps its attempts in whole seconds: one made in the second the run started is fresh.
             since = run["started_at"].replace(microsecond=0)
             stale = {nid for nid, at in latest.items() if at < since and statuses.get(nid) == "started"}
+            # A guest that has not reported once since the lab started is still booting: wait for it like for a
+            # stale one, and if it stays silent the run is incomplete ("check again"), not graded on an empty lab.
+            stale |= {nid for nid in await self.guest_fact_nodes(s)
+                      if nid not in latest and statuses.get(nid) == "started"}
             if stale and (now() - run["started_at"]).total_seconds() < self.settings.check_facts_wait:
                 if mono - self._check_asked.get(sid, float("-inf")) >= CHECK_REASK:
                     # The slot drops a refresh that comes within SLOT_FACTS_MIN_REFRESH of the previous one (a
@@ -1279,6 +1296,20 @@ class Orchestrator:
         nodes = {k: ({**v, "console_type": "none"} if k in hidden else v) for k, v in nodes.items()}
         self._live_cache[s["id"]] = (time.monotonic(), nodes, stale)
         return nodes, stale
+
+    async def guest_fact_nodes(self, s) -> set:
+        """node_ids of a session whose facts come from the guest agent (guest_fact_names); empty if the lab of
+        the session can no longer be resolved, as before this was known."""
+        known = self._guest_facts.get(s["id"])
+        if known is None:
+            try:
+                ticket, _ = await self._ticket(s)
+            except (LabError, KeyError):
+                return set()
+            names = guest_fact_names(ticket)
+            known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
+            self._guest_facts[s["id"]] = known
+        return known
 
     async def consoleless(self, s) -> set:
         """node_ids of a running session that get no console for anybody, observers included (an image of

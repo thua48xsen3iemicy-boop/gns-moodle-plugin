@@ -6,6 +6,9 @@ from conftest import make_env
 from test_facts import collected, started
 
 LATER = "2099-01-01T00:00:00Z"  # Collected after any run started: the facts count as fresh
+# Every QEMU node of the example lab (D1…D6) has a guest agent: a run waits for each to report once.
+ADDRS = (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"),
+         ("D4", "192.168.9.4/24"), ("D5", "192.168.9.5/24"), ("D6", "192.168.9.6/24"))
 CHECKS = {"format": "gns3lab.checks/1",
           "groups": {"explicit": [{"name": "A", "members": ["D1", "D2"]}, {"name": "B", "members": ["D3"]}]}}
 
@@ -30,8 +33,7 @@ async def test_a_run_goes_from_queued_to_done(tmp_path, dsn):
             slot.facts_enabled = True
         with_checks(env)
         sid, slot, pid, ids = await started(env)
-        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}}
-                           for n, a in (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"))}
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}} for n, a in ADDRS}
         env.orch._facts_next.clear()
         await env.run(3)
         assert (await env.client.get(f"/api/v1/sessions/{sid}")).json()["features"] == ["consoles", "facts", "checks"]
@@ -80,7 +82,7 @@ async def test_a_run_waits_for_the_collection_it_asked_for(tmp_path, dsn, monkey
         with_checks(env)
         sid, slot, pid, ids = await started(env)
         old = "2000-01-01T00:00:00Z"
-        addrs = (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"))
+        addrs = ADDRS
         slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": collected(
             host(a)["data"], attempted=old, observed=old)}} for n, a in addrs}
         env.orch._facts_next.clear()
@@ -103,6 +105,26 @@ async def test_a_run_waits_for_the_collection_it_asked_for(tmp_path, dsn, monkey
         done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{run['run_id']}")).json()
         assert done["status"] == "done" and done["result"]["outcome"] == "graded"
         assert not [r for r in done["result"]["rules"] if r.get("reason") == "stale_facts"]
+
+
+async def test_a_guest_that_never_reported_makes_the_run_incomplete(tmp_path, dsn):
+    """Just after the lab started the guests are still booting and the slot publishes nothing about them yet
+    (SLOT_FACTS_BOOT_GRACE). Such a node is not one "without a collector": the run waits for it, and if it stays
+    silent the run asks to check again instead of grading an empty lab."""
+    async with make_env(tmp_path, dsn, check_facts_wait=0) as env:
+        for slot in env.slots.values():
+            slot.facts_enabled = True
+        with_checks(env)
+        sid, slot, pid, ids = await started(env)
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}} for n, a in ADDRS if n != "D3"}
+        env.orch._facts_next.clear()
+        await env.run(3)
+        r = await env.client.post(f"/api/v1/sessions/{sid}/checks", json={"requested_by_user_id": 42})
+        await env.run(5)
+        done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{r.json()['run_id']}")).json()
+        assert done["status"] == "done"
+        assert done["result"]["outcome"] == "incomplete" and done["result"]["mark"] is None
+        assert [r for r in done["result"]["rules"] if r.get("reason") == "stale_facts"]
 
 
 async def test_requests_that_are_refused(tmp_path, dsn):
