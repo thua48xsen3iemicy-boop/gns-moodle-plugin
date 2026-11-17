@@ -86,9 +86,13 @@ class get_course_overview extends external_api {
             $cms = [$cmid => $cms[$cmid]];
         }
         $showgrades = course_results::can_see_grades($coursecontext);
-        $gradesettings = $showgrades
-            ? $DB->get_records_list('gns3lab', 'id', array_map(fn($cm) => (int) $cm->instance, array_values($cms)), '', 'id, grade')
-            : [];
+        $settings = $DB->get_records_list(
+            'gns3lab',
+            'id',
+            array_map(fn($cm) => (int) $cm->instance, array_values($cms)),
+            '',
+            'id, grade, checksenabled'
+        );
 
         $configured = manager_client::is_configured();
         $client = $configured ? \core\di::get(manager_client::class) : null;
@@ -113,11 +117,11 @@ class get_course_overview extends external_api {
             $results = course_results::grades(
                 $course,
                 $cm,
-                $showgrades ? (int) ($gradesettings[$cm->instance]->grade ?? 0) : 0,
+                $showgrades ? (int) ($settings[$cm->instance]->grade ?? 0) : 0,
                 $shared
             );
-            $checks = course_results::checks((int) $cm->instance, $shared);
-            $labs[] = $lab + $results['lab'];
+            $checks = course_results::checks((int) $cm->instance, $shared, $showgrades);
+            $labs[] = $lab + $results['lab'] + ['checks' => !empty($settings[$cm->instance]->checksenabled)];
             $shared = array_flip($shared);
             foreach ($found as $user) {
                 $students[$user->id] = $user;

@@ -46,6 +46,8 @@ const STRING_KEYS = [
     'cl_labfailed', 'cl_lastcheck', 'cl_layer_l1', 'cl_layer_l2', 'cl_layer_l3', 'cl_layer_rt', 'cl_left', 'cl_live',
     'cl_loadfailed', 'cl_loading', 'cl_nochecks', 'cl_nograde', 'cl_nogradeitem', 'cl_nostudents', 'cl_openlab',
     'cl_overridden', 'cl_passed_n', 'cl_sortgrade', 'cl_sortname', 'cl_sortstate', 'cl_sorttotal', 'cl_started',
+    'cl_card_checkmark', 'cl_col_attempts', 'cl_col_avg', 'cl_sortattempts', 'cl_sortavg', 'cl_sortchecks', 'cl_sortfacts',
+    'cl_sortlab', 'cl_tries', 'cl_tries_title', 'cl_avg_title', 'cl_attempts_title',
     'cl_state_failed', 'cl_state_none', 'cl_state_queued', 'cl_state_running', 'cl_state_starting', 'cl_state_stopped',
     'cl_state_stopping', 'cl_student', 'cl_total', 'cl_total_title', 'cl_unobservable', 'cl_updated', 'cl_warn',
     'chk_hist_failed', 'chk_hist_incomplete', 'chk_hist_mark', 'chk_hist_pending', 'chk_n_critical', 'chk_n_major',
@@ -98,20 +100,84 @@ const rank = (cell, fact) => {
 };
 
 /**
- * Order of the cells by grade: the best first when ascending is turned round, no grade last.
+ * The result of a student in a lab, as the page shows it.
  *
- * @param {object|null} cell cell of the table
- * @returns {number}
+ * The mark of the last graded auto-check (5, 4, 3, 2) is the result, whatever the grade type of the activity: a lab whose
+ * grade type is "None" has marks but no gradebook grade. A grade changed by hand in the gradebook wins over the mark;
+ * without a mark the gradebook grade is shown as it is.
+ *
+ * @param {object|null|undefined} cell cell of the table
+ * @returns {object|null} {text, value (a number or null), ratio (0 to 1), passed ('yes', 'no' or ''), overridden,
+ *     attempts (graded auto-checks), at (when it was given)}
  */
-const gradeRank = cell => (cell && cell.observable && cell.grade ? cell.grade.ratio : -1);
+const resultOf = cell => {
+    if (!cell || !cell.observable) {
+        return null;
+    }
+    const grade = cell.grade;
+    const checks = cell.checks;
+    const attempts = checks ? checks.attempts : 0;
+    const marked = !!checks && typeof checks.mark === 'number' && checks.mark >= 0;
+    if (grade && (grade.overridden || !marked)) {
+        const value = parseFloat(String(grade.text).replace(',', '.'));
+        return {
+            text: grade.text, value: Number.isFinite(value) ? value : null, ratio: grade.ratio, passed: grade.passed,
+            overridden: grade.overridden, attempts, at: grade.gradedat || 0,
+        };
+    }
+    if (!marked) {
+        return null;
+    }
+    const top = checks.topmark;
+    let pass = grade && grade.passed ? grade.passed : '';
+    if (!pass && top > checks.failmark) {
+        pass = checks.mark > checks.failmark ? 'yes' : 'no';
+    }
+    return {
+        text: String(checks.mark), value: checks.mark, ratio: top > 0 ? Math.max(0, Math.min(1, checks.mark / top)) : 0,
+        passed: pass, overridden: false, attempts, at: checks.markedat || 0,
+    };
+};
 
 /**
- * Whether a cell counts as passed: graded, and not below the grade to pass if the gradebook sets one.
+ * The sorting key of a result: the best grade first; of equal grades, the one got with fewer auto-checks, then earlier.
+ *
+ * @param {object|null} result result of a cell (resultOf)
+ * @returns {number[]|null} null without a result
+ */
+const resultKey = result => (result ? [-result.ratio, result.attempts, result.at] : null);
+
+/**
+ * Whether a cell counts as passed: it has a result, not below the grade to pass (the gradebook's, or above the fail mark of
+ * the auto-check).
  *
  * @param {object|null} cell cell of the table
  * @returns {boolean}
  */
-const passed = cell => !!(cell && cell.observable && cell.grade && cell.grade.passed !== 'no');
+const passed = cell => {
+    const result = resultOf(cell);
+    return !!result && result.passed !== 'no';
+};
+
+/**
+ * Compares two sorting keys element by element.
+ *
+ * @param {number[]} a key
+ * @param {number[]} b key
+ * @returns {number}
+ */
+const compareKeys = (a, b) => {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const d = (a[i] ?? 0) - (b[i] ?? 0);
+        if (d) {
+            return d;
+        }
+    }
+    return 0;
+};
+
+/** Order of the levels of the facts in the column "Scheme": what needs a look first. */
+const FACT_ORDER = {bad: 0, warn: 1, stale: 2, ok: 3, unknown: 4};
 
 /**
  * The course page.
@@ -579,35 +645,67 @@ class CoursePage {
      * @returns {object[]}
      */
     rows() {
-        let rows = this.students.filter(s => !this.search || s.fullname.toLocaleLowerCase().includes(this.search));
+        const rows = this.students.filter(s => !this.search || s.fullname.toLocaleLowerCase().includes(this.search));
         const by = this.sort.by;
         const dir = this.sort.dir;
-        const cmid = this.view;
-        const order = student => {
-            const cell = this.cells.get(this.key(cmid, student.userid));
-            switch (by) {
-                case 'state':
-                    return rank(cell, this.factOf(cmid, student.userid));
-                case 'grade':
-                    // The best grade first.
-                    return -gradeRank(cell);
-                case 'total':
-                    return -this.total(student).passed;
-                default:
-                    return 0;
+        const byName = (a, b) => a.fullname.localeCompare(b.fullname, undefined, {numeric: true});
+        if (by === 'name') {
+            return [...rows].sort((a, b) => byName(a, b) * dir);
+        }
+        // Students without a value for the column stay at the bottom whichever way it is sorted.
+        const keyed = rows.map(student => ({student, key: this.sortKey(by, student)}));
+        keyed.sort((a, b) => {
+            if (!a.key || !b.key) {
+                return (a.key ? 0 : 1) - (b.key ? 0 : 1) || byName(a.student, b.student);
             }
-        };
-        rows = [...rows].sort((a, b) => {
-            if (by !== 'name') {
-                const ra = order(a);
-                const rb = order(b);
-                if (ra !== rb) {
-                    return (ra - rb) * dir;
-                }
-            }
-            return a.fullname.localeCompare(b.fullname, undefined, {numeric: true}) * (by === 'name' ? dir : 1);
+            return compareKeys(a.key, b.key) * dir || byName(a.student, b.student);
         });
-        return rows;
+        return keyed.map(k => k.student);
+    }
+
+    /**
+     * The sorting key of a student for a column: smaller first in the order the column is sorted at the first click.
+     *
+     * @param {string} by column: state, facts, checks, grade, lab:<cmid>, total, avg, attempts
+     * @param {object} student student of the table
+     * @returns {number[]|null} null when the student has nothing in the column
+     */
+    sortKey(by, student) {
+        if (by.startsWith('lab:')) {
+            return resultKey(resultOf(this.cells.get(this.key(parseInt(by.slice(4), 10), student.userid))));
+        }
+        const cmid = this.view;
+        const cell = this.cells.get(this.key(cmid, student.userid));
+        switch (by) {
+            case 'state':
+                return cell && cell.observable ? [rank(cell, this.factOf(cmid, student.userid))] : null;
+            case 'facts': {
+                const fact = this.factOf(cmid, student.userid);
+                const summary = cell && cell.session && cell.session.status === 'running' && fact ? fact.summary : null;
+                return summary ? [FACT_ORDER[summary.level] ?? 5, -summary.bad, -summary.warn] : null;
+            }
+            case 'checks': {
+                const checks = cell && cell.observable ? cell.checks : null;
+                // A run in progress first, then the fewest graded attempts, then the latest check.
+                return checks ? [RUN_PENDING.includes(checks.laststatus) ? 0 : 1, checks.attempts, -checks.lastat] : null;
+            }
+            case 'grade':
+                return resultKey(resultOf(cell));
+            case 'total': {
+                const total = this.total(student);
+                return total.total ? [-total.passed, -total.ratio, total.attempts] : null;
+            }
+            case 'avg': {
+                const total = this.total(student);
+                return total.avg === null ? null : [-total.avg, total.attempts];
+            }
+            case 'attempts': {
+                const total = this.total(student);
+                return total.attempts ? [total.attempts, -total.passed] : null;
+            }
+            default:
+                return null;
+        }
     }
 
     /**
@@ -655,42 +753,91 @@ class CoursePage {
         const img = hel('img', 'pic', holder);
         img.src = student.pictureurl;
         img.alt = '';
-        img.width = 24;
-        img.height = 24;
+        img.width = 18;
+        img.height = 18;
         hel('span', 'name', holder).textContent = student.fullname;
     }
 
     /**
-     * Labs passed by a student out of the labs with a grade the user may observe the student in.
+     * Whether the page shows results of a lab: grades are visible, and the lab has a grade item or auto-checks.
+     *
+     * @param {object} lab lab of the table
+     * @returns {boolean}
+     */
+    graded(lab) {
+        return this.showgrades && (lab.gradetype !== 'none' || !!lab.checks);
+    }
+
+    /**
+     * The results of a student over the labs with results the user may observe the student in.
      *
      * @param {object} student student of the table
-     * @returns {object} {passed, total}
+     * @returns {object} {passed, total, ratio (average), avg (average value shown, null without one), attempts (all graded
+     *     auto-checks of the labs with a result)}
      */
     total(student) {
-        const out = {passed: 0, total: 0};
+        const out = {passed: 0, total: 0, ratio: 0, avg: null, attempts: 0};
+        let ratios = 0;
+        let values = 0;
+        let sum = 0;
         for (const lab of this.labs) {
             const cell = this.cells.get(this.key(lab.cmid, student.userid));
-            if (lab.gradetype === 'none' || !cell || !cell.observable) {
+            if (!this.graded(lab) || !cell || !cell.observable) {
                 continue;
             }
             out.total++;
-            if (passed(cell)) {
+            const result = resultOf(cell);
+            if (!result) {
+                continue;
+            }
+            if (result.passed !== 'no') {
                 out.passed++;
             }
+            out.ratio += result.ratio;
+            ratios++;
+            out.attempts += result.attempts;
+            if (result.value !== null) {
+                sum += result.value;
+                values++;
+            }
         }
+        out.ratio = ratios ? out.ratio / ratios : 0;
+        out.avg = values ? sum / values : null;
         return out;
     }
 
     /**
-     * How many of the students shown passed a lab, how many have a grade, out of how many can be observed in it.
+     * How many of the students shown passed a lab, how many have a result, out of how many can be observed in it, and the
+     * average of the results shown.
      *
      * @param {object} lab lab of the table
      * @param {object[]} rows students shown
-     * @returns {object} {passed, graded, total}
+     * @returns {object} {passed, graded, total, average (formatted, empty without numbers)}
      */
     gradeCounts(lab, rows) {
         const cells = rows.map(s => this.cells.get(this.key(lab.cmid, s.userid))).filter(c => c && c.observable);
-        return {passed: cells.filter(passed).length, graded: cells.filter(c => c.grade).length, total: cells.length};
+        const results = cells.map(resultOf).filter(r => r);
+        const values = results.map(r => r.value).filter(v => v !== null);
+        return {
+            passed: cells.filter(passed).length,
+            graded: results.length,
+            total: cells.length,
+            average: values.length ? this.number(values.reduce((a, b) => a + b, 0) / values.length) : '',
+        };
+    }
+
+    /**
+     * A number as the language of the page writes it, with at most two decimals.
+     *
+     * @param {number} value number
+     * @returns {string}
+     */
+    number(value) {
+        try {
+            return new Intl.NumberFormat(document.documentElement.lang || undefined, {maximumFractionDigits: 2}).format(value);
+        } catch (e) {
+            return String(Math.round(value * 100) / 100);
+        }
     }
 
     /**
@@ -701,7 +848,8 @@ class CoursePage {
      */
     drawSummary(table, rows) {
         table.className = 'grid summary';
-        const graded = this.showgrades && this.labs.some(lab => lab.gradetype !== 'none');
+        const graded = this.labs.some(lab => this.graded(lab));
+        const checked = this.labs.some(lab => lab.checks);
         const head = hel('tr', '', hel('thead', '', table));
         const corner = hel('th', 'stud', head);
         corner.scope = 'col';
@@ -709,8 +857,9 @@ class CoursePage {
         for (const lab of this.labs) {
             const th = hel('th', 'lab', head);
             th.scope = 'col';
-            // The header leads to the lab, where its students are looked at closely.
-            const link = hel('a', 'labbtn', th);
+            const box = hel('span', 'labhead', th);
+            // The header leads to the lab, where its students are looked at closely; the arrow sorts by it.
+            const link = hel('a', 'labbtn', box);
             link.href = this.viewUrl(lab.cmid);
             link.textContent = lab.name;
             link.title = this.str('cl_openlab');
@@ -722,16 +871,25 @@ class CoursePage {
                 this.setView(lab.cmid, true);
             });
             if (lab.error) {
-                const warn = hel('span', 'laberr', th);
+                const warn = hel('span', 'laberr', box);
                 warn.textContent = '!';
                 warn.title = this.str('cl_labfailed', lab.error);
             }
+            const sort = this.sortButton(box, '', 'lab:' + lab.cmid, this.str('cl_sortlab'));
+            sort.classList.add('sortonly');
+            sort.setAttribute('aria-label', this.str('cl_sortlab') + ': ' + lab.name);
         }
-        if (graded) {
+        const extra = (key, label, title) => {
             const th = hel('th', 'total', head);
             th.scope = 'col';
-            this.sortButton(th, this.str('cl_total'), 'total', this.str('cl_sorttotal'));
-            th.querySelector('button').title = this.str('cl_total_title');
+            this.sortButton(th, label, key, title);
+        };
+        if (graded) {
+            extra('total', this.str('cl_total'), this.str('cl_sorttotal'));
+            extra('avg', this.str('cl_col_avg'), this.str('cl_sortavg'));
+        }
+        if (graded && checked) {
+            extra('attempts', this.str('cl_col_attempts'), this.str('cl_sortattempts'));
         }
         const body = hel('tbody', '', table);
         for (const student of rows) {
@@ -746,28 +904,36 @@ class CoursePage {
                 const td = hel('td', 'total', tr);
                 td.textContent = total.total ? `${total.passed} / ${total.total}` : '—';
                 td.title = this.str('cl_total_title');
+                const avg = hel('td', 'total avg', tr);
+                avg.textContent = total.avg === null ? '—' : this.number(total.avg);
+                avg.title = this.str('cl_avg_title');
+                if (checked) {
+                    const tries = hel('td', 'total tries', tr);
+                    tries.textContent = total.attempts ? String(total.attempts) : '—';
+                    tries.title = this.str('cl_attempts_title');
+                }
             }
         }
-        // Per lab: the average of the gradebook and how many passed of the students shown.
+        // Per lab: the average and how many passed of the students shown.
         if (this.showgrades) {
             const foot = hel('tr', '', hel('tfoot', '', table));
             hel('th', 'stud', foot).scope = 'row';
             for (const lab of this.labs) {
                 const td = hel('td', 'labsum', foot);
-                if (lab.gradetype === 'none') {
+                if (!this.graded(lab)) {
                     td.classList.add('muted');
                     td.textContent = this.str('cl_nogradeitem');
                     continue;
                 }
                 const count = this.gradeCounts(lab, rows);
-                if (lab.average) {
-                    hel('span', 'avg', td).textContent = this.str('cl_avg', lab.average);
+                if (count.average) {
+                    hel('span', 'avg', td).textContent = this.str('cl_avg', count.average);
                 }
-                hel('span', 'cnt', td).textContent = lab.gradepass
+                hel('span', 'cnt', td).textContent = lab.gradepass || lab.checks
                     ? this.str('cl_passed_n', count) : this.str('cl_graded_n', count);
             }
             if (graded) {
-                hel('td', 'total', foot);
+                hel('td', 'total', foot).colSpan = checked ? 3 : 2;
             }
         }
     }
@@ -794,12 +960,13 @@ class CoursePage {
         if (this.open && this.open.cmid === cell.cmid && this.open.userid === cell.userid) {
             button.setAttribute('aria-current', 'true');
         }
-        if (cell.grade) {
+        const result = this.graded(lab) ? resultOf(cell) : null;
+        if (result) {
             button.dataset.kind = 'graded';
-            if (cell.grade.passed) {
-                button.dataset.pass = cell.grade.passed;
+            if (result.passed) {
+                button.dataset.pass = result.passed;
             }
-            this.gradeText(button, cell.grade);
+            this.gradeText(button, result, true);
         } else {
             const pending = cell.checks && RUN_PENDING.includes(cell.checks.laststatus);
             let kind = 'none';
@@ -818,11 +985,11 @@ class CoursePage {
                 checking: this.str('cl_checking'),
                 running: this.str('cl_state_running'),
                 failed: this.str('cl_state_failed'),
-                started: this.showgrades && lab.gradetype !== 'none' ? this.str('cl_nograde') : this.str('cl_started'),
+                started: this.graded(lab) ? this.str('cl_nograde') : this.str('cl_started'),
             }[kind];
             hel('span', 'state', button).textContent = text;
         }
-        if (live && (cell.grade || session.status !== 'running')) {
+        if (live && (result || session.status !== 'running')) {
             // A grade and a lab that is up again: both are worth knowing.
             const dot = hel('span', 'live', button);
             dot.textContent = '●';
@@ -833,18 +1000,24 @@ class CoursePage {
     }
 
     /**
-     * The grade of the gradebook: the value and the mark of a grade changed by hand.
+     * A result: the grade, the mark of a grade changed by hand, and how many auto-checks it took.
      *
      * @param {HTMLElement} el where it goes
-     * @param {object} grade grade of a cell
+     * @param {object} result result of a cell (resultOf)
+     * @param {boolean} tries show the graded auto-checks
      */
-    gradeText(el, grade) {
-        hel('span', 'grade', el).textContent = grade.text;
-        if (grade.overridden) {
+    gradeText(el, result, tries) {
+        hel('span', 'grade', el).textContent = result.text;
+        if (result.overridden) {
             const mark = hel('span', 'over', el);
             mark.textContent = '✎';
             mark.title = this.str('cl_overridden');
             mark.setAttribute('aria-label', this.str('cl_overridden'));
+        }
+        if (tries && result.attempts) {
+            const count = hel('span', 'tries', el);
+            count.textContent = this.str('cl_tries', result.attempts);
+            count.title = this.str('cl_tries_title', result.attempts);
         }
     }
 
@@ -857,7 +1030,7 @@ class CoursePage {
      */
     drawLab(table, rows, lab) {
         table.className = 'grid lab';
-        const grades = this.showgrades && lab.gradetype !== 'none';
+        const grades = this.graded(lab);
         const head = hel('tr', '', hel('thead', '', table));
         const corner = hel('th', 'stud', head);
         corner.scope = 'col';
@@ -878,8 +1051,8 @@ class CoursePage {
             warn.textContent = '!';
             warn.title = this.str('cl_labfailed', lab.error);
         }
-        th('col-facts', this.str('cl_col_facts'));
-        th('col-checks', this.str('cl_col_checks'));
+        th('col-facts', this.str('cl_col_facts'), 'facts', this.str('cl_sortfacts'));
+        th('col-checks', this.str('cl_col_checks'), 'checks', this.str('cl_sortchecks'));
         if (grades) {
             th('col-grade', this.str('cl_col_grade'), 'grade', this.str('cl_sortgrade'));
         }
@@ -929,11 +1102,12 @@ class CoursePage {
             this.drawChecks(hel('td', 'checks', tr), cell.checks);
             if (grades) {
                 const grade = hel('td', 'gradecell', tr);
-                if (cell.grade) {
-                    if (cell.grade.passed) {
-                        grade.dataset.pass = cell.grade.passed;
+                const result = resultOf(cell);
+                if (result) {
+                    if (result.passed) {
+                        grade.dataset.pass = result.passed;
                     }
-                    this.gradeText(grade, cell.grade);
+                    this.gradeText(grade, result, false);
                 } else {
                     grade.textContent = '—';
                     grade.classList.add('muted');
@@ -971,6 +1145,7 @@ class CoursePage {
      * @param {string} label text
      * @param {string|number} by sorting key
      * @param {string} title tooltip
+     * @returns {HTMLButtonElement}
      */
     sortButton(th, label, by, title) {
         const button = hel('button', 'sortbtn', th);
@@ -986,6 +1161,7 @@ class CoursePage {
             this.sort = {by, dir: active ? -this.sort.dir : 1};
             this.draw();
         });
+        return button;
     }
 
     /**
@@ -1107,13 +1283,13 @@ class CoursePage {
             const li = hel('li', lab.error ? 'has-error' : '', list);
             hel('b', '', li).textContent = lab.name;
             hel('span', '', li).textContent = lab.error ? this.str('cl_labfailed', lab.error) : this.str('cl_counts', count);
-            if (this.showgrades && lab.gradetype !== 'none') {
+            if (this.graded(lab)) {
                 const grades = this.gradeCounts(lab, rows);
                 const line = hel('li', 'grades', list);
-                hel('span', '', line).textContent = lab.gradepass
+                hel('span', '', line).textContent = lab.gradepass || lab.checks
                     ? this.str('cl_counts_passed', grades) : this.str('cl_counts_graded', grades);
-                if (lab.average) {
-                    hel('span', '', line).textContent = this.str('cl_avg', lab.average);
+                if (grades.average) {
+                    hel('span', '', line).textContent = this.str('cl_avg', grades.average);
                 }
             }
         }
@@ -1291,6 +1467,18 @@ class CoursePage {
         if (session && session.startedat) {
             hel('span', '', state).textContent = ' · ' + this.clock(session.startedat * 1000);
         }
+        const marked = this.showgrades && cell.checks && cell.checks.mark >= 0;
+        if (marked) {
+            const line = hel('p', 'cgrade', el);
+            line.dataset.source = 'checks';
+            hel('span', 'lbl', line).textContent = this.str('cl_card_checkmark') + ': ';
+            const result = resultOf({...cell, grade: null});
+            if (result.passed) {
+                line.dataset.pass = result.passed;
+            }
+            this.gradeText(line, result, false);
+            hel('span', 'sub', line).textContent = ' · ' + this.str('cl_tries_title', cell.checks.attempts);
+        }
         if (this.showgrades && lab.gradetype !== 'none') {
             const grade = hel('p', 'cgrade', el);
             hel('span', 'lbl', grade).textContent = this.str('cl_card_grade') + ': ';
@@ -1298,7 +1486,7 @@ class CoursePage {
                 if (cell.grade.passed) {
                     grade.dataset.pass = cell.grade.passed;
                 }
-                this.gradeText(grade, cell.grade);
+                this.gradeText(grade, cell.grade, false);
                 if (lab.grademax) {
                     hel('span', 'sub', grade).textContent = ' ' + this.str('cl_card_outof', lab.grademax);
                 }

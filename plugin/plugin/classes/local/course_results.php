@@ -99,13 +99,18 @@ class course_results {
     }
 
     /**
-     * A summary of the auto-check runs of some students of a lab: graded attempts and the last run.
+     * A summary of the auto-check runs of some students of a lab: graded attempts, the last run and the mark of the last
+     * graded run (the one the gradebook gets).
+     *
+     * The mark is what the auto-check gave (5, 4, 3, 2 by default), whatever the grade type of the activity: a lab whose
+     * grade type is "None" still has marks. Like the grades, it is left out when the user may not see grades.
      *
      * @param int $instanceid gns3lab id
      * @param int[] $userids students
-     * @return array userid => fields of a check summary (check_fields())
+     * @param bool $marks include the marks
+     * @return array userid => fields of a check summary (checks_structure())
      */
-    public static function checks(int $instanceid, array $userids): array {
+    public static function checks(int $instanceid, array $userids, bool $marks = true): array {
         global $DB;
 
         if (!$userids) {
@@ -117,14 +122,21 @@ class course_results {
             "gns3labid = :labid AND userid {$insql}",
             $params + ['labid' => $instanceid],
             'id ASC',
-            'id, userid, status, outcome, mark, timecreated, timefinished'
+            'id, userid, status, outcome, mark, topmark, failmark, timecreated, timefinished, timemodified'
         );
         $out = [];
         foreach ($rows as $row) {
             $userid = (int) $row->userid;
-            $entry = $out[$userid] ?? ['attempts' => 0];
+            $entry = $out[$userid] ?? ['attempts' => 0, 'mark' => -1, 'topmark' => 0, 'failmark' => 0, 'markedat' => 0];
             if (check_runs::is_graded($row)) {
                 $entry['attempts']++;
+                if ($marks) {
+                    // A later graded run replaces an earlier one, as in the gradebook.
+                    $entry['mark'] = (int) $row->mark;
+                    $entry['topmark'] = (int) $row->topmark;
+                    $entry['failmark'] = (int) $row->failmark;
+                    $entry['markedat'] = (int) ($row->timefinished ?: $row->timemodified);
+                }
             }
             // Ordered by id: the last row of the user is the last run.
             $entry['laststatus'] = (string) $row->status;
@@ -146,6 +158,7 @@ class course_results {
             'grademax' => new external_value(PARAM_TEXT, 'Top points of a value grade, formatted; empty for a scale'),
             'gradepass' => new external_value(PARAM_TEXT, 'Grade to pass, formatted; empty if the gradebook sets none'),
             'average' => new external_value(PARAM_TEXT, 'Average grade of the graded students in the answer; empty for a scale'),
+            'checks' => new external_value(PARAM_BOOL, 'The auto-checks of the lab are switched on'),
         ];
     }
 
@@ -175,6 +188,10 @@ class course_results {
             'laststatus' => new external_value(PARAM_ALPHA, 'Status of the last run: queued, running, done or failed'),
             'lastoutcome' => new external_value(PARAM_ALPHA, 'Outcome of the last run: graded or incomplete when done'),
             'lastat' => new external_value(PARAM_INT, 'When the last run ended, or was asked for while it goes on'),
+            'mark' => new external_value(PARAM_INT, 'Mark of the last graded run, -1 if none or the user may not see grades'),
+            'topmark' => new external_value(PARAM_INT, 'Top mark of the grading of that run, 0 if no mark'),
+            'failmark' => new external_value(PARAM_INT, 'Fail mark of the grading of that run, 0 if no mark'),
+            'markedat' => new external_value(PARAM_INT, 'When that run ended, 0 if no mark'),
         ], 'Auto-check runs of the student, null if there are none', VALUE_DEFAULT, null, NULL_ALLOWED);
     }
 }
