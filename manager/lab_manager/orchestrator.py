@@ -68,6 +68,10 @@ NODE_KEYS = ("node_id", "name", "node_type", "x", "y", "z", "width", "height", "
 LINK_KEYS = ("link_id", "nodes", "suspend", "filters", "link_type", "link_style")
 CONSOLE_TYPES = {"telnet", "vnc"}
 NODE_STATUSES = {"started", "stopped", "suspended"}
+# Collectors a check run does not wait for: iol.l1 is the slot's own L1 cycle, not refreshed on request.
+UNREFRESHED_COLLECTORS = frozenset({"iol.l1"})
+# A collector this far behind the newest one of its node is no longer published by the slot (CONTRACTS 4.6).
+ABANDONED_COLLECTOR = timedelta(minutes=5)
 CHECK_REASK = 6  # Seconds between the requests of a check run to collect now: over the slot's 5 s rate limit
 
 # The CT may be running with the student's directory mounted read-write.
@@ -165,6 +169,27 @@ def node_states(topology: dict) -> dict:
             "console_type": console if console in CONSOLE_TYPES else "none",
         }
     return result
+
+
+def stale_nodes(rows, statuses: dict, since) -> set:
+    """node_ids of the started nodes whose facts a check run cannot use yet: a collector of theirs has not been
+    attempted since `since` (CONTRACTS 2.9, "Свежесть").
+
+    Every collector counts, not only the newest: a fresh linux.net next to a linux.config read before the student
+    fixed the file would grade the old file. Two kinds of rows are left out. iol.l1 follows its own L1 cycle, not
+    the refresh a run asks for. A row far behind the other collectors of its node is one the slot no longer
+    publishes (the manager never deletes rows): it would keep the node stale for good.
+    """
+    by_node = defaultdict(list)
+    for row in rows:
+        if row["collector"] not in UNREFRESHED_COLLECTORS and statuses.get(row["node_id"]) == "started":
+            by_node[row["node_id"]].append(row["attempted_at"])
+    stale = set()
+    for nid, stamps in by_node.items():
+        live = [at for at in stamps if at >= max(stamps) - ABANDONED_COLLECTOR]
+        if min(live) < since:
+            stale.add(nid)
+    return stale
 
 
 def guest_fact_names(ticket: dict) -> set:
@@ -1060,16 +1085,13 @@ class Orchestrator:
             rows = await self.store.facts_rows(sid)
             nodes, _ = await self.live_nodes(s)
             statuses = {node_id: n["status"] for node_id, n in nodes.items()}
-            latest = {}
-            for row in rows:
-                latest[row["node_id"]] = max(latest.get(row["node_id"], row["attempted_at"]), row["attempted_at"])
             # The slot stamps its attempts in whole seconds: one made in the second the run started is fresh.
-            since = run["started_at"].replace(microsecond=0)
-            stale = {nid for nid, at in latest.items() if at < since and statuses.get(nid) == "started"}
+            stale = stale_nodes(rows, statuses, run["started_at"].replace(microsecond=0))
             # A guest that has not reported once since the lab started is still booting: wait for it like for a
             # stale one, and if it stays silent the run is incomplete ("check again"), not graded on an empty lab.
+            reported = {row["node_id"] for row in rows}
             stale |= {nid for nid in await self.guest_fact_nodes(s)
-                      if nid not in latest and statuses.get(nid) == "started"}
+                      if nid not in reported and statuses.get(nid) == "started"}
             if stale and (now() - run["started_at"]).total_seconds() < self.settings.check_facts_wait:
                 if mono - self._check_asked.get(sid, float("-inf")) >= CHECK_REASK:
                     # The slot drops a refresh that comes within SLOT_FACTS_MIN_REFRESH of the previous one (a
