@@ -184,6 +184,7 @@ define([], function() {
         cells: new Map(),
         calls: [],
         historyCalls: [],
+        runCalls: [],
     };
     const summary = (status, facts = 'unknown', left = 3 * 3600) => ({
         status,
@@ -351,6 +352,31 @@ define([], function() {
         return {enabled: true, available: true, canstart: false, report: 'full', detailsfrom: 0,
             attempts: {max: 0, used, left: -1}, runs};
     };
+    // The report of a run of a student of the course page (get_check_run with userid): r2 found nothing, r1 and r3
+    // found errors, one of them with a consequence and a forgiven note.
+    const finding = (id, cls, message, extra = {}) => ({id, code: 'rule_' + id, group: 'l2', class: cls, baseclass: cls,
+        counted: cls !== 'note', causedby: '', nodes: [], ifaces: [], message, ...extra});
+    const COURSE_REPORTS = {
+        r2: [],
+        r1: [finding('f1', 'major', 'SW1 Gi0/2: access VLAN 20, expected 10'),
+            finding('f2', 'major', 'PC2 cannot reach its gateway 10.0.10.1'),
+            finding('f3', 'minor', 'R1 Gi0/1: no description')],
+        r3: [finding('f4', 'critical', 'R1: OSPF area 0 has no neighbours'),
+            finding('f5', 'major', 'R2 cannot reach 10.0.12.1', {counted: false, causedby: 'f4'}),
+            finding('f6', 'major', 'SW2 Gi0/3 is shut down'),
+            finding('f7', 'note', 'R3 Gi0/0: MTU 1400', {baseclass: 'minor', counted: false})],
+    };
+    const courseRun = async args => {
+        course.runCalls.push(args);
+        const overview = await courseChecks(args);
+        course.historyCalls.pop();
+        const r = overview.runs.find(x => x.runid === args.runid);
+        if (!r || cfg.runfail) {
+            throw new Error('This check is not known in this activity.');
+        }
+        return {...r, detailed: true, detailsfrom: 0, gone: false, findings: COURSE_REPORTS[r.runid] || [],
+            rules: r.runid === 'r1' ? [{code: 'address_not_saved', group: 'addressing', status: 'skipped', reason: 'no_collector'}] : []};
+    };
 
     const handlers = {
         mod_gns3lab_authoring: async args => {
@@ -385,6 +411,9 @@ define([], function() {
             return checksOverview();
         },
         mod_gns3lab_get_check_run: async args => {
+            if (cfg.course && args.userid) {
+                return courseRun(args);
+            }
             const r = checks.runs.find(x => x.runid === args.runid);
             if (!r) {
                 throw new Error('This check is not known in this activity.');
@@ -603,6 +632,7 @@ define([], function() {
             result: setResult,
             grade,
             historyCalls: course.historyCalls,
+            runCalls: course.runCalls,
             // The facts of a student changed: the next read sees a new rev.
             bump: userid => {
                 course.rev[userid] = (course.rev[userid] || 1) + 1;

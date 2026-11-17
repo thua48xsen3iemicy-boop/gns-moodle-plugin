@@ -4374,6 +4374,111 @@ body.gns3lab-fullscreen {
     color: var(--muted);
     font-size: 12px;
 }
+/* A finished run is a button that opens its report under it. */
+.gns3lab-course .historylist .runbtn {
+    display: flex;
+    flex-wrap: wrap;
+    flex-basis: 100%;
+    gap: 2px 10px;
+    margin: -5px -8px;
+    padding: 5px 8px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-course .historylist .runbtn:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.gns3lab-course .historylist .runbtn::before {
+    content: "▸";
+    color: var(--muted);
+}
+.gns3lab-course .historylist .runbtn[aria-expanded="true"]::before {
+    content: "▾";
+}
+.gns3lab-course .historylist li[data-open="true"] {
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.gns3lab-course .rundetails {
+    flex-basis: 100%;
+    margin-top: 10px;
+}
+.gns3lab-course .rundetails .cnote {
+    margin: 4px 0;
+}
+.gns3lab-course .rundetails .runok {
+    color: var(--ok);
+    font-weight: 600;
+}
+.gns3lab-course .rundetails .findings,
+.gns3lab-course .rundetails .consequences,
+.gns3lab-course .rundetails .gaps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-course .rundetails .gaps {
+    padding-left: 16px;
+    list-style: disc;
+    color: var(--muted);
+    font-size: 12px;
+}
+.gns3lab-course .rundetails .finding {
+    padding: 4px 0 4px 8px;
+    border-top: 1px solid var(--line);
+    border-left: 3px solid transparent;
+}
+.gns3lab-course .rundetails .finding.counted.sev-critical {
+    border-left-color: var(--bad);
+}
+.gns3lab-course .rundetails .finding.counted.sev-major {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .rundetails .finding.counted.sev-minor {
+    border-left-color: var(--muted);
+}
+.gns3lab-course .rundetails .consequences {
+    margin-top: 4px;
+}
+.gns3lab-course .rundetails .finding.consequence {
+    border-top: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+.gns3lab-course .rundetails .sev,
+.gns3lab-course .rundetails .tag {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--muted);
+    border: 1px solid var(--line);
+}
+.gns3lab-course .rundetails .sev-critical > .sev {
+    color: #fff;
+    background: var(--bad);
+    border-color: var(--bad);
+}
+.gns3lab-course .rundetails .sev-major > .sev {
+    color: #000;
+    background: var(--warn);
+    border-color: var(--warn);
+}
+.gns3lab-course .rundetails .sev-minor > .sev {
+    color: var(--fg);
+}
+.gns3lab-course .rundetails .forgiven {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+}
 @media (max-width: 720px) {
     .gns3lab-course .card {
         position: fixed;
