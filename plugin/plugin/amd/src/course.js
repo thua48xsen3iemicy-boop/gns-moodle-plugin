@@ -34,6 +34,7 @@ import {getStrings} from 'core/str';
 import {hel} from 'mod_gns3lab/dom';
 import {buildModel} from 'mod_gns3lab/model';
 import {card, idleSince, summarize, trackRev} from 'mod_gns3lab/coursefacts';
+import {CLASSES, groupFindings, isForgiven} from 'mod_gns3lab/checkreport';
 
 /** Language strings of the page. */
 const STRING_KEYS = [
@@ -52,7 +53,12 @@ const STRING_KEYS = [
     'cl_state_stopping', 'cl_student', 'cl_total', 'cl_total_title', 'cl_unobservable', 'cl_updated', 'cl_warn',
     'chk_hist_failed', 'chk_hist_incomplete', 'chk_hist_mark', 'chk_hist_pending', 'chk_n_critical', 'chk_n_major',
     'chk_n_minor', 'chk_n_note',
+    'cl_run_failed', 'cl_run_toggle', 'chk_consequence', 'chk_forgiven', 'chk_nofindings', 'chk_details_counts',
+    'chk_details_gone', 'chk_gaps', 'chk_class_critical', 'chk_class_major', 'chk_class_minor', 'chk_class_note',
+    'chk_gap_no_collector', 'chk_gap_collect_failed', 'chk_gap_unsupported_os', 'chk_gap_port_unknown',
 ];
+/** Why a rule of a run could not be checked (get_check_run rules[].reason), as the panel of the student lists them. */
+const DATA_GAPS = ['no_collector', 'collect_failed', 'unsupported_os', 'port_unknown'];
 /** Statuses of a check run that is not over yet. */
 const RUN_PENDING = ['queued', 'running'];
 /** Statuses of a session that has a lab up or on its way. */
@@ -218,6 +224,9 @@ class CoursePage {
         this.pushed = false;
         // The runs of the checks of the open card: {key, sign, data, error}.
         this.history = null;
+        // The run of the history shown in full ({key, runid}) and the reports read (get_check_run), by cell and run.
+        this.runOpen = null;
+        this.runs = new Map();
         this.drawPending = false;
         this.loaded = false;
         // The markup on the screen, so that a redraw with the same content leaves the elements (and the focus) alone.
@@ -1514,7 +1523,15 @@ class CoursePage {
         this.renderHistory(el, cell);
         if (el.innerHTML !== this.cardHtml) {
             this.cardHtml = el.innerHTML;
-            this.region('card').replaceChildren(...el.childNodes);
+            const box = this.region('card');
+            // A run opened from the keyboard keeps the focus on its line.
+            const focused = box.contains(document.activeElement) && document.activeElement.dataset
+                ? document.activeElement.dataset.runid : '';
+            box.replaceChildren(...el.childNodes);
+            const again = focused ? [...box.querySelectorAll('.runbtn')].find(b => b.dataset.runid === focused) : null;
+            if (again) {
+                again.focus();
+            }
         }
     }
 
@@ -1673,15 +1690,156 @@ class CoursePage {
                 result = this.str('chk_hist_incomplete');
                 li.dataset.result = 'incomplete';
             }
-            hel('span', 'when', li).textContent = this.when((run.finishedat || run.requestedat) * 1000);
-            hel('b', 'what', li).textContent = result;
+            // A finished run opens its report: the findings by class, where the student stumbled, or that nothing was found.
+            const done = run.status === 'done' && !!run.runid;
+            const open = done && this.runOpen && this.runOpen.key === this.key(cell.cmid, cell.userid)
+                && this.runOpen.runid === run.runid;
+            let line = li;
+            if (done) {
+                line = hel('button', 'runbtn', li);
+                line.type = 'button';
+                line.dataset.runid = run.runid;
+                line.title = this.str('cl_run_toggle');
+                line.setAttribute('aria-expanded', open ? 'true' : 'false');
+                line.addEventListener('click', () => this.toggleRun(cell, run.runid));
+            }
+            hel('span', 'when', line).textContent = this.when((run.finishedat || run.requestedat) * 1000);
+            hel('b', 'what', line).textContent = result;
             if (run.status === 'done') {
-                const counts = ['critical', 'major', 'minor', 'note'].filter(k => run.counts[k])
-                    .map(k => this.str('chk_n_' + k, run.counts[k]));
+                const counts = CLASSES.filter(k => run.counts[k]).map(k => this.str('chk_n_' + k, run.counts[k]));
                 if (counts.length) {
-                    hel('span', 'counts', li).textContent = counts.join(', ');
+                    hel('span', 'counts', line).textContent = counts.join(', ');
                 }
             }
+            if (open) {
+                li.dataset.open = 'true';
+                this.renderRun(hel('div', 'rundetails', li), cell, run.runid);
+            }
+        }
+    }
+
+    /**
+     * Opens or closes the report of a run in the history of the card; the first opening reads it.
+     *
+     * @param {object} cell cell of the card
+     * @param {string} runid run
+     */
+    async toggleRun(cell, runid) {
+        const key = this.key(cell.cmid, cell.userid);
+        if (this.runOpen && this.runOpen.key === key && this.runOpen.runid === runid) {
+            this.runOpen = null;
+            this.renderCard();
+            return;
+        }
+        this.runOpen = {key, runid};
+        const id = `${key}:${runid}`;
+        const known = this.runs.get(id);
+        if (known && (known.data || known.loading)) {
+            this.renderCard();
+            this.showRun(runid);
+            return;
+        }
+        // A finished run does not change: it is read once.
+        const entry = {loading: true, data: null, error: ''};
+        this.runs.set(id, entry);
+        this.renderCard();
+        try {
+            const [data] = await Promise.all(Ajax.call([{
+                methodname: 'mod_gns3lab_get_check_run',
+                args: {cmid: cell.cmid, runid, userid: cell.userid},
+            }]));
+            entry.data = data;
+        } catch (error) {
+            entry.error = error && error.message ? error.message : String(error);
+        }
+        entry.loading = false;
+        this.renderCard();
+        this.showRun(runid);
+        if (!entry.data && this.runs.get(id) === entry) {
+            // The next opening tries again.
+            this.runs.delete(id);
+        }
+    }
+
+    /**
+     * Scrolls the card so that the opened report of a run is in sight.
+     *
+     * @param {string} runid run
+     */
+    showRun(runid) {
+        const button = [...this.region('card').querySelectorAll('.runbtn')].find(b => b.dataset.runid === runid);
+        const details = button ? button.parentElement.querySelector('.rundetails') : null;
+        if (details && details.scrollIntoView) {
+            details.scrollIntoView({block: 'nearest'});
+        }
+    }
+
+    /**
+     * The report of a run: the findings that count first (critical, major, minor), each root with its consequences,
+     * then the forgiven ones; or that nothing was found, or why the findings are not there.
+     *
+     * @param {HTMLElement} box where it goes
+     * @param {object} cell cell of the card
+     * @param {string} runid run
+     */
+    renderRun(box, cell, runid) {
+        const entry = this.runs.get(`${this.key(cell.cmid, cell.userid)}:${runid}`);
+        const note = (text, cls = 'cnote') => {
+            hel('p', cls, box).textContent = text;
+        };
+        if (!entry || entry.loading) {
+            note(this.str('cl_loading'));
+            return;
+        }
+        if (!entry.data) {
+            note(this.str('cl_run_failed', entry.error));
+            return;
+        }
+        const run = entry.data;
+        if (!run.detailed) {
+            note(run.gone ? this.str('chk_details_gone') : this.str('chk_details_counts'));
+            return;
+        }
+        const groups = groupFindings(run.findings);
+        if (!groups.length) {
+            note(this.str('chk_nofindings'), 'cnote runok');
+        } else {
+            const list = hel('ol', 'findings', box);
+            for (const {finding, consequences} of groups) {
+                const item = hel('li', 'finding sev-' + finding.class + (finding.counted ? ' counted' : ''), list);
+                this.findingLine(item, finding);
+                if (consequences.length) {
+                    const sub = hel('ul', 'consequences', item);
+                    for (const c of consequences) {
+                        const li = hel('li', 'finding consequence sev-' + c.class, sub);
+                        hel('span', 'tag', li).textContent = this.str('chk_consequence');
+                        this.findingLine(li, c);
+                    }
+                }
+            }
+        }
+        const gaps = DATA_GAPS.map(reason => [reason, (run.rules || []).filter(r => r.reason === reason).length])
+            .filter(([, n]) => n > 0);
+        if (gaps.length) {
+            note(this.str('chk_gaps'));
+            const ul = hel('ul', 'gaps', box);
+            for (const [reason, n] of gaps) {
+                hel('li', '', ul).textContent = this.str('chk_gap_' + reason, n);
+            }
+        }
+    }
+
+    /**
+     * One finding of a report: its class and what is wrong; a forgiven one says so.
+     *
+     * @param {HTMLElement} parent where it goes
+     * @param {object} f finding
+     */
+    findingLine(parent, f) {
+        hel('span', 'sev', parent).textContent = this.str('chk_class_' + f.class);
+        hel('span', 'msg', parent).textContent = f.message || f.code;
+        if (isForgiven(f)) {
+            hel('small', 'forgiven', parent).textContent = this.str('chk_forgiven');
         }
     }
 }

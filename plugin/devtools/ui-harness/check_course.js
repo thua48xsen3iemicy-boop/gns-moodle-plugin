@@ -177,6 +177,16 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         check('sorting by the checks: the fewest first', (await names(page))[0] === 'Chen Wei', JSON.stringify(await names(page)));
         const height = await rowOf(page, 'Alice').evaluate(e => e.getBoundingClientRect().height);
         check('rows are compact', height <= 28, String(height));
+        const bg = (name, sel = 'th') => rowOf(page, name).locator(sel).first().evaluate(e => getComputedStyle(e).backgroundColor);
+        const shade = n => page.locator('tbody tr').nth(n).locator('th').evaluate(e => getComputedStyle(e).backgroundColor);
+        check('every other row is shaded', (await shade(0)) !== (await shade(1)) && (await shade(0)) === (await shade(2)),
+            JSON.stringify([await shade(0), await shade(1), await shade(2)]));
+        const plain = await bg('Chen', 'td');
+        await rowOf(page, 'Chen').locator('th .name').hover();
+        const lit = await until(async() => (await bg('Chen', 'td')) !== plain
+            && (await bg('Chen', 'td')) === (await bg('Chen', 'td.total')) && (await bg('Chen')) === (await bg('Chen', 'td')), 2000);
+        check('the pointer over a name lights the whole row', !!lit, JSON.stringify([plain, await bg('Chen', 'td')]));
+        await page.mouse.move(0, 0);
         await page.locator('thead .sortbtn', {hasText: 'Student'}).click();
         check('sorting by name again', (await names(page))[0] === 'Alice Ivanova' && (await names(page))[1] === 'Boris Petrov');
 
@@ -198,12 +208,54 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         check('...with the findings counted', /critical: 1, major: 1/.test(await history.innerText()));
         check('...read from get_checks for that student and lab',
             JSON.stringify(await page.evaluate(() => window.__stub.course.historyCalls.at(-1))) === '{"cmid":1,"userid":12}');
+        /* the report of a run in the history */
+        const runLine = n => history.locator('li').nth(n);
+        check('a running check cannot be opened, a finished one can',
+            (await runLine(0).locator('.runbtn').count()) === 0 && (await runLine(1).locator('.runbtn').getAttribute('aria-expanded')) === 'false');
+        await runLine(1).locator('.runbtn').click();
+        const report = runLine(1).locator('.rundetails');
+        const shown = await until(async() => (await report.locator('.finding').count()) > 0, 4000);
+        const reportText = shown ? await report.innerText() : '';
+        check('a click on a run shows its findings: the critical first, with its class', !!shown
+            && (await report.locator('.findings > li').first().getAttribute('class')).includes('sev-critical')
+            && /OSPF area 0 has no neighbours/.test(reportText), reportText);
+        check('...a consequence under its cause, a forgiven note at the end',
+            (await report.locator('.findings > li').first().locator('.consequence').count()) === 1
+            && /MTU 1400/.test(await report.locator('.findings > li').last().innerText())
+            && (await report.locator('.forgiven').count()) === 1, reportText);
+        check('...read with get_check_run for that student, lab and run',
+            JSON.stringify(await page.evaluate(() => window.__stub.course.runCalls.at(-1))) === '{"cmid":1,"runid":"r3","userid":12}');
+        check('...and the line says it is open', (await runLine(1).locator('.runbtn').getAttribute('aria-expanded')) === 'true');
+        await card.screenshot({path: path.join(SHOTS, 'course-2b-run-report.png')});
+        await runLine(1).locator('.runbtn').click();
+        await until(async() => (await report.count()) === 0, 2000);
+        check('a second click hides it', (await runLine(1).locator('.rundetails').count()) === 0);
+        await runLine(1).locator('.runbtn').click();
+        await until(async() => (await runLine(1).locator('.finding').count()) > 0, 2000);
+        check('...opened again, it is not read again', (await page.evaluate(() => window.__stub.course.runCalls.length)) === 1);
+        await runLine(1).locator('.runbtn').click();
+
         const findings = await until(async() => (await card.locator('.cfinds .issues li').count()) > 0, 6000);
         check('the card of a running lab reads its facts in the summary too', !!findings);
         await page.screenshot({path: path.join(SHOTS, 'course-2-summary-card.png')});
         await card.locator('.cclose').click();
         await card.waitFor({state: 'hidden'});
         check('closing the card clears the address', (await page.evaluate(() => location.hash)) === '');
+
+        // Alice in lab 4: a run that found nothing says so, an earlier one lists what was wrong.
+        await cellOf(page, 'Alice', 1).locator('button').click();
+        await card.waitFor({state: 'visible'});
+        await until(async() => (await history.locator('.runbtn').count()) === 2, 4000);
+        await history.locator('li').nth(0).locator('.runbtn').click();
+        const clean = await until(async() => /No errors found/.test(await history.locator('li').nth(0).innerText()), 4000);
+        check('a run without findings: "no errors found"', !!clean, await history.innerText());
+        await history.locator('li').nth(1).locator('.runbtn').click();
+        const older = await until(async() => (await history.locator('li').nth(1).locator('.finding').count()) === 3, 4000);
+        check('opening another run closes the first and lists its findings and what could not be checked', !!older
+            && (await history.locator('.rundetails').count()) === 1 && /Not everything could be checked/.test(await history.innerText()),
+            await history.innerText());
+        await page.goBack();
+        await card.waitFor({state: 'hidden'});
 
         await cellOf(page, 'Alice', 3).locator('button').click();
         await card.waitFor({state: 'visible'});
