@@ -378,6 +378,8 @@ class FakeSlot:
         lab = self.labs.get(pid)
         record = self.projects.get(pid)
         missing = bool(record and record.get("missing"))
+        # Slot 0.4.1: a project whose first deploy never reached READY is refused, in any slot.
+        unprovisioned = action == "deploy" and record is not None and not record.get("provisioned")
         if lab is None and action == "deploy" and record and record["student_state"] and self.student_state:
             # The record in the student directory: same nodes, nothing recreated.
             lab = self.labs[pid] = {"project_id": pid, "ticket": record["ticket"], "state": "STOPPED"}
@@ -390,9 +392,9 @@ class FakeSlot:
             return self._json(409, {"detail": {"code": "INVALID_TRANSITION", "message": "no"}})
         if lab and ticket and ticket != lab["ticket"]:
             return self._json(409, {"detail": "Existing project manifest differs"})
-        cold = False
+        cold = unprovisioned
         if lab is None:
-            cold = record is not None
+            cold = cold or record is not None
             lab = self.labs[pid] = {"project_id": pid, "ticket": ticket}
             self.node_ids[pid] = {n["name"]: str(uuid.uuid4()) for n in ticket["nodes"]}
             if record is None:
@@ -525,6 +527,8 @@ class FakeSlot:
                     else:
                         op["status"] = "SUCCEEDED"
                         lab["state"] = "STOPPED" if op["action"] == "stop" else "READY"
+                        if op["action"] != "stop" and op["project_id"] in self.projects:
+                            self.projects[op["project_id"]]["provisioned"] = True
                         lab['shutdown_nodes'] = set()
                         if op['action'] != 'stop':
                             self.stopped_nodes.difference_update(n['name'] for n in lab['ticket']['nodes'])
