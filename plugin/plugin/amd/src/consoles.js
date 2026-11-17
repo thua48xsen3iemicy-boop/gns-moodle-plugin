@@ -72,6 +72,12 @@ const TYPED_MAX = 16;
 /** The marker a terminal in bracketed paste mode puts before pasted text. */
 const PASTE_MARK = '\x1b[200~';
 
+/**
+ * Closed terminals kept connected, at most: the oldest one is disconnected for good when another is closed.
+ * Reopening a kept terminal shows the screen as it was (nano, a pager, half-typed input) instead of a blank one.
+ */
+const PARK_MAX = 12;
+
 /** The kinds of connection state that mean the console works now (a green dot). */
 const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: 'off', failed: 'bad', idle: 'wait', closed: 'off'};
 
@@ -102,6 +108,8 @@ class Con {
         this.n = node;
         this.unread = false;
         this.min = false;
+        // Closed by the student but still connected: out of every view, back as it was when opened again.
+        this.parked = false;
         this.term = null;
         this.fit = null;
         this.conn = null;
@@ -610,6 +618,7 @@ class Con {
 
     output() {
         const o = this.owner;
+        if (this.parked) return;
         this.activity('out');
         if (!o.isVisible(this)) {
             if (!this.unread) {
@@ -722,6 +731,8 @@ export class Consoles {
         this.xterm = null;
         this.RFB = null;
         this.cons = new Map();
+        // Terminals the student closed: hidden, still connected (PARK_MAX).
+        this.parked = new Map();
         this.active = null;
         this.fonts = store.get('termfonts', {});
         if (!this.fonts || typeof this.fonts !== 'object' || Array.isArray(this.fonts)) this.fonts = {};
@@ -883,7 +894,7 @@ export class Consoles {
             this.toast(this.s(screen ? 'ui_screen_fail' : 'ui_term_fail'));
             return;
         }
-        let c = this.cons.get(node.id);
+        let c = this.cons.get(node.id) || this.unpark(node);
         if (!c) {
             c = new Con(this, node);
             c.titled = node.name;
@@ -907,10 +918,19 @@ export class Consoles {
         c.focus();
     }
 
+    /**
+     * Closes a console in the views. A terminal stays connected in the background, so that opening it again shows
+     * the screen of the device as it was: a new connection to a node gets nothing until the device prints, and a
+     * full-screen program (nano, less) would leave a black terminal. A screen (noVNC) redraws itself on connection
+     * and is disconnected.
+     *
+     * @param {string} nodeId Node of the console.
+     */
     close(nodeId) {
         const c = this.cons.get(nodeId);
         if (!c) return;
-        c.dispose();
+        if (c.vnc || !c.conn || c.state === 'failed') c.dispose();
+        else this.park(c);
         this.cons.delete(nodeId);
         this.stage.setBadge(nodeId, null);
         if (this.active === nodeId) this.active = this.cons.size ? Array.from(this.cons.keys()).pop() : null;
@@ -922,8 +942,56 @@ export class Consoles {
         this.layout();
     }
 
+    /**
+     * Takes a closed terminal out of the views and keeps its connection; the oldest kept one is dropped past PARK_MAX.
+     *
+     * @param {Con} c the console
+     */
+    park(c) {
+        this.snip.closeFor(c);
+        c.parked = true;
+        c.unread = false;
+        c.min = false;
+        c.host.remove();
+        if (c.win) c.win.remove();
+        c.win = null;
+        this.parked.delete(c.n.id);
+        this.parked.set(c.n.id, c);
+        while (this.parked.size > PARK_MAX) {
+            const [id, old] = this.parked.entries().next().value;
+            this.parked.delete(id);
+            old.dispose();
+        }
+    }
+
+    /**
+     * Brings back a terminal closed earlier, still connected.
+     *
+     * @param {object} node node of the model
+     * @returns {Con|null} the console, or null when none is kept for the node
+     */
+    unpark(node) {
+        const c = this.parked.get(node.id);
+        if (!c) return null;
+        this.parked.delete(node.id);
+        c.parked = false;
+        c.n = node;
+        c.titled = node.name;
+        this.cons.set(node.id, c);
+        // The bar and the font may have changed while the terminal was hidden.
+        c.renderQuick();
+        c.applyFont();
+        c.applyFold();
+        return c;
+    }
+
+    /**
+     * Closes every console and its connection: the session stopped or the page lost the seat.
+     */
     closeAll() {
         [...this.cons.keys()].forEach(id => this.close(id));
+        this.parked.forEach(c => c.dispose());
+        this.parked.clear();
     }
 
     /**
@@ -932,9 +1000,9 @@ export class Consoles {
      * @param {Map} statuses node id → status
      */
     updateNodes(statuses) {
-        this.cons.forEach((c, id) => {
+        [this.cons, this.parked].forEach(map => map.forEach((c, id) => {
             if (c.conn) c.conn.nodeChanged(statuses.get(id) || null);
-        });
+        }));
     }
 
     /**
@@ -967,6 +1035,7 @@ export class Consoles {
     }
 
     paintBadges(c) {
+        if (c.parked) return;
         this.stage.setBadge(c.n.id, {has: true, unread: c.unread, min: c.min});
     }
 
