@@ -4250,13 +4250,18 @@ body.gns3lab-fullscreen {
 .gns3lab-course .labrow {
     cursor: pointer;
 }
-.gns3lab-course .labrow:hover td,
-.gns3lab-course .labrow:hover th {
-    background: var(--canvas);
+/* Rows of both tables: every other one a shade darker, the row under the pointer lit whole, the row of the open card marked. */
+.gns3lab-course .grid tbody tr:nth-child(even) > td,
+.gns3lab-course .grid tbody tr:nth-child(even) > th {
+    background: color-mix(in srgb, var(--fg) 6%, var(--panel));
 }
-.gns3lab-course .labrow[aria-current="true"] td,
-.gns3lab-course .labrow[aria-current="true"] th {
-    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+.gns3lab-course .grid tbody tr:hover > td,
+.gns3lab-course .grid tbody tr:hover > th {
+    background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.gns3lab-course .grid tbody tr[aria-current="true"] > td,
+.gns3lab-course .grid tbody tr[aria-current="true"] > th {
+    background: color-mix(in srgb, var(--accent) 18%, var(--panel));
 }
 .gns3lab-course .namebtn {
     display: flex;

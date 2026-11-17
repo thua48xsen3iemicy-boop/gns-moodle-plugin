@@ -177,6 +177,16 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         check('sorting by the checks: the fewest first', (await names(page))[0] === 'Chen Wei', JSON.stringify(await names(page)));
         const height = await rowOf(page, 'Alice').evaluate(e => e.getBoundingClientRect().height);
         check('rows are compact', height <= 28, String(height));
+        const bg = (name, sel = 'th') => rowOf(page, name).locator(sel).first().evaluate(e => getComputedStyle(e).backgroundColor);
+        const shade = n => page.locator('tbody tr').nth(n).locator('th').evaluate(e => getComputedStyle(e).backgroundColor);
+        check('every other row is shaded', (await shade(0)) !== (await shade(1)) && (await shade(0)) === (await shade(2)),
+            JSON.stringify([await shade(0), await shade(1), await shade(2)]));
+        const plain = await bg('Chen', 'td');
+        await rowOf(page, 'Chen').locator('th .name').hover();
+        const lit = await until(async() => (await bg('Chen', 'td')) !== plain
+            && (await bg('Chen', 'td')) === (await bg('Chen', 'td.total')) && (await bg('Chen')) === (await bg('Chen', 'td')), 2000);
+        check('the pointer over a name lights the whole row', !!lit, JSON.stringify([plain, await bg('Chen', 'td')]));
+        await page.mouse.move(0, 0);
         await page.locator('thead .sortbtn', {hasText: 'Student'}).click();
         check('sorting by name again', (await names(page))[0] === 'Alice Ivanova' && (await names(page))[1] === 'Boris Petrov');
 
