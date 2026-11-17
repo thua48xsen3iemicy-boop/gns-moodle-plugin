@@ -44,8 +44,12 @@ Usage: lab-provision <step> [args]
   agent             prepare CephFS directories and install the node agent on this node
   manager           mounts, packages, configs and services of the manager LXC (with nginx)
   moodle            give Moodle the web CA and print the plugin settings
-  check             this node's agent and slots; on the manager's node also the manager and all agents
-  enable [VMID...]  make the slots available in the manager (slot-enable), all of SLOTS by default
+  check [--node NODE...]
+                    this node's agent and slots; on the manager's node also the manager and all agents.
+                    With --node only the agents and slots of these nodes
+  enable [VMID...] | --node NODE...
+                    make the slots available in the manager (slot-enable), all of SLOTS by default.
+                    With --node the slots of these nodes that wait in maintenance
   reconcile VMID [--yes]
                     after an agent quarantine (COMMAND_UNCERTAIN, SLOT_QUARANTINED): clear the agent's
                     uncertain mark of a stopped slot, on the node of the slot. Without --yes only shows
@@ -54,6 +58,10 @@ Usage: lab-provision <step> [args]
   template          build the slot template CT (Ubuntu 24.04, GNS3 2.2.61) from SLOT_TEMPLATE
   create            create the missing manager CT (CREATE_MANAGER) and slot CTs (CREATE_SLOTS)
   deploy            template, create and all the steps above on every node, from any node (ssh)
+  deploy --node NODE[,NODE...]
+                    add nodes, or more slots on them, to a working stand: create, secrets, slot for
+                    the slots not prepared yet, agent on these nodes, manager, check and enable for
+                    these nodes only. The manager restarts: run it without active sessions
   reset [--yes] [--secrets] [--template]
                     destroy the manager and slot CTs, their ownership records on the agents, the
                     student directories (renamed, not deleted); --secrets also moves SECRETS_DIR
@@ -245,6 +253,37 @@ node_range() {  # node_range <node>: "min max" VMID of the slots on that node; f
   printf '%s\n' "${ids[@]}" | sort -n | sed -n '1p;$p' | paste -sd' '
 }
 
+# node_args <args...>: "--node a,b --node c" goes to NODE_ARGS (nodes of NODES, no repeats), the rest to REST_ARGS.
+node_args() {
+  NODE_ARGS=() REST_ARGS=()
+  local n list
+  while (($#)); do
+    case $1 in
+      --node | --node=*)
+        if [[ $1 == --node ]]; then
+          [[ -n ${2:-} ]] || die "--node needs a node name"
+          list=$2
+          shift
+        else
+          list=${1#--node=}
+        fi
+        for n in ${list//,/ }; do
+          [[ -n ${NODE_IPS[$n]:-} ]] || die "--node $n: not in NODES of $CONF"
+          [[ " ${NODE_ARGS[*]} " == *" $n "* ]] || NODE_ARGS+=("$n")
+        done ;;
+      *) REST_ARGS+=("$1") ;;
+    esac
+    shift
+  done
+}
+
+node_slots() {  # node_slots <node...>: the slots of SLOTS on (or planned for) these nodes
+  local id
+  for id in "${SLOT_IDS[@]}"; do
+    if [[ -n ${SLOT_NODE[$id]:-} && " $* " == *" ${SLOT_NODE[$id]} "* ]]; then echo "$id"; fi
+  done
+}
+
 # ------------------------------------------------------------------ LXC helpers
 
 ct_node() {  # Node that hosts CT $1: the cluster filesystem has the configs of every node
@@ -256,6 +295,11 @@ ct_node() {  # Node that hosts CT $1: the cluster filesystem has the configs of 
     return 0
   done
   return 1
+}
+has_clean() {  # The CT exists and has the clean snapshot: the slot step has prepared it (seen from any node)
+  local n
+  n=$(ct_node "$1") || return 1
+  grep -qx "\[$CLEAN_SNAPSHOT\]" "/etc/pve/nodes/$n/lxc/$1.conf"
 }
 ct_conf() {  # Current config of CT $1 on any node, without its snapshot sections
   local n
@@ -1040,18 +1084,28 @@ runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slots
 runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin check || echo "admin check failed (a manager older than 0.11.1 has no such command)"
 '
 
-cmd_check() {
+cmd_check() {  # check [--node <node>...]: with --node only these nodes' agents and slots
   need_secrets
-  local n id agents=() slot_agents=()
+  node_args "$@"
+  ((${#REST_ARGS[@]} == 0)) || die "check: unknown argument ${REST_ARGS[0]}"
+  local n id agents=() slot_agents=() only=''
+  ((${#NODE_ARGS[@]} == 0)) || only=" ${NODE_ARGS[*]} "
   [[ ${#LOCAL_SLOTS[@]} -gt 0 || $MANAGER_NODE == "$NODE" ]] ||
     die "neither slots nor the manager are on this node ($NODE)"
-  ((${#LOCAL_SLOTS[@]} == 0)) || { need_node; agent_check; }
+  if ((${#LOCAL_SLOTS[@]})) && [[ -z $only || $only == *" $NODE "* ]]; then
+    need_node
+    agent_check
+  fi
   if [[ $MANAGER_NODE != "$NODE" ]]; then
     log "manager CT $MANAGER_VMID is on $MANAGER_NODE: run check there for the manager and all agents"
     return 0
   fi
-  for n in "${NODE_NAMES[@]}"; do agents+=("$n.$AGENT_DOMAIN"); done
-  for id in "${SLOT_IDS[@]}"; do slot_agents+=("$id=${SLOT_NODE[$id]}.$AGENT_DOMAIN"); done
+  for n in "${NODE_NAMES[@]}"; do
+    [[ -n $only && $only != *" $n "* ]] || agents+=("$n.$AGENT_DOMAIN")
+  done
+  for id in "${SLOT_IDS[@]}"; do
+    [[ -n $only && $only != *" ${SLOT_NODE[$id]} "* ]] || slot_agents+=("$id=${SLOT_NODE[$id]}.$AGENT_DOMAIN")
+  done
   log "manager CT $MANAGER_VMID"
   ct_sh "$MANAGER_VMID" "$MANAGER_CHECK" AGENTS="${agents[*]}" SLOT_AGENTS="${slot_agents[*]}"
 }
@@ -1091,10 +1145,51 @@ cmd_reconcile() {  # On the node of the slot: the agent's uncertain mark, by lab
     --ct-state "$ct_state" --manager-state "${manager_state:-unknown}"
 }
 
-cmd_enable() {
-  local ids=("$@") id
-  ((${#ids[@]})) || ids=("${SLOT_IDS[@]}")
+manager_slot_states() {  # "<vmid> <state>" for every slot the manager knows, in one call
+  pct exec "$MANAGER_VMID" -- runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slots |
+    python3 -c '
+import json, sys
+for line in sys.stdin:
+    try:
+        row = json.loads(line)
+    except ValueError:
+        continue
+    print(row.get("vmid"), row.get("state"))'
+}
+
+cmd_agents_ok() {  # Internal, on the manager's node: the manager reaches the agents of these nodes
   ct_local "$MANAGER_VMID"
+  local n
+  for n in "$@"; do
+    # shellcheck disable=SC2016  # expands inside the CT
+    ct_sh "$MANAGER_VMID" '. /etc/lab-manager/manager.env
+curl -sS -o /dev/null --max-time 10 --noproxy "*" --cert "$AGENT_CERT_FILE" --key "$AGENT_KEY_FILE" --cacert "$AGENT_CA_FILE" "https://$A:8443/health"' \
+      A="$n.$AGENT_DOMAIN" ||
+      die "the manager cannot reach the agent of $n (https://$n.$AGENT_DOMAIN:8443): open 8443 on $n for the" \
+        "manager ($(ct_ip "$MANAGER_VMID")), then repeat 'deploy --node $n'"
+    log "agent of $n answers the manager"
+  done
+}
+
+# enable [VMID...] | --node <node>...: with --node only the slots of these nodes that wait in maintenance
+cmd_enable() {
+  node_args "$@"
+  local ids=("${REST_ARGS[@]}") id v st
+  ct_local "$MANAGER_VMID"
+  if ((${#NODE_ARGS[@]})); then
+    ((${#ids[@]} == 0)) || die "enable: give VMIDs or --node, not both"
+    local -A states=()
+    while read -r v st; do states[$v]=$st; done < <(manager_slot_states)
+    for id in $(node_slots "${NODE_ARGS[@]}"); do
+      case ${states[$id]:-unknown} in
+        maintenance) ids+=("$id") ;;
+        free | preparing | ready | busy | releasing) ;;  # At work already
+        *) warn "slot $id is '${states[$id]:-unknown}' in the manager: not enabled (TROUBLESHOOTING.md)" ;;
+      esac
+    done
+    ((${#ids[@]})) || { log "enable: no slot of ${NODE_ARGS[*]} waits in maintenance"; return 0; }
+  fi
+  ((${#ids[@]})) || ids=("${SLOT_IDS[@]}")
   for id in "${ids[@]}"; do
     [[ " ${SLOT_IDS[*]} " == *" $id "* ]] || die "$id is not in SLOTS of $CONF"
     ct_sh "$MANAGER_VMID" 'runuser -u lab-manager -- /srv/gns3-ro/manager/lab-manager-admin slot-enable "$VMID"' VMID="$id"
@@ -1399,7 +1494,45 @@ slot_nodes() {  # Nodes of NODES that have slots, in NODES order
   done
 }
 
+# deploy --node <node>...: add nodes (or more slots on them) to a working stand. Only what is new is touched:
+# the slots without the clean snapshot are prepared, the agents of these nodes installed, their slots enabled.
+cmd_deploy_nodes() {
+  need_cluster
+  local n id new=() ids node_flags=()
+  [[ -n $MANAGER_NODE ]] && ct_node "$MANAGER_VMID" >/dev/null ||
+    die "deploy --node adds to a working stand, but the manager CT $MANAGER_VMID does not exist: run deploy without --node"
+  for n in "${NODE_ARGS[@]}"; do
+    [[ -n $(node_slots "$n") ]] || die "--node $n: no slot of SLOTS is on it or planned for it in CREATE_SLOTS"
+    node_flags+=(--node "$n")
+  done
+  log "ssh to every node"
+  reach "${NODE_ARGS[@]}" "$MANAGER_NODE" "$TEMPLATE_NODE"
+  for id in $(node_slots "${NODE_ARGS[@]}"); do has_clean "$id" || new+=("$id"); done
+
+  if [[ -n $TEMPLATE_VMID ]]; then run_on "$TEMPLATE_NODE" template; fi
+  run_on "$NODE" create
+  run_on "$NODE" secrets
+  for n in "${NODE_ARGS[@]}"; do
+    ids=()
+    for id in "${new[@]}"; do [[ ${SLOT_NODE[$id]} != "$n" ]] || ids+=("$id"); done
+    if ((${#ids[@]})); then run_on "$n" slot "${ids[@]}"; else log "[$n] every slot is prepared already"; fi
+    run_on "$n" agent
+  done
+  run_on "$MANAGER_NODE" manager
+  run_on "$MANAGER_NODE" _agents-ok "${NODE_ARGS[@]}"
+  for n in "${NODE_ARGS[@]}"; do [[ $n == "$MANAGER_NODE" ]] || run_on "$n" check; done
+  run_on "$MANAGER_NODE" check "${node_flags[@]}"
+  run_on "$MANAGER_NODE" enable "${node_flags[@]}"
+  log "deployed on ${NODE_ARGS[*]}: start a lab on each of them from Moodle"
+}
+
 cmd_deploy() {
+  node_args "$@"
+  ((${#REST_ARGS[@]} == 0)) || die "deploy: unknown argument ${REST_ARGS[0]}"
+  if ((${#NODE_ARGS[@]})); then
+    cmd_deploy_nodes
+    return
+  fi
   need_cluster
   local n nodes=() moodle_node
   [[ -n $MANAGER_NODE ]] || die "manager CT $MANAGER_VMID does not exist and CREATE_MANAGER is not set"
@@ -1539,12 +1672,12 @@ main() {
     agent) cmd_agent ;;
     manager) cmd_manager ;;
     moodle) cmd_moodle ;;
-    check) cmd_check ;;
+    check) cmd_check "$@" ;;
     enable) cmd_enable "$@" ;;
     reconcile) cmd_reconcile "$@" ;;
     template) cmd_template ;;
     create) cmd_create ;;
-    deploy) cmd_deploy ;;
+    deploy) cmd_deploy "$@" ;;
     reset) cmd_reset "$@" ;;
     # Internal: what deploy, create and reset run on each node
     _create-manager) cmd_create_manager ;;
@@ -1552,6 +1685,7 @@ main() {
     _destroy) cmd_destroy "$@" ;;
     _node-reset) cmd_node_reset ;;
     _ping) echo "$NODE ok" ;;
+    _agents-ok) cmd_agents_ok "$@" ;;
     _slot-state) cmd_slot_state "$@" ;;
     *) usage; exit 2 ;;
   esac
