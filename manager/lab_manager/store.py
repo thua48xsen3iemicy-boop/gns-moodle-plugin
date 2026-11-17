@@ -185,6 +185,8 @@ class Store:
                     ws = await cur.fetchone()
                     if ws["purge_requested_at"] is not None:
                         raise WorkspacePurging("The student's work in this lab is being deleted; start again shortly")
+                    if not ws["deployed"]:
+                        ws = await self._rebuild_unprovisioned(conn, ws)
                     snapshot = ws["resource_snapshot"] or resources
                     ticket = ws["ticket"]
                     if ticket is None and ticket_factory is not None:
@@ -208,6 +210,33 @@ class Store:
             except psycopg.errors.UniqueViolation:
                 continue  # A concurrent POST won; return its session
         raise RuntimeError("Could not create or find the session")
+
+    async def _rebuild_unprovisioned(self, conn, ws):
+        """A project whose first deploy reached a slot but never READY gets a new project_id.
+
+        The slot refuses to continue such a project (PROVISIONING_UNKNOWN: it may neither skip nor replay the
+        provisioning commands), so every later start would fail. The student never had its consoles (deployed
+        is set before the session runs), so there is no work to lose: the half-built directory goes to the
+        purge queue and the next deploy creates a fresh project. Called under the workspace row lock, with no
+        live session of the student.
+        """
+        cur = await conn.execute(
+            "SELECT DISTINCT s.student_key FROM slot_calls c JOIN sessions s ON s.id = c.session_id"
+            " WHERE s.workspace_id = %s AND c.action = 'deploy'", (ws["id"],))
+        keys = [r["student_key"] for r in await cur.fetchall()]
+        if not keys:
+            return ws  # No deploy ever reached a slot: no project on disk, the same project_id is fine
+        for key in keys:
+            await conn.execute("INSERT INTO project_purges (project_id, student_key) VALUES (%s, %s)"
+                               " ON CONFLICT DO NOTHING", (ws["project_id"], key))
+        cur = await conn.execute(
+            "UPDATE workspaces SET project_id = %s, ticket = NULL WHERE id = %s RETURNING *",
+            (uuid.uuid4(), ws["id"]))
+        rebuilt = await cur.fetchone()
+        await self._event(conn, None, None, "workspace_rebuilt",
+                          {"workspace_id": ws["id"], "old_project_id": str(ws["project_id"]),
+                           "project_id": str(rebuilt["project_id"])})
+        return rebuilt
 
     async def live_session(self, site, user_id, *, library_lab_id=None):
         """A student has at most one live lab on a site, in any activity."""

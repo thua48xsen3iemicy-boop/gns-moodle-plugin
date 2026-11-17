@@ -251,7 +251,83 @@ async def test_slot_failed_operation_fails_session_and_frees_slot(tmp_path, dsn)
         assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
         again = await start(env)  # The student can start right away
         await env.run()
-        assert (await session(env, again))["slot_vmid"] in (201, 202)
+        s2 = await session(env, again)
+        assert s2["slot_vmid"] in (201, 202)
+        # The first provisioning never finished: the slot would refuse the project (PROVISIONING_UNKNOWN), so the
+        # next start builds a fresh one and the half-built directory goes to the purge queue.
+        assert s2["status"] == "running" and s2["project_id"] != s["project_id"]
+
+
+async def _rows(env, sql, *args):
+    async with env.services.store.pool.connection() as conn:
+        return await (await conn.execute(sql, args)).fetchall()
+
+
+async def test_project_whose_first_provisioning_did_not_finish_is_rebuilt(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.slots[201].fail_next = {"code": "RuntimeError", "message": "serial-getty readiness failed"}
+        sid = await start(env)
+        await env.run()
+        first = await session(env, sid)
+        assert first["status"] == "failed"
+        old = str(first["project_id"])
+        assert old in env.projects and not env.projects[old].get("provisioned")
+
+        again = await start(env)
+        await env.run()
+        s = await session(env, again)
+        assert s["status"] == "running", s["error"]
+        assert str(s["project_id"]) != old and env.projects[str(s["project_id"])]["provisioned"]
+        [queued] = await _rows(env, "SELECT project_id, student_key FROM project_purges")
+        assert str(queued["project_id"]) == old and queued["student_key"] == first["student_key"]
+        [ws] = await _rows(env, "SELECT project_id, deployed FROM workspaces")
+        assert ws["project_id"] == s["project_id"] and ws["deployed"]
+        await env.services.purges.step(force=True)
+        assert env.agent.deleted_projects == []  # The student's directory is mounted in the slot
+
+        # Later sessions continue the new project as usual: nothing is rebuilt again.
+        await stop(env, again)
+        await env.run()
+        async with env.services.store.pool.connection() as conn:
+            await conn.execute("UPDATE project_purges SET next_attempt_at = now()")
+        await env.services.purges.step(force=True)
+        assert env.agent.deleted_projects == [(first["student_key"], old)]
+        third = await start(env)
+        await env.run()
+        assert (await session(env, third))["project_id"] == s["project_id"]
+        assert await _rows(env, "SELECT 1 FROM project_purges") == []
+
+
+async def test_stop_during_the_first_deploy_keeps_the_project(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.slots[201].op_polls = 100
+        sid = await start(env)
+        await env.run()
+        await stop(env, sid)  # The deploy finishes first, then the lab stops: the project is complete
+        env.slots[201].op_polls = 1
+        for op in env.slots[201].ops.values():
+            op["remaining"] = 0
+        await env.run()
+        first = await session(env, sid)
+        assert first["status"] == "stopped"
+        again = await start(env)
+        await env.run()
+        s = await session(env, again)
+        assert s["status"] == "running" and s["project_id"] == first["project_id"]
+        assert await _rows(env, "SELECT 1 FROM project_purges") == []
+
+
+async def test_failure_before_any_deploy_keeps_the_project(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        sid = await start(env)
+        await stop(env, sid)  # Stopped in the queue: the slot never saw the project
+        await env.run()
+        pid = (await session(env, sid))["project_id"]
+        again = await start(env)
+        await env.run()
+        s = await session(env, again)
+        assert s["status"] == "running" and s["project_id"] == pid
+        assert await _rows(env, "SELECT 1 FROM project_purges") == []
 
 
 async def test_slot_lab_failing_while_running(tmp_path, dsn):

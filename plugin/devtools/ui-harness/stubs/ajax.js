@@ -162,15 +162,17 @@ define([], function() {
 
     // The course page of a teacher: students 11 to 14 in two labs, the cells as get_course_overview sends them.
     const COURSE_USERS = {11: 'ok', 12: 'broken'};
-    // Lab 4 is graded out of 5 with 3 to pass, lab 5 on points without a pass grade, lab 6 has no grade. ?nogrades plays a
-    // teacher without moodle/grade:viewall.
-    const gradeLab = (gradetype, grademax, gradepass) => cfg.nogrades
-        ? {gradetype: 'none', grademax: '', gradepass: '', average: ''} : {gradetype, grademax, gradepass, average: ''};
+    // Lab 4 is graded out of 5 with 3 to pass and has auto-checks, lab 5 on points without a pass grade, lab 6 has no grade,
+    // lab 7 has the grade type "None" but auto-checks that give marks. ?nogrades plays a teacher without moodle/grade:viewall.
+    const gradeLab = (gradetype, grademax, gradepass, checks = false) => (cfg.nogrades
+        ? {gradetype: 'none', grademax: '', gradepass: '', average: '', checks}
+        : {gradetype, grademax, gradepass, average: '', checks});
     const course = {
         labs: [
-            {cmid: 1, name: 'Lab 4 · OSPF multi-area', error: '', ...gradeLab('value', '5.00', '3.00')},
+            {cmid: 1, name: 'Lab 4 · OSPF multi-area', error: '', ...gradeLab('value', '5.00', '3.00', true)},
             {cmid: 2, name: 'Lab 5 · Linux switch', error: cfg.laberror ? 'unreachable' : '', ...gradeLab('value', '100.00', '')},
             {cmid: 3, name: 'Lab 6 · Warm-up', error: '', ...gradeLab('none', '', '')},
+            {cmid: 4, name: 'Lab 7 · VLANs', error: '', ...gradeLab('none', '', '', true)},
         ],
         students: [
             {userid: 11, fullname: 'Alice Ivanova', groups: [5]}, {userid: 12, fullname: 'Boris Petrov', groups: [5]},
@@ -182,6 +184,7 @@ define([], function() {
         cells: new Map(),
         calls: [],
         historyCalls: [],
+        runCalls: [],
     };
     const summary = (status, facts = 'unknown', left = 3 * 3600) => ({
         status,
@@ -212,10 +215,20 @@ define([], function() {
     setCell(2, 15, null);
     [11, 12, 13, 14, 15].forEach(u => setCell(3, u, null));
     setCell(3, 11, summary('stopped'));
-    setResult(1, 11, grade('5.00', 1, 'yes'), {attempts: 2, laststatus: 'done', lastoutcome: 'graded', lastat: now() - 3600});
-    setResult(1, 12, grade('2.00', 0.4, 'no', true), {attempts: 1, laststatus: 'running', lastoutcome: '', lastat: now() - 30});
+    [11, 12, 13, 14, 15].forEach(u => setCell(4, u, null));
+    // The summary of the checks with the mark of the last graded run (5 to 2, fail mark 2), -1 without one.
+    const runs = (attempts, laststatus, lastat, mark = -1, markedat = 0) => ({attempts, laststatus,
+        lastoutcome: laststatus === 'done' ? 'graded' : '', lastat, mark, topmark: mark >= 0 ? 5 : 0,
+        failmark: mark >= 0 ? 2 : 0, markedat});
+    setResult(1, 11, grade('5.00', 1, 'yes'), runs(2, 'done', now() - 3600, 5, now() - 3600));
+    setResult(1, 12, grade('2.00', 0.4, 'no', true), runs(1, 'running', now() - 30, 4, now() - 5400));
     setResult(2, 11, grade('85.00', 0.85));
-    setResult(2, 13, null, {attempts: 0, laststatus: 'failed', lastoutcome: '', lastat: now() - 7200});
+    setResult(2, 13, null, runs(0, 'failed', now() - 7200));
+    // Lab 7: equal marks, fewer checks first (Boris before Alice), then Chen; Dana failed.
+    setResult(4, 11, null, runs(2, 'done', now() - 4000, 5, now() - 4000));
+    setResult(4, 12, null, runs(1, 'done', now() - 5000, 5, now() - 5000));
+    setResult(4, 13, null, runs(1, 'done', now() - 3000, 4, now() - 3000));
+    setResult(4, 14, null, runs(3, 'done', now() - 2000, 2, now() - 2000));
 
     const courseOverview = async args => {
         course.calls.push(args);
@@ -229,7 +242,8 @@ define([], function() {
         const students = course.students.filter(s => (!args.groupid || s.groups.includes(args.groupid))
             && labs.some(lab => course.cells.get(lab.cmid + ':' + s.userid).observable));
         const cells = [];
-        const hide = cell => (cfg.nogrades ? {...cell, grade: null} : {...cell});
+        const hide = cell => (cfg.nogrades ? {...cell, grade: null,
+            checks: cell.checks && {...cell.checks, mark: -1, topmark: 0, failmark: 0, markedat: 0}} : {...cell});
         students.forEach(st => labs.forEach(lab => cells.push(hide(course.cells.get(lab.cmid + ':' + st.userid)))));
         // The average of the gradebook over the graded students of the answer (two decimals, as the gradebook formats).
         const out = labs.map(lab => {
@@ -338,6 +352,31 @@ define([], function() {
         return {enabled: true, available: true, canstart: false, report: 'full', detailsfrom: 0,
             attempts: {max: 0, used, left: -1}, runs};
     };
+    // The report of a run of a student of the course page (get_check_run with userid): r2 found nothing, r1 and r3
+    // found errors, one of them with a consequence and a forgiven note.
+    const finding = (id, cls, message, extra = {}) => ({id, code: 'rule_' + id, group: 'l2', class: cls, baseclass: cls,
+        counted: cls !== 'note', causedby: '', nodes: [], ifaces: [], message, ...extra});
+    const COURSE_REPORTS = {
+        r2: [],
+        r1: [finding('f1', 'major', 'SW1 Gi0/2: access VLAN 20, expected 10'),
+            finding('f2', 'major', 'PC2 cannot reach its gateway 10.0.10.1'),
+            finding('f3', 'minor', 'R1 Gi0/1: no description')],
+        r3: [finding('f4', 'critical', 'R1: OSPF area 0 has no neighbours'),
+            finding('f5', 'major', 'R2 cannot reach 10.0.12.1', {counted: false, causedby: 'f4'}),
+            finding('f6', 'major', 'SW2 Gi0/3 is shut down'),
+            finding('f7', 'note', 'R3 Gi0/0: MTU 1400', {baseclass: 'minor', counted: false})],
+    };
+    const courseRun = async args => {
+        course.runCalls.push(args);
+        const overview = await courseChecks(args);
+        course.historyCalls.pop();
+        const r = overview.runs.find(x => x.runid === args.runid);
+        if (!r || cfg.runfail) {
+            throw new Error('This check is not known in this activity.');
+        }
+        return {...r, detailed: true, detailsfrom: 0, gone: false, findings: COURSE_REPORTS[r.runid] || [],
+            rules: r.runid === 'r1' ? [{code: 'address_not_saved', group: 'addressing', status: 'skipped', reason: 'no_collector'}] : []};
+    };
 
     const handlers = {
         mod_gns3lab_authoring: async args => {
@@ -372,6 +411,9 @@ define([], function() {
             return checksOverview();
         },
         mod_gns3lab_get_check_run: async args => {
+            if (cfg.course && args.userid) {
+                return courseRun(args);
+            }
             const r = checks.runs.find(x => x.runid === args.runid);
             if (!r) {
                 throw new Error('This check is not known in this activity.');
@@ -590,6 +632,7 @@ define([], function() {
             result: setResult,
             grade,
             historyCalls: course.historyCalls,
+            runCalls: course.runCalls,
             // The facts of a student changed: the next read sees a new rev.
             bump: userid => {
                 course.rev[userid] = (course.rev[userid] || 1) + 1;

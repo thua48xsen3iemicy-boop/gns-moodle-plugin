@@ -163,7 +163,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
 | `mod_gns3lab_refresh_facts` | `cmid`, `userid=0` | те же; только `running`-сессия | `{"requested"}`; частоту ограничивает менеджер |
 | `mod_gns3lab_get_reveal` | `cmid`, `userid=0` | view; как у `get_facts`: чужой `userid` — observe + группы | `{"items": [{"nodeid","kind","item"}]}` — маска студента (§5.1, `gns3lab_reveal`) |
-| `mod_gns3lab_get_course_overview` | `courseid`, `groupid=0`, `cmid=0` (0.28.0: только эта лаба) | validate_context курса; для каждой лабы observe (лаба без права не попадает в ответ, нет ни одной — отказ); группа — из доступных пользователю; ячейка «студент × лаба» только при `can_observe_user()` | `{labs:[{cmid,name,error}], students:[{userid,fullname,pictureurl}], cells:[{cmid,userid,observable,session}]}`: `session` — сводка (`status`, `startedat`, `expiresat`, `facts`: yes/no/unknown) или `null`; id сессии и топологии нет; список сессий лабы кэшируется 10 с (MUC `activitysessions`); недоступный менеджер даёт `error` только у своей лабы (`docs/teacher-dashboard.md`); 🆕 0.28.0: `showgrades` (`moodle/grade:viewall`), у лабы `gradetype`, `grademax`, `gradepass`, `average`, у ячейки `grade` — итоговая оценка журнала (`text`, `ratio`, `passed`, `overridden`, `gradedat`) и `checks` — сводка прогонов (`attempts`, `laststatus`, `lastoutcome`, `lastat`), §12 того же документа |
+| `mod_gns3lab_get_course_overview` | `courseid`, `groupid=0`, `cmid=0` (0.28.0: только эта лаба) | validate_context курса; для каждой лабы observe (лаба без права не попадает в ответ, нет ни одной — отказ); группа — из доступных пользователю; ячейка «студент × лаба» только при `can_observe_user()` | `{labs:[{cmid,name,error}], students:[{userid,fullname,pictureurl}], cells:[{cmid,userid,observable,session}]}`: `session` — сводка (`status`, `startedat`, `expiresat`, `facts`: yes/no/unknown) или `null`; id сессии и топологии нет; список сессий лабы кэшируется 10 с (MUC `activitysessions`); недоступный менеджер даёт `error` только у своей лабы (`docs/teacher-dashboard.md`); 🆕 0.28.0: `showgrades` (`moodle/grade:viewall`), у лабы `gradetype`, `grademax`, `gradepass`, `average`, у ячейки `grade` — итоговая оценка журнала (`text`, `ratio`, `passed`, `overridden`, `gradedat`) и `checks` — сводка прогонов (`attempts`, `laststatus`, `lastoutcome`, `lastat`), §12 того же документа; 🆕 0.33.0: у лабы `checks` (автопроверки включены), в `checks` ячейки `mark`, `topmark`, `failmark`, `markedat` — отметка последней оценённой проверки (`-1` без неё или без `moodle/grade:viewall`), §13 |
 | `mod_gns3lab_claim_seat` | `cmid`, `tabid`, `takeover=false` | use; место только владельца лабы, другого пользователя назвать нельзя | `{"status","mode","idle","beat"}`: `status` — `held`, `othertab`, `otherlogin` (`docs/seat.md`); страница спрашивает при открытии (`takeover=true`) и раз в `beat` секунд |
 | `mod_gns3lab_get_checks` | `cmid`, `userid=0` | view; чужой `userid` — observe + группы | настройки проверок для страницы, попытки и прогоны (`docs/autochecks.md` §3) |
 | `mod_gns3lab_start_check` | `cmid`, `tabid` | use, только своя лаба; проверки включены, `checks` у менеджера и сессии, `running`, место, попытки | как `get_checks`; `grading` — из настроек элемента |
@@ -244,6 +244,10 @@ Moodle никогда не держит WebSocket и не видит токен�
   окнами (`consoles.js`), на телефоне — шторка консоли. Колесо действий — «Консоль», «Сведения», «Ближе», «Закрыть
   консоль»; управление нодами (пуск, стоп, рестарт) и пауза линка — после появления вызовов в API менеджера; пока на их
   местах свободные кнопки.
+  Закрытая студентом текстовая консоль (0.32.1) не рвёт соединение: терминал прячется и остаётся подключённым, а при
+  повторном открытии показывает экран как был (nano, `less`, недонабранная строка). Держится не больше 12 таких консолей
+  (`PARK_MAX` в `consoles.js`, старшая отключается); остановка лабы и потеря места закрывают их насовсем. Экран noVNC
+  при закрытии отключается: он перерисовывается при подключении. Проверка — `devtools/ui-harness/check_park.js`.
 - Для наблюдателя: выпадающий список студентов (`list_students`) над схемой, бейдж «Только просмотр».
 - `course.php?id=<courseid>` — «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`): страница преподавателя на весь экран,
   студенты × лабы курса с живым состоянием сессий, счётчики по лабе, поиск, сортировка, выбор группы; сводка фактов в ячейке
@@ -255,6 +259,9 @@ Moodle никогда не держит WebSocket и не видит токен�
   итоговые оценки журнала (исправленные вручную помечены), «Сдано N / M» по студенту, средняя и «Сдали» по лабе, ссылка на
   журнал оценок; живое состояние сессий и фактов — только во вкладке лабы, с проверками и оценкой. Карточка показывает оценку
   журнала и историю проверок (`get_checks`).
+  🆕 0.33.0 (§13 того же документа): оценка ячейки — отметка последней оценённой автопроверки (и в лабе с типом оценки
+  «Нет»), исправленная вручную оценка журнала важнее; плотные строки; сортировка по каждому столбцу; при равной оценке
+  выше тот, кто сдал за меньшее число автопроверок.
 - `index.php` — список активностей курса (стандартный).
 - `mod_form.php` — название, описание, выбор `lab_ref` из `/api/v1/labs` (если менеджер недоступен — текстовое поле
   и предупреждение), `maxduration`.

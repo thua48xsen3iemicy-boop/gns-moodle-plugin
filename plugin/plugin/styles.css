@@ -3740,9 +3740,12 @@ body.gns3lab-fullscreen {
     border-spacing: 0;
     min-width: 100%;
 }
+.gns3lab-course .grid {
+    line-height: 1.25;
+}
 .gns3lab-course .grid th,
 .gns3lab-course .grid td {
-    padding: 4px 6px;
+    padding: 1px 6px;
     border-bottom: 1px solid var(--line);
     vertical-align: middle;
     background: var(--panel);
@@ -3751,7 +3754,9 @@ body.gns3lab-fullscreen {
     position: sticky;
     top: 0;
     z-index: 2;
-    min-width: 150px;
+    min-width: 90px;
+    max-width: 180px;
+    vertical-align: bottom;
     text-align: left;
     font-weight: 600;
 }
@@ -3770,15 +3775,19 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-course .stud .pic {
     border-radius: 50%;
-    margin-right: 8px;
+    margin-right: 6px;
     vertical-align: middle;
 }
 .gns3lab-course .stud .name {
     vertical-align: middle;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .gns3lab-course .sortbtn {
-    min-height: 40px;
-    padding: 0 6px;
+    min-height: 28px;
+    padding: 0 4px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -3794,6 +3803,28 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-course .sortbtn[data-dir="desc"]::after {
     content: " ▼";
+}
+.gns3lab-course .sortbtn.sortonly {
+    min-height: 24px;
+    padding: 0 4px;
+    flex: none;
+}
+.gns3lab-course .sortbtn.sortonly::after {
+    content: "↕";
+    font-size: 11px;
+    color: var(--muted);
+}
+.gns3lab-course .sortbtn.sortonly[data-dir]::after {
+    content: "▲";
+    color: var(--accent);
+}
+.gns3lab-course .sortbtn.sortonly[data-dir="desc"]::after {
+    content: "▼";
+}
+.gns3lab-course .labhead {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
 }
 .gns3lab-course .laberr {
     display: inline-grid;
@@ -4090,8 +4121,9 @@ body.gns3lab-fullscreen {
 .gns3lab-course .labbtn {
     display: inline-flex;
     align-items: center;
-    min-height: 40px;
-    padding: 0 6px;
+    min-height: 28px;
+    padding: 0 4px;
+    line-height: 1.2;
     border-radius: 6px;
     color: var(--accent);
     font-weight: 600;
@@ -4102,7 +4134,7 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-course .grid th.total,
 .gns3lab-course .grid td.total {
-    min-width: 90px;
+    min-width: 64px;
     text-align: center;
     font-variant-numeric: tabular-nums;
     border-left: 1px solid var(--line);
@@ -4126,6 +4158,7 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-course .labsum span {
     display: block;
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
 .gns3lab-course .labsum .avg {
@@ -4135,12 +4168,14 @@ body.gns3lab-fullscreen {
 .gns3lab-course .sumbtn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     width: 100%;
-    min-height: 44px;
-    padding: 4px 10px;
+    min-height: 22px;
+    padding: 0 6px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 4px;
+    line-height: 1.2;
+    white-space: nowrap;
     background: var(--canvas);
     color: var(--fg);
     font-size: 13px;
@@ -4172,7 +4207,7 @@ body.gns3lab-fullscreen {
 .gns3lab-course .gradecell .grade,
 .gns3lab-course .cgrade .grade {
     font-weight: 700;
-    font-size: 15px;
+    font-size: 14px;
     font-variant-numeric: tabular-nums;
 }
 .gns3lab-course [data-pass="yes"] .grade {
@@ -4186,6 +4221,12 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-course .sumbtn[data-pass="no"] {
     border-left: 4px solid var(--bad);
+}
+.gns3lab-course .tries {
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    cursor: help;
 }
 .gns3lab-course .over {
     margin-left: 4px;
@@ -4202,25 +4243,32 @@ body.gns3lab-fullscreen {
     min-width: 0;
 }
 .gns3lab-course .grid.lab td {
-    padding: 6px 10px;
+    padding: 1px 8px;
     font-size: 13px;
+    white-space: nowrap;
 }
 .gns3lab-course .labrow {
     cursor: pointer;
 }
-.gns3lab-course .labrow:hover td,
-.gns3lab-course .labrow:hover th {
-    background: var(--canvas);
+/* Rows of both tables: every other one a shade darker, the row under the pointer lit whole, the row of the open card marked. */
+.gns3lab-course .grid tbody tr:nth-child(even) > td,
+.gns3lab-course .grid tbody tr:nth-child(even) > th {
+    background: color-mix(in srgb, var(--fg) 6%, var(--panel));
 }
-.gns3lab-course .labrow[aria-current="true"] td,
-.gns3lab-course .labrow[aria-current="true"] th {
-    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+.gns3lab-course .grid tbody tr:hover > td,
+.gns3lab-course .grid tbody tr:hover > th {
+    background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.gns3lab-course .grid tbody tr[aria-current="true"] > td,
+.gns3lab-course .grid tbody tr[aria-current="true"] > th {
+    background: color-mix(in srgb, var(--accent) 18%, var(--panel));
 }
 .gns3lab-course .namebtn {
     display: flex;
     align-items: center;
     width: 100%;
-    min-height: 44px;
+    min-height: 22px;
+    min-width: 0;
     padding: 0;
     border: 0;
     background: transparent;
@@ -4236,8 +4284,10 @@ body.gns3lab-fullscreen {
     min-width: 130px;
     border-left: 4px solid var(--off);
 }
-.gns3lab-course .grid.lab td.state span {
-    display: block;
+.gns3lab-course .grid.lab td.state span + span::before,
+.gns3lab-course .grid.lab td.checks span + span::before {
+    content: " · ";
+    color: var(--muted);
 }
 .gns3lab-course .grid.lab td.state .state {
     font-weight: 600;
@@ -4268,16 +4318,16 @@ body.gns3lab-fullscreen {
 }
 .gns3lab-course .grid.lab .time,
 .gns3lab-course .grid.lab .idle {
-    display: block;
+    display: inline;
     color: var(--muted);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
 }
+.gns3lab-course .grid.lab td.facts .idle {
+    margin-left: 6px;
+}
 .gns3lab-course .grid.lab td.facts {
     min-width: 150px;
-}
-.gns3lab-course .grid.lab td.checks span {
-    display: block;
 }
 .gns3lab-course .checking {
     color: var(--accent);
@@ -4324,6 +4374,111 @@ body.gns3lab-fullscreen {
     color: var(--muted);
     font-size: 12px;
 }
+/* A finished run is a button that opens its report under it. */
+.gns3lab-course .historylist .runbtn {
+    display: flex;
+    flex-wrap: wrap;
+    flex-basis: 100%;
+    gap: 2px 10px;
+    margin: -5px -8px;
+    padding: 5px 8px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.gns3lab-course .historylist .runbtn:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.gns3lab-course .historylist .runbtn::before {
+    content: "▸";
+    color: var(--muted);
+}
+.gns3lab-course .historylist .runbtn[aria-expanded="true"]::before {
+    content: "▾";
+}
+.gns3lab-course .historylist li[data-open="true"] {
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.gns3lab-course .rundetails {
+    flex-basis: 100%;
+    margin-top: 10px;
+}
+.gns3lab-course .rundetails .cnote {
+    margin: 4px 0;
+}
+.gns3lab-course .rundetails .runok {
+    color: var(--ok);
+    font-weight: 600;
+}
+.gns3lab-course .rundetails .findings,
+.gns3lab-course .rundetails .consequences,
+.gns3lab-course .rundetails .gaps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.gns3lab-course .rundetails .gaps {
+    padding-left: 16px;
+    list-style: disc;
+    color: var(--muted);
+    font-size: 12px;
+}
+.gns3lab-course .rundetails .finding {
+    padding: 4px 0 4px 8px;
+    border-top: 1px solid var(--line);
+    border-left: 3px solid transparent;
+}
+.gns3lab-course .rundetails .finding.counted.sev-critical {
+    border-left-color: var(--bad);
+}
+.gns3lab-course .rundetails .finding.counted.sev-major {
+    border-left-color: var(--warn);
+}
+.gns3lab-course .rundetails .finding.counted.sev-minor {
+    border-left-color: var(--muted);
+}
+.gns3lab-course .rundetails .consequences {
+    margin-top: 4px;
+}
+.gns3lab-course .rundetails .finding.consequence {
+    border-top: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+.gns3lab-course .rundetails .sev,
+.gns3lab-course .rundetails .tag {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--muted);
+    border: 1px solid var(--line);
+}
+.gns3lab-course .rundetails .sev-critical > .sev {
+    color: #fff;
+    background: var(--bad);
+    border-color: var(--bad);
+}
+.gns3lab-course .rundetails .sev-major > .sev {
+    color: #000;
+    background: var(--warn);
+    border-color: var(--warn);
+}
+.gns3lab-course .rundetails .sev-minor > .sev {
+    color: var(--fg);
+}
+.gns3lab-course .rundetails .forgiven {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+}
 @media (max-width: 720px) {
     .gns3lab-course .card {
         position: fixed;
@@ -4365,6 +4520,11 @@ body.gns3lab-fullscreen {
     }
     .gns3lab-course .grid.lab thead th {
         min-width: 110px;
+    }
+    /* Fingers need bigger targets than a mouse: the rows are taller on a phone. */
+    .gns3lab-course .sumbtn,
+    .gns3lab-course .namebtn {
+        min-height: 40px;
     }
 }
 

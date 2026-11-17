@@ -66,7 +66,7 @@ docs/          SPEC.md и прочая документация
   `checkreport.js` (отчёт без DOM: находки по первопричинам, состояние кнопки, период опроса; проверка — `devtools/check_checkreport.mjs`,
   в браузере — `devtools/ui-harness/check_checks.js`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
   настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники).
-  Страница преподавателя «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`; с 0.28.0 — §12): `course.js` (вкладки «Сводка» оценок журнала
+  Страница преподавателя «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`; с 0.28.0 — §12, оценки автопроверок и сортировка — §13): `course.js` (вкладки «Сводка» оценок журнала
   и вид одной лабы с живым состоянием, карточка с историей проверок, опрос) и
   `coursefacts.js` (сводка ячейки и данные карточки из `model.buildModel` + `facts.derive`, без DOM; проверка — `devtools/check_coursefacts.mjs`,
   в браузере — `devtools/ui-harness/check_course.js`). Данные — `mod_gns3lab_get_course_overview` (`classes/external/`), состав страницы

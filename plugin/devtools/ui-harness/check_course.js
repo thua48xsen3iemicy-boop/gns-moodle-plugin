@@ -113,10 +113,12 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
             === JSON.stringify(['Alice Ivanova', 'Boris Petrov', 'Chen Wei', 'Dana Kim', 'Eve <b>x</b> & Co']), JSON.stringify(await names(page)));
         check('the name that looks like markup is text, not markup', (await page.locator('tbody th b').count()) === 0);
         const heads = await page.locator('thead th').allInnerTexts();
-        check('the columns are the labs in the order of the course and the total',
-            /Lab 4.*Lab 5.*Lab 6.*Passed/s.test(heads.join('|')), JSON.stringify(heads));
+        check('the columns are the labs in the order of the course, the total, the average and the checks',
+            /Lab 4.*Lab 5.*Lab 6.*Lab 7.*Passed.*Average.*Checks/s.test(heads.join('|')), JSON.stringify(heads));
         const alice4 = cellOf(page, 'Alice', 1).locator('button');
-        check('a grade of the gradebook in the cell', (await alice4.locator('.grade').innerText()) === '5.00');
+        check('the mark of the auto-check in the cell, with the number of graded checks',
+            (await alice4.locator('.grade').innerText()) === '5' && (await alice4.locator('.tries').innerText()) === '×2'
+            && (await alice4.locator('.tries').getAttribute('title')) === 'Graded auto-checks: 2');
         check('...passed against the grade to pass', (await alice4.getAttribute('data-pass')) === 'yes');
         check('...with a dot for a lab that runs now', (await alice4.locator('.live').count()) === 1);
         const boris4 = cellOf(page, 'Boris', 1).locator('button');
@@ -137,14 +139,23 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         check('a stopped lab without a grade in a graded lab: "No grade"', !!nograde, await cellOf(page, 'Boris', 2).innerText());
         check('a student the teacher cannot observe in a lab: a dash, no button',
             (await cellOf(page, 'Dana', 2).innerText()).trim() === '—' && (await cellOf(page, 'Dana', 2).locator('button').count()) === 0);
-        check('the total: labs passed out of the graded labs the student can be observed in',
-            (await rowOf(page, 'Alice').locator('td.total').innerText()) === '2 / 2'
-            && (await rowOf(page, 'Boris').locator('td.total').innerText()) === '0 / 2'
-            && (await rowOf(page, 'Dana').locator('td.total').innerText()) === '0 / 1');
+        const alice7 = cellOf(page, 'Alice', 4).locator('button');
+        check('a lab with the grade type "None" but auto-checks shows their marks',
+            (await alice7.locator('.grade').innerText()) === '5' && (await alice7.getAttribute('data-pass')) === 'yes'
+            && (await cellOf(page, 'Dana', 4).locator('button').getAttribute('data-pass')) === 'no');
+        const total = (name, cls) => rowOf(page, name).locator('td.' + cls).first().innerText();
+        check('the total: labs passed out of the labs with a result the student can be observed in',
+            (await total('Alice', 'total')) === '3 / 3' && (await total('Boris', 'total')) === '1 / 3'
+            && (await total('Dana', 'total')) === '0 / 2', JSON.stringify([await total('Alice', 'total'), await total('Boris', 'total')]));
+        check('the average and the graded checks of a student',
+            (await total('Alice', 'avg')) === '31.67' && (await total('Chen', 'avg')) === '4'
+            && (await total('Alice', 'tries')) === '4' && (await total('Eve', 'tries')) === '—',
+            JSON.stringify([await total('Alice', 'avg'), await total('Chen', 'avg'), await total('Alice', 'tries')]));
         const foot = await page.locator('tfoot td.labsum').allInnerTexts();
-        check('per lab: the average of the gradebook and how many passed or were graded, a lab without a grade says so',
-            /Average 3\.50/.test(foot[0]) && /Passed 1 of 5/.test(foot[0]) && /Average 85\.00/.test(foot[1])
-            && /Graded 1 of 4/.test(foot[1]) && /Not graded/.test(foot[2]), JSON.stringify(foot));
+        check('per lab: the average and how many passed or were graded, a lab without a grade says so',
+            /Average 3\.5/.test(foot[0]) && /Passed 1 of 5/.test(foot[0]) && /Average 85/.test(foot[1])
+            && /Graded 1 of 4/.test(foot[1]) && /Not graded/.test(foot[2]) && /Average 4/.test(foot[3])
+            && /Passed 3 of 5/.test(foot[3]), JSON.stringify(foot));
         check('the link to the gradebook', (await page.locator('[data-region="gradebook"]').getAttribute('href')) === '#gradebook');
         let c = await calls(page);
         check('the summary reads no facts', !c.mod_gns3lab_get_state && !c.mod_gns3lab_get_facts, JSON.stringify(c));
@@ -152,6 +163,30 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
 
         await page.locator('thead .sortbtn', {hasText: 'Passed'}).click();
         check('sorting by the total: the most passed first', (await names(page))[0] === 'Alice Ivanova', JSON.stringify(await names(page)));
+        await page.locator('thead th.lab', {hasText: 'Lab 7'}).locator('.sortonly').click();
+        check('sorting by a lab: the best mark first, of equal marks fewer checks first, no result last',
+            JSON.stringify(await names(page)) === JSON.stringify(['Boris Petrov', 'Alice Ivanova', 'Chen Wei', 'Dana Kim', 'Eve <b>x</b> & Co']),
+            JSON.stringify(await names(page)));
+        await page.locator('thead th.lab', {hasText: 'Lab 7'}).locator('.sortonly').click();
+        check('...turned round: the worst first, no result still last',
+            JSON.stringify(await names(page)) === JSON.stringify(['Dana Kim', 'Chen Wei', 'Alice Ivanova', 'Boris Petrov', 'Eve <b>x</b> & Co']),
+            JSON.stringify(await names(page)));
+        await page.locator('thead .sortbtn', {hasText: 'Average'}).click();
+        check('sorting by the average: the highest first', (await names(page))[0] === 'Alice Ivanova', JSON.stringify(await names(page)));
+        await page.locator('thead .sortbtn', {hasText: 'Checks'}).click();
+        check('sorting by the checks: the fewest first', (await names(page))[0] === 'Chen Wei', JSON.stringify(await names(page)));
+        const height = await rowOf(page, 'Alice').evaluate(e => e.getBoundingClientRect().height);
+        check('rows are compact', height <= 28, String(height));
+        const bg = (name, sel = 'th') => rowOf(page, name).locator(sel).first().evaluate(e => getComputedStyle(e).backgroundColor);
+        const shade = n => page.locator('tbody tr').nth(n).locator('th').evaluate(e => getComputedStyle(e).backgroundColor);
+        check('every other row is shaded', (await shade(0)) !== (await shade(1)) && (await shade(0)) === (await shade(2)),
+            JSON.stringify([await shade(0), await shade(1), await shade(2)]));
+        const plain = await bg('Chen', 'td');
+        await rowOf(page, 'Chen').locator('th .name').hover();
+        const lit = await until(async() => (await bg('Chen', 'td')) !== plain
+            && (await bg('Chen', 'td')) === (await bg('Chen', 'td.total')) && (await bg('Chen')) === (await bg('Chen', 'td')), 2000);
+        check('the pointer over a name lights the whole row', !!lit, JSON.stringify([plain, await bg('Chen', 'td')]));
+        await page.mouse.move(0, 0);
         await page.locator('thead .sortbtn', {hasText: 'Student'}).click();
         check('sorting by name again', (await names(page))[0] === 'Alice Ivanova' && (await names(page))[1] === 'Boris Petrov');
 
@@ -161,9 +196,10 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         await card.waitFor({state: 'visible'});
         check('the address carries the card', (await page.evaluate(() => location.hash)) === '#cm=1&user=12');
         const grade = card.locator('.cgrade');
-        check('the card shows the grade of the gradebook, out of what, changed by hand, the grade to pass',
-            /2\.00/.test(await grade.innerText()) && /out of 5\.00/.test(await grade.innerText())
-            && /Changed by hand/.test(await grade.innerText()) && /to pass: 3\.00/.test(await grade.innerText()), await grade.innerText());
+        const gradeText = (await grade.allInnerTexts()).join('\n');
+        check('the card shows the mark of the auto-check, the grade of the gradebook, out of what, changed by hand, the grade to pass',
+            /Auto-check grade: 4/.test(gradeText) && /2\.00/.test(gradeText) && /out of 5\.00/.test(gradeText)
+            && /Changed by hand/.test(gradeText) && /to pass: 3\.00/.test(gradeText), gradeText);
         const history = card.locator('[data-region="history"]');
         const runs = await until(async() => (await history.locator('li').count()) === 2, 4000);
         check('the history of the checks: a line per run, the newest first', !!runs
@@ -172,12 +208,54 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         check('...with the findings counted', /critical: 1, major: 1/.test(await history.innerText()));
         check('...read from get_checks for that student and lab',
             JSON.stringify(await page.evaluate(() => window.__stub.course.historyCalls.at(-1))) === '{"cmid":1,"userid":12}');
+        /* the report of a run in the history */
+        const runLine = n => history.locator('li').nth(n);
+        check('a running check cannot be opened, a finished one can',
+            (await runLine(0).locator('.runbtn').count()) === 0 && (await runLine(1).locator('.runbtn').getAttribute('aria-expanded')) === 'false');
+        await runLine(1).locator('.runbtn').click();
+        const report = runLine(1).locator('.rundetails');
+        const shown = await until(async() => (await report.locator('.finding').count()) > 0, 4000);
+        const reportText = shown ? await report.innerText() : '';
+        check('a click on a run shows its findings: the critical first, with its class', !!shown
+            && (await report.locator('.findings > li').first().getAttribute('class')).includes('sev-critical')
+            && /OSPF area 0 has no neighbours/.test(reportText), reportText);
+        check('...a consequence under its cause, a forgiven note at the end',
+            (await report.locator('.findings > li').first().locator('.consequence').count()) === 1
+            && /MTU 1400/.test(await report.locator('.findings > li').last().innerText())
+            && (await report.locator('.forgiven').count()) === 1, reportText);
+        check('...read with get_check_run for that student, lab and run',
+            JSON.stringify(await page.evaluate(() => window.__stub.course.runCalls.at(-1))) === '{"cmid":1,"runid":"r3","userid":12}');
+        check('...and the line says it is open', (await runLine(1).locator('.runbtn').getAttribute('aria-expanded')) === 'true');
+        await card.screenshot({path: path.join(SHOTS, 'course-2b-run-report.png')});
+        await runLine(1).locator('.runbtn').click();
+        await until(async() => (await report.count()) === 0, 2000);
+        check('a second click hides it', (await runLine(1).locator('.rundetails').count()) === 0);
+        await runLine(1).locator('.runbtn').click();
+        await until(async() => (await runLine(1).locator('.finding').count()) > 0, 2000);
+        check('...opened again, it is not read again', (await page.evaluate(() => window.__stub.course.runCalls.length)) === 1);
+        await runLine(1).locator('.runbtn').click();
+
         const findings = await until(async() => (await card.locator('.cfinds .issues li').count()) > 0, 6000);
         check('the card of a running lab reads its facts in the summary too', !!findings);
         await page.screenshot({path: path.join(SHOTS, 'course-2-summary-card.png')});
         await card.locator('.cclose').click();
         await card.waitFor({state: 'hidden'});
         check('closing the card clears the address', (await page.evaluate(() => location.hash)) === '');
+
+        // Alice in lab 4: a run that found nothing says so, an earlier one lists what was wrong.
+        await cellOf(page, 'Alice', 1).locator('button').click();
+        await card.waitFor({state: 'visible'});
+        await until(async() => (await history.locator('.runbtn').count()) === 2, 4000);
+        await history.locator('li').nth(0).locator('.runbtn').click();
+        const clean = await until(async() => /No errors found/.test(await history.locator('li').nth(0).innerText()), 4000);
+        check('a run without findings: "no errors found"', !!clean, await history.innerText());
+        await history.locator('li').nth(1).locator('.runbtn').click();
+        const older = await until(async() => (await history.locator('li').nth(1).locator('.finding').count()) === 3, 4000);
+        check('opening another run closes the first and lists its findings and what could not be checked', !!older
+            && (await history.locator('.rundetails').count()) === 1 && /Not everything could be checked/.test(await history.innerText()),
+            await history.innerText());
+        await page.goBack();
+        await card.waitFor({state: 'hidden'});
 
         await cellOf(page, 'Alice', 3).locator('button').click();
         await card.waitFor({state: 'visible'});
@@ -198,12 +276,16 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         const labHeads = await page.locator('thead th').allInnerTexts();
         check('the columns: student, session, scheme, checks, grade', labHeads.join('|') === 'Student|Session|Scheme|Checks|Grade',
             JSON.stringify(labHeads));
-        const byState = await names(page);
-        check('what needs a look comes first: the error, then the errors in facts, then the rest',
-            byState[0] === 'Chen Wei' && byState[1] === 'Boris Petrov' && byState[2] === 'Alice Ivanova', JSON.stringify(byState));
+        // The facts come after the table: the order settles once they are read.
+        const settled = async() => {
+            const order = await names(page);
+            return order[0] === 'Chen Wei' && order[1] === 'Boris Petrov' && order[2] === 'Alice Ivanova';
+        };
+        check('what needs a look comes first: the error, then the errors in facts, then the rest', !!(await until(settled, 8000)),
+            JSON.stringify(await names(page)));
         const counts = (await page.locator('[data-region="counts"]').innerText()).replace(/\n/g, ' ');
         check('counters of the lab: running, errors, not started, passed and the average',
-            /Running: 2, errors: 1, not started: 2/.test(counts) && /Passed: 1 of 5/.test(counts) && /Average 3\.50/.test(counts), counts);
+            /Running: 2, errors: 1, not started: 2/.test(counts) && /Passed: 1 of 5/.test(counts) && /Average 3\.5/.test(counts), counts);
 
         const waiting = await until(async() => /\d+/.test(await colOf(page, 'Boris', 'facts').locator('.finds .bad').innerText()), 8000);
         check('a student with errors: the number of bad findings', !!waiting);
@@ -220,7 +302,7 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
             /Check in progress/.test(await colOf(page, 'Boris', 'checks').innerText())
             && /Attempts: 2/.test(await colOf(page, 'Alice', 'checks').innerText())
             && /No checks/.test(await colOf(page, 'Dana', 'checks').innerText()));
-        check('the grade of the gradebook in its column', (await colOf(page, 'Alice', 'gradecell').innerText()) === '5.00'
+        check('the grade in its column', (await colOf(page, 'Alice', 'gradecell').innerText()) === '5'
             && (await colOf(page, 'Dana', 'gradecell').innerText()) === '—');
         c = await calls(page);
         const since = name => (c[name] || 0) - (before[name] || 0);
@@ -245,6 +327,10 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         await page.locator('thead .sortbtn', {hasText: 'Grade'}).click();
         check('sorting by grade: the best first', (await names(page))[0] === 'Alice Ivanova' && (await names(page))[1] === 'Boris Petrov',
             JSON.stringify(await names(page)));
+        await page.locator('thead .sortbtn', {hasText: 'Scheme'}).click();
+        check('sorting by the scheme: the most problems first', (await names(page))[0] === 'Boris Petrov', JSON.stringify(await names(page)));
+        await page.locator('thead .sortbtn', {hasText: 'Checks'}).click();
+        check('sorting by the checks: a run in progress first', (await names(page))[0] === 'Boris Petrov', JSON.stringify(await names(page)));
         await page.locator('thead .sortbtn', {hasText: 'Student'}).click();
         check('sorting by name', (await names(page))[0] === 'Alice Ivanova');
         await page.locator('[data-region="group"]').selectOption('5');
