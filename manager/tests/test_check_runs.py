@@ -1,11 +1,16 @@
 """Auto-check runs through the API and the orchestrator: queued -> running -> done (CONTRACTS 2.9)."""
 
 import json
+import time
+from datetime import datetime, timedelta, timezone
 
 from conftest import make_env
 from test_facts import collected, started
 
 LATER = "2099-01-01T00:00:00Z"  # Collected after any run started: the facts count as fresh
+# Every QEMU node of the example lab (D1…D6) has a guest agent: a run waits for each to report once.
+ADDRS = (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"),
+         ("D4", "192.168.9.4/24"), ("D5", "192.168.9.5/24"), ("D6", "192.168.9.6/24"))
 CHECKS = {"format": "gns3lab.checks/1",
           "groups": {"explicit": [{"name": "A", "members": ["D1", "D2"]}, {"name": "B", "members": ["D3"]}]}}
 
@@ -30,8 +35,7 @@ async def test_a_run_goes_from_queued_to_done(tmp_path, dsn):
             slot.facts_enabled = True
         with_checks(env)
         sid, slot, pid, ids = await started(env)
-        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}}
-                           for n, a in (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"))}
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}} for n, a in ADDRS}
         env.orch._facts_next.clear()
         await env.run(3)
         assert (await env.client.get(f"/api/v1/sessions/{sid}")).json()["features"] == ["consoles", "facts", "checks"]
@@ -80,7 +84,7 @@ async def test_a_run_waits_for_the_collection_it_asked_for(tmp_path, dsn, monkey
         with_checks(env)
         sid, slot, pid, ids = await started(env)
         old = "2000-01-01T00:00:00Z"
-        addrs = (("D1", "192.168.1.1/24"), ("D2", "192.168.1.2/24"), ("D3", "192.168.2.1/24"))
+        addrs = ADDRS
         slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": collected(
             host(a)["data"], attempted=old, observed=old)}} for n, a in addrs}
         env.orch._facts_next.clear()
@@ -103,6 +107,72 @@ async def test_a_run_waits_for_the_collection_it_asked_for(tmp_path, dsn, monkey
         done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{run['run_id']}")).json()
         assert done["status"] == "done" and done["result"]["outcome"] == "graded"
         assert not [r for r in done["result"]["rules"] if r.get("reason") == "stale_facts"]
+
+
+async def test_a_guest_that_never_reported_makes_the_run_incomplete(tmp_path, dsn):
+    """Just after the lab started the guests are still booting and the slot publishes nothing about them yet
+    (SLOT_FACTS_BOOT_GRACE). Such a node is not one "without a collector": the run waits for it, and if it stays
+    silent the run asks to check again instead of grading an empty lab."""
+    async with make_env(tmp_path, dsn, check_facts_wait=0) as env:
+        for slot in env.slots.values():
+            slot.facts_enabled = True
+        with_checks(env)
+        sid, slot, pid, ids = await started(env)
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}} for n, a in ADDRS if n != "D3"}
+        env.orch._facts_next.clear()
+        await env.run(3)
+        r = await env.client.post(f"/api/v1/sessions/{sid}/checks", json={"requested_by_user_id": 42})
+        await env.run(5)
+        done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{r.json()['run_id']}")).json()
+        assert done["status"] == "done"
+        assert done["result"]["outcome"] == "incomplete" and done["result"]["mark"] is None
+        assert [r for r in done["result"]["rules"] if r.get("reason") == "stale_facts"]
+
+
+def test_a_node_is_fresh_only_when_every_collector_is():
+    from lab_manager.orchestrator import stale_nodes
+
+    since = datetime(2026, 11, 17, 10, 0, tzinfo=timezone.utc)
+    after, before = since + timedelta(seconds=2), since - timedelta(seconds=40)
+
+    def row(node, collector, at):
+        return {"node_id": node, "collector": collector, "attempted_at": at}
+
+    started = {"A": "started", "B": "started", "C": "started", "D": "started", "E": "stopped"}
+    rows = [
+        row("A", "linux.net", after), row("A", "linux.config", after),
+        # The address is fresh, the saved configuration was read before the student fixed it.
+        row("B", "linux.net", after), row("B", "linux.config", before),
+        # iol.l1 follows its own cycle: an old one does not hold the node.
+        row("C", "ios.config", after), row("C", "iol.l1", before),
+        # A collector the slot stopped publishing long ago does not hold the node either.
+        row("D", "linux.net", after), row("D", "switch.net", since - timedelta(hours=2)),
+        row("E", "linux.net", before),  # Stopped: node_stopped, not stale
+    ]
+    assert stale_nodes(rows, started, since) == {"B"}
+
+
+async def test_a_run_waits_for_every_collector_of_a_node(tmp_path, dsn):
+    """linux.net was read after the run started, linux.config before it: the node is not fresh yet."""
+    async with make_env(tmp_path, dsn, check_facts_wait=0) as env:
+        for slot in env.slots.values():
+            slot.facts_enabled = True
+        with_checks(env)
+        sid, slot, pid, ids = await started(env)
+        stamp = lambda delta: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + delta))  # noqa: E731
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}} for n, a in ADDRS}
+        slot.facts[pid][ids["D3"]]["collectors"] = {
+            "linux.net": collected(host("192.168.2.1/24")["data"], attempted=stamp(60), observed=stamp(60)),
+            "linux.config": collected({"net_saved": {"mechanism": "ifupdown", "ok": True, "interfaces": []}},
+                                      attempted=stamp(-60), observed=stamp(-60), schema="linux.config/1"),
+        }
+        env.orch._facts_next.clear()
+        await env.run(3)
+        r = await env.client.post(f"/api/v1/sessions/{sid}/checks", json={"requested_by_user_id": 42})
+        await env.run(5)
+        done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{r.json()['run_id']}")).json()
+        assert done["status"] == "done"
+        assert done["result"]["outcome"] == "incomplete" and done["result"]["mark"] is None
 
 
 async def test_requests_that_are_refused(tmp_path, dsn):
