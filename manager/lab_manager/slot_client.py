@@ -100,6 +100,11 @@ class SlotClient:
         return await self._call("POST", f"/v1/labs/{project_id}/nodes/{node_id}/shutdown",
                                 json={"timeout": timeout}, key=key)
 
+    async def iso(self, project_id, node_id, path, targets, key):
+        """ISO image of a guest directory into the CD-ROM drive of the targets (CONTRACTS 4.7)."""
+        return await self._call("POST", f"/v1/labs/{project_id}/nodes/{node_id}/iso",
+                                json={"path": path, "targets": list(targets)}, key=key)
+
     async def deploy(self, ticket: dict, key: str) -> dict:
         return await self._call("POST", "/v1/labs/deploy", json=ticket, key=key)
 

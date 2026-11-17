@@ -36,6 +36,11 @@ it SeaBIOS. No Secure Boot; the image must boot with empty UEFI variables (\\EFI
 slot.adapter_type (qemu only): the network adapter model, e.g. "virtio-net-pci" (NodeSpec.adapter_type). Without it
 "e1000". The guest needs a driver for it.
 
+iso_source (qemu with a guest agent only): the directory of the guest, an absolute POSIX path ("/root/to-iso") or a Windows
+path ("C:\\ToISO"), whose files a student may turn into an ISO image (CONTRACTS 2.12, 4.7). iso_target (qemu only): nodes of the
+image take that image into their CD-ROM drive. Only the administrator names the directory; public() carries just
+`iso_source: true` and `iso_target: true`.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -65,6 +70,8 @@ CPU_PATTERN = (
 MACHINE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 # slot.adapter_type: the QEMU network adapter models (NodeSpec.adapter_type). slot/api/models.py AdapterType.
 AdapterType = Literal["e1000", "e1000e", "virtio-net-pci", "vmxnet3", "rtl8139"]
+# iso_source: slot/api/models.py ISO_PATH_PATTERN. No control characters: the slot quotes it into a guest shell command.
+ISO_PATH_PATTERN = r"^(/|[A-Za-z]:\\)[^\x00-\x1f\x7f]{0,254}$"
 VPCS_MEMORY_MB = 32  # Counted for the CT size; VPCS has no memory setting
 
 
@@ -131,6 +138,8 @@ class Image(Strict):
     # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
     role: Literal["switch"] | None = None
     qga: bool = Field(default=True, strict=True)  # False: no guest agent in the image (CONTRACTS 2.6, 4.2)
+    iso_source: str | None = Field(default=None, pattern=ISO_PATH_PATTERN)  # CONTRACTS 2.12
+    iso_target: bool = Field(default=False, strict=True)
     sha256: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     derived: dict | None = None
     featured: bool = False
@@ -176,6 +185,10 @@ class Image(Strict):
             if (self.net_config is not None or self.random_ifnames or self.role is not None
                     or self.uplink_port is not None or self.slot.provisioning):
                 raise ValueError("qga false excludes net_config, random_ifnames, role, uplink_port and slot.provisioning")
+        if self.iso_source is not None and (self.kind != "qemu" or not self.qga or self.uplink_port is not None):
+            raise ValueError("iso_source is for qemu images with a guest agent and without uplink_port")
+        if self.iso_target and (self.kind != "qemu" or self.uplink_port is not None):
+            raise ValueError("iso_target is for qemu images without uplink_port")
         if self.slot.cli_prompt is not None:
             try:
                 pattern = re.compile(self.slot.cli_prompt.encode())
@@ -217,6 +230,8 @@ class Image(Strict):
             # The plugin picks console snippets by it; only RouterOS images carry the field (CONTRACTS 2.6).
             **({"guest": "routeros"} if self.net_config == "routeros" else {}),
             **({"random_ifnames": True} if self.random_ifnames else {}),
+            **({"iso_source": True} if self.iso_source is not None else {}),
+            **({"iso_target": True} if self.iso_target else {}),
             **({"extra_disks": {"max": MAX_EXTRA_DISKS, "size_gb": dict(EXTRA_DISK_GB)}} if self.extra_disks else {}),
             **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }

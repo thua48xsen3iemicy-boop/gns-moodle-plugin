@@ -626,6 +626,7 @@ SOURCE_FILES = (
     'manager/tests/test_ifnames.py',
     'manager/tests/test_extra_disks.py',
     'manager/tests/test_ios_config.py',
+    'manager/tests/test_iso.py',
     'manager/tests/test_no_qga.py',
     'manager/tests/test_qemu_cpu.py',
     'manager/tests/test_qemu_machine.py',
