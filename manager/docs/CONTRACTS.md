@@ -706,14 +706,61 @@ Windows) — `skipped` с `no_collector`. Путь в интернет — по 
   решает плагин.
 - Прогоны студента в элементе курса, лимит попыток и запись в журнал оценок Moodle — забота плагина.
 
+🆕 **Свои скрипты преподавателя: `scripts`** (этап 4, формат утверждён владельцем 2026-11-18; менеджер — в работе,
+возможность `check-scripts` в `info.features`). Проект — `docs/autochecks/README.md` §7. Скрипт выполняется в госте ноды через
+`qga/exec` слота (§4.2), вывод сравнивает менеджер.
+
+| Поле элемента `scripts[]` | Обяз. | Правило |
+|---|---|---|
+| `id` | да | `^[a-z0-9][a-z0-9_-]{0,31}$`, уникален в лабе (`duplicate_name`) |
+| `title` | да | строка 1…120 символов |
+| `node` | да | имя ноды лабы (`unknown_node`): QEMU без `qga: false`, иначе `script_node_unsupported` |
+| `shell` | нет | `sh` · `powershell` · `routeros`. Без поля — по семейству гостя. Семейство известно по `net_config` образа (`routeros` — `routeros`; `ifupdown`, `networkmanager`, `netplan`, `networkd` — `sh`); другая оболочка — `shell_mismatch`. Без `net_config` (в том числе Windows) не сверяется до запуска |
+| `run` | да | строка, UTF-8 не больше 8000 байт после подстановки `{{nonce}}` |
+| `timeout` | нет | int 1…60, по умолчанию 20 |
+| `expect` | нет | объект, без поля — `{"exit": 0}`; условия ниже, нужны все; пустой объект — `required` |
+| `expect.exit` | нет | int |
+| `expect.match` | нет | строка 1…500 символов, регулярное выражение RE2; не компилируется — `bad_regex`. Ищется в выводе (`search`, без флагов) |
+| `expect.contains`, `expect.not_contains` | нет | массив 1…10 непустых строк, каждая не длиннее 500 символов |
+| `group` | нет | `l1` · `l2` · `addressing` · `gateways` · `routing` · `host` (по умолчанию) |
+| `class` | нет | `critical` · `major` (по умолчанию) · `minor` · `note` |
+
+Пределы (`out_of_range`): не больше 20 скриптов, сумма `timeout` не больше 120. Срок прогона — `CHECK_TIMEOUT` плюс эта сумма.
+
+- **Маркер.** На прогон — 16 hex-символов (`result.nonce`); заменяет `{{nonce}}` в `run`, `contains`, `not_contains` и, как
+  буквальный текст, в `match`.
+- **Выполнение.** После ожидания свежих фактов, до расчёта правил, по одному в порядке массива: `POST …/qga/exec` с `command`,
+  `timeout_seconds` = `timeout` скрипта и `shell`, если он задан.
+- **Сравнение.** `stdout`: `\r\n` → `\n`, пробельные символы в конце отрезаются, сравниваются первые 64 КиБ. `stderr` не сравнивается.
+- **Класс.** `class` скрипта, профиль не действует; `grading.overrides["script_failed"]` заменяет его у всех скриптов, затем
+  `focus` поднимает на ступень, если `group` скрипта в `focus`.
+
+`result.scripts[]` — по строке на скрипт, в порядке массива (в `GET …/checks` списком прогонов не отдаётся, как `findings`):
+
+| Поле | Смысл |
+|---|---|
+| `id`, `node` | из скрипта |
+| `status` | `pass` · `fail` · `skipped` |
+| `reason` | у `fail`: `exit` (код выхода не тот), `mismatch` (вывод не прошёл `match`/`contains`/`not_contains`), `timeout` (не уложился: `504 EXEC_TIMEOUT` слота с `exec-shell`), `node_stopped` (нода остановлена). У `skipped`: `collect_failed` (агент гостя не ответил, слот недоступен) — временная причина, как в §3 проекта: если `group` скрипта в `focus` или `focus` пуст, `outcome: "incomplete"`; `unsupported_os` (семейство гостя не совпало с `shell` — `409 SHELL_MISMATCH` слота, или слот без `exec-shell` и `shell: "powershell"`) |
+| `exit_code` | int или `null`, если скрипт не выполнился |
+| `stdout`, `stderr` | первые 2048 и 1024 байта (UTF-8, по границе символа); `""`, если не выполнился |
+| `truncated` | `true`, если `stdout` или `stderr` обрезаны здесь или слотом |
+| `duration_ms` | int или `null` |
+
+Непрошедший скрипт (`fail`) — находка `script_failed` с полем `script_id`, `group` и классом скрипта, `nodes: [node]`, `ifaces: []`,
+`message` — `«<title>: <причина>»`. У `reason: "node_stopped"` — `caused_by` = `id` находки `node_stopped` этой ноды,
+`counted: false`. В `result.rules` — одна строка `script_failed` (группа `host`): `fail`, если не прошёл хоть один скрипт, `pass`,
+если прошли все выполненные, `skipped` с `reason` первого, если все пропущены. Нет скриптов — строки нет.
+`result.nonce` — маркер прогона; `null`, если скриптов нет. Текст `run` и `expect` в прогон не попадают.
+
 **Поля определения `gns3lab.lab/2` для проверок** (только при `checks` в `info.features`; иначе — `unknown_field`):
 
 | Поле | Правило |
 |---|---|
-| `checks` | объект `gns3lab.checks/1` (проект §4): `format` — ровно `gns3lab.checks/1`; остальные поля необязательны. `scripts` (этап 4) пока не принимается — `unknown_field`. Входит в `lab_def` |
+| `checks` | объект `gns3lab.checks/1` (проект §4): `format` — ровно `gns3lab.checks/1`; остальные поля необязательны. 🆕 `scripts` — выше; менеджер без `check-scripts` в `info.features` его не принимает (`unknown_field`). Входит в `lab_def` |
 | `segments[].configure` | `manager` (по умолчанию) или `student`. `student` — компилятор не настраивает ни участников, ни шлюз, ни коммутаторы на пути, предупреждения `gateway_not_configured` и `switch_not_configured` для сегмента не выдаются; адреса раздаются по тем же правилам и становятся ожиданием проверок. Входит в `lab_def` |
 
-Новые `code` в `problems` `validate` (путь вида `checks.groups.explicit[0].members[1]`): `unknown_rule` (код в
+Новые `code` в `problems` `validate` (путь вида `checks.groups.explicit[0].members[1]`): 🆕 `script_node_unsupported`, `shell_mismatch`, `bad_regex` (`scripts`, выше), `unknown_rule` (код в
 `checks.rules` или `overrides` не из каталога), `group_overlap` (узел в двух группах `explicit`), `bad_range` (элемент
 `addresses.allowed` — не `rfc1918` и не сеть IPv4), а также общие `required`, `unknown_field`, `bad_type`, `bad_name`,
 `duplicate_name` (имя группы), `unknown_node`, `out_of_range` (в том числе `segments[i].configure`). Эталонная лаба с неверным `meta.json.checks` — `409 lab_invalid`, как с другими ошибками каталога.
@@ -1036,6 +1083,13 @@ QGA `guest-get-osinfo` → `id: "routeros"` (CHR 7.25.1: `name: "RouterOS"`, `va
   слот переносит последнюю непустую строку вывода в `stderr` и заменяет `\r\n` на `\n`. Скрипт не атомарен: команды до ошибки
   уже применены;
 - `POST …/serial/enable` — `409`.
+
+🆕 **Оболочка `qga/exec`** (возможность `exec-shell`, просьба `SLOT_REQUESTS.md` §9). Сейчас слот запускает `command` скриптом RouterOS
+у семейства `routeros` и через `/bin/sh -c` у всех остальных, в том числе у Windows. Со `exec-shell`: у семейства `windows` —
+PowerShell (`-NoProfile -NonInteractive -EncodedCommand`, как коллекторы §4.6); необязательное поле запроса `shell` (`sh` ·
+`powershell` · `routeros`) — сверка: не совпало с семейством гостя — `409` с `detail.code = "SHELL_MISMATCH"`, до гостя запрос не
+доходит; `stdout` и `stderr` ответа — не больше 64 КиБ каждый (по границе символа), обрезанный ответ получает `"truncated": true`; команда не завершилась за `timeout_seconds` — `504` с `detail.code = "EXEC_TIMEOUT"`
+(сейчас — `502 QGA error: QgaTimeout`, его не отличить от сбоя канала). Без поля `shell` и при выводе меньше 64 КиБ ответ прежний.
 
 🆕 **`NodeSpec.uplink_port`** — номер адаптера узла «Интернет» (`0 ≤ uplink_port < adapters`), только `kind: "qemu"`, не более
 одного узла в билете; к этому порту в `links` ничего не подключается. Слот присваивает порту MAC из своего `SLOT_UPLINK_MAC`
@@ -1620,6 +1674,8 @@ node_id без самого источника, `timeout` — строгий int
 | `extra_disks` | менеджер | 🆕 (0.22.0) поле ноды `disks` в определении лабы, `extra_disks` образов и `limits.max_disk_gb` (§2.1, §2.6) |
 | `extra-disks` | слот | 🆕 (0.18.0) `NodeSpec.disks`: дополнительные пустые диски QEMU-узла (§4.2). Только при годном `blank.qcow2` в `/opt/gns3/images/QEMU`; менеджер и слот выпускаются вместе |
 | `uplink` | слот; менеджер | 🆕 `NodeSpec.uplink_port`: узел «Интернет», его внешний порт получает `SLOT_UPLINK_MAC` и подключается к `eth1` слота через облако GNS3 (§4.2). Только при заданном `SLOT_UPLINK_MAC` и наличии `eth1`; лаба с `uplink_port` выбирает только такие слоты. Менеджер не опрашивает слот (свободный слот — выключенный LXC): возможность записывает администратор в `slots.json` (`"features": ["uplink"]`, `lab-provision secrets` делает это при заданном `INET_BRIDGE`); сам слот в любом случае отклонит такую лабу `422` |
+| `check-scripts` | менеджер | 🆕 (этап 4, в работе) поле `scripts` в `gns3lab.checks/1` и `result.scripts`, `result.nonce` прогона (§2.9). Плагин показывает поле скриптов в редакторе лабы только при ней |
+| `exec-shell` | слот | 🆕 (просьба `SLOT_REQUESTS.md` §9) `qga/exec`: PowerShell у Windows-гостя, поле `shell` со сверкой, вывод не больше 64 КиБ (§4.2). Без неё скрипты с `shell: "powershell"` — `skipped` с `unsupported_os` |
 | `student-state` | слот | 🆕 состояние лабы переносится вместе с каталогом студента (`/opt/gns3/projects`): проект продолжается в любом слоте. Без этой возможности межслотовый `resume` не включается |
 
 Новое имя добавляется в эту таблицу тем же изменением, что и код, который его объявляет.
