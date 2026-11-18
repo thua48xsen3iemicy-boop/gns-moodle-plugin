@@ -1,4 +1,7 @@
-# Lab Slot — 0.25.1
+# Lab Slot — 0.26.0
+
+0.26.0: ISO-образ каталога гостя в CD-ROM других нод (`iso-mount`, CONTRACTS §4.7), раздел «ISO из каталога гостя».
+Нужен пакет `xorriso` в шаблоне LXC; без него возможность не объявляется.
 
 0.25.1: `SLOT_READY_TIMEOUT` по умолчанию 600 секунд вместо 180 (код и `slot.env.example`). Когда весь класс запускает лабы
 одновременно, Ceph нагружен, и ВМ грузятся дольше: на пилоте одна Linux-нода не стала готова за 180 секунд, и первая подготовка
@@ -473,6 +476,33 @@ Debian должен иметь установленный qemu-guest-agent. QGA 
 адаптера: текущий механизм не подтверждает семантическую корректность конфигурации.
 Без provisioning проверяется только TCP-доступность CLI, не интерактивный login.
 Время ожидания начального CLI prompt — 30 секунд, каждой команды — её timeout.
+
+## ISO из каталога гостя
+
+`POST /v1/labs/{project_id}/nodes/{source}/iso` с телом `{"path": "/root/to-iso", "targets": [<node_id>...]}` —
+асинхронная операция `iso` (202, опрос `/v1/operations/{id}`), долгая команда под fencing, как `shutdown`. Каталог
+задаёт каталог образов менеджера, не студент. Шаги:
+
+1. Гость-источник (запущенная QEMU-нода с QGA) упаковывает каталог во временный архив: POSIX — `tar` в `/tmp/lab-iso.*`,
+   Windows — zip через .NET `ZipFile.CreateFromDirectory` (Windows 8 / Server 2012 и новее, `tar.exe` не нужен).
+   RouterOS не поддерживается.
+2. Слот читает архив через `guest-file-read` кусками по 1 МиБ; в агенте гостя не должны быть запрещены `guest-file-*`.
+3. Распаковка во временный каталог проекта: только обычные файлы и каталоги, ссылки, устройства, абсолютные пути и `..`
+   отбрасываются. Пределы — `SLOT_ISO_MAX_BYTES` (архив и распакованное, 256 МиБ) и `SLOT_ISO_MAX_FILES` (10000).
+4. `xorriso -local_charset UTF-8 -as mkisofs -r -J -joliet-long -V LABFILES`: Rock Ridge для Linux, Joliet для Windows,
+   кириллица в именах сохраняется при любой локали сервиса.
+5. Образ `lab-iso-<operation_id>.iso` в каталоге проекта; каждой цели `cdrom_image` через GNS3. GNS3 2.2.61 у запущенной
+   ноды меняет носитель сразу (`eject -f ide1-cd0`, `change ide1-cd0` в мониторе QEMU), остановленная получит его при
+   старте. Образы, которых нет ни в одном приводе, удаляются. Образ живёт в каталоге проекта и переезжает вместе с ним.
+
+Результат: `result = {iso, bytes, files, targets: [{node_id, status: attached|failed, error?}]}`. Ошибка одной цели
+(`ISO_DRIVE_BUSY` — у ноды IDE-диск `hdc`, место CD-ROM; `NOT_SUPPORTED`; `NODE_NOT_FOUND`; `GNS3_ERROR`) не роняет
+остальные; операция FAILED (`ISO_ATTACH_FAILED`), только если не подключилась ни одна. Прочие коды: `ISO_SOURCE_MISSING`,
+`ISO_SOURCE_EMPTY`, `ISO_SOURCE_FAILED`, `ISO_SOURCE_UNAVAILABLE`, `ISO_TOO_LARGE`, `ISO_BUILD_FAILED`, `ISO_TIMEOUT`,
+`GUEST_AGENT_UNAVAILABLE`, `NOT_SUPPORTED`. Лаба в любом случае остаётся READY.
+
+Проверить на стенде: у машины `q35` привод CD-ROM называется не `ide1-cd0`, и GNS3 молча не сменит носитель у запущенной
+ноды; в Linux-госте смонтированный `/dev/sr0` нужно перемонтировать после новой сборки.
 
 ## API и ручная проверка GNS3 2.2.61
 

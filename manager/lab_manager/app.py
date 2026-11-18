@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -16,16 +17,17 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import VERSION, checks as checks_mod, labdef
 from .derived import DerivedImages, register_routes
-from .agent_client import AgentClient, start_budget_warnings
+from .agent_client import AgentClient, AgentError, start_budget_warnings
 from .db import latest_version, make_pool, schema_version
 from .errors import public_error
 from .facts import build_state
 from .labs import Catalog, LabError, LabNotFound, deploy_ticket
-from .orchestrator import Orchestrator
+from .orchestrator import Failure, Orchestrator
+from .ownership import command_scope
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
 from .storage import StorageError, student_key, authoring_key
-from .store import Store, CaptureConflict, WorkspacePurging
+from .store import Store, CaptureConflict, Fenced, WorkspacePurging
 from .purge import Purges
 from .maintenance import Maintenance
 
@@ -90,6 +92,14 @@ class Grading(Strict):
 class CheckRequest(Strict):
     requested_by_user_id: int = Field(gt=0)
     grading: Grading | None = None
+
+
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+class IsoRequest(Strict):
+    node_id: str = Field(min_length=1, max_length=64)  # the source node
+    requested_by_user_id: int | None = Field(default=None, gt=0)  # Journal only (events)
 
 
 class StopRequest(Strict):
@@ -299,6 +309,11 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             body["nodes"], stale = await services.orchestrator.live_nodes(s)
             if stale:
                 body["nodes_stale"] = True
+        if s["status"] == "running" and s["topology"]:
+            iso = await services.orchestrator.iso_nodes(s)
+            if iso["sources"] and iso["targets"]:  # CONTRACTS 2.12
+                body["features"] += ["iso"]
+                body["iso"] = {"sources": sorted(iso["sources"]), "targets": iso["targets"]}
         if s.get("mode") == "authoring":
             body["capture_nodes"] = await services.derived.candidates(s)
         return body
@@ -354,7 +369,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
         # resume: the next session continues the project; checks: CONTRACTS 2.9
-        features = ["consoles", "observer", "resume", "facts", "checks", "purge", "maintenance"]
+        # iso: POST /sessions/{id}/iso (CONTRACTS 2.12); a session says whether its lab has a source and a target
+        features = ["consoles", "observer", "resume", "facts", "checks", "purge", "maintenance", "iso"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -590,6 +606,84 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if run is None:
             raise ApiError(404, "check_not_found", "Unknown check run")
         return present_run(run)
+
+    # ------------------------------------------------------------------ ISO of a guest directory (CONTRACTS 2.12)
+    ISO_STATUS = {"RUNNING": "running", "SUCCEEDED": "succeeded"}
+
+    def present_iso(op):
+        body = {"schema": "gns3lab.iso/1", "operation_id": op.get("operation_id"),
+                "status": ISO_STATUS.get(op.get("status"), "failed")}
+        if body["status"] == "running":
+            body["stage"] = op.get("stage")
+            body["progress"] = op.get("progress", 0)
+        result = op.get("result")
+        if isinstance(result, dict):
+            body["result"] = {k: result.get(k) for k in ("files", "bytes")}
+            body["result"]["targets"] = [{k: t.get(k) for k in ("node_id", "status", "error") if t.get(k) is not None}
+                                         for t in result.get("targets") or [] if isinstance(t, dict)]
+        error = op.get("error")
+        if body["status"] == "failed":
+            code = error.get("code") if isinstance(error, dict) else None
+            body["error"] = {"code": code or "ISO_FAILED",
+                             "message": (error or {}).get("message") or "ISO image failed"}
+        return body
+
+    async def iso_session(session_id, site, node_id=None):
+        s = await own_session(session_id, site)
+        if s["status"] != "running" or not s["topology"]:
+            raise ApiError(409, "session_not_running", "Session is not running")
+        iso = await services.orchestrator.iso_nodes(s)
+        if node_id is not None:
+            if node_id not in {n["node_id"] for n in s["topology"]["topology"]["nodes"]}:
+                raise ApiError(404, "node_not_found", "Node does not belong to this session")
+            if node_id not in iso["sources"]:
+                raise ApiError(409, "iso_not_available", "The image of this node gives no ISO")
+            if not [t for t in iso["targets"] if t != node_id]:
+                raise ApiError(409, "iso_not_available", "No node of this lab takes an ISO")
+        return s, iso
+
+    @app.post("/api/v1/sessions/{session_id}/iso", status_code=202)
+    async def make_iso(session_id: str, body: IsoRequest, site=Depends(site_of)):
+        s, iso = await iso_session(session_id, site, body.node_id)
+        await refuse_in_maintenance(started_only=True)
+        orch = services.orchestrator
+        epoch, generation = orch.epoch, max(1, 2 * s["slot_generation"])
+        targets = [t for t in iso["targets"] if t != body.node_id]
+        try:
+            client = orch._slot(s)
+            with command_scope(epoch, generation, lambda: orch.leader and orch.epoch == epoch):
+                await orch._claim(s, epoch, generation)
+                if "iso-mount" not in (await client.capabilities()).get("features", []):
+                    raise ApiError(409, "iso_not_supported", "The slot of this session cannot make ISO images")
+                reply = await client.iso(str(s["project_id"]), body.node_id, iso["sources"][body.node_id], targets,
+                                         "iso-" + secrets.token_hex(16))
+        except SlotError as exc:
+            if exc.code == "OPERATION_IN_PROGRESS":
+                raise ApiError(409, "iso_in_progress", "Другая операция слота ещё идёт, повторите позже") from exc
+            raise ApiError(502, "slot_unavailable", "The slot did not accept the ISO request") from exc
+        except (Failure, Fenced, AgentError) as exc:
+            raise ApiError(503, "slot_unavailable", "The slot of this session cannot be commanded now") from exc
+        await store.event(s["id"], s["slot_vmid"], "iso_requested",
+                          {"node_id": body.node_id, "targets": targets, "operation_id": reply.get("operation_id"),
+                           "user_id": body.requested_by_user_id})
+        return JSONResponse(status_code=202, content=present_iso(reply))
+
+    @app.get("/api/v1/sessions/{session_id}/iso/{operation_id}")
+    async def get_iso(session_id: str, operation_id: str, site=Depends(site_of)):
+        s, _ = await iso_session(session_id, site)
+        if not UUID_RE.fullmatch(operation_id):  # it goes into the URL of the slot
+            raise ApiError(404, "iso_not_found", "Unknown ISO operation")
+        try:
+            op = await services.orchestrator._slot(s).operation(operation_id)
+        except SlotError as exc:
+            if exc.status == 404:
+                raise ApiError(404, "iso_not_found", "Unknown ISO operation") from exc
+            raise ApiError(502, "slot_unavailable", "The slot did not answer") from exc
+        except Failure as exc:
+            raise ApiError(503, "slot_unavailable", "The slot of this session is not configured") from exc
+        if op.get("action") != "iso" or op.get("project_id") != str(s["project_id"]):
+            raise ApiError(404, "iso_not_found", "Unknown ISO operation")
+        return present_iso(op)
 
     @app.post("/api/v1/sessions/{session_id}/console-tickets")
     async def console_ticket(session_id: str, body: TicketRequest, site=Depends(site_of)):

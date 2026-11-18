@@ -214,6 +214,16 @@ def consoleless_names(ticket: dict, images: dict) -> set:
     return {n["name"] for n in ticket.get("nodes") or [] if n.get("image") in files}
 
 
+def iso_names(ticket: dict, images: dict) -> tuple[dict, set]:
+    """Names of the nodes whose image may give an ISO image of a guest directory ({name: directory}) and names of the
+    nodes whose image takes one (CONTRACTS 2.12). Matched by the image file, like consoleless_names."""
+    sources = {image.file: image.iso_source for image in images.values() if image.iso_source and image.file}
+    targets = {image.file for image in images.values() if image.iso_target and image.file}
+    nodes = ticket.get("nodes") or []
+    return ({n["name"]: sources[n.get("image")] for n in nodes if n.get("image") in sources},
+            {n["name"] for n in nodes if n.get("image") in targets})
+
+
 class Orchestrator:
     def __init__(self, settings, store, pve, agent, slot_clients, catalog, *, sleep=asyncio.sleep):
         self.settings = settings
@@ -231,6 +241,7 @@ class Orchestrator:
         self._check_asked: dict[str, float] = {}  # session id -> monotonic time a check run last asked the slot
         self._live_cache: dict[str, tuple[float, dict]] = {}
         self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
+        self._iso: dict[str, dict] = {}  # session id -> iso_nodes()
         self._guest_facts: dict[str, set] = {}  # session id -> node_ids whose facts come from the guest agent
         self.leader = False
         self.epoch = None
@@ -558,6 +569,7 @@ class Orchestrator:
         self._check_asked.pop(s["id"], None)
         self._consoleless.pop(s["id"], None)
         self._guest_facts.pop(s["id"], None)
+        self._iso.pop(s["id"], None)
 
     @staticmethod
     def _recorded_slot_state(error, slot_state):
@@ -1343,4 +1355,21 @@ class Orchestrator:
             names = consoleless_names(ticket, await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {}))
             known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
             self._consoleless[s["id"]] = known
+        return known
+
+    async def iso_nodes(self, s) -> dict:
+        """{"sources": {node_id: guest directory}, "targets": [node_id]} of a running session (CONTRACTS 2.12); empty
+        when the lab cannot be resolved. A source never gets its own image."""
+        known = self._iso.get(s["id"])
+        if known is None:
+            try:
+                ticket, _ = await self._ticket(s)
+                images = await self.derived.catalog(s["site"]) if self.derived else (self.settings.images or {})
+            except (LabError, KeyError):
+                return {"sources": {}, "targets": []}
+            sources, targets = iso_names(ticket, images)
+            ids = {n["name"]: n["node_id"] for n in s["topology"]["topology"]["nodes"]}
+            known = {"sources": {ids[name]: path for name, path in sources.items() if name in ids},
+                     "targets": [ids[name] for name in sorted(targets) if name in ids]}
+            self._iso[s["id"]] = known
         return known

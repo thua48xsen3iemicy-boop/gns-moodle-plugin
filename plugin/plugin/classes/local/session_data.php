@@ -64,6 +64,18 @@ class session_data {
                 new external_value(PARAM_ALPHANUMEXT, 'Feature name, such as consoles or facts'),
                 'What this session offers (CONTRACTS §7), empty if the manager did not say'
             ),
+            'isosources' => new external_multiple_structure(
+                new external_value(PARAM_ALPHANUMEXT, 'Node id'),
+                'Nodes whose guest directory can become an ISO image (CONTRACTS §2.12), empty without feature iso',
+                VALUE_DEFAULT,
+                []
+            ),
+            'isotargets' => new external_multiple_structure(
+                new external_value(PARAM_ALPHANUMEXT, 'Node id'),
+                'Nodes that take that ISO image into their CD-ROM drive, empty without feature iso',
+                VALUE_DEFAULT,
+                []
+            ),
         ], 'Lab session', $required);
     }
 
@@ -108,7 +120,28 @@ class session_data {
             'nodesstale' => $running && ($session->nodes_stale ?? false) === true,
             'slotvmid' => self::slot_vmid($session),
             'features' => self::features($session),
+            'isosources' => self::iso_nodes($session, 'sources'),
+            'isotargets' => self::iso_nodes($session, 'targets'),
         ];
+    }
+
+    /**
+     * Node ids of the ISO sources or targets of a running session (manager CONTRACTS §2.12).
+     *
+     * @param \stdClass $session session from manager_client
+     * @param string $which sources or targets
+     * @return string[]
+     */
+    public static function iso_nodes(\stdClass $session, string $which): array {
+        $iso = $session->iso ?? null;
+        if ($session->status !== 'running' || !self::has_feature($session, 'iso') || !$iso instanceof \stdClass) {
+            return [];
+        }
+        $ids = $iso->$which ?? null;
+        if (!is_array($ids)) {
+            return [];
+        }
+        return array_values(array_filter($ids, fn($id) => is_string($id) && self::has_node($session, $id)));
     }
 
     /**

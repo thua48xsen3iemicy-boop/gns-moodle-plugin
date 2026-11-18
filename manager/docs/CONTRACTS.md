@@ -193,7 +193,8 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 | `slot_vmid` | 🆕 (менеджер 0.28.0) VMID CT слота в Proxmox (целое), пока сессия `starting`, `running` или `stopping` и слот ей уже выделен (с этапа `ct_prepare`). В очереди (`wait_slot`) и у завершённых сессий поля нет. Плагин показывает его студенту и наблюдателю как «Слот 9012», чтобы по жалобе найти CT в Proxmox; логика по нему не строится |
 | `status_message` | текст для студента по-русски; логика по нему не строится |
 | `error` | при `failed`: `{"code", "retryable"}` (§2.5); иначе `null` |
-| `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7) |
+| `features` | что доступно в **этой** сессии: `consoles` при `running`; ✅ `facts`, когда слот отдаёт факты (§2.7); 🆕 `iso`, когда в лабе есть нода-источник и нода-приёмник ISO (§2.12) |
+| `iso` | 🆕 (менеджер 0.30.0) при `running` и `features` с `iso`: `{"sources": [node_id], "targets": [node_id]}` — у каких нод кнопка «Смонтировать ISO» и куда подключится образ (§2.12). Иначе поля нет |
 | `topology` | формат `.gns3` с живыми `node_id`. У нод сохраняются `node_id`, `name`, `node_type`, `x`, `y`, `z`, `width`, `height`, `symbol`, `label`, `console_type`, `status`, `ports` (с `name`, `short_name`, `adapter_number`, `port_number` — как их отдаёт GNS3 2.2), `locked`; `properties` пустые, номера консоли нет. У линков — `link_id`, `nodes` (с `adapter_number`, `port_number`, `label`), `suspend`, `filters`, `link_type`, `link_style`. `drawings` — из эталона (у лабы из Moodle — пустые: рисунки у плагина). `symbol` — из эталона или каталога образов по имени ноды (GNS3 рисует ноды слота компьютерами). 🆕 `guest` — так же из эталона или каталога (§2.6), только у нод MikroTik RouterOS |
 | `nodes` | статусы нод (кеш 3 с); `console_type` — `telnet` · `vnc` · `none`. Нода, чей образ в каталоге (§2.6) объявлен с `console_type: "none"`, получает `none`, даже если у неё есть консоль: слот держит её для своих проверок готовности, пользователям она не выдаётся |
 | `capture_nodes` | у authoring: `[{"name", "status"}]`, когда-либо запускавшиеся QEMU-ноды проекта, включая штатно выключенные маршрутом shutdown |
@@ -526,6 +527,13 @@ GUEST_SHUTDOWN_UNSUPPORTED (слот без capability или маршрут 404
 образам без агента. Несовместимо с `net_config`, `random_ifnames`, `role`, `uplink_port` и `slot.provisioning`: всё это
 работает через агент, такой каталог менеджер не загружает. Производный образ наследует поле от базы. В `GET /images` поля нет.
 
+🆕 Необязательные поля элемента `IMAGES_FILE` — `iso_source` и `iso_target` (менеджер 0.30.0, только `qemu`, не вместе с
+`uplink_port`; §2.12). `iso_source` — каталог гостя, из которого студент собирает ISO: абсолютный путь POSIX (`"/root/to-iso"`)
+или Windows (`"C:\\ToISO"`), без управляющих символов, до 255 знаков; нужен гостевой агент (с `qga: false` каталог не
+загружается). `iso_target: true` — ноды образа принимают этот ISO в CD-ROM. Образ может быть и тем, и другим. Каталог задаёт
+только администратор: в `GET /images` — лишь `"iso_source": true` и `"iso_target": true`, пути нет. Производный образ
+наследует поля от базы.
+
 🆕 Необязательное поле элемента `IMAGES_FILE` — `slot.cpu` (менеджер 0.24.0, только `qemu`): модель процессора QEMU и её флаги,
 значение ключа `-cpu`, например `"host"` или `"SandyBridge,+rdrand,+avx2"`. Менеджер переносит его в `NodeSpec.cpu` (§4.2). Шаблон:
 модель `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, затем до 32 флагов `,[+-]?имя[=значение]` из тех же символов; без пробелов и `%`.
@@ -789,12 +797,53 @@ Wipe отдельной ноды — другой механизм: он идё�
 кроме `off` (повтор `POST` для уже живой сессии по-прежнему `200` с ней); `console-tickets` и `POST /capture` — в фазах
 `draining` и `active`.
 
+### 2.12. 🆕 ISO из каталога гостя: `/sessions/{id}/iso` (менеджер 0.30.0)
+
+Возможность `iso` в `info.features`. Студент кладёт файлы в каталог ноды-источника (`iso_source` её образа, §2.6) и
+нажимает «Смонтировать ISO»: слот собирает из каталога ISO-образ (Rock Ridge и Joliet, метка `LABFILES`) и вставляет его
+в CD-ROM **всех** нод-приёмников лабы (`iso_target`), кроме самого источника (§4.7). Запущенная нода получает носитель
+сразу, без перезагрузки; выключенная — при старте. Повторное нажатие заменяет образ у всех приёмников. Образ хранится в
+проекте студента и переживает остановку лабы.
+
+Какие ноды источники и приёмники, плагин узнаёт из сессии: `features` с `iso` и поле `iso` (§2.3). Кнопку показывает
+только владельцу на нодах из `iso.sources`; наблюдателю — нет (права проверяет плагин, менеджер владельца не знает).
+
+**`POST /api/v1/sessions/{id}/iso`** `{"node_id": "<источник>", "requested_by_user_id": 42}` (второе поле — для журнала,
+необязательное) → `202`:
+
+```json
+{"schema": "gns3lab.iso/1", "operation_id": "8c0e…", "status": "running", "stage": "iso_pack", "progress": 0}
+```
+
+**`GET /api/v1/sessions/{id}/iso/{operation_id}`** — то же с текущим состоянием; опрашивать раз в 1–2 с. `status`:
+`running` (`stage`: `iso_pack` → `iso_transfer` → `iso_build` → `iso_attach`, `progress` 0–100), `succeeded`, `failed`.
+
+```json
+{"schema": "gns3lab.iso/1", "operation_id": "8c0e…", "status": "succeeded",
+ "result": {"files": 12, "bytes": 1468416,
+            "targets": [{"node_id": "…", "status": "attached"}, {"node_id": "…", "status": "failed", "error": "ISO_DRIVE_BUSY"}]}}
+```
+
+Приёмник может не принять образ (`error`: `ISO_DRIVE_BUSY` — третий диск ноды на IDE занимает место CD-ROM;
+`NOT_SUPPORTED`, `NODE_NOT_FOUND`, `GNS3_ERROR`), остальные это не задевает. `failed` — `{"error": {"code", "message"}}`;
+коды слота (§4.7): `ISO_SOURCE_MISSING` (нет каталога), `ISO_SOURCE_EMPTY` (нет файлов), `ISO_TOO_LARGE` (больше предела
+слота, по умолчанию 256 МиБ или 10000 файлов), `ISO_SOURCE_UNAVAILABLE` (источник выключен), `GUEST_AGENT_UNAVAILABLE`,
+`ISO_SOURCE_FAILED`, `ISO_BUILD_FAILED`, `ISO_ATTACH_FAILED` (ни один приёмник не принял), `ISO_TIMEOUT`, `NOT_SUPPORTED`
+(гость RouterOS), `SERVICE_RESTART`. `message` — английский текст для журнала, студенту плагин показывает свой текст по коду.
+Лаба при любой ошибке продолжает работать.
+
+Ошибки запроса (§2.5): `409 session_not_running`; `404 node_not_found`; `409 iso_not_available` — нода не источник или в лабе
+нет другого приёмника; `409 iso_not_supported` — слот сессии не объявляет `iso-mount` (нет `xorriso`); `409 iso_in_progress` —
+слот выполняет другую операцию (в том числе прошлую сборку), повторить позже; `404 iso_not_found` — нет такой операции у этой
+сессии; `502`/`503 slot_unavailable` — слот не принял команду; `503 maintenance` в фазах `draining` и `active` (§2.11).
+
 ### 2.5. Коды ошибок
 
 **Ошибки запросов** (`{"error", "message"}`; у `session_conflict` ещё `conflict`):
 `unauthorized` 401, `invalid_request` 400, `unsupported_field` 400, `lab_not_found` 404,
 `session_not_found` 404, `node_not_found` 404, `session_not_running` 409, `node_not_running` 409,
-`session_conflict` 409, 🆕 `workspace_purging` 409 (§2.10), 🆕 `maintenance` 503 (§2.11), 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
+`session_conflict` 409, 🆕 `iso_not_available` 409, `iso_not_supported` 409, `iso_in_progress` 409, `iso_not_found` 404,
+`slot_unavailable` 502/503 (§2.12), 🆕 `workspace_purging` 409 (§2.10), 🆕 `maintenance` 503 (§2.11), 🆕 `check_not_found` 404, `check_in_progress` 409 (§2.9), 🆕 `capture_not_found` 404, `guest_not_stopped` 409 (список nodes, §2.8), `not_authoring` 409, `capture_in_progress` 409, `capture_done` 409, `image_static` 409 (§2.8), `lab_invalid` 409 (эталонная лаба сломана) или 422 с `problems` (определение
 из Moodle, §2.6), `gateway_unavailable` 502, `storage_unavailable` 503.
 🆕 `unsupported_lab` 409 (слоты не умеют того, что требует лаба, §4.3; сейчас — лаба с `uplink_port`, а ни один слот в `slots.json` не объявляет `uplink`).
 
@@ -1463,6 +1512,20 @@ as-value]` внутри `:do … on-error`. Из неё поле `snat` (фор�
 Сравнить `/facts`, `/sessions/{id}/state`, схему и IOS; восстановительные пробы могут
 кратковременно менять carrier внутри IOS — это ограничение самого L1-механизма.
 
+### 4.7. 🆕 ISO из каталога гостя (`iso-mount`, слот 0.26.0)
+
+`POST /v1/labs/{project_id}/nodes/{source}/iso`, тело `{"path": "/root/to-iso", "targets": ["<node_id>", …], "timeout": 600}`:
+`path` — `iso_source` образа источника (§2.6, шаблон `^(/|[A-Za-z]:\\)[^\x00-\x1f\x7f]{0,254}$`), `targets` — 1–32 разных
+node_id без самого источника, `timeout` — строгий int 60–1800 (по умолчанию 600). Fencing и `Idempotency-Key` — как у
+`shutdown` (§4.3a), это долгая команда: смена владельца ждёт её. Только READY-лаба (`409 INVALID_TRANSITION`); без `xorriso` —
+`409 NOT_SUPPORTED`; пока идёт любая другая операция слота — `409 OPERATION_IN_PROGRESS`.
+
+Ответ `202` + `operation_id` (`action: "iso"`), опрос `GET /v1/operations/{id}`: `stage` — `iso_pack`, `iso_transfer`,
+`iso_build`, `iso_attach`; в конце `result: {"iso": "lab-iso-<operation_id>.iso", "bytes", "files", "targets": [{"node_id",
+"status": "attached"|"failed", "error"?}]}`. `SUCCEEDED`, если подключён хотя бы один приёмник, иначе `FAILED`
+`ISO_ATTACH_FAILED`. Коды ошибок — §2.12. Что делает слот: `slot/README.md`, «ISO из каталога гостя». Лабу операция не
+меняет: `FAILED` операции не переводит лабу в `FAILED`.
+
 ## 5. Менеджер → агент узла
 
 Формат и доработки — `AGENT_REQUESTS.md`. Агент строгий (`extra="forbid"`, `strict=True`),
@@ -1538,6 +1601,8 @@ as-value]` внутри `:do … on-error`. Из неё поле `snat` (фор�
 | `lab_constructor` | менеджер | 🆕 `gns3lab.lab/2`: сегменты, `preconfig` образов, `warnings` в `validate` (§2.6); объявляется вместе с `lab_definitions` |
 | `image_capture` | менеджер | 🆕 авторский запуск (`options.mode: "authoring"`), снятие слоёв и производные образы в каталоге (§2.8); объявляется вместе с `images`, `lab_definitions` и при агенте с `images_capture` |
 | `guest-shutdown` | слот | QGA powerdown выбранной QEMU-ноды и ожидание stopped, §4.3a |
+| `iso` | менеджер | 🆕 (0.30.0) `POST /sessions/{id}/iso`, поля `iso_source`/`iso_target` образов (§2.6, §2.12); в `session.features` — когда в лабе есть источник и приёмник |
+| `iso-mount` | слот | 🆕 (0.26.0) ISO из каталога гостя в CD-ROM других нод (§4.7). Объявляется, только если в шаблоне LXC есть `xorriso`; менеджер спрашивает `capabilities` слота при каждом запросе |
 | `images_capture` | агент | 🆕 `POST /images/capture` (§5, AGENT_REQUESTS §6); поле `GET /capabilities` агента |
 | `projects_delete` | агент | 🆕 `DELETE /students/{key}/projects/{id}` (§5, AGENT_REQUESTS §7); поле `GET /capabilities` агента, агент 1.4.0 |
 | `qemu`, `iou`, `vpcs` | слот | типы нод `NodeSpec.kind` |

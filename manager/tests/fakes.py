@@ -340,6 +340,9 @@ class FakeSlot:
         self.deploy_bodies = []  # Bodies of POST /v1/labs/deploy as the slot received them
         self.facts = {}  # project_id -> {node_id: {"name", "collectors": {...}}} served by GET /facts
         self.guest_shutdown = True
+        self.iso_mount = True  # slot 0.26.0 announces iso-mount (CONTRACTS 4.7)
+        self.iso_requests = []  # (project_id, source node_id, body) of POST .../iso
+        self.iso_result = None  # what an ISO operation ends with: None succeeds, a dict is the error
         self.shutdown_route = True
         self.shutdown_errors = {}
         self.refreshes = []  # project ids the manager asked to collect now
@@ -431,7 +434,8 @@ class FakeSlot:
             return self._json(200 if self.healthy else 503, {"status": "ok"})
         assert request.headers["Authorization"] == "Bearer " + "a" * 40
         if path == "/v1/capabilities":
-            return self._json(200, {"features": ["guest-shutdown"] if self.guest_shutdown else []})
+            return self._json(200, {"features": (["guest-shutdown"] if self.guest_shutdown else [])
+                                    + (["iso-mount"] if self.iso_mount else [])})
         if path == "/v1/readyz":
             self.timeline.append(("slot:readyz", self.ready))
             return self._json(200 if self.ready else 503,
@@ -448,6 +452,20 @@ class FakeSlot:
             token = (int(request.headers.get("X-Lab-Epoch", 0)), int(request.headers.get("X-Lab-Generation", 0)))
             if token != self.fence:
                 return self._json(409, {"detail": {"code": "STALE_OWNER"}})
+        iso = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/nodes/([0-9a-f-]+)/iso", path)
+        if iso:
+            if any(op["status"] == "RUNNING" for op in self.ops.values()):
+                return self._json(409, {"detail": {"code": "OPERATION_IN_PROGRESS"}})
+            pid, node_id = iso.groups()
+            body = json.loads(request.content)
+            self.iso_requests.append((pid, node_id, body))
+            oid = str(uuid.uuid4())
+            failed = self.iso_result
+            op = {"operation_id": oid, "project_id": pid, "action": "iso", "status": "RUNNING", "remaining": 1,
+                  "stage": "iso_pack", "progress": 0, "iso_error": failed,
+                  "iso_targets": body["targets"]}
+            self.ops[oid] = op
+            return self._json(202, self._present(op))
         shutdown = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/nodes/([0-9a-f-]+)/shutdown", path)
         if shutdown:
             if not self.shutdown_route:
@@ -515,6 +533,17 @@ class FakeSlot:
             op = self.ops.get(m.group(1))
             if not op:
                 return self._json(404, {"detail": "Unknown operation"})
+            if op["action"] == "iso" and op["status"] == "RUNNING":
+                if op["remaining"] > 0:
+                    op["remaining"] -= 1
+                elif op["iso_error"]:
+                    op.update(status="FAILED", error=op["iso_error"])
+                else:
+                    op.update(status="SUCCEEDED", progress=100, result={
+                        "iso": "lab-iso-" + op["operation_id"] + ".iso", "bytes": 4096, "files": 2,
+                        "targets": [{"node_id": t, "status": "attached"} for t in op["iso_targets"]]})
+                return self._json(200, {**self._present(op), **{k: op.get(k) for k in
+                                                               ("stage", "progress", "error", "result")}})
             if op["status"] == "RUNNING":
                 if op["remaining"] > 0:
                     op["remaining"] -= 1

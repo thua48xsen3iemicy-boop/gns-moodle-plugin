@@ -75,6 +75,13 @@ const REVEAL_DELAY = 1000;
 const REVEAL_RETRY = 5000;
 const REVEAL_TRIES = 4;
 
+/** Poll interval of an ISO image being built, ms (manager CONTRACTS §2.12). */
+const ISO_POLL = 1500;
+
+/** Codes of a failed ISO image with an own text; others get ui_iso_err_other. */
+const ISO_ERRORS = ['ISO_SOURCE_MISSING', 'ISO_SOURCE_EMPTY', 'ISO_TOO_LARGE', 'ISO_SOURCE_UNAVAILABLE',
+    'GUEST_AGENT_UNAVAILABLE', 'ISO_ATTACH_FAILED', 'NOT_SUPPORTED'];
+
 /** Codes of a failed collection with an own text. */
 const FACT_ERRORS = ['unreachable', 'timeout', 'stopped', 'unsupported', 'failed'];
 
@@ -101,6 +108,8 @@ const UI_KEYS = [
     'ui_seen_at', 'ui_seen_mark', 'ui_seen_note',
     'ui_fog_unknown', 'ui_fog_unknown_note', 'ui_fog_unknown_count', 'ui_fog_unexplored', 'ui_fog_found_note',
     'ui_fog_found_noconsole', 'ui_fog_no_cables', 'ui_as_student', 'ui_as_student_help',
+    'ui_act_iso', 'ui_act_iso_full', 'ui_iso_busy', 'ui_iso_started', 'ui_iso_done', 'ui_iso_partly', 'ui_iso_err_other',
+    ...ISO_ERRORS.map(code => 'ui_iso_err_' + code.toLowerCase()),
     ...FACT_ERRORS.map(code => 'ui_facts_err_' + code),
 ];
 
@@ -137,6 +146,8 @@ class LabPage {
         this.seen = new Map();
         this.liveSession = null;
         this.saveRefreshAt = 0;
+        // An ISO image being built (manager CONTRACTS §2.12): its operation id while it runs.
+        this.isoOperation = null;
         // What the scheme shows (activity setting) and what the student has uncovered of it (docs/lab-constructor §2).
         this.mode = MODES.includes(this.data.factsview) ? this.data.factsview : 'live';
         this.start = Array.isArray(this.data.fogstart) ? this.data.fogstart : [];
@@ -915,7 +926,82 @@ class LabPage {
         if (open) {
             items.push({id: 'close', label: s.ui_act_close, full: s.ui_act_close_full, icon: 'close'});
         }
+        if (this.isoSource(n)) {
+            const busy = this.isoOperation !== null;
+            items.push({id: 'iso', label: s.ui_act_iso, full: s.ui_act_iso_full, icon: 'disc', off: busy,
+                why: busy ? s.ui_iso_busy : ''});
+        }
         return items;
+    }
+
+    /**
+     * Whether "Mount ISO" belongs on a node: the owner's running lab names it a source (manager CONTRACTS §2.12). The
+     * server checks it again; observers and the authoring page never get the action.
+     *
+     * @param {object} n node
+     * @returns {boolean}
+     */
+    isoSource(n) {
+        const session = this.session && this.session.session;
+        return this.userid === 0 && !this.data.authoring && !!session && session.status === 'running'
+            && Array.isArray(session.isosources) && session.isosources.includes(n.id);
+    }
+
+    /**
+     * "Mount ISO": the files of the agreed directory of the node become an ISO image in the CD-ROM drive of the other
+     * target nodes. The page follows the operation and says how it ended.
+     *
+     * @param {object} n source node
+     */
+    async mountIso(n) {
+        if (this.isoOperation !== null) {
+            this.toast(this.strings.ui_iso_busy);
+            return;
+        }
+        this.isoOperation = '';
+        try {
+            let [op] = await Promise.all(this.api([{
+                methodname: 'mod_gns3lab_start_iso',
+                args: {cmid: this.cmid, nodeid: n.id, tabid: tabId()},
+            }]));
+            this.isoOperation = op.operationid;
+            this.toast(fill(this.strings.ui_iso_started, n.name), 4000);
+            while (op.status === 'running') {
+                await new Promise(resolve => setTimeout(resolve, ISO_POLL));
+                [op] = await Promise.all(this.api([{
+                    methodname: 'mod_gns3lab_get_iso',
+                    args: {cmid: this.cmid, operationid: this.isoOperation},
+                }]));
+            }
+            this.toast(this.isoOutcome(op), 8000);
+        } catch (error) {
+            reportRefusal(error);
+            this.toast(error.message || String(error), 6000);
+        } finally {
+            this.isoOperation = null;
+        }
+    }
+
+    /**
+     * The text of a finished ISO operation.
+     *
+     * @param {object} op operation from mod_gns3lab_get_iso
+     * @returns {string}
+     */
+    isoOutcome(op) {
+        const s = this.strings;
+        if (op.status !== 'succeeded') {
+            return ISO_ERRORS.includes(op.errorcode) ? s['ui_iso_err_' + op.errorcode.toLowerCase()]
+                : fill(s.ui_iso_err_other, op.errorcode || '?');
+        }
+        const name = id => {
+            const node = this.stage.model.nodes.get(id);
+            return node ? node.name : id;
+        };
+        const attached = op.targets.filter(t => t.status === 'attached').map(t => name(t.nodeid));
+        const failed = op.targets.filter(t => t.status !== 'attached').map(t => name(t.nodeid));
+        const done = fill(s.ui_iso_done, attached.join(', '));
+        return failed.length ? done + ' ' + fill(s.ui_iso_partly, failed.join(', ')) : done;
     }
 
     runAction(id, t) {
@@ -928,6 +1014,7 @@ class LabPage {
             },
             zoom: () => stage.zoomToNode(t, Math.max(2.4, stage.view.k)),
             close: () => this.consoles.close(t.id),
+            iso: () => this.mountIso(t),
             linfo: () => {
                 stage.select({kind: 'link', id: t.id}, true);
                 this.details.show(stage.sel);

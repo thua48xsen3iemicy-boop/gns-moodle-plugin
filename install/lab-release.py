@@ -334,7 +334,7 @@ def slot_identity(root, entries):
     nested = read_json(Path(root) / "slot/release.json")
     require(isinstance(nested, dict) and set(nested) == {"version", "build_id", "files"},
             "Unsupported Slot manifest")
-    require(nested["version"] == "0.25.1" and isinstance(nested["build_id"], str)
+    require(nested["version"] == "0.26.0" and isinstance(nested["build_id"], str)
             and nested["build_id"] and isinstance(nested["files"], dict)
             and SLOT_REQUIRED <= nested["files"].keys(), "Incomplete Slot identity")
     require(nested["files"] == slot_projection(entries), "Nested Slot manifest disagrees with payload")
@@ -626,6 +626,7 @@ SOURCE_FILES = (
     'manager/tests/test_ifnames.py',
     'manager/tests/test_extra_disks.py',
     'manager/tests/test_ios_config.py',
+    'manager/tests/test_iso.py',
     'manager/tests/test_no_qga.py',
     'manager/tests/test_qemu_cpu.py',
     'manager/tests/test_qemu_machine.py',
@@ -656,6 +657,7 @@ SOURCE_FILES = (
     'slot/api/client.py',
     'slot/api/console.py',
     'slot/api/disks.py',
+    'slot/api/iso.py',
     'slot/api/facts.py',
     'slot/api/health.py',
     'slot/api/iol_nvram.py',
@@ -686,6 +688,7 @@ SOURCE_FILES = (
     'slot/tests/test_fixed_mount.py',
     'slot/tests/test_iol_nvram.py',
     'slot/tests/test_disks.py',
+    'slot/tests/test_iso.py',
     'slot/tests/test_ios_config.py',
     'slot/tests/test_l1.py',
     'slot/tests/test_linux_facts.py',

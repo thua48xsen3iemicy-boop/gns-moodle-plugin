@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
-from api.models import ExecTicket, WipeTicket, ShutdownTicket
+from api.models import ExecTicket, IsoTicket, WipeTicket, ShutdownTicket
 from api.qga import Priority, QgaError
 
 router = APIRouter(prefix="/v1/labs/{project_id}/nodes", tags=["nodes"])
@@ -134,3 +134,13 @@ async def shutdown(request: Request, project_id: UUID, node_id: UUID, ticket: Sh
     if result.get("replayed") and result.get("status") == "SUCCEEDED" and node.get("status") != "stopped":
         raise HTTPException(409, {"code": "STALE_IDEMPOTENCY_KEY", "message": "Node was restarted; use a new shutdown key"})
     return result
+
+
+@router.post("/{node_id}/iso", status_code=202)
+async def make_iso(request: Request, project_id: UUID, node_id: UUID, ticket: IsoTicket):
+    """An ISO image of a directory of this guest into the CD-ROM drive of the targets (CONTRACTS.md 4.7)."""
+    if node_id in ticket.targets:
+        raise HTTPException(422, "The source node cannot be its own target")
+    lifecycle = get_lifecycle(request)
+    return lifecycle.submit_iso(str(project_id), str(node_id), ticket,
+                                request.headers.get("Idempotency-Key"), request.state.admission)

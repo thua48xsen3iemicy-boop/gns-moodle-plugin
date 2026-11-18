@@ -67,6 +67,17 @@ define([], function() {
         return demo;
     };
 
+    const qemuNodes = doc => doc.topology.nodes.filter(n => n.node_type === 'qemu').map(n => n.node_id);
+
+    /** ISO operations: id → {targets, polls, error}; `__stub.iso.next = 'ISO_SOURCE_EMPTY'` fails the next one. */
+    const iso = {ops: {}, next: null, seq: 0};
+    const isoBody = (id, op) => ({
+        operationid: id, status: op.polls > 0 ? 'running' : (op.error ? 'failed' : 'succeeded'),
+        stage: op.polls > 0 ? 'iso_build' : '', progress: op.polls > 0 ? 50 : -1, errorcode: op.polls > 0 ? '' : (op.error || ''),
+        files: op.polls > 0 || op.error ? 0 : 3, bytes: op.polls > 0 || op.error ? 0 : 391168,
+        targets: op.polls > 0 || op.error ? [] : op.targets.map(nodeid => ({nodeid, status: 'attached', errorcode: ''})),
+    });
+
     const view = async() => {
         await loadDemo();
         if (!session) {
@@ -102,7 +113,10 @@ define([], function() {
             })) : [],
             nodesstale: false,
             slotvmid: ['starting', 'running', 'stopping'].includes(session.status) ? 9012 : 0,
-            features: running ? (cfg.nofacts ? ['consoles'] : ['consoles', 'facts', 'checks']) : [],
+            features: running ? (cfg.nofacts ? ['consoles'] : ['consoles', 'facts', 'checks', 'iso']) : [],
+            // ISO (manager CONTRACTS §2.12): every QEMU node of the demo is a source and a target.
+            isosources: running && !cfg.nofacts ? qemuNodes(doc) : [],
+            isotargets: running && !cfg.nofacts ? qemuNodes(doc) : [],
         };
     };
 
@@ -392,6 +406,28 @@ define([], function() {
             }
             return checksOverview();
         },
+        mod_gns3lab_start_iso: async args => {
+            needSeat(args, 'start_iso');
+            const s = await view();
+            if (!s || s.status !== 'running' || !s.isosources.includes(args.nodeid)) {
+                throw new Error('This device cannot make an ISO image, or the lab has no device to put it into.');
+            }
+            if (Object.values(iso.ops).some(op => op.polls > 0)) {
+                throw new Error('The lab is busy with another operation, such as an ISO image being built. Try again in a minute.');
+            }
+            const id = '00000000-0000-4000-8000-' + String(++iso.seq).padStart(12, '0');
+            iso.ops[id] = {targets: s.isotargets.filter(t => t !== args.nodeid), polls: 2, error: iso.next};
+            iso.next = null;
+            return isoBody(id, iso.ops[id]);
+        },
+        mod_gns3lab_get_iso: async args => {
+            const op = iso.ops[args.operationid];
+            if (!op) {
+                throw new Error('The ISO image operation is no longer known.');
+            }
+            op.polls = Math.max(0, op.polls - 1);
+            return isoBody(args.operationid, op);
+        },
         mod_gns3lab_start_check: async args => {
             needSeat(args, 'start_check');
             const s = await view();
@@ -623,6 +659,7 @@ define([], function() {
 
     window.__stub = {
         editor,
+        iso,
         // Announce a maintenance that starts in `seconds` (null ends it).
         maintenance: (seconds, message = 'Image update') => {
             maintenance = seconds === null ? null : {startsat: now() + seconds, message};

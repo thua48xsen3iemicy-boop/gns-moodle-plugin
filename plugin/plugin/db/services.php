@@ -144,4 +144,18 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_start_iso' => [
+        'classname' => \mod_gns3lab\external\start_iso::class,
+        'description' => 'Makes an ISO image of a node directory and puts it into the CD-ROM drive of the target nodes.',
+        'type' => 'write',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_get_iso' => [
+        'classname' => \mod_gns3lab\external\get_iso::class,
+        'description' => 'The state of an ISO image the current user asked for.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
 ];
