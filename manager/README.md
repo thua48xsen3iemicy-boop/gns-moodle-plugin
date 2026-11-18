@@ -1,4 +1,8 @@
-# Lab Manager — 0.31.0
+# Lab Manager — 0.31.1
+
+0.31.1: библиотека готовых скриптов автопроверки — `examples/checks/` (nginx, вход по ключу SSH, ping между группами и
+изоляция сетей, DHCP-аренда на Linux, DHCP-сервер RouterOS, служба Windows) с инструкцией для преподавателя в README.
+Тест `test_check_scripts.py` проверяет, что каждый фрагмент проходит проверку менеджера. Код менеджера не менялся.
 
 0.31.0: свои скрипты преподавателя в автопроверке (`../docs/autochecks/README.md` §7, CONTRACTS §2.9 `scripts`). Поле `scripts`
 в `gns3lab.checks/1`: скрипт, нода, оболочка, `expect` (код выхода, `match` — RE2, `contains`, `not_contains`), группа и класс;

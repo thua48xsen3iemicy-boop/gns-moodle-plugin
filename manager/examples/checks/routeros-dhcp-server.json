@@ -1,0 +1,13 @@
+{
+  "id": "chr-dhcp",
+  "title": "DHCP-сервер на R1 выдал аренду",
+  "node": "R1",
+  "shell": "routeros",
+  "run": ":put [/ip dhcp-server lease print count-only where status=\"bound\"]",
+  "timeout": 10,
+  "expect": {
+    "match": "^[1-9][0-9]*$"
+  },
+  "group": "addressing",
+  "class": "major"
+}

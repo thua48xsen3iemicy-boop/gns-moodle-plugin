@@ -1,0 +1,14 @@
+{
+  "id": "nginx",
+  "title": "Веб-сервер nginx на SRV1",
+  "node": "SRV1",
+  "shell": "sh",
+  "run": "systemctl is-active nginx; curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1/",
+  "timeout": 15,
+  "expect": {
+    "exit": 0,
+    "match": "^active\\n200$"
+  },
+  "group": "host",
+  "class": "major"
+}

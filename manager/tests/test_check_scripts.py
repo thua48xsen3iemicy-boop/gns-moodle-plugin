@@ -241,3 +241,35 @@ def test_a_guest_that_did_not_answer_leaves_the_run_incomplete():
 def test_a_run_without_scripts():
     out = grade([], [], normalize_grading(None), {"format": "gns3lab.checks/1"})
     assert out["scripts"] == [] and out["nonce"] is None and out["rules"] == []
+
+
+def test_the_library_of_snippets_passes_the_manager():
+    """Every snippet of examples/checks is one ready element of `scripts`, and the README names each of them."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "examples" / "checks"
+    files = sorted(root.glob("*.json"))
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert len(files) >= 7
+    items = [json.loads(f.read_text(encoding="utf-8")) for f in files]
+    for f in files:
+        assert f"`{f.name}`" in readme, f.name
+    nodes = {item["node"] for item in items}
+    family = {item["node"]: item["shell"] if item["shell"] != "powershell" else None for item in items}
+    support = {name: {"ok": True, "family": family[name]} for name in nodes}
+    norm, problems = check_definition({"format": "gns3lab.checks/1", "scripts": items}, nodes, script_nodes=support)
+    assert problems == [], problems
+    assert len({s["id"] for s in norm["scripts"]}) == len(items)
+    assert sum(s["timeout"] for s in norm["scripts"]) <= scripts_mod.MAX_TOTAL_TIMEOUT
+    nginx = next(s for s in norm["scripts"] if s["id"] == "nginx")
+    assert scripts_mod.judge(nginx, "ab" * 8, {"exit_code": 0, "stdout": "active\r\n200\r\n"}) == (None, False)
+    assert scripts_mod.judge(nginx, "ab" * 8, {"exit_code": 3, "stdout": "inactive\n000"})[0] == "exit"
+    ssh = next(s for s in norm["scripts"] if s["id"] == "ssh-key")
+    assert scripts_mod.judge(ssh, "ab" * 8, {"exit_code": 0, "stdout": "ab" * 8})[0] is None
+    assert scripts_mod.judge(ssh, "ab" * 8, {"exit_code": 0, "stdout": "ok"})[0] == "mismatch"
+    lease = next(s for s in norm["scripts"] if s["id"] == "dhcp-lease")
+    out = "2: ens3    inet 192.168.10.57/24 brd 192.168.10.255 scope global dynamic ens3\\       valid_lft 86321sec"
+    assert scripts_mod.judge(lease, "ab" * 8, {"exit_code": 0, "stdout": out})[0] is None
+    isolated = next(s for s in norm["scripts"] if s["id"] == "isolated-guest")
+    assert scripts_mod.judge(isolated, "ab" * 8, {"exit_code": 0, "stdout": "reachable\n"})[0] == "mismatch"

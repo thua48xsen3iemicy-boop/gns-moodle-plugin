@@ -1,0 +1,13 @@
+{
+  "id": "win-dns",
+  "title": "Служба DNS-сервера на DC1 запущена",
+  "node": "DC1",
+  "shell": "powershell",
+  "run": "(Get-Service -Name DNS).Status",
+  "timeout": 20,
+  "expect": {
+    "match": "^Running$"
+  },
+  "group": "host",
+  "class": "major"
+}

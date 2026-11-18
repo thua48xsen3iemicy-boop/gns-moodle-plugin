@@ -554,8 +554,8 @@ netplan/networkd/NetworkManager пока `supported: false`); `hostname` в `win
 - [x] ~~Плагин: поле скриптов в редакторе лабы, показ `script_failed` и `result.scripts` в отчёте~~ — плагин 0.35.0
   (`plugin/docs/autochecks.md` §9; `amd/build` собран ui-harness, перед выпуском пересобрать `grunt amd`).
 - [ ] Стенд (владелец): лаба со скриптами на Debian и RouterOS — см. `manager/README.md` 0.31.0.
-- [ ] Библиотека готовых фрагментов `manager/examples/checks/` (nginx, ключ SSH, ping между группами, DHCP-аренда) с
-  инструкцией для преподавателя.
+- [x] ~~Библиотека готовых фрагментов `manager/examples/checks/` (nginx, ключ SSH, ping между группами, DHCP-аренда) с
+  инструкцией для преподавателя~~ — менеджер 0.31.1; ещё изоляция сетей, DHCP-сервер RouterOS и служба Windows.
 - [ ] Проверка «на эталоне» в авторском запуске (`CONTRACTS.md` §2.8).
 
 **Этап 5 — калибровка (§5.4).**
