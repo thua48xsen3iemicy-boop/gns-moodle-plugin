@@ -190,6 +190,38 @@ async def test_leader_connection_loss_cancels_and_joins_session_tasks():
         await asyncio.gather(runner, return_exceptions=True)
 
 
+async def test_unexpected_error_of_a_tick_does_not_end_the_orchestrator():
+    """A bug in one tick gives the leadership up and takes it again; before, the loop ended for good."""
+    again = asyncio.Event()
+    calls = []
+    async def live_sessions():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("a bug")
+        again.set()
+        return []
+    store = NS(next_epoch=AsyncMock(return_value=1), live_sessions=live_sessions, fail_orphan_check_runs=AsyncMock())
+    async def pause(_):
+        await asyncio.sleep(0)
+    orch = Orchestrator(NS(worker_interval=0.001, check_timeout=120), store, NS(), NS(), {}, None, sleep=pause)
+    orch._scripted["s-1"] = "c-1"
+    class Connection:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            pass
+        async def execute(self, sql, *_):
+            if "pg_try_advisory_lock" in sql:
+                return NS(fetchone=AsyncMock(return_value={"ok": True}))
+    runner = asyncio.create_task(orch.run_forever(AsyncMock(return_value=Connection())))
+    try:
+        await asyncio.wait_for(again.wait(), 2)
+        assert orch._scripted == {}  # The scripts of a cancelled run are run again by the next leadership
+    finally:
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+
+
 async def test_readiness_requires_live_fresh_leader(tmp_path):
     @asynccontextmanager
     async def connection():

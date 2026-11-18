@@ -332,6 +332,7 @@ class FakeSlot:
         self.fail_next = None  # error dict for the next operation
         self.requests = []
         self.reachable = True
+        self.timeouts = []  # (path, read timeout) of every request: what the manager is ready to wait
         self.projects = projects if projects is not None else {}
         self.stopped_nodes = set()  # Node names reported as stopped in the topology
         self.student_state = student_state
@@ -432,6 +433,7 @@ class FakeSlot:
     def handle(self, request: httpx.Request):
         path = request.url.path
         self.requests.append((request.method, path, request.headers.get("Idempotency-Key")))
+        self.timeouts.append((path, (request.extensions.get("timeout") or {}).get("read")))
         if not self.reachable:
             raise httpx.ConnectError("refused", request=request)
         if path == "/healthz":

@@ -135,8 +135,9 @@ class SlotClient:
                 return None
             raise
 
-    async def topology(self, project_id: str) -> dict:
-        return await self._call("GET", f"/v1/labs/{project_id}/topology")
+    async def topology(self, project_id: str, timeout: float | None = None) -> dict:
+        """Live topology of the lab; `timeout` shortens the wait for a reader that has an older snapshot."""
+        return await self._call("GET", f"/v1/labs/{project_id}/topology", timeout=timeout)
 
     async def facts(self, project_id: str) -> dict:
         """Latest collector results of the lab (CONTRACTS 4.6); a slot older than 0.6.0 answers 404."""

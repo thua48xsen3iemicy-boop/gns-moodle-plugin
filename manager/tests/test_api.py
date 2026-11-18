@@ -350,6 +350,42 @@ async def test_ticket_to_stopped_node_and_stale_nodes(tmp_path, dsn):
         assert r.status_code == 200
 
 
+async def test_page_reads_do_not_wait_for_a_hung_slot(tmp_path, dsn):
+    from lab_manager.orchestrator import LIVE_TIMEOUT
+    async with make_env(tmp_path, dsn) as env:
+        s = await start(env)
+        await env.run()
+        sid = s["session_id"]
+        env.orch._live_cache.clear()
+        await env.client.get(f"/api/v1/sessions/{sid}")
+        reads = [t for p, t in env.slots[201].timeouts if p.endswith("/topology")]
+        assert reads[-1] == LIVE_TIMEOUT  # Shorter than the plugin's wait for the manager (SLOT_TIMEOUT, 10 s)
+        # A slot that did not answer is not asked again by every poll: the stale snapshot answers for a while.
+        env.slots[201].reachable = False
+        env.orch._live_cache.clear()
+        for _ in range(3):
+            assert (await env.client.get(f"/api/v1/sessions/{sid}")).json()["nodes_stale"] is True
+        asked = [p for _, p, _ in env.slots[201].requests if p.endswith("/topology")]
+        assert len(asked) == len(reads) + 1
+        # A decision about a stopping lab asks the slot at once, with the whole SLOT_TIMEOUT.
+        env.slots[201].reachable = True
+        nodes, stale = await env.orch.live_nodes(await env.services.store.session(sid), fresh=True)
+        assert not stale and env.slots[201].timeouts[-1][1] == env.settings.slot_timeout
+
+
+async def test_finished_session_leaves_no_cached_nodes(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        s = await start(env)
+        await env.run()
+        sid = s["session_id"]
+        await env.client.get(f"/api/v1/sessions/{sid}")
+        assert sid in env.orch._live_cache
+        await env.client.post(f"/api/v1/sessions/{sid}/stop")
+        await env.run()
+        assert (await env.client.get(f"/api/v1/sessions/{sid}")).json()["status"] == "stopped"
+        assert sid not in env.orch._live_cache
+
+
 async def test_stop_by_teacher(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         s = await start(env)
