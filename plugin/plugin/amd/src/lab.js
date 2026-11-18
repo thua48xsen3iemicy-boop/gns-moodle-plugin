@@ -51,6 +51,7 @@ import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
 import {Seat, STRING_KEYS as SEAT_KEYS, reportRefusal, tabId} from 'mod_gns3lab/seat';
 import {Session, STRING_KEYS as SESSION_KEYS} from 'mod_gns3lab/session';
+import {guestOf} from 'mod_gns3lab/model';
 import {Stage} from 'mod_gns3lab/stage';
 import {snippetSet} from 'mod_gns3lab/snippets';
 import {STRING_KEYS as VNC_KEYS} from 'mod_gns3lab/vnc';
@@ -438,6 +439,9 @@ class LabPage {
         const nopaste = new Set(((ref && ref.nodes) || []).filter(n => n && n.nopaste === true).map(n => n.name));
         // So is the icon a teacher chose in the lab editor.
         const icons = new Map(((ref && ref.nodes) || []).filter(n => n && n.icon).map(n => [n.name, n.icon]));
+        // The live topology has no properties: the disk image that tells a MikroTik node is in the reference only, and
+        // the manager names the guest only for images of its catalog. Without it the node would get the Cisco snippets.
+        const guests = new Map(((ref && ref.nodes) || []).filter(n => n && guestOf(n)).map(n => [n.name, guestOf(n)]));
         // Node states come from the live data of the session, not from the saved project.
         ((doc.topology && doc.topology.nodes) || []).forEach(n => {
             delete n.status;
@@ -451,6 +455,9 @@ class LabPage {
             }
             if (icons.has(n.name)) {
                 n.icon = icons.get(n.name);
+            }
+            if (!n.guest && guests.has(n.name)) {
+                n.guest = guests.get(n.name);
             }
         });
         // The project name of a session is technical (lab-…-s-…): the title stays the name of the lab.
