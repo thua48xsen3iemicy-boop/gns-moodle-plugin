@@ -411,8 +411,9 @@ class check_runs {
      * The findings and rules of a run from the manager, for the external functions.
      *
      * @param \stdClass|null $run run from the manager
-     * @param bool $gaps include the rules skipped for want of data (DATA_GAPS); no other rule is ever included
-     * @return array ['findings' => array, 'rules' => array]
+     * @param bool $gaps for a teacher: include the rules skipped for want of data (DATA_GAPS; no other rule is ever
+     *     included) and the output of the teacher's scripts
+     * @return array ['findings' => array, 'rules' => array, 'scripts' => array]
      */
     public static function export_details(?\stdClass $run, bool $gaps = false): array {
         $result = $run && ($run->result ?? null) instanceof \stdClass ? $run->result : null;
@@ -438,6 +439,7 @@ class check_runs {
                 'nodes' => array_values(array_filter(is_array($f->nodes ?? null) ? $f->nodes : [], 'is_string')),
                 'ifaces' => $ifaces,
                 'message' => is_string($f->message ?? null) ? $f->message : '',
+                'scriptid' => self::token($f->script_id ?? ''),
             ];
         }
         $rules = [];
@@ -454,7 +456,37 @@ class check_runs {
                 ];
             }
         }
-        return ['findings' => $findings, 'rules' => $rules];
+        return ['findings' => $findings, 'rules' => $rules, 'scripts' => $gaps ? self::export_scripts($result) : []];
+    }
+
+    /**
+     * What the teacher's scripts of a run did (CONTRACTS §2.9 `result.scripts`): a teacher's view only, a student sees
+     * the title and the reason in the finding script_failed.
+     *
+     * @param \stdClass|null $result result of the run
+     * @return array
+     */
+    protected static function export_scripts(?\stdClass $result): array {
+        $out = [];
+        foreach (is_array($result->scripts ?? null) ? $result->scripts : [] as $s) {
+            if (!$s instanceof \stdClass || !is_string($s->id ?? null)) {
+                continue;
+            }
+            $exit = $s->exit_code ?? null;
+            $out[] = [
+                'id' => self::token($s->id),
+                'node' => is_string($s->node ?? null) ? $s->node : '',
+                'status' => in_array($s->status ?? '', ['pass', 'fail', 'skipped'], true) ? $s->status : 'skipped',
+                'reason' => self::token($s->reason ?? ''),
+                'hasexit' => is_int($exit),
+                'exitcode' => is_int($exit) ? $exit : 0,
+                'stdout' => is_string($s->stdout ?? null) ? \core_text::substr($s->stdout, 0, 4096) : '',
+                'stderr' => is_string($s->stderr ?? null) ? \core_text::substr($s->stderr, 0, 2048) : '',
+                'truncated' => ($s->truncated ?? false) === true,
+                'durationms' => is_int($s->duration_ms ?? null) ? $s->duration_ms : -1,
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -478,6 +510,7 @@ class check_runs {
                     'iface' => new external_value(PARAM_TEXT, 'Interface name on the device'),
                 ])),
                 'message' => new external_value(PARAM_TEXT, 'Text of the finding from the lab manager (in Russian)'),
+                'scriptid' => new external_value(PARAM_ALPHANUMEXT, 'Id of the teacher\'s script of a script_failed finding, else empty'),
             ]), 'Findings, empty when the report is not shown'),
             'rules' => new external_multiple_structure(new external_single_structure([
                 'code' => new external_value(PARAM_ALPHANUMEXT, 'Rule code'),
@@ -485,6 +518,18 @@ class check_runs {
                 'status' => new external_value(PARAM_ALPHA, 'pass, fail, skipped or off'),
                 'reason' => new external_value(PARAM_ALPHANUMEXT, 'Why it was skipped: no_collector, collect_failed, unsupported_os, port_unknown'),
             ]), 'Rules skipped for want of data, for a teacher only; empty for a student and when the report is not shown'),
+            'scripts' => new external_multiple_structure(new external_single_structure([
+                'id' => new external_value(PARAM_ALPHANUMEXT, 'Id of the script in the lab'),
+                'node' => new external_value(PARAM_TEXT, 'Node it ran on'),
+                'status' => new external_value(PARAM_ALPHA, 'pass, fail or skipped'),
+                'reason' => new external_value(PARAM_ALPHANUMEXT, 'exit, mismatch, timeout, node_stopped, collect_failed, unsupported_os or empty'),
+                'hasexit' => new external_value(PARAM_BOOL, 'The script ran and has an exit code'),
+                'exitcode' => new external_value(PARAM_INT, 'Exit code, 0 without hasexit'),
+                'stdout' => new external_value(PARAM_RAW, 'Start of the output'),
+                'stderr' => new external_value(PARAM_RAW, 'Start of the error output'),
+                'truncated' => new external_value(PARAM_BOOL, 'The output was cut'),
+                'durationms' => new external_value(PARAM_INT, 'How long it ran, ms; -1 if it did not run'),
+            ]), 'The teacher\'s scripts of the run with their output, for a teacher only; empty for a student'),
         ];
     }
 

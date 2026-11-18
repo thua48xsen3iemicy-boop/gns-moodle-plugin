@@ -109,9 +109,18 @@ def validate(lab_ref: str, topology: dict, ticket: dict, meta: dict) -> list[str
         if not ok:
             problems.append("meta.json resources must be {cores: 1..128, memory_mb: 256..1048576}")
     if "checks" in meta:
-        _, found = checks_mod.check_definition(meta["checks"], set(gns3_names))
+        _, found = checks_mod.check_definition(meta["checks"], set(gns3_names), script_nodes=script_nodes_of(ticket))
         problems += [f"meta.json {p['path']}: {p['code']} {p['message']}".rstrip() for p in found]
     return problems
+
+
+def script_nodes_of(ticket) -> dict:
+    """Nodes of a catalog lab a teacher's script may run on: QEMU with a guest agent, not the ISP. The ticket does
+    not say the guest family, so the shell is checked only when the script runs (CONTRACTS 2.9 `scripts`)."""
+    nodes = ticket.get("nodes") if isinstance(ticket, dict) else None
+    return {n["name"]: {"ok": n.get("kind") == "qemu" and n.get("qga", True) is not False and "uplink_port" not in n,
+                        "family": None}
+            for n in nodes or [] if isinstance(n, dict) and isinstance(n.get("name"), str)}
 
 
 class Catalog:
@@ -138,7 +147,8 @@ class Catalog:
             raise LabError("; ".join(problems))
         checks = None
         if "checks" in meta:
-            checks = checks_mod.check_definition(meta["checks"], {n["name"] for n in topology["topology"]["nodes"]})[0]
+            checks = checks_mod.check_definition(meta["checks"], {n["name"] for n in topology["topology"]["nodes"]},
+                                                 script_nodes=script_nodes_of(ticket))[0]
         return Lab(lab_ref, meta["title"].strip(), str(meta.get("description", "")),
                    meta.get("resources"), topology, ticket, checks)
 

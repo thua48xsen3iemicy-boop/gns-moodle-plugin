@@ -55,6 +55,12 @@ class QgaTimeout(QgaError, TimeoutError):
     code = "QGA_TIMEOUT"
 
 
+class QgaExecTimeout(QgaTimeout):
+    """The guest command was started but did not finish before its timeout; the channel itself is fine."""
+
+    code = "QGA_EXEC_TIMEOUT"
+
+
 class QgaBusy(QgaError):
     """The caller asked not to wait and the channel is occupied."""
 
@@ -490,7 +496,7 @@ class QgaBroker:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise QgaTimeout("Guest command did not finish before timeout")
+                raise QgaExecTimeout("Guest command did not finish before timeout")
             await asyncio.sleep(min(delay, remaining))
             delay = min(delay * 1.5, POLL_MAX)
             # The last poll after the deadline still gets a chance to see the exit.

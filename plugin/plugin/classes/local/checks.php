@@ -70,7 +70,7 @@ class checks {
      * Rule catalog of the lab manager: code => group (CONTRACTS §2.9, docs/autochecks/README.md §8).
      *
      * Keep in step with RULES of manager/lab_manager/checks.py; the services codes (facts_conflict, script_failed)
-     * are not in it and take no override.
+     * are not in it. Of them only script_failed takes an override (SCRIPT_RULE).
      */
     public const RULES = [
         'node_stopped' => 'l1', 'config_not_saved' => 'l1', 'link_suspended' => 'l1', 'port_shutdown' => 'l1',
@@ -86,6 +86,19 @@ class checks {
         'nat_missing' => 'routing',
         'hostname_wrong' => 'host', 'forwarding_off' => 'host', 'forwarding_on_host' => 'host',
     ];
+
+    /** Code of the findings of the teacher's scripts (CONTRACTS §2.9 `scripts`); its override sets every script's class. */
+    public const SCRIPT_RULE = 'script_failed';
+
+    /**
+     * Whether a code takes an override: a rule of the catalog or the teacher's scripts.
+     *
+     * @param string $code rule code
+     * @return bool
+     */
+    public static function overridable(string $code): bool {
+        return isset(self::RULES[$code]) || $code === self::SCRIPT_RULE;
+    }
 
     /**
      * Whether the activity has auto-checks switched on (whatever the lab manager offers).
@@ -141,7 +154,7 @@ class checks {
         $raw = json_decode((string) ($instance->checksoverrides ?? ''), true);
         $out = [];
         foreach (is_array($raw) ? $raw : [] as $code => $class) {
-            if (isset(self::RULES[$code]) && in_array($class, self::CLASSES, true)) {
+            if (self::overridable((string) $code) && in_array($class, self::CLASSES, true)) {
                 $out[$code] = $class;
             }
         }
@@ -292,7 +305,7 @@ class checks {
                 continue;
             }
             $parts = array_map('trim', explode('=', $line, 2));
-            if (count($parts) !== 2 || !isset(self::RULES[$parts[0]]) || !in_array($parts[1], self::CLASSES, true)) {
+            if (count($parts) !== 2 || !self::overridable($parts[0]) || !in_array($parts[1], self::CLASSES, true)) {
                 $bad[] = $line;
                 continue;
             }

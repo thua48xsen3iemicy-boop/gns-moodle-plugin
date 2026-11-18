@@ -1,0 +1,16 @@
+{
+  "id": "ssh-key",
+  "title": "Вход по ключу с PC1 на SRV1",
+  "node": "PC1",
+  "shell": "sh",
+  "run": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 admin@192.168.10.10 echo {{nonce}}",
+  "timeout": 15,
+  "expect": {
+    "exit": 0,
+    "contains": [
+      "{{nonce}}"
+    ]
+  },
+  "group": "host",
+  "class": "major"
+}

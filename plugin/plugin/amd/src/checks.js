@@ -33,6 +33,10 @@ import {reportRefusal, tabId} from 'mod_gns3lab/seat';
 /** Why a rule was skipped for want of data: the server sends these rules to a teacher only. */
 const DATA_GAPS = ['no_collector', 'collect_failed', 'unsupported_os', 'port_unknown'];
 
+/** What a teacher's script did (CONTRACTS §2.9 `result.scripts`): its status and why. */
+const SCRIPT_STATUSES = ['pass', 'fail', 'skipped'];
+const SCRIPT_REASONS = ['exit', 'mismatch', 'timeout', 'node_stopped', 'collect_failed', 'unsupported_os'];
+
 /** Language strings of the panel. */
 export const STRING_KEYS = [
     'chk_title', 'chk_open', 'chk_start', 'chk_again', 'chk_attempts', 'chk_attempts_unlimited', 'chk_running',
@@ -44,6 +48,10 @@ export const STRING_KEYS = [
     ...CLASSES.map(c => 'chk_class_' + c),
     ...CLASSES.map(c => 'chk_n_' + c),
     ...DATA_GAPS.map(r => 'chk_gap_' + r),
+    'chk_scripts', 'chk_script_exit', 'chk_script_ms', 'chk_script_output', 'chk_script_stderr', 'chk_script_truncated',
+    'chk_script_nooutput',
+    ...SCRIPT_STATUSES.map(st => 'chk_script_' + st),
+    ...SCRIPT_REASONS.map(r => 'chk_script_reason_' + r),
 ];
 
 /**
@@ -445,6 +453,54 @@ export class Checks {
                 hel('li', '', list).textContent = fill(this.strings['chk_gap_' + reason], n);
             });
         }
+        this.renderScripts(box, run.scripts || []);
+    }
+
+    /**
+     * The teacher's scripts of a run with their output: the server sends them to a teacher only.
+     *
+     * @param {HTMLElement} box container
+     * @param {Array} scripts scripts of get_check_run
+     */
+    renderScripts(box, scripts) {
+        if (!scripts.length) {
+            return;
+        }
+        hel('p', 'chk-note chk-scripts-title', box).textContent = this.strings.chk_scripts;
+        const list = hel('ul', 'chk-scripts', box);
+        scripts.forEach(sc => {
+            const item = hel('li', 'chk-script st-' + sc.status, list);
+            const line = hel('div', 'chk-line', item);
+            hel('span', 'chk-script-status', line).textContent = this.strings['chk_script_' + sc.status] || sc.status;
+            hel('b', 'chk-script-id', line).textContent = sc.id;
+            hel('span', 'chk-script-node', line).textContent = sc.node;
+            const facts = [];
+            if (sc.reason) {
+                facts.push(this.strings['chk_script_reason_' + sc.reason] || sc.reason);
+            }
+            if (sc.hasexit) {
+                facts.push(fill(this.strings.chk_script_exit, sc.exitcode));
+            }
+            if (sc.durationms >= 0) {
+                facts.push(fill(this.strings.chk_script_ms, sc.durationms));
+            }
+            if (facts.length) {
+                hel('small', 'chk-script-facts', item).textContent = facts.join(' · ');
+            }
+            if (!sc.hasexit) {
+                return;
+            }
+            const out = hel('details', 'chk-script-output', item);
+            hel('summary', '', out).textContent = this.strings.chk_script_output;
+            hel('pre', '', out).textContent = sc.stdout || this.strings.chk_script_nooutput;
+            if (sc.stderr) {
+                hel('p', 'chk-note', out).textContent = this.strings.chk_script_stderr;
+                hel('pre', '', out).textContent = sc.stderr;
+            }
+            if (sc.truncated) {
+                hel('small', 'chk-note', out).textContent = this.strings.chk_script_truncated;
+            }
+        });
     }
 
     /**

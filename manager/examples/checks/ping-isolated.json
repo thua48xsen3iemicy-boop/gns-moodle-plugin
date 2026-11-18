@@ -1,0 +1,13 @@
+{
+  "id": "isolated-guest",
+  "title": "Гостевая сеть не видит BUH-1",
+  "node": "GUEST-1",
+  "shell": "sh",
+  "run": "if ping -c 2 -W 2 192.168.10.11 >/dev/null 2>&1; then echo reachable; else echo isolated; fi",
+  "timeout": 10,
+  "expect": {
+    "match": "^isolated$"
+  },
+  "group": "routing",
+  "class": "critical"
+}

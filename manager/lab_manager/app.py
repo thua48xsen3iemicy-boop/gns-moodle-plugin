@@ -370,7 +370,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def info(site=Depends(site_of)):
         # resume: the next session continues the project; checks: CONTRACTS 2.9
         # iso: POST /sessions/{id}/iso (CONTRACTS 2.12); a session says whether its lab has a source and a target
-        features = ["consoles", "observer", "resume", "facts", "checks", "purge", "maintenance", "iso"]
+        # check-scripts: the teacher's scripts in `checks` and `result.scripts` of a run (CONTRACTS 2.9)
+        features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "purge", "maintenance",
+                    "iso"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -573,7 +575,7 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 "finished_at": iso_or_none(r["finished_at"]), "facts_rev": r["facts_rev"],
                 "checks_def": r["checks_def"], "grading": r["grading"], "result": r["result"], "error": r["error"]}
         if not full and body["result"] is not None:
-            body["result"] = {k: v for k, v in body["result"].items() if k not in ("findings", "rules")}
+            body["result"] = {k: v for k, v in body["result"].items() if k not in ("findings", "rules", "scripts")}
         return body
 
     @app.post("/api/v1/sessions/{session_id}/checks", status_code=202)

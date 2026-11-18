@@ -1,0 +1,13 @@
+{
+  "id": "ping-buh-adm",
+  "title": "Из BUH-1 доступен ADM-1",
+  "node": "BUH-1",
+  "shell": "sh",
+  "run": "if ping -c 2 -W 2 192.168.20.10 >/dev/null 2>&1; then echo reachable; else echo unreachable; fi",
+  "timeout": 10,
+  "expect": {
+    "match": "^reachable$"
+  },
+  "group": "routing",
+  "class": "major"
+}

@@ -258,7 +258,7 @@ function editorPage(lang, def, constructor, extra = {}) {
             texts['problem_' + key.slice(11)] = text;
         } else if (key.startsWith('ed_warning_')) {
             texts['warning_' + key.slice(11)] = text;
-        } else if (key.startsWith('ed_') || key.startsWith('authoring') || key === 'stoplab') {
+        } else if (key.startsWith('ed_') || key.startsWith('authoring') || key.startsWith('chk_class_') || key === 'stoplab') {
             texts[key] = text;
         }
     }
@@ -296,6 +296,9 @@ for (const lang of ['en', 'ru']) {
     // A manager that checks labs (labchecks): the network check switch and the checks document.
     fs.writeFileSync(path.join(dist, `editor.${lang}.checks.html`),
         shell(lang, '', editorPage(lang, EDITOR_LAB, true, {labchecks: true}), 'live', '', EDITOR_INIT));
+    // A manager that also runs the teacher's scripts (labscripts, `check-scripts`).
+    fs.writeFileSync(path.join(dist, `editor.${lang}.scripts.html`),
+        shell(lang, '', editorPage(lang, EDITOR_LAB, true, {labchecks: true, labscripts: true}), 'live', '', EDITOR_INIT));
 }
 
 // Authoring uses the real mock manager through the local server's Moodle stand-in.

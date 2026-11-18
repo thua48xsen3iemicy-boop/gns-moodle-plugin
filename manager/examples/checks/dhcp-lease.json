@@ -1,0 +1,14 @@
+{
+  "id": "dhcp-lease",
+  "title": "PC1 получил адрес по DHCP из 192.168.10.0/24",
+  "node": "PC1",
+  "shell": "sh",
+  "run": "ip -4 -o addr show scope global dynamic",
+  "timeout": 10,
+  "expect": {
+    "exit": 0,
+    "match": "inet 192\\.168\\.10\\.\\d+/24"
+  },
+  "group": "addressing",
+  "class": "major"
+}

@@ -464,6 +464,15 @@ define([], function() {
                     {code: 'address_not_saved', group: 'addressing', status: 'skipped', reason: 'no_collector'},
                     {code: 'config_not_applied', group: 'addressing', status: 'skipped', reason: 'no_collector'},
                     {code: 'hostname_wrong', group: 'host', status: 'skipped', reason: 'collect_failed'},
+                ] : [],
+                // The teacher's scripts with their output, to a teacher only (get_check_run, CONTRACTS §2.9).
+                scripts: detailed && (cfg.checkteacher || cfg.observer) ? [
+                    {id: 'web', node: 'PC1', status: 'pass', reason: '', hasexit: true, exitcode: 0,
+                        stdout: 'active\n200', stderr: '', truncated: false, durationms: 412},
+                    {id: 'ping', node: 'PC2', status: 'fail', reason: 'exit', hasexit: true, exitcode: 1, stdout: '',
+                        stderr: 'connect: Network is unreachable', truncated: true, durationms: 37},
+                    {id: 'win', node: 'R1', status: 'skipped', reason: 'unsupported_os', hasexit: false, exitcode: 0,
+                        stdout: '', stderr: '', truncated: false, durationms: -1},
                 ] : []};
         },
         mod_gns3lab_get_course_overview: courseOverview,

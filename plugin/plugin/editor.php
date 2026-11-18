@@ -43,6 +43,7 @@ $limits = null;
 $canpublish = false;
 $constructor = false;
 $labchecks = false;
+$labscripts = false;
 $imagecapture = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
@@ -55,6 +56,7 @@ if (!manager_client::is_configured()) {
         $canpublish = $client->supports_lab_definitions();
         $constructor = $client->supports_lab_constructor();
         $labchecks = $constructor && $client->has_feature('checks');
+        $labscripts = $labchecks && $client->has_feature('check-scripts');
         $imagecapture = $client->has_feature('image_capture');
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
@@ -83,10 +85,11 @@ $keys = [
     'ed_segconfigure', 'ed_segconfigure_help', 'ed_randomifnames', 'ed_randomifnames_help',
     'ed_nopaste', 'ed_nopaste_help', 'ed_disks', 'ed_disks_help', 'ed_disk', 'ed_adddisk', 'ed_removedisk', 'ed_diskgb', 'ed_checks', 'ed_checks_help', 'ed_checkskept', 'ed_checksinvalid',
     'ed_network', 'ed_network_auto', 'ed_network_off', 'ed_network_help',
+    'chk_class_critical', 'chk_class_major', 'chk_class_minor', 'chk_class_note',
 ];
 $keys = array_merge($keys, ['stoplab', 'ed_save']);
 foreach (array_keys(get_string_manager()->load_component_strings('gns3lab', current_language())) as $key) {
-    if (str_starts_with($key, 'authoring')) {
+    if (str_starts_with($key, 'authoring') || str_starts_with($key, 'ed_script')) {
         $keys[] = $key;
     }
 }
@@ -96,7 +99,7 @@ $codes = [
     'limit_exceeded', 'too_large', 'segment_not_connected', 'segment_overlap', 'member_in_two_segments',
     'gateway_not_router', 'unsupported_image', 'subnet_too_small', 'bad_subnet', 'vlan_out_of_range',
     'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment', 'gateway_port_conflict',
-    'unknown_rule', 'group_overlap', 'bad_range',
+    'unknown_rule', 'group_overlap', 'bad_range', 'script_node_unsupported', 'shell_mismatch', 'bad_regex',
 ];
 $warningcodes = ['gateway_not_configured', 'switch_not_configured', 'hostname_not_set'];
 foreach ($keys as $key) {
@@ -124,6 +127,7 @@ $data = [
     'canpublish' => $canpublish,
     'labconstructor' => $constructor,
     'labchecks' => $labchecks,
+    'labscripts' => $labscripts,
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];

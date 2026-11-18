@@ -121,6 +121,7 @@ const startButton = page => page.locator('[data-region="checksBody"] .chk-start 
         check('attempts went down', !!await until(async() => /1 из 2/.test(await region(page, 'checksLead').innerText())));
         check('the mark is on the button', (await region(page, 'checksMark').innerText()) === '5');
         check('a student is not told what was not checked', !/Проверено не всё|Не проверено/.test(await panelText(page)));
+        check('a student does not see the scripts', (await page.locator('ul.chk-scripts').count()) === 0);
         await page.screenshot({path: path.join(SHOTS, 'checks-ok.png')});
 
         // A broken lab: consequences under the root, a forgiven note, the message as text (no markup from the manager).
@@ -210,6 +211,16 @@ const startButton = page => page.locator('[data-region="checksBody"] .chk-start 
         check('a teacher is told what was not checked', /Проверено не всё:/.test(await panelText(page)) && gaps.length === 2
             && /не собираются факты.*правил: 2/.test(gaps[0]) && /ошибкой.*правил: 1/.test(gaps[1]), gaps.join(' | '));
         check('...without rule codes', !/no_collector|address_not_saved/.test(await panelText(page)));
+        const scripts = await page.locator('ul.chk-scripts > li').allInnerTexts();
+        check('a teacher sees the scripts', /Скрипты преподавателя/.test(await panelText(page)) && scripts.length === 3
+            && /^прошёл[\s\S]*web[\s\S]*код выхода 0 · 412 мс/i.test(scripts[0])
+            && /^не прошёл[\s\S]*ping[\s\S]*не тот код выхода · код выхода 1/i.test(scripts[1])
+            && /^не выполнен[\s\S]*оболочка не подходит/i.test(scripts[2]), scripts.join(' | '));
+        await page.locator('ul.chk-scripts > li').nth(1).locator('summary').click();
+        const output = await page.locator('ul.chk-scripts > li').nth(1).locator('details').innerText();
+        check('...with the output of a script', /Network is unreachable/.test(output) && /Вывод обрезан/.test(output), output);
+        check('...and no output box for a script that did not run',
+            (await page.locator('ul.chk-scripts > li').nth(2).locator('details').count()) === 0);
         await page.screenshot({path: path.join(SHOTS, 'checks-teacher.png')});
         await page.context().close();
 

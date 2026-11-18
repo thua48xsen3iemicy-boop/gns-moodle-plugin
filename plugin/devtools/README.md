@@ -184,6 +184,7 @@ Mock объявляет `checks` и отвечает на `POST/GET /api/v1/sess
 
 ```sh
 curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'   # следующий прогон: «повторите проверку»
+curl -X POST localhost:8090/mock/checks/next -d '{"scripts": true}'            # прогоны со скриптами преподавателя (§9)
 curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'       # следующий прогон: сбой слота
 ```
 

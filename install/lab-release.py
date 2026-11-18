@@ -334,7 +334,7 @@ def slot_identity(root, entries):
     nested = read_json(Path(root) / "slot/release.json")
     require(isinstance(nested, dict) and set(nested) == {"version", "build_id", "files"},
             "Unsupported Slot manifest")
-    require(nested["version"] == "0.26.0" and isinstance(nested["build_id"], str)
+    require(nested["version"] == "0.27.0" and isinstance(nested["build_id"], str)
             and nested["build_id"] and isinstance(nested["files"], dict)
             and SLOT_REQUIRED <= nested["files"].keys(), "Incomplete Slot identity")
     require(nested["files"] == slot_projection(entries), "Nested Slot manifest disagrees with payload")
@@ -553,6 +553,14 @@ SOURCE_FILES = (
     'manager/docs/DESIGN.md',
     'manager/docs/PLUGIN_REQUESTS.md',
     'manager/docs/SLOT_REQUESTS.md',
+    'manager/examples/checks/README.md',
+    'manager/examples/checks/dhcp-lease.json',
+    'manager/examples/checks/nginx.json',
+    'manager/examples/checks/ping-isolated.json',
+    'manager/examples/checks/ping-reachable.json',
+    'manager/examples/checks/routeros-dhcp-server.json',
+    'manager/examples/checks/ssh-key.json',
+    'manager/examples/checks/windows-service.json',
     'manager/examples/images.json',
     'manager/examples/labs/cisco-3x2/checks/README.md',
     'manager/examples/labs/cisco-3x2/lab.gns3',
@@ -596,6 +604,7 @@ SOURCE_FILES = (
     'manager/lab_manager/migrations/012_purges.sql',
     'manager/lab_manager/migrations/013_maintenance.sql',
     'manager/lab_manager/migrations/014_slot_address_in_config.sql',
+    'manager/lab_manager/migrations/015_check_run_scripts.sql',
     'manager/lab_manager/migrations/__init__.py',
     'manager/lab_manager/orchestrator.py',
     'manager/lab_manager/netconfig.py',
@@ -604,6 +613,7 @@ SOURCE_FILES = (
     'manager/lab_manager/preflight.py',
     'manager/lab_manager/proxmox.py',
     'manager/lab_manager/purge.py',
+    'manager/lab_manager/scripts.py',
     'manager/lab_manager/segments.py',
     'manager/lab_manager/slot_client.py',
     'manager/lab_manager/storage.py',
@@ -618,6 +628,7 @@ SOURCE_FILES = (
     'manager/tests/test_agent_client.py',
     'manager/tests/test_api.py',
     'manager/tests/test_check_runs.py',
+    'manager/tests/test_check_scripts.py',
     'manager/tests/test_checks.py',
     'manager/tests/test_config.py',
     'manager/tests/test_derived.py',

@@ -223,6 +223,8 @@ class DeployTicket(BaseModel):
 class ExecTicket(BaseModel):
     command: str = Field(min_length=1, max_length=8192)
     timeout_seconds: int = Field(default=20, ge=1, le=120)
+    # exec-shell (CONTRACTS 4.2): the shell the caller expects; another guest family is SHELL_MISMATCH.
+    shell: Literal["sh", "powershell", "routeros"] | None = None
 
 
 class WipeTicket(BaseModel):

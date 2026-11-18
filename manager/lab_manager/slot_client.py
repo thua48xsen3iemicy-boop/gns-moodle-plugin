@@ -53,12 +53,13 @@ class SlotClient:
     async def close(self):
         await self._http.aclose()
 
-    async def _call(self, method, path, *, json=None, key=None, ok=(200, 202)):
+    async def _call(self, method, path, *, json=None, key=None, ok=(200, 202), timeout=None):
         headers = {"Idempotency-Key": key} if key else {}
         if method in ("POST", "PUT", "DELETE", "PATCH"):
             headers.update(command_headers())
+        extra = {"timeout": httpx.Timeout(timeout)} if timeout is not None else {}
         try:
-            resp = await self._http.request(method, path, json=json, headers=headers)
+            resp = await self._http.request(method, path, json=json, headers=headers, **extra)
         except httpx.HTTPError as exc:
             raise SlotUnavailable(f"{method} {path}: {type(exc).__name__}") from exc
         if resp.status_code not in ok:
@@ -104,6 +105,15 @@ class SlotClient:
         """ISO image of a guest directory into the CD-ROM drive of the targets (CONTRACTS 4.7)."""
         return await self._call("POST", f"/v1/labs/{project_id}/nodes/{node_id}/iso",
                                 json={"path": path, "targets": list(targets)}, key=key)
+
+    async def qga_exec(self, project_id, node_id, command: str, timeout: int, shell: str | None = None) -> dict:
+        """Run a command in the guest of a node: {exit_code, stdout, stderr[, truncated]} (CONTRACTS 4.2).
+
+        `shell` only for a slot with `exec-shell`; the request may take the whole timeout, and a little more.
+        """
+        body = {"command": command, "timeout_seconds": timeout, **({"shell": shell} if shell else {})}
+        return await self._call("POST", f"/v1/labs/{project_id}/nodes/{node_id}/qga/exec", json=body,
+                                ok=(200,), timeout=timeout + 15)
 
     async def deploy(self, ticket: dict, key: str) -> dict:
         return await self._call("POST", "/v1/labs/deploy", json=ticket, key=key)

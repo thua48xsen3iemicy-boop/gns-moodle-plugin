@@ -7,7 +7,19 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.client import call, get_lifecycle
 from api.models import ExecTicket, IsoTicket, WipeTicket, ShutdownTicket
-from api.qga import Priority, QgaError
+from api.qga import Priority, QgaError, QgaExecTimeout
+
+# exec-shell (CONTRACTS 4.2): the shell of each guest family, and how much output an answer carries.
+FAMILY_SHELL = {"windows": "powershell", "routeros": "routeros", "posix": "sh"}
+MAX_OUTPUT = 64 * 1024
+
+
+def cut(text, limit=MAX_OUTPUT):
+    """(text cut to `limit` UTF-8 bytes on a character boundary, whether it was cut)."""
+    raw = text.encode()
+    if len(raw) <= limit:
+        return text, False
+    return raw[:limit].decode(errors="ignore"), True
 
 router = APIRouter(prefix="/v1/labs/{project_id}/nodes", tags=["nodes"])
 
@@ -42,18 +54,31 @@ async def qga_exec(
         raise HTTPException(409, "The node has no guest agent")
 
     async def run():
-        # The command is a RouterOS script on a RouterOS guest, a /bin/sh command elsewhere (CONTRACTS 4.2).
+        # The command runs in the shell of the guest family: a RouterOS script, PowerShell on Windows, /bin/sh
+        # elsewhere (CONTRACTS 4.2). A caller that names a shell learns of another family before the guest runs it.
         family = await lifecycle.guest_family(str(node_id), Priority.COMMAND)
-        return await lifecycle.qga.exec(
+        shell = FAMILY_SHELL.get(family, "sh")
+        if ticket.shell is not None and ticket.shell != shell:
+            raise HTTPException(409, {"code": "SHELL_MISMATCH",
+                                      "message": f"The guest runs {shell}, not {ticket.shell}"})
+        result = await lifecycle.qga.exec(
             str(node_id),
             ticket.command,
             timeout=ticket.timeout_seconds,
             priority=Priority.COMMAND,
-            shell="routeros" if family == "routeros" else "sh",
+            shell=shell,
         )
+        stdout, cut_out = cut(result.get("stdout") or "")
+        stderr, cut_err = cut(result.get("stderr") or "")
+        answer = {**result, "stdout": stdout, "stderr": stderr}
+        if cut_out or cut_err:
+            answer["truncated"] = True
+        return answer
 
     try:
         return await admitted(request, run())
+    except QgaExecTimeout as exc:
+        raise HTTPException(504, {"code": "EXEC_TIMEOUT", "message": str(exc)}) from exc
     except (QgaError, OSError, ValueError) as exc:
         raise HTTPException(502, f"QGA error: {type(exc).__name__}: {exc}") from exc
 
