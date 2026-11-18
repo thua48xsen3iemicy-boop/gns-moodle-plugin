@@ -234,7 +234,16 @@ export class ConsoleConnection {
         }
         this.readonly = ticket.readonly;
         this.term.options.disableStdin = ticket.readonly;
-        const ws = new WebSocket(consoleUrl(ticket, this.nodeId));
+        let ws;
+        try {
+            ws = new WebSocket(consoleUrl(ticket, this.nodeId));
+        } catch (error) {
+            // A ws:// gateway on an https page or a malformed URL: the browser refuses at once, no close event follows.
+            // Without this the console would stay "connecting" for good.
+            this.term.write(note(this.strings.consoleerror + ' ' + (error.message || '')));
+            this.setState('failed');
+            return;
+        }
         ws.binaryType = 'arraybuffer';
         ws.onopen = () => this.opened(ws);
         ws.onmessage = event => {

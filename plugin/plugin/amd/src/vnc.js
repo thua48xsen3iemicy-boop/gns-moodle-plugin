@@ -164,7 +164,15 @@ export class VncConnection {
      * @param {object} ticket answer of mod_gns3lab_get_console_ticket
      */
     open(ticket) {
-        const ws = new WebSocket(consoleUrl(ticket, this.nodeId));
+        let ws;
+        try {
+            ws = new WebSocket(consoleUrl(ticket, this.nodeId));
+        } catch (error) {
+            // A ws:// gateway on an https page or a malformed URL: the browser refuses at once, no close event follows.
+            this.onNote(this.strings.consoleerror + ' ' + (error.message || ''));
+            this.setState('failed');
+            return;
+        }
         ws.binaryType = 'arraybuffer';
         let rfb;
         try {

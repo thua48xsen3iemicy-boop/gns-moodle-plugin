@@ -89,6 +89,19 @@ final class authoring_test extends \advanced_testcase {
         authoring::execute($this->labid, 'patch', imageid: $image['id'], title: 'Not mine');
     }
 
+    public function test_empty_image_patch_is_refused_before_the_manager(): void {
+        $image = fake_manager::host_image();
+        $image['id'] = 'd-123456789abc';
+        $image['derived'] = ['author_user_id' => $this->author->id];
+        $this->manager->on('GET', '/api/v1/images', 200, ['images' => [$image]]);
+        try {
+            authoring::execute($this->labid, 'patch', imageid: $image['id'], title: '   ');
+            $this->fail('an empty change must be refused');
+        } catch (\invalid_parameter_exception $e) {
+            $this->assertSame([], $this->manager->requests_to('PATCH', '/api/v1/images/' . $image['id']));
+        }
+    }
+
     public function test_capture_application_refuses_a_concurrently_changed_draft(): void {
         $def = lab_definition::from_json(json_encode(fake_manager::lab()), 'Authoring test');
         lab_library::save_draft($this->labid, $def);

@@ -472,4 +472,50 @@ final class checks_test extends \advanced_testcase {
         $this->assertSame(1, check_runs::give_up_stale(time()));
         $this->assertSame('failed', $DB->get_field('gns3lab_check_runs', 'status', []));
     }
+
+    public function test_course_reset_deletes_the_runs_and_their_grades(): void {
+        global $CFG, $DB;
+        require_once($CFG->libdir . '/gradelib.php');
+        require_once($CFG->dirroot . '/mod/gns3lab/lib.php');
+        $this->setUser($this->student);
+        $this->start();
+        $this->finish(5);
+        $this->read_run();
+        $this->setAdminUser();
+
+        $status = gns3lab_reset_userdata((object) [
+            'courseid' => $this->course->id, 'reset_gns3lab_checks' => 1, 'reset_gns3lab_work' => 0, 'timeshift' => 0,
+        ]);
+
+        $this->assertCount(1, $status);
+        $this->assertSame(0, $DB->count_records('gns3lab_check_runs', ['gns3labid' => $this->lab->id]));
+        $grades = grade_get_grades($this->course->id, 'mod', 'gns3lab', $this->lab->id, $this->student->id);
+        $this->assertNull($grades->items[0]->grades[$this->student->id]->grade);
+        // Saving the settings again computes the grades from the runs: nothing comes back.
+        $instance = $DB->get_record('gns3lab', ['id' => $this->lab->id]);
+        gns3lab_update_grades($instance);
+        $grades = grade_get_grades($this->course->id, 'mod', 'gns3lab', $this->lab->id, $this->student->id);
+        $this->assertNull($grades->items[0]->grades[$this->student->id]->grade);
+        $this->setUser($this->student);
+        $this->assertSame(['max' => 2, 'used' => 0, 'left' => 2], $this->overview()['attempts']);
+    }
+
+    public function test_course_reset_deletes_the_labs_only_when_asked(): void {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/mod/gns3lab/lib.php');
+        $DB->insert_record('gns3lab_reveal', (object) [
+            'gns3labid' => $this->lab->id, 'userid' => $this->student->id, 'nodeid' => 'n1', 'kind' => 'node', 'item' => '',
+            'timecreated' => time(),
+        ]);
+        $data = (object) ['courseid' => $this->course->id, 'reset_gns3lab_checks' => 0, 'reset_gns3lab_work' => 0,
+            'timeshift' => 0];
+
+        $this->assertSame([], gns3lab_reset_userdata($data));
+        $this->assertSame(0, $DB->count_records('gns3lab_purges'));
+
+        $data->reset_gns3lab_work = 1;
+        $this->assertCount(1, gns3lab_reset_userdata($data));
+        $this->assertSame(1, $DB->count_records('gns3lab_purges', ['instanceid' => $this->lab->id, 'userid' => 0]));
+        $this->assertSame(0, $DB->count_records('gns3lab_reveal', ['gns3labid' => $this->lab->id]));
+    }
 }

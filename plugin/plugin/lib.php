@@ -245,6 +245,95 @@ function gns3lab_update_grades(stdClass $gns3lab, int $userid = 0, bool $nullifn
 }
 
 /**
+ * Course reset: the elements of this module in the reset form.
+ *
+ * @param MoodleQuickForm $mform the reset form
+ */
+function gns3lab_reset_course_form_definition(&$mform): void {
+    $mform->addElement('header', 'gns3labheader', get_string('modulenameplural', 'gns3lab'));
+    $mform->addElement('advcheckbox', 'reset_gns3lab_checks', get_string('resetchecks', 'gns3lab'));
+    $mform->addElement('advcheckbox', 'reset_gns3lab_work', get_string('resetwork', 'gns3lab'));
+}
+
+/**
+ * Course reset: what is ticked by default. The labs on the lab manager are deleted only when asked: that cannot be
+ * undone and the students may come back to them.
+ *
+ * @param stdClass $course course record
+ * @return array element => default
+ */
+function gns3lab_reset_course_form_defaults($course): array {
+    return ['reset_gns3lab_checks' => 1, 'reset_gns3lab_work' => 0];
+}
+
+/**
+ * Course reset: deletes the user data of the activities of the course.
+ *
+ * Without it the check runs of the past students would survive the reset: their attempts would still count, and the
+ * next gns3lab_update_grades() (saving the activity settings) would put the old marks back into the gradebook.
+ *
+ * reset_gns3lab_checks: the check runs and the grades of the activities. reset_gns3lab_work: the students' work on the
+ * lab manager (a purge of each activity, manager CONTRACTS 2.10, sent by the task send_purges), with what goes with
+ * it in Moodle: the uncovered scheme of seen and fog and the seats.
+ *
+ * @param stdClass $data the reset form data
+ * @return array status of each step
+ */
+function gns3lab_reset_userdata($data): array {
+    global $DB;
+
+    $component = get_string('modulenameplural', 'gns3lab');
+    $status = [];
+    $ids = array_map('intval', $DB->get_fieldset_select('gns3lab', 'id', 'course = :course', ['course' => $data->courseid]));
+    if ($ids && !empty($data->reset_gns3lab_checks)) {
+        foreach ($ids as $id) {
+            \mod_gns3lab\local\check_runs::delete($id);
+        }
+        // The whole gradebook may be reset already; otherwise the marks of the deleted runs go with them.
+        if (empty($data->reset_gradebook_grades)) {
+            gns3lab_reset_gradebook($data->courseid);
+        }
+        $status[] = ['component' => $component, 'item' => get_string('resetchecksdone', 'gns3lab'), 'error' => false];
+    }
+    if ($ids && !empty($data->reset_gns3lab_work)) {
+        foreach ($ids as $id) {
+            \mod_gns3lab\local\reveal::delete($id);
+            \mod_gns3lab\local\seat::delete($id);
+            \mod_gns3lab\local\purges::queue($id);
+        }
+        $status[] = ['component' => $component, 'item' => get_string('resetworkdone', 'gns3lab'), 'error' => false];
+    }
+    if (!empty($data->timeshift)) {
+        // From when the findings of the checks are shown (report mode "after"); 0 stays 0.
+        shift_course_mod_dates('gns3lab', ['checksreportdate'], $data->timeshift, $data->courseid);
+        $status[] = ['component' => $component, 'item' => get_string('date'), 'error' => false];
+    }
+    return $status;
+}
+
+/**
+ * Removes the grades of all activities of a course from the gradebook (course reset).
+ *
+ * @param int $courseid course id
+ * @param string $type unused, as in core
+ */
+function gns3lab_reset_gradebook($courseid, $type = ''): void {
+    global $DB;
+
+    $instances = $DB->get_records_sql(
+        "SELECT g.*, cm.idnumber AS cmidnumber
+           FROM {gns3lab} g
+           JOIN {course_modules} cm ON cm.instance = g.id
+           JOIN {modules} m ON m.id = cm.module AND m.name = 'gns3lab'
+          WHERE g.course = :course",
+        ['course' => $courseid]
+    );
+    foreach ($instances as $instance) {
+        gns3lab_grade_item_update($instance, 'reset');
+    }
+}
+
+/**
  * Whether an activity uses a scale.
  *
  * @param int $gns3labid gns3lab id

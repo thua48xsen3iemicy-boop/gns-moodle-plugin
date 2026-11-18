@@ -607,7 +607,10 @@ define([], function() {
                 throw e;
             }
             window.__stub.tickets = (window.__stub.tickets || 0) + 1;
-            return {ticket: 't' + Math.random().toString(36).slice(2), gatewayurl: `ws://${location.host}/gw`, expiresin: 30, readonly: !!cfg.observer};
+            // ?badgateway: an address the browser refuses to open (like ws:// from an https page).
+            return {ticket: 't' + Math.random().toString(36).slice(2),
+                gatewayurl: cfg.badgateway ? 'ftp://gateway.invalid' : `ws://${location.host}/gw`, expiresin: 30,
+                readonly: !!cfg.observer};
         },
     };
 
