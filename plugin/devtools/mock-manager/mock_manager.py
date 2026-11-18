@@ -32,6 +32,13 @@
 - POST /api/v1/sessions/{id}/state/refresh — 202 без тела (409 session_not_running у неживой); не чаще раза в 10 с
   действительно «собирает»: rev растёт, снимок переключается между facts.json и facts-broken.json.
 
+ISO из каталога гостя (CONTRACTS §2.12 менеджера 0.30):
+- info: feature "iso"; у running-сессии с двумя и больше QEMU-нодами — features + "iso" и поле iso: все QEMU-ноды
+  и источники, и приёмники;
+- POST /api/v1/sessions/{id}/iso {"node_id", "requested_by_user_id"?} — 202 операция running (409 iso_not_available,
+  iso_in_progress); GET /api/v1/sessions/{id}/iso/{op} — после двух опросов succeeded, приёмники — остальные QEMU-ноды;
+    curl -X POST localhost:8090/mock/iso/next -d '{"error": "ISO_SOURCE_EMPTY"}'  # следующая сборка: failed
+
 Автопроверки (CONTRACTS §2.9 менеджера 0.17):
 - info: feature "purge"; POST /api/v1/purges {"instance_id"?, "user_id"?, "library_lab_id"?} — живые сессии получают
   остановку, остановленные и упавшие удаляются сразу; ответ {"workspaces", "pending"} (CONTRACTS §2.10);
@@ -478,6 +485,8 @@ class Manager:
         self.sessions: list[Session] = []
         self.started_nodes = {}
         self.shutdown_errors = {}
+        self.iso_ops = {}  # operation id -> {"sid", "source", "targets", "polls", "error"}
+        self.iso_next_error = None
         self.shutdown_supported = True
         self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
@@ -584,6 +593,10 @@ class Manager:
             }
             if self.stale:
                 body["nodes_stale"] = True
+            qemu = [n["node_id"] for n in doc["topology"]["nodes"] if n.get("node_type") == "qemu"]
+            if len(qemu) >= 2:
+                body["features"].append("iso")
+                body["iso"] = {"sources": sorted(qemu), "targets": qemu}
         return body
 
     def facts(self, s):
@@ -644,7 +657,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance", "random_ifnames", "extra_disks"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance", "random_ifnames", "extra_disks", "iso"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -1223,6 +1236,57 @@ def present_run(m, s, run, full=True):
             "checks_def": None, "grading": run["grading"], "result": result, "error": err}
 
 
+def iso_body(op_id, op):
+    body = {"schema": "gns3lab.iso/1", "operation_id": op_id}
+    if op["polls"] > 0:
+        return {**body, "status": "running", "stage": "iso_build", "progress": 50}
+    if op["error"]:
+        return {**body, "status": "failed", "error": {"code": op["error"], "message": "mock"}}
+    return {**body, "status": "succeeded", "result": {"files": 3, "bytes": 391168, "targets": [
+        {"node_id": t, "status": "attached"} for t in op["targets"]]}}
+
+
+async def start_iso(request):
+    m: Manager = request.app["m"]
+    s = own(request, site_of(request))
+    try:
+        body = await read_body(request, {"node_id": 1, "requested_by_user_id": 1})
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    except json.JSONDecodeError:
+        return error(400, "invalid_request", "Body is not JSON")
+    if s.status() != "running":
+        return error(409, "session_not_running", "Session is not running")
+    roles = m.present(s).get("iso")
+    if not roles or body.get("node_id") not in roles["sources"]:
+        return error(409, "iso_not_available", "The image of this node gives no ISO")
+    if any(op["sid"] == s.id and op["polls"] > 0 for op in m.iso_ops.values()):
+        return error(409, "iso_in_progress", "Другая операция слота ещё идёт, повторите позже")
+    op_id = str(uuid.uuid4())
+    m.iso_ops[op_id] = {"sid": s.id, "source": body["node_id"], "polls": 2, "error": m.iso_next_error,
+                        "targets": [t for t in roles["targets"] if t != body["node_id"]]}
+    m.iso_next_error = None
+    log.info("session %s: ISO of %s", s.id, body["node_id"])
+    return web.json_response(iso_body(op_id, m.iso_ops[op_id]), status=202)
+
+
+async def get_iso(request):
+    m: Manager = request.app["m"]
+    s = own(request, site_of(request))
+    op_id = request.match_info["op"]
+    op = m.iso_ops.get(op_id)
+    if op is None or op["sid"] != s.id:
+        return error(404, "iso_not_found", "Unknown ISO operation")
+    op["polls"] = max(0, op["polls"] - 1)
+    return web.json_response(iso_body(op_id, op))
+
+
+async def mock_iso_next(request):
+    m: Manager = request.app["m"]
+    m.iso_next_error = (await request.json()).get("error")
+    return web.json_response({"error": m.iso_next_error})
+
+
 async def start_check(request):
     m: Manager = request.app["m"]
     s = own(request, site_of(request))
@@ -1606,6 +1670,9 @@ def make_apps():
     api.router.add_get("/api/v1/sessions/{sid}/checks", list_checks)
     api.router.add_get("/api/v1/sessions/{sid}/checks/{run}", get_check)
     api.router.add_post("/mock/checks/next", mock_check_next)
+    api.router.add_post("/api/v1/sessions/{sid}/iso", start_iso)
+    api.router.add_get("/api/v1/sessions/{sid}/iso/{op}", get_iso)
+    api.router.add_post("/mock/iso/next", mock_iso_next)
     api.router.add_post("/mock/nodes/{node}/{action:stop|start}", mock_node)
     api.router.add_post("/mock/fail-next", mock_fail_next)
     api.router.add_post("/mock/stale/{mode:on|off}", mock_stale)

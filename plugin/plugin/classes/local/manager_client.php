@@ -541,6 +541,56 @@ class manager_client {
     }
 
     /**
+     * Asks the slot of a running session to make an ISO image of the directory of a source node and to put it into the
+     * CD-ROM drive of the other target nodes (CONTRACTS §2.12).
+     *
+     * Refusals are manager_exception: session_not_running, node_not_found, iso_not_available, iso_not_supported,
+     * iso_in_progress, slot_unavailable, maintenance.
+     *
+     * @param string $sessionid session id
+     * @param string $nodeid source node id
+     * @param int $requestedby id of the Moodle user who asked
+     * @return \stdClass the operation, normally running
+     */
+    public function start_iso(string $sessionid, string $nodeid, int $requestedby): \stdClass {
+        return $this->expect_iso($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/iso', [
+            'node_id' => $nodeid,
+            'requested_by_user_id' => $requestedby,
+        ]));
+    }
+
+    /**
+     * The state of an ISO operation of a session (CONTRACTS §2.12); an unknown one is is_not_found().
+     *
+     * @param string $sessionid session id
+     * @param string $operationid operation id from start_iso()
+     * @return \stdClass
+     */
+    public function get_iso(string $sessionid, string $operationid): \stdClass {
+        return $this->expect_iso($this->request(
+            'GET',
+            '/api/v1/sessions/' . rawurlencode($sessionid) . '/iso/' . rawurlencode($operationid)
+        ));
+    }
+
+    /**
+     * Checks the fields every ISO operation must have.
+     *
+     * @param mixed $data decoded JSON
+     * @return \stdClass
+     */
+    protected function expect_iso(mixed $data): \stdClass {
+        $op = $this->expect_object($data);
+        if (
+            !is_string($op->operation_id ?? null) || !preg_match('/^[0-9a-f-]{36}$/', $op->operation_id)
+            || !in_array($op->status ?? null, ['running', 'succeeded', 'failed'], true)
+        ) {
+            throw new manager_exception('badresponse', 200, 'ISO operation without operation_id or status');
+        }
+        return $op;
+    }
+
+    /**
      * Checks the fields every check run must have.
      *
      * @param mixed $data decoded JSON
