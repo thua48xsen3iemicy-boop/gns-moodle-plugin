@@ -33,7 +33,7 @@
 import {CISCO_TYPES, ConsoleConnection, KEYS, PORT_RE, THEME, loadXterm, note} from 'mod_gns3lab/console';
 import {ConsoleWatch} from 'mod_gns3lab/consolewatch';
 import {SnipMenu} from 'mod_gns3lab/snipmenu';
-import {kindOf, snippetSet} from 'mod_gns3lab/snippets';
+import {kindOf, notePrompt, snippetSet} from 'mod_gns3lab/snippets';
 import {VncConnection, loadNovnc} from 'mod_gns3lab/vnc';
 import {svgEl as el, hel, store, fill} from 'mod_gns3lab/dom';
 import {clamp, esc} from 'mod_gns3lab/model';
@@ -620,12 +620,25 @@ class Con {
         const o = this.owner;
         if (this.parked) return;
         this.activity('out');
+        this.checkPrompt();
         if (!o.isVisible(this)) {
             if (!this.unread) {
                 this.unread = true;
                 o.paintBadges(this);
                 o.renderTabsAndChips();
             }
+        }
+    }
+
+    /**
+     * A MikroTik node the manager did not name shows itself by the prompt of RouterOS: its snippets follow.
+     */
+    checkPrompt() {
+        if (this.vnc || !this.term || this.n.type !== 'qemu' || kindOf(this.n) === 'routeros') return;
+        const buf = this.term.buffer.active, line = buf.getLine(buf.baseY + buf.cursorY);
+        if (line && notePrompt(this.n, line.translateToString(true))) {
+            if (this.watch) this.watch.hint = 'routeros';
+            this.owner.cons.forEach(c => c.n.id === this.n.id && c.renderQuick());
         }
     }
 

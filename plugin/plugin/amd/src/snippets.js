@@ -39,7 +39,7 @@ const IOS_PRE = '\x15\r\x1a' + 'enable\r';
  *
  * @param {string} group group id
  * @param {string} id unique id, also the key of the description string
- * @param {string} cmd the command; a trailing space marks a command that needs an argument
+ * @param {string} cmd the command; a trailing space or "=" marks a command that needs an argument
  * @param {object} [opts]
  * @param {string} [opts.short] shorter caption for the bar
  * @param {boolean|string} [opts.quick] pinned to the bar until the student changes it: true for every device,
@@ -112,27 +112,42 @@ const KINDS = {
         items: [
             sn('inspect', 'ros_ipaddr', '/ip address print', {short: 'ip address', quick: true}),
             sn('inspect', 'ros_iface', '/interface print', {short: 'interface', quick: true}),
+            sn('inspect', 'ros_identity', '/system identity print', {short: 'identity', quick: true}),
             sn('inspect', 'ros_export', '/export terse', {short: 'export', quick: true}),
+            sn('inspect', 'ros_ifeth', '/interface ethernet print', {short: 'ethernet'}),
             sn('inspect', 'ros_neighbor', '/ip neighbor print', {short: 'ip neighbor'}),
             sn('inspect', 'ros_arp', '/ip arp print', {short: 'ip arp'}),
-            sn('inspect', 'ros_resource', '/system resource print', {short: 'resource'}),
-            sn('inspect', 'ros_identity', '/system identity print', {short: 'identity'}),
             sn('inspect', 'ros_dhcpc', '/ip dhcp-client print', {short: 'dhcp-client'}),
+            sn('inspect', 'ros_dhcpsrv', '/ip dhcp-server print', {short: 'dhcp-server'}),
+            sn('inspect', 'ros_lease', '/ip dhcp-server lease print', {short: 'dhcp leases'}),
+            sn('inspect', 'ros_pool', '/ip pool print', {short: 'ip pool'}),
             sn('inspect', 'ros_dns', '/ip dns print', {short: 'dns'}),
+            sn('inspect', 'ros_nat', '/ip firewall nat print', {short: 'nat'}),
+            sn('inspect', 'ros_filter', '/ip firewall filter print', {short: 'firewall'}),
+            sn('inspect', 'ros_resource', '/system resource print', {short: 'resource'}),
+            sn('inspect', 'ros_log', '/log print', {short: 'log'}),
             sn('routing', 'ros_route', '/ip route print', {short: 'ip route', quick: 'router'}),
+            sn('routing', 'ros_routedet', '/ip route print detail', {short: 'ip route detail'}),
+            sn('routing', 'ros_ospfinst', '/routing ospf instance print', {short: 'ospf instance'}),
+            sn('routing', 'ros_ospfarea', '/routing ospf area print', {short: 'ospf area'}),
+            sn('routing', 'ros_ospftpl', '/routing ospf interface-template print', {short: 'ospf template'}),
             sn('routing', 'ros_ospfnei', '/routing ospf neighbor print', {short: 'ospf neighbor', quick: 'router'}),
             sn('routing', 'ros_ospfif', '/routing ospf interface print', {short: 'ospf interface'}),
             sn('routing', 'ros_ospflsa', '/routing ospf lsa print', {short: 'ospf lsa'}),
             sn('routing', 'ros_bgp', '/routing bgp session print', {short: 'bgp session'}),
             sn('switching', 'ros_vlan', '/interface vlan print', {short: 'vlan'}),
+            sn('switching', 'ros_bridge', '/interface bridge print', {short: 'bridge'}),
             sn('switching', 'ros_bridgeport', '/interface bridge port print', {short: 'bridge port'}),
             sn('switching', 'ros_bridgevlan', '/interface bridge vlan print', {short: 'bridge vlan'}),
             sn('switching', 'ros_host', '/interface bridge host print', {short: 'bridge host'}),
-            sn('tools', 'ros_nat', '/ip firewall nat print', {short: 'nat'}),
-            sn('tools', 'ros_filter', '/ip firewall filter print', {short: 'firewall'}),
             sn('tools', 'ros_ping', '/ping count=3 ', {short: 'ping'}),
             sn('tools', 'ros_trace', '/tool traceroute ', {short: 'traceroute'}),
+            sn('tools', 'ros_torch', '/tool torch interface=', {short: 'torch'}),
+            sn('config', 'ros_setname', '/system identity set name=', {short: 'set name'}),
             sn('config', 'ros_addaddr', '/ip address add ', {short: 'add address'}),
+            sn('config', 'ros_addroute', '/ip route add ', {short: 'add route'}),
+            sn('config', 'ros_addvlan', '/interface vlan add ', {short: 'add vlan'}),
+            sn('config', 'ros_adddhcpc', '/ip dhcp-client add interface=', {short: 'add dhcp-client'}),
             sn('config', 'ros_history', '/system history print', {short: 'history'}),
         ],
     },
@@ -156,7 +171,7 @@ const KINDS = {
 
 // What each snippet sends: whole (run) or only the text of the command (insert, the student presses Enter).
 Object.values(KINDS).forEach(kind => kind.items.forEach(item => {
-    item.insertOnly = item.cmd.endsWith(' ');
+    item.insertOnly = item.cmd.endsWith(' ') || item.cmd.endsWith('=');
     item.typed = kind.pre + item.cmd;
     item.seq = item.insertOnly ? item.typed : item.typed + '\r';
 }));
@@ -167,11 +182,33 @@ export const STRING_KEYS = [
     ...Object.values(KINDS).flatMap(kind => kind.items.map(item => 'snip_' + item.id)),
 ];
 
+/** Prompt of RouterOS: "[admin@MikroTik] > " or, in a submenu, "[admin@MikroTik] /ip address> ". */
+const ROUTEROS_PROMPT = /^\[[^\]\s@]+@[^\]]+\] (\/[^>]*)?> ?$/;
+
+/** Nodes whose console showed the prompt of RouterOS, by node id (the page only). */
+const seenRouterOS = new Set();
+
+/**
+ * Notes the line at the cursor of a console: the prompt of RouterOS tells a MikroTik node that nothing else named.
+ *
+ * @param {object} node node of the model
+ * @param {string} line text of the line at the cursor
+ * @returns {boolean} the kind of the node changed to routeros
+ */
+export const notePrompt = (node, line) => {
+    if (kindOf(node) === 'routeros' || node.type !== 'qemu' || !ROUTEROS_PROMPT.test(String(line).trim() + ' ')) {
+        return false;
+    }
+    seenRouterOS.add(node.id);
+    return true;
+};
+
 /**
  * Kind of the device by its node.
  *
  * MikroTik RouterOS is told by `guest` of the node (the image catalog of the lab manager, CONTRACTS §2.6) or, in an
- * uploaded .gns3, by the disk image of a QEMU node (chr-7.x.img and alike).
+ * uploaded .gns3, by the disk image of a QEMU node (chr-7.x.img and alike); failing both, by the prompt of RouterOS
+ * in its console (notePrompt).
  *
  * @param {object} node node of the model
  * @returns {string} ios, linux, vpcs or routeros
@@ -180,7 +217,7 @@ export const kindOf = node => {
     if (node.type === 'iou' || node.type === 'dynamips') {
         return 'ios';
     }
-    if (node.guest === 'routeros') {
+    if (node.guest === 'routeros' || seenRouterOS.has(node.id)) {
         return 'routeros';
     }
     if (node.type === 'vpcs') {
