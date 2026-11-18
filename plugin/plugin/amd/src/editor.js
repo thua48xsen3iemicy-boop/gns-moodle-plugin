@@ -1336,8 +1336,9 @@ export const init = (prefix) => {
     change(() => {
       const checks = st.lab.checks || (st.lab.checks = {format: CHECKS_FORMAT});
       const list = checks.scripts || (checks.scripts = []);
+      const taken = new Set(list.map(x => x.id));
       let k = list.length + 1;
-      while (list.some(x => x.id === "s" + k)) {
+      while (taken.has("s" + k)) {
         k++;
       }
       const node = scriptNodes()[0];
