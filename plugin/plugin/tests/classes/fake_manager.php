@@ -186,6 +186,13 @@ class fake_manager {
                         'base_class' => 'major', 'counted' => false, 'caused_by' => 'f3', 'nodes' => ['PC1'],
                         'ifaces' => [], 'message' => 'В домене SW1 две подсети'],
                 ],
+                'scripts' => [
+                    ['id' => 'web', 'node' => 'PC1', 'status' => 'pass', 'exit_code' => 0, 'stdout' => "active\n200",
+                        'stderr' => '', 'truncated' => false, 'duration_ms' => 412],
+                    ['id' => 'ping', 'node' => 'PC2', 'status' => 'skipped', 'reason' => 'collect_failed',
+                        'exit_code' => null, 'stdout' => '', 'stderr' => '', 'truncated' => false, 'duration_ms' => null],
+                ],
+                'nonce' => '3f9a1c0d2b4e5f60',
             ],
             'error' => $status === 'failed' ? ['code' => 'SLOT_UNAVAILABLE', 'message' => 'slot'] : null,
         ];

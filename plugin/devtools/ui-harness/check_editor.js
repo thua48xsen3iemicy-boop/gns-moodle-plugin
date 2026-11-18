@@ -418,6 +418,46 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await page.locator('[data-network]').selectOption('auto');
         await until(async() => (await page.locator('[data-checks]').inputValue()) === '');
         check('turning it back on leaves no document behind', (await page.locator('[data-checks]').inputValue()) === '');
+        check('no scripts without check-scripts', (await page.locator('[data-act="addscript"]').count()) === 0);
+
+        // ---- the teacher's scripts (docs/autochecks/README.md §7)
+        await page.goto(`${BASE}/editor.ru.scripts.html${MIN}`);
+        await until(async() => (await page.locator('[data-act="addscript"]').count()) === 1);
+        const doc = async() => {
+            const text = await page.locator('[data-checks]').inputValue();
+            return text ? JSON.parse(text) : null;
+        };
+        await page.locator('[data-act="addscript"]').click();
+        await until(async() => (await page.locator('fieldset.ed-script').count()) === 1);
+        check('a new script goes into the checks document', JSON.stringify(await doc()) === JSON.stringify(
+            {format: 'gns3lab.checks/1', scripts: [{id: 's1', title: 'Скрипт 1', node: 'SW1'}]}), JSON.stringify(await doc()));
+        const nodes = await page.locator('[data-sfield="node"] option').allInnerTexts();
+        check('only QEMU devices run scripts', nodes.join(',') === 'SW1,PC1,PC2', nodes.join(','));
+        const field = name => page.locator(`fieldset.ed-script [data-sfield="${name}"]`);
+        await field('node').selectOption('PC1');
+        await field('run').fill('systemctl is-active nginx; echo {{nonce}}');
+        await field('match').focus();
+        await field('match').fill('^active');
+        await field('contains').focus();
+        await field('contains').fill('{{nonce}}\n\n');
+        await field('class').focus();
+        await field('class').selectOption('critical');
+        await field('group').selectOption('host');
+        const filled = await until(async() => {
+            const d = await doc();
+            return d && d.scripts[0].class === 'critical' && d;
+        });
+        check('the fields of a script go into the document', JSON.stringify(filled && filled.scripts[0]) === JSON.stringify(
+            {id: 's1', title: 'Скрипт 1', node: 'PC1', run: 'systemctl is-active nginx; echo {{nonce}}',
+                expect: {match: '^active', contains: ['{{nonce}}']}, class: 'critical'}), JSON.stringify(filled));
+        await field('timeout').fill('99');
+        await field('title').focus();
+        check('a time limit over 60 s is refused on the spot',
+            /от 1 до 60/.test(await page.locator('[data-region="fielderror"]').innerText()));
+        await page.locator('[data-act="delscript"]').click();
+        await until(async() => (await page.locator('[data-checks]').inputValue()) === '');
+        check('deleting the last script leaves no document', (await page.locator('[data-checks]').inputValue()) === ''
+            && (await page.locator('fieldset.ed-script').count()) === 0);
 
         check('no errors in the page', problems.length === 0, problems.join(' | '));
     } catch (e) {

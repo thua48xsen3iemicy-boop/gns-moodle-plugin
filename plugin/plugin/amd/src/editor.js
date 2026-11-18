@@ -75,6 +75,11 @@ export const init = (prefix) => {
   /* the manager also checks labs (CONTRACTS §2.9): segments set up by the student and the `checks` document */
   const withChecks = withSegments && !!D.labchecks;
   const CHECKS_FORMAT = "gns3lab.checks/1";
+  /* the manager also runs the teacher's scripts in the guests (CONTRACTS §2.9 `scripts`, `check-scripts`) */
+  const withScripts = withChecks && !!D.labscripts;
+  const SCRIPT_SHELLS = ["sh", "powershell", "routeros"];
+  const SCRIPT_GROUPS = ["host", "l1", "l2", "addressing", "gateways", "routing"];
+  const SCRIPT_CLASSES = ["major", "critical", "minor", "note"];
 
   const def = D.definition || {};
   const st = {
@@ -861,6 +866,66 @@ export const init = (prefix) => {
       ${problemsHTML()}`;
   };
 
+  /* nodes a script may run on: QEMU with a guest agent, not the ISP (the manager checks it again) */
+  const scriptNodes = () => st.lab.nodes.filter(n => {
+    const img = imageOf(n);
+    return img && img.kind === "qemu" && (img.uplink_port === undefined || img.uplink_port === null);
+  });
+
+  /* the teacher's scripts (docs/autochecks/README.md §7): one fieldset each, the same document as the JSON below */
+  const scriptsHTML = () => {
+    const list = st.lab.checks && Array.isArray(st.lab.checks.scripts) ? st.lab.checks.scripts : [];
+    if (!withScripts && !list.length) {
+      return "";
+    }
+    const off = withScripts ? "" : " disabled";
+    const opt = (value, label, current) =>
+      `<option value="${esc(value)}"${value === current ? " selected" : ""}>${esc(label)}</option>`;
+    const field = (label, control, help) => `<label class="ed-field"><span>${esc(label)}</span>${control}${
+      help ? `<small>${esc(help)}</small>` : ""}</label>`;
+    const input = (name, value, extra) => `<input class="form-control form-control-sm" data-sfield="${name}"
+      value="${esc(value === undefined || value === null ? "" : value)}"${extra || ""}${off}>`;
+    const area = (name, value, rows, extra) => `<textarea class="form-control form-control-sm mono" data-sfield="${name}"
+      rows="${rows}" spellcheck="false"${extra || ""}${off}>${esc(value)}</textarea>`;
+    const nodes = scriptNodes();
+    const items = list.map((sc, i) => {
+      const e = sc.expect || {};
+      const nodeOpts = (sc.node && !nodes.some(n => n.name === sc.node) ? opt(sc.node, sc.node, sc.node) : "")
+        + nodes.map(n => opt(n.name, n.name, sc.node)).join("");
+      const shellOpts = opt("", str("ed_script_shell_auto"), sc.shell || "")
+        + SCRIPT_SHELLS.map(x => opt(x, x, sc.shell)).join("");
+      const groupOpts = SCRIPT_GROUPS.map(x => opt(x, x, sc.group || "host")).join("");
+      const classOpts = SCRIPT_CLASSES.map(x => opt(x, str("chk_class_" + x), sc.class || "major")).join("");
+      return `<fieldset class="ed-script" data-script="${i}">
+        <legend>${esc(sc.title || sc.id || str("ed_script_untitled"))}</legend>
+        ${field(str("ed_script_title"), input("title", sc.title, ' maxlength="120"'))}
+        ${field(str("ed_script_id"), input("id", sc.id, ' maxlength="32"'), str("ed_script_id_help"))}
+        ${field(str("ed_script_node"), `<select class="form-select form-select-sm" data-sfield="node"${off}>${
+          sc.node ? "" : opt("", "—", "")}${nodeOpts}</select>`)}
+        ${field(str("ed_script_shell"), `<select class="form-select form-select-sm" data-sfield="shell"${off}>${
+          shellOpts}</select>`)}
+        ${field(str("ed_script_run"), area("run", sc.run || "", 4), str("ed_script_run_help"))}
+        ${field(str("ed_script_timeout"), input("timeout", sc.timeout, ' inputmode="numeric" placeholder="20"'))}
+        ${field(str("ed_script_exit"), input("exit", e.exit, ' inputmode="numeric"'), str("ed_script_expect_help"))}
+        ${field(str("ed_script_match"), input("match", e.match, ' maxlength="500" spellcheck="false"'),
+          str("ed_script_match_help"))}
+        ${field(str("ed_script_contains"), area("contains", (e.contains || []).join("\n"), 2))}
+        ${field(str("ed_script_notcontains"), area("not_contains", (e.not_contains || []).join("\n"), 2),
+          str("ed_script_lines_help"))}
+        ${field(str("ed_script_group"), `<select class="form-select form-select-sm" data-sfield="group"${off}>${
+          groupOpts}</select>`)}
+        ${field(str("ed_script_class"), `<select class="form-select form-select-sm" data-sfield="class"${off}>${
+          classOpts}</select>`)}
+        ${withScripts ? `<button type="button" class="btn btn-sm btn-outline-danger" data-act="delscript"
+          data-script="${i}">${esc(str("ed_script_delete"))}</button>` : ""}
+      </fieldset>`;
+    }).join("");
+    return `<h3>${esc(str("ed_scripts"))}</h3>
+      <p class="muted">${esc(str(withScripts ? "ed_scripts_help" : "ed_scripts_kept"))}</p>${items}
+      ${withScripts ? `<button type="button" class="btn btn-sm btn-outline-primary" data-act="addscript">${
+        esc(str("ed_script_add"))}</button>` : ""}`;
+  };
+
   /* the `checks` document of the lab (docs/autochecks/README.md §4) as JSON; the lab manager checks it on "Check" */
   const checksHTML = () => {
     if (!withChecks && !st.lab.checks) {
@@ -875,7 +940,7 @@ export const init = (prefix) => {
           <option value="off"${off ? " selected" : ""}>${esc(str("ed_network_off"))}</option>
         </select><small>${esc(str("ed_network_help"))}</small></label>`;
     return `<h3>${esc(str("ed_checks"))}</h3>
-      ${network}
+      ${network}${scriptsHTML()}
       <label class="ed-field"><textarea class="form-control form-control-sm mono" data-checks rows="8" spellcheck="false"
         placeholder='{"format": "${CHECKS_FORMAT}"}'${withChecks ? "" : " readonly"}>${esc(text)}</textarea>
         <small>${esc(str(withChecks ? "ed_checks_help" : "ed_checkskept"))}</small></label>
@@ -1217,6 +1282,80 @@ export const init = (prefix) => {
       st.lab.checks = value;
     });
   };
+  /* one field of a teacher's script; a default value leaves the field out, as the manager would fill it in */
+  const setOrDrop = (obj, key, value) => {
+    if (value === null) {
+      delete obj[key];
+    } else {
+      obj[key] = value;
+    }
+  };
+  const DEFAULTS = {group: "host", class: "major", shell: ""};
+  const scriptChange = t => {
+    const box = t.closest("[data-script]");
+    const list = st.lab.checks && st.lab.checks.scripts;
+    const i = box ? +box.dataset.script : -1;
+    if (!Array.isArray(list) || !list[i]) {
+      return;
+    }
+    const f = t.dataset.sfield, raw = t.value;
+    let edit;
+    if (f === "timeout" || f === "exit") {
+      const v = f === "timeout" ? intField(t, 1, 60) : intField(t, -2147483648, 2147483647);
+      if (v === undefined) {
+        fieldError(str(f === "timeout" ? "ed_script_timeoutinvalid" : "ed_script_exitinvalid"));
+        return;
+      }
+      edit = sc => setOrDrop(f === "exit" ? sc.expect : sc, f, v);
+    } else if (f === "contains" || f === "not_contains") {
+      const lines = raw.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+      edit = sc => setOrDrop(sc.expect, f, lines.length ? lines : null);
+    } else if (f === "match") {
+      edit = sc => setOrDrop(sc.expect, f, raw === "" ? null : raw);
+    } else if (f === "run") {
+      edit = sc => setOrDrop(sc, f, raw.trim() === "" ? null : raw);
+    } else if (f in DEFAULTS) {
+      edit = sc => setOrDrop(sc, f, raw === DEFAULTS[f] ? null : raw);
+    } else {
+      edit = sc => setOrDrop(sc, f, raw.trim() === "" ? null : raw.trim());
+    }
+    const next = JSON.parse(JSON.stringify(list[i]));
+    next.expect = next.expect || {};
+    edit(next);
+    if (!Object.keys(next.expect).length) {
+      delete next.expect; // no condition left: the manager checks the exit code 0
+    }
+    if (JSON.stringify(next) === JSON.stringify(list[i])) {
+      return;
+    }
+    change(() => {
+      st.lab.checks.scripts[i] = next;
+    });
+  };
+  const addScript = () => {
+    change(() => {
+      const checks = st.lab.checks || (st.lab.checks = {format: CHECKS_FORMAT});
+      const list = checks.scripts || (checks.scripts = []);
+      let k = list.length + 1;
+      while (list.some(x => x.id === "s" + k)) {
+        k++;
+      }
+      const node = scriptNodes()[0];
+      list.push(Object.assign({id: "s" + k, title: str("ed_script_newtitle", k)}, node ? {node: node.name} : {}));
+    });
+  };
+  const deleteScript = i => {
+    change(() => {
+      const checks = st.lab.checks;
+      checks.scripts.splice(i, 1);
+      if (!checks.scripts.length) {
+        delete checks.scripts;
+      }
+      if (Object.keys(checks).length === 1) {
+        st.lab.checks = null; // only "format" left: the lab has no checks document
+      }
+    });
+  };
   const networkChange = t => {
     const checks = Object.assign({format: CHECKS_FORMAT}, st.lab.checks || {});
     if (t.value === "off") {
@@ -1334,6 +1473,9 @@ export const init = (prefix) => {
       }
       if (t.dataset.network !== undefined && withChecks) {
         networkChange(t);
+      }
+      if (t.dataset.sfield !== undefined && withScripts) {
+        scriptChange(t);
       }
       return;
     }
@@ -1493,6 +1635,10 @@ export const init = (prefix) => {
           }
         });
       }
+    } else if (name === "addscript" && withScripts) {
+      addScript();
+    } else if (name === "delscript" && withScripts) {
+      deleteScript(+act.dataset.script);
     } else if (name === "addsegment") {
       addSegment();
     } else if (name === "addmembers" && st.sel && st.sel.kind === "segment") {

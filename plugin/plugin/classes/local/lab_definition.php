@@ -372,7 +372,7 @@ class lab_definition {
      *
      * The definition is decoded into arrays, and an empty JSON object would go to the lab manager as an empty list,
      * which it refuses (bad_type). The objects of gns3lab.checks/1 are known: the document itself, nodes and each node
-     * in it, addresses, groups, switches and rules.
+     * in it, addresses, groups, switches, rules, each script and its expect.
      *
      * @param array $checks checks document decoded into arrays
      * @return array
@@ -387,6 +387,16 @@ class lab_definition {
             foreach ($checks['nodes'] as $name => $node) {
                 if ($node === []) {
                     $checks['nodes'][$name] = new \stdClass();
+                }
+            }
+        }
+        if (is_array($checks['scripts'] ?? null)) {
+            foreach ($checks['scripts'] as $i => $script) {
+                // A script and its expect are objects too (the teacher's scripts, CONTRACTS §2.9).
+                if ($script === []) {
+                    $checks['scripts'][$i] = new \stdClass();
+                } else if (is_array($script) && ($script['expect'] ?? null) === []) {
+                    $checks['scripts'][$i]['expect'] = new \stdClass();
                 }
             }
         }

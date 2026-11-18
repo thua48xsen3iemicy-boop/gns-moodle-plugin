@@ -79,6 +79,8 @@ PC1); с `?observer` те же страницы открывает препод�
 `_get_check_run`; прогон длится 2 с (`?fast` — 0,5 с), отчёт зависит от варианта фактов («Обновить сейчас» — конфиг с ошибками).
 `?checksreport=counts|after` — сервер прячет находки, `?checksmax=N` — лимит попыток (0 — без ограничения), `?observer` — без кнопки.
 `window.__stub.checks.next('incomplete'|'failed')` — исход следующего прогона. Сквозная проверка — `node check_checks.js [--min]`.
+С `?checkteacher` в отчёте — скрипты преподавателя с выводом (`docs/autochecks.md` §9). Редактор лаб со скриптами —
+`editor.<язык>.scripts.html` (проверка в `check_editor.js`).
 
 ## Графическая консоль (noVNC)
 

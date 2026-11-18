@@ -33,6 +33,14 @@ final class checks_test extends \basic_testcase {
         $this->assertSame("hostname_wrong=note\nvlan_extra=minor", checks::format_overrides($out));
     }
 
+    public function test_the_scripts_of_the_teacher_take_an_override(): void {
+        [$out, $bad] = checks::parse_overrides("script_failed=minor\nfacts_conflict=major");
+        $this->assertSame(['script_failed' => 'minor'], $out);
+        $this->assertSame(['facts_conflict=major'], $bad);
+        $instance = (object) ['checksoverrides' => json_encode(['script_failed' => 'note', 'bogus' => 'note'])];
+        $this->assertSame(['script_failed' => 'note'], checks::overrides($instance));
+    }
+
     public function test_thresholds_follow_the_rules_of_the_manager(): void {
         $rows = checks::clean_thresholds([
             ['mark' => '5', 'critical' => '0', 'major' => '0', 'minor' => '1'],

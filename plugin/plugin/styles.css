@@ -5541,3 +5541,21 @@ from{transform:translateY(40%);opacity:.3}
 @media(prefers-reduced-motion:reduce){
 .gns3lab-student.canvas-ui .assign-head svg{transition:none}
 }
+
+/* The teacher's scripts of a run (docs/autochecks.md §9): status, node, output */
+.gns3lab-student.canvas-ui .checks-panel .chk-scripts{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.gns3lab-student.canvas-ui .checks-panel .chk-script{border-left:3px solid var(--line);padding-left:8px}
+.gns3lab-student.canvas-ui .checks-panel .chk-script.st-pass{border-left-color:var(--ok)}
+.gns3lab-student.canvas-ui .checks-panel .chk-script.st-fail{border-left-color:var(--bad)}
+.gns3lab-student.canvas-ui .checks-panel .chk-script.st-skipped{border-left-color:var(--warn)}
+.gns3lab-student.canvas-ui .checks-panel .chk-script-status{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-script-id{font-family:var(--mono)}
+.gns3lab-student.canvas-ui .checks-panel .chk-script-node{color:var(--muted)}
+.gns3lab-student.canvas-ui .checks-panel .chk-script-facts{display:block;color:var(--muted);font-size:12px}
+.gns3lab-student.canvas-ui .checks-panel .chk-script-output summary{cursor:pointer;font-size:12px}
+.gns3lab-student.canvas-ui .checks-panel .chk-script-output pre{max-height:180px;overflow:auto;margin:4px 0;padding:6px;
+  font:12px/1.4 var(--mono);white-space:pre-wrap;word-break:break-all;background:var(--panel-2,transparent);border:1px solid var(--line)}
+/* The teacher's scripts in the lab editor (docs/autochecks.md §9) */
+.gns3lab-editor .ed-script{display:flex;flex-direction:column;gap:6px;margin:0 0 10px;padding:8px;border:1px solid var(--line);border-radius:6px}
+.gns3lab-editor .ed-script legend{float:none;width:auto;margin:0;padding:0 4px;font-size:13px;font-weight:600}
+.gns3lab-editor .ed-script .btn{align-self:flex-start}

@@ -95,7 +95,13 @@ class start_check extends external_api {
             throw new \moodle_exception('checksnoattempts', 'gns3lab');
         }
         try {
-            $run = $client->start_check($session->session_id, (int) $USER->id, checks::grading($instance));
+            $grading = checks::grading($instance);
+            if (is_array($grading['overrides']) && !$client->has_feature('check-scripts')) {
+                // A manager without the teacher's scripts refuses their code in the overrides (CONTRACTS §2.9).
+                unset($grading['overrides'][checks::SCRIPT_RULE]);
+                $grading['overrides'] = $grading['overrides'] ?: new \stdClass();
+            }
+            $run = $client->start_check($session->session_id, (int) $USER->id, $grading);
         } catch (manager_exception $e) {
             $runid = $e->details->run_id ?? null;
             if ($e->remotecode === 'check_in_progress' && is_string($runid)) {

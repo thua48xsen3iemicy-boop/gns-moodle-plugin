@@ -299,6 +299,39 @@ final class checks_test extends \advanced_testcase {
             [['code' => 'address_not_saved', 'group' => 'addressing', 'status' => 'skipped', 'reason' => 'no_collector']],
             $run['rules']
         );
+        // The output of the teacher's scripts is for the teacher.
+        $this->assertSame(['web', 'ping'], array_column($run['scripts'], 'id'));
+        $this->assertSame(['status' => 'pass', 'hasexit' => true, 'exitcode' => 0, 'stdout' => "active\n200"], [
+            'status' => $run['scripts'][0]['status'], 'hasexit' => $run['scripts'][0]['hasexit'],
+            'exitcode' => $run['scripts'][0]['exitcode'], 'stdout' => $run['scripts'][0]['stdout'],
+        ]);
+        $this->assertSame(['collect_failed', false, -1], [
+            $run['scripts'][1]['reason'], $run['scripts'][1]['hasexit'], $run['scripts'][1]['durationms'],
+        ]);
+
+        $this->setUser($this->student);
+        $this->assertSame([], $this->read_run()['scripts']);
+    }
+
+    public function test_a_manager_without_scripts_gets_no_script_override(): void {
+        global $DB;
+        $DB->set_field('gns3lab', 'checksoverrides', json_encode(['script_failed' => 'minor', 'vlan_extra' => 'note']), [
+            'id' => $this->lab->id,
+        ]);
+        $this->setUser($this->student);
+        $this->start();
+        [$post] = $this->manager->requests_to('POST', fake_manager::CHECKS);
+        $this->assertSame(['vlan_extra' => 'note'], $post['body']['grading']['overrides']);
+    }
+
+    public function test_a_manager_with_scripts_gets_the_script_override(): void {
+        global $DB;
+        $DB->set_field('gns3lab', 'checksoverrides', json_encode(['script_failed' => 'minor']), ['id' => $this->lab->id]);
+        $this->manager->with_info(['consoles', 'observer', 'resume', 'facts', 'checks', 'check-scripts']);
+        $this->setUser($this->student);
+        $this->start();
+        [$post] = $this->manager->requests_to('POST', fake_manager::CHECKS);
+        $this->assertSame(['script_failed' => 'minor'], $post['body']['grading']['overrides']);
     }
 
     public function test_findings_after_a_date(): void {

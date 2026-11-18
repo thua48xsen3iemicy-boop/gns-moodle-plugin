@@ -551,7 +551,8 @@ netplan/networkd/NetworkManager пока `supported: false`); `hostname` в `win
 - [x] ~~Слот: `exec-shell` (`manager/docs/SLOT_REQUESTS.md` §9)~~ — слот 0.27.0.
 - [x] ~~Менеджер: выполнение через `qga/exec` слота с приоритетом `COMMAND`, сравнение вывода на менеджере, находка
   `script_failed`, свой маркер в каждом запуске (§6)~~ — менеджер 0.31.0.
-- [ ] Плагин: поле скриптов в редакторе лабы, показ `script_failed` и `result.scripts` в отчёте (`manager/docs/PLUGIN_REQUESTS.md`).
+- [x] ~~Плагин: поле скриптов в редакторе лабы, показ `script_failed` и `result.scripts` в отчёте~~ — плагин 0.35.0
+  (`plugin/docs/autochecks.md` §9; `amd/build` собран ui-harness, перед выпуском пересобрать `grunt amd`).
 - [ ] Стенд (владелец): лаба со скриптами на Debian и RouterOS — см. `manager/README.md` 0.31.0.
 - [ ] Библиотека готовых фрагментов `manager/examples/checks/` (nginx, ключ SSH, ping между группами, DHCP-аренда) с
   инструкцией для преподавателя.

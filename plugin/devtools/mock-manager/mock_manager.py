@@ -52,6 +52,7 @@ ISO из каталога гостя (CONTRACTS §2.12 менеджера 0.30):
   конфиг с ошибками (после «Обновить сейчас») — vlan_wrong со следствиями и address_missing; оценка — по grading запроса.
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'  # следующий прогон: incomplete
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'      # следующий прогон: failed
+    curl -X POST localhost:8090/mock/checks/next -d '{"scripts": true}'          # прогоны со скриптами преподавателя
 
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
@@ -492,6 +493,7 @@ class Manager:
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
         self.check_next = None  # "incomplete" or "failed": the outcome of the next check run
+        self.check_scripts = False  # the next runs have the teacher's scripts (result.scripts), /mock/checks/next
         self.capture_fail = os.environ.get('MOCK_CAPTURE_FAIL') == '1'
         self.stale = False
         self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
@@ -657,7 +659,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "purge", "maintenance", "random_ifnames", "extra_disks", "iso"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "purge", "maintenance", "random_ifnames", "extra_disks", "iso"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -1119,7 +1121,7 @@ CHECK_ALL_CODES = set(CHECK_RULES) | {  # every code of the catalog takes an ove
     "tag_not_allowed", "vlan_name_wrong", "vlan_extra_used", "mgmt_vlan_missing", "address_wrong", "mask_wrong",
     "address_misplaced", "address_apipa", "address_not_private", "address_duplicate", "subnet_overlap", "subnet_mixed",
     "address_not_saved", "config_not_applied", "gateway_missing", "forwarding_off", "forwarding_on_host",
-    "nat_missing"}
+    "nat_missing", "script_failed"}
 CHECK_DEFAULT_THRESHOLDS = [{"mark": 5, "critical": 0, "major": 0, "minor": 1},
                             {"mark": 4, "critical": 0, "major": 1, "minor": 3},
                             {"mark": 3, "critical": 0, "major": 3, "minor": None}]
@@ -1191,11 +1193,32 @@ def check_findings(m, s, grading):
     return findings
 
 
+def check_scripts(nodes):
+    """Teacher's scripts of a run (CONTRACTS §2.9 `result.scripts`): one passed, one failed, as the demo of the report."""
+    a, b = nodes[0], nodes[1 % len(nodes)]
+    return [
+        {"id": "web", "node": a, "status": "pass", "exit_code": 0, "stdout": "active\n200", "stderr": "",
+         "truncated": False, "duration_ms": 412},
+        {"id": "ping", "node": b, "status": "fail", "reason": "exit", "exit_code": 1, "stdout": "",
+         "stderr": "connect: Network is unreachable", "truncated": False, "duration_ms": 37},
+    ]
+
+
 def check_result(m, s, run):
     if run["_outcome"] == "incomplete":
         return {"outcome": "incomplete", "mark": None, "counts": dict.fromkeys(CHECK_CLASSES, 0),
                 "rules": [{"code": "vlan_wrong", "group": "l2", "status": "skipped", "reason": "stale_facts"}], "findings": []}
     findings = check_findings(m, s, run["grading"])
+    scripts = []
+    if run.get("_scripts"):
+        names = [n["name"] for n in m.labs[s.key]["doc"]["topology"]["nodes"]] or ["PC1"]
+        scripts = check_scripts(names)
+        failed = scripts[1]
+        cls = run["grading"]["overrides"].get("script_failed", "minor")
+        findings.append({"id": f"f{len(findings) + 1}", "code": "script_failed", "script_id": "ping", "group": "routing",
+                         "class": cls, "base_class": "minor", "counted": cls != "note", "caused_by": None,
+                         "nodes": [failed["node"]], "ifaces": [],
+                         "message": f"{failed['node']} видит сервер: код выхода 1, ожидался 0"})
     counts = dict.fromkeys(CHECK_CLASSES, 0)
     for f in findings:
         if f["caused_by"] is None:
@@ -1206,10 +1229,14 @@ def check_result(m, s, run):
             mark = row["mark"]
             break
     failed = {f["code"] for f in findings}
+    failed.discard("script_failed")
     rules = [{"code": code, "group": group, "status": "fail" if code in failed else "pass"}
              for code, (group, _) in CHECK_RULES.items()]
     rules.append({"code": "address_not_saved", "group": "addressing", "status": "skipped", "reason": "no_collector"})
-    return {"outcome": "graded", "mark": mark, "counts": counts, "rules": rules, "findings": findings}
+    if scripts:
+        rules.append({"code": "script_failed", "group": "host", "status": "fail"})
+    return {"outcome": "graded", "mark": mark, "counts": counts, "rules": rules, "findings": findings,
+            "scripts": scripts, "nonce": secrets.token_hex(8) if scripts else None}
 
 
 def present_run(m, s, run, full=True):
@@ -1228,7 +1255,7 @@ def present_run(m, s, run, full=True):
         status, err, result = ("queued" if age < CHECK_QUEUED_FOR else "running"), None, None
     finished = run["_created"] + CHECK_QUEUED_FOR + CHECK_RUNNING_FOR if run["_final"] is not None else None
     if result is not None and not full:
-        result = {k: v for k, v in result.items() if k not in ("findings", "rules")}
+        result = {k: v for k, v in result.items() if k not in ("findings", "rules", "scripts")}
     return {"schema": "gns3lab.check-run/1", "run_id": run["run_id"], "session_id": s.id, "status": status,
             "requested_by_user_id": run["requested_by_user_id"], "requested_at": iso(run["_created"]),
             "started_at": iso(run["_created"] + CHECK_QUEUED_FOR) if age >= CHECK_QUEUED_FOR else None,
@@ -1307,7 +1334,7 @@ async def start_check(request):
     if active:
         return error(409, "check_in_progress", "Проверка уже идёт", run_id=active["run_id"])
     run = {"run_id": "c-" + secrets.token_hex(8), "requested_by_user_id": by, "grading": grading,
-           "_created": time.time(), "_outcome": m.check_next or "graded", "_final": None}
+           "_created": time.time(), "_outcome": m.check_next or "graded", "_final": None, "_scripts": m.check_scripts}
     m.check_next = None
     s.check_runs.append(run)
     log.info("session %s: check %s by %s, %s", s.id, run["run_id"], by, run["_outcome"])
@@ -1332,7 +1359,9 @@ async def mock_check_next(request):
     m: Manager = request.app["m"]
     outcome = body.get("outcome")
     m.check_next = outcome if outcome in ("incomplete", "failed") else None
-    return web.json_response({"check_next": m.check_next})
+    if "scripts" in body:
+        m.check_scripts = body["scripts"] is True
+    return web.json_response({"check_next": m.check_next, "scripts": m.check_scripts})
 
 
 # ---------------------------------------------------------------- поддельный экран VNC (RFB 3.8)
