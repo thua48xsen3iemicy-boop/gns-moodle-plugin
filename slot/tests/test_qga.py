@@ -543,3 +543,78 @@ def test_shutdown_without_response_does_not_wait_or_poison_next_call(sockdir):
         assert agent.commands() == ["guest-shutdown", "guest-ping"]
         assert agent.connections == 2
     run(scenario, sockdir)
+
+
+def test_exec_runs_the_shell_of_the_guest_family_and_checks_the_asked_one(mock_server, monkeypatch):
+    """exec-shell (CONTRACTS 4.2): PowerShell on Windows, the `shell` field, EXEC_TIMEOUT, at most 64 KiB of output."""
+    client, _projects, nodes = mock_server
+    data = payload()
+    pid = data["project_id"]
+    assert wait(client, client.post("/v1/labs/deploy", json=data, headers=HEADERS))["status"] == "SUCCEEDED"
+    node_id = nodes[pid][0]["node_id"]
+    caps = client.get("/v1/capabilities", headers=HEADERS).json()
+    assert "exec-shell" in caps["features"]
+
+    class Broker:
+        seen = []
+        failure = None
+        answer = {"exit_code": 0, "stdout": "ok", "stderr": ""}
+
+        async def call(self, node, command, args=None, **options):
+            return {}
+
+        async def exec(self, node, command, **options):
+            self.seen.append((command, options["shell"]))
+            if self.failure:
+                raise self.failure
+            return dict(self.answer)
+
+        async def close(self):
+            pass
+
+    broker = Broker()
+    app.state.lifecycle.qga = broker
+    families = {node_id: "windows"}
+    monkeypatch.setattr(app.state.lifecycle, "guest_families", families)
+    url = f"/v1/labs/{pid}/nodes/{node_id}/qga/exec"
+
+    reply = client.post(url, json={"command": "Get-Service w32time"}, headers=HEADERS)
+    assert reply.status_code == 200 and reply.json() == {"exit_code": 0, "stdout": "ok", "stderr": ""}
+    assert broker.seen[-1] == ("Get-Service w32time", "powershell")
+    reply = client.post(url, json={"command": "uptime", "shell": "powershell"}, headers=HEADERS)
+    assert reply.status_code == 200
+
+    reply = client.post(url, json={"command": "uptime", "shell": "sh"}, headers=HEADERS)
+    assert reply.status_code == 409 and reply.json()["detail"]["code"] == "SHELL_MISMATCH"
+    assert broker.seen[-1][0] == "uptime" and len(broker.seen) == 2  # The guest never saw it
+    reply = client.post(url, json={"command": "uptime", "shell": "bash"}, headers=HEADERS)
+    assert reply.status_code == 422
+
+    families[node_id] = "posix"
+    reply = client.post(url, json={"command": "uptime", "shell": "sh"}, headers=HEADERS)
+    assert reply.status_code == 200 and broker.seen[-1] == ("uptime", "sh")
+    families[node_id] = "routeros"
+    reply = client.post(url, json={"command": ":put 1", "shell": "routeros"}, headers=HEADERS)
+    assert reply.status_code == 200 and broker.seen[-1] == (":put 1", "routeros")
+
+    broker.failure = qga.QgaExecTimeout("Guest command did not finish before timeout")
+    reply = client.post(url, json={"command": ":delay 99"}, headers=HEADERS)
+    assert reply.status_code == 504 and reply.json()["detail"]["code"] == "EXEC_TIMEOUT"
+    broker.failure = QgaTimeout("late")  # The channel, not the command: still 502
+    reply = client.post(url, json={"command": ":put 1"}, headers=HEADERS)
+    assert reply.status_code == 502
+
+    broker.failure = None
+    broker.answer = {"exit_code": 0, "stdout": "я" * 40000, "stderr": "e" * 10}
+    reply = client.post(url, json={"command": ":put 1"}, headers=HEADERS)
+    body = reply.json()
+    assert body["truncated"] is True and body["stdout"] == "я" * 32768 and body["stderr"] == "e" * 10
+
+
+def test_a_command_past_its_timeout_is_an_exec_timeout(sockdir):
+    async def scenario(agent, broker):
+        agent.polls["never"] = 10**6
+        with pytest.raises(qga.QgaExecTimeout):
+            await broker.exec("n1", "never", timeout=0.2)
+
+    run(scenario, sockdir)

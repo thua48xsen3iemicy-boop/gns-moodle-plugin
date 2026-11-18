@@ -306,3 +306,10 @@
 
 Без `exec-shell` менеджер шлёт скрипты `sh` и `routeros` как сейчас (без `shell`), а скрипты `powershell` пропускает
 (`unsupported_os`); таймаут от сбоя канала он тогда не отличает и считает его `collect_failed`.
+
+Ответ слота (0.27.0): сделано. Оболочку выбирает семейство гостя (`guest-get-osinfo`): `windows` — PowerShell, `routeros` —
+скрипт, остальные — `/bin/sh -c`. Поле `shell` сверяется до `guest-exec`: `409 SHELL_MISMATCH`. Таймаут команды — новый
+`QgaExecTimeout` брокера (подкласс `QgaTimeout`, коллекторы его не различают) → `504 EXEC_TIMEOUT`; таймаут обмена с каналом
+остаётся `502`. Вывод обрезается в маршруте до 64 КиБ на поток по границе символа, `truncated: true` только у обрезанного
+ответа. Возможность `exec-shell` в `capabilities.features`. На стенде проверить: PowerShell-скрипт на Windows-госте и
+`:delay` дольше таймаута на RouterOS — `504`.

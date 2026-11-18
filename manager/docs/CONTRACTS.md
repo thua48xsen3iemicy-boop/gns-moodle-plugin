@@ -1085,7 +1085,7 @@ QGA `guest-get-osinfo` → `id: "routeros"` (CHR 7.25.1: `name: "RouterOS"`, `va
   уже применены;
 - `POST …/serial/enable` — `409`.
 
-🆕 **Оболочка `qga/exec`** (возможность `exec-shell`, просьба `SLOT_REQUESTS.md` §9). Сейчас слот запускает `command` скриптом RouterOS
+🆕 **Оболочка `qga/exec`** (слот 0.27.0, возможность `exec-shell`, просьба `SLOT_REQUESTS.md` §9). До неё слот запускал `command` скриптом RouterOS
 у семейства `routeros` и через `/bin/sh -c` у всех остальных, в том числе у Windows. Со `exec-shell`: у семейства `windows` —
 PowerShell (`-NoProfile -NonInteractive -EncodedCommand`, как коллекторы §4.6); необязательное поле запроса `shell` (`sh` ·
 `powershell` · `routeros`) — сверка: не совпало с семейством гостя — `409` с `detail.code = "SHELL_MISMATCH"`, до гостя запрос не
@@ -1676,7 +1676,7 @@ node_id без самого источника, `timeout` — строгий int
 | `extra-disks` | слот | 🆕 (0.18.0) `NodeSpec.disks`: дополнительные пустые диски QEMU-узла (§4.2). Только при годном `blank.qcow2` в `/opt/gns3/images/QEMU`; менеджер и слот выпускаются вместе |
 | `uplink` | слот; менеджер | 🆕 `NodeSpec.uplink_port`: узел «Интернет», его внешний порт получает `SLOT_UPLINK_MAC` и подключается к `eth1` слота через облако GNS3 (§4.2). Только при заданном `SLOT_UPLINK_MAC` и наличии `eth1`; лаба с `uplink_port` выбирает только такие слоты. Менеджер не опрашивает слот (свободный слот — выключенный LXC): возможность записывает администратор в `slots.json` (`"features": ["uplink"]`, `lab-provision secrets` делает это при заданном `INET_BRIDGE`); сам слот в любом случае отклонит такую лабу `422` |
 | `check-scripts` | менеджер | 🆕 (0.31.0) поле `scripts` в `gns3lab.checks/1` и `result.scripts`, `result.nonce` прогона (§2.9). Плагин показывает поле скриптов в редакторе лабы только при ней |
-| `exec-shell` | слот | 🆕 (просьба `SLOT_REQUESTS.md` §9) `qga/exec`: PowerShell у Windows-гостя, поле `shell` со сверкой, вывод не больше 64 КиБ (§4.2). Без неё скрипты с `shell: "powershell"` — `skipped` с `unsupported_os` |
+| `exec-shell` | слот | 🆕 (0.27.0) `qga/exec`: PowerShell у Windows-гостя, поле `shell` со сверкой, вывод не больше 64 КиБ (§4.2). Без неё скрипты с `shell: "powershell"` — `skipped` с `unsupported_os` |
 | `student-state` | слот | 🆕 состояние лабы переносится вместе с каталогом студента (`/opt/gns3/projects`): проект продолжается в любом слоте. Без этой возможности межслотовый `resume` не включается |
 
 Новое имя добавляется в эту таблицу тем же изменением, что и код, который его объявляет.

@@ -548,7 +548,7 @@ netplan/networkd/NetworkManager пока `supported: false`); `hostname` в `win
 - [x] ~~Формат `scripts` в `gns3lab.checks/1`: узел, оболочка (`sh` / `powershell` / `routeros`), скрипт, `expect` (код
   выхода, регулярное выражение), группа и класс; пределы (число скриптов, таймаут, размер вывода). Внести в `CONTRACTS.md`
   §2.9~~ — утверждён 2026-11-18. Запрет (`unknown_field`) снимает менеджер с `check-scripts`.
-- [ ] Слот: `exec-shell` (`manager/docs/SLOT_REQUESTS.md` §9).
+- [x] ~~Слот: `exec-shell` (`manager/docs/SLOT_REQUESTS.md` §9)~~ — слот 0.27.0.
 - [x] ~~Менеджер: выполнение через `qga/exec` слота с приоритетом `COMMAND`, сравнение вывода на менеджере, находка
   `script_failed`, свой маркер в каждом запуске (§6)~~ — менеджер 0.31.0.
 - [ ] Плагин: поле скриптов в редакторе лабы, показ `script_failed` и `result.scripts` в отчёте (`manager/docs/PLUGIN_REQUESTS.md`).
