@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from . import ifnames, iosconfig, netconfig
 from . import checks as checks_mod
+from . import scripts as scripts_mod
 from . import segments as segments_mod
 from .images import EXTRA_DISK_GB, MAX_EXTRA_DISKS, PORTS_PER_ADAPTER, VPCS_MEMORY_MB
 
@@ -303,8 +304,15 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
 
     out_checks = None
     if fmt == FORMAT_2 and "checks" in lab:
+        script_nodes = {}
+        for name, node in by_name.items():
+            image = images.get(node.get("image"))
+            if image is not None:
+                script_nodes[name] = {"ok": image.kind == "qemu" and image.qga and image.uplink_port is None,
+                                      "family": scripts_mod.family_of(image.net_config)}
         out_checks, found = checks_mod.check_definition(
-            lab["checks"], {n.get("name") for n in nodes if isinstance(n, dict) and isinstance(n.get("name"), str)})
+            lab["checks"], {n.get("name") for n in nodes if isinstance(n, dict) and isinstance(n.get("name"), str)},
+            script_nodes=script_nodes)
         problems.extend(found)
 
     if problems:

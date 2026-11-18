@@ -212,3 +212,98 @@ async def test_check_runs_go_away_with_their_session(tmp_path, dsn):
                 "SELECT confdeltype FROM pg_constraint WHERE contype = 'f' AND confrelid = 'sessions'::regclass"
                 " AND conrelid = 'check_runs'::regclass")
             assert [r["confdeltype"] for r in await cur.fetchall()] == ["c"]
+
+
+SCRIPTS = [
+    {"id": "web", "title": "Веб-сервер на D1", "node": "D1", "run": "curl -s http://127.0.0.1/?n={{nonce}}",
+     "expect": {"exit": 0, "contains": ["{{nonce}}"]}},
+    {"id": "ping", "title": "D3 видит D1", "node": "D3", "run": "ping -c1 192.168.1.1", "timeout": 5,
+     "group": "routing", "class": "minor"},
+    {"id": "win", "title": "Служба на D4", "node": "D4", "shell": "powershell", "run": "Get-Service w32time",
+     "expect": {"match": "Running"}},
+]
+
+
+async def test_teacher_scripts_run_in_the_guests(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        for slot in env.slots.values():
+            slot.facts_enabled = True
+        with_checks(env, {**CHECKS, "scripts": SCRIPTS})
+        sid, slot, pid, ids = await started(env)
+        slot.facts[pid] = {ids[n]: {"name": n, "collectors": {"linux.net": host(a)}} for n, a in ADDRS}
+        env.orch._facts_next.clear()
+        await env.run(3)
+
+        def answer(node_id, body):
+            if node_id == ids["D1"]:  # Echoes the marker it was given: the real path works
+                return 200, {"exit_code": 0, "stdout": body["command"].rsplit("=", 1)[1] + "\n", "stderr": ""}
+            if node_id == ids["D3"]:
+                return 200, {"exit_code": 1, "stdout": "", "stderr": "Network is unreachable"}
+            return 200, {"exit_code": 0, "stdout": "Running", "stderr": ""}
+
+        slot.on_exec = answer
+        r = await env.client.post(f"/api/v1/sessions/{sid}/checks", json={"requested_by_user_id": 42})
+        run = r.json()
+        for _ in range(4):
+            await env.run(2)
+        done = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{run['run_id']}")).json()
+        assert done["status"] == "done", done
+        result = done["result"]
+        nonce = result["nonce"]
+        assert len(nonce) == 16
+        # Without exec-shell the slot gets no shell field, and a PowerShell script is not sent at all.
+        assert [(n, b) for _, n, b in slot.exec_requests] == [
+            (ids["D1"], {"command": f"curl -s http://127.0.0.1/?n={nonce}", "timeout_seconds": 20}),
+            (ids["D3"], {"command": "ping -c1 192.168.1.1", "timeout_seconds": 5})]
+        assert [(s["id"], s["status"], s.get("reason")) for s in result["scripts"]] == [
+            ("web", "pass", None), ("ping", "fail", "exit"), ("win", "skipped", "unsupported_os")]
+        assert result["scripts"][1]["stderr"] == "Network is unreachable"
+        failed = [f for f in result["findings"] if f["code"] == "script_failed"]
+        assert [(f["script_id"], f["class"], f["group"], f["nodes"]) for f in failed] == [
+            ("ping", "minor", "routing", ["D3"])]
+        assert {"code": "script_failed", "group": "host", "status": "fail"} in result["rules"]
+        listed = (await env.client.get(f"/api/v1/sessions/{sid}/checks")).json()["runs"]
+        assert "scripts" not in listed[0]["result"] and listed[0]["result"]["nonce"] == nonce
+        async with env.services.pool.connection() as conn:
+            cur = await conn.execute("SELECT extra_seconds FROM check_runs WHERE id = %s", (run["run_id"],))
+            assert (await cur.fetchone())["extra_seconds"] == 45
+
+        # A slot with exec-shell: the shell goes along, its timeout and mismatch codes are told apart.
+        slot.exec_shell = True
+        slot.exec_requests.clear()
+
+        def strict(node_id, body):
+            if node_id == ids["D1"]:
+                return 504, {"detail": {"code": "EXEC_TIMEOUT", "message": "timed out"}}
+            if node_id == ids["D4"]:
+                return 409, {"detail": {"code": "SHELL_MISMATCH", "message": "posix guest"}}
+            return 502, {"detail": "QGA error: QgaUnavailable: closed"}
+
+        slot.on_exec = strict
+        r = await env.client.post(f"/api/v1/sessions/{sid}/checks", json={"requested_by_user_id": 42})
+        for _ in range(4):
+            await env.run(2)
+        again = (await env.client.get(f"/api/v1/sessions/{sid}/checks/{r.json()['run_id']}")).json()
+        assert [b.get("shell") for _, _, b in slot.exec_requests] == [None, None, "powershell"]
+        assert [(s["status"], s.get("reason")) for s in again["result"]["scripts"]] == [
+            ("fail", "timeout"), ("skipped", "collect_failed"), ("skipped", "unsupported_os")]
+        # The ping script is outside no focus: its guest did not answer, so the run asks to check again.
+        assert again["result"]["outcome"] == "incomplete" and again["result"]["mark"] is None
+        assert again["result"]["nonce"] != nonce
+
+
+async def test_a_run_with_scripts_times_out_later(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        sid, *_ = await started(env)
+        store = env.services.store
+        run = await store.create_check_run(sid, 42, {})
+        await store.start_check_run(run["id"])
+        await store.extend_check_run(run["id"], 3600)
+        async with env.services.pool.connection() as conn:
+            await conn.execute("UPDATE check_runs SET requested_at = now() - interval '10 minutes' WHERE id = %s",
+                               (run["id"],))
+        await store.fail_orphan_check_runs(120)
+        assert (await store.check_run(sid, run["id"]))["status"] == "running"
+        await store.extend_check_run(run["id"], 0)
+        await store.fail_orphan_check_runs(120)
+        assert (await store.check_run(sid, run["id"]))["status"] == "failed"

@@ -15,6 +15,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from . import scripts as scripts_mod
 from . import segments as segments_mod
 from .netmodel import Model
 
@@ -104,6 +105,7 @@ CAUSES = {
 NETWORK_GROUPS = ("addressing", "gateways", "routing")  # What `network: off` turns off
 INTERNET_PROBE = ipaddress.IPv4Address("8.8.8.8")  # An address outside every lab: where a route to the internet leads
 ORDER = list(RULES)  # Findings are reported in catalog order: lower layers first
+SCRIPT_RULE = "script_failed"  # The findings of the teacher's scripts (scripts.py); its row in `rules` is in group host
 
 DEFAULT_THRESHOLDS = (
     {"mark": 5, "critical": 0, "major": 0, "minor": 1},
@@ -129,10 +131,11 @@ def digest(checks: dict | None):
 # ---------------------------------------------------------------------- gns3lab.checks/1
 
 
-def check_definition(raw, node_names: set, prefix="checks"):
+def check_definition(raw, node_names: set, prefix="checks", script_nodes: dict | None = None):
     """Validate and normalize a `gns3lab.checks/1` document. Returns (normalized, problems).
 
     problems: [{"path", "code", "message"}], paths below `prefix`. Unknown fields at any level are refused.
+    script_nodes: node name -> {"ok", "family"} for the nodes a script may run on (scripts.check); None skips that.
     """
     problems = []
 
@@ -147,7 +150,7 @@ def check_definition(raw, node_names: set, prefix="checks"):
         problem("", "bad_type", "object expected")
         return None, problems
     keys(raw, {"format", "focus", "persistence", "nodes", "addresses", "groups", "switches", "reachability", "rules",
-               "network"}, "")
+               "network", "scripts"}, "")
     out = {"format": FORMAT}
     if raw.get("format") != FORMAT:
         problem("format", "required" if "format" not in raw else "bad_type", FORMAT)
@@ -362,6 +365,11 @@ def check_definition(raw, node_names: set, prefix="checks"):
                     norm[code] = "off"
             if norm:
                 out["rules"] = norm
+
+    if "scripts" in raw:
+        items = scripts_mod.check(raw["scripts"], node_names, script_nodes, problem)
+        if items:
+            out["scripts"] = items
     return (None if problems else out), problems
 
 
@@ -373,7 +381,7 @@ def normalize_grading(raw):
         raise ValueError(f"grading.profile: one of {', '.join(PROFILES)}")
     overrides = raw.get("overrides") or {}
     for code, cls in overrides.items():
-        if code not in RULES:
+        if code not in RULES and code != SCRIPT_RULE:
             raise ValueError(f"grading.overrides: unknown rule {code[:64]}")
         if cls not in CLASSES:
             raise ValueError(f"grading.overrides.{code}: one of {', '.join(CLASSES)}")
@@ -1725,8 +1733,12 @@ def finish(run: Run, checks: dict):
 STEP = {"note": "minor", "minor": "major", "major": "critical", "critical": "critical"}
 
 
-def grade(rules: list, findings: list, grading: dict, checks: dict | None):
-    """The `result` of a run: outcome, mark, counts, rules, findings as JSON."""
+def grade(rules: list, findings: list, grading: dict, checks: dict | None, scripts: list | None = None,
+          nonce: str | None = None):
+    """The `result` of a run: outcome, mark, counts, rules, findings as JSON.
+
+    scripts: `result.scripts` of the run (scripts.run), in the order of `checks.scripts`.
+    """
     focus = set((checks or {}).get("focus") or [])
     profile = PROFILES.index(grading["profile"])
     counts = {cls: 0 for cls in CLASSES}
@@ -1742,6 +1754,37 @@ def grade(rules: list, findings: list, grading: dict, checks: dict | None):
                     "caused_by": f.caused_by, "nodes": f.nodes, "ifaces": f.ifaces, "message": f.message})
     watched = [r for r in rules if not focus or r["group"] in focus]
     incomplete = any(r["status"] == "skipped" and r.get("reason") in TRANSIENT for r in watched)
+    rules = list(rules)
+    defined = (checks or {}).get("scripts") or []
+    if defined and scripts is not None:
+        stopped = {}
+        for f in out:
+            if f["code"] == "node_stopped":
+                for name in f["nodes"]:
+                    stopped.setdefault(name, f["id"])
+        for script, result in zip(defined, scripts):
+            group = script["group"]
+            if result["status"] == "skipped":
+                incomplete |= result.get("reason") in TRANSIENT and (not focus or group in focus)
+                continue
+            if result["status"] != "fail":
+                continue
+            base = script["class"]
+            cls = grading["overrides"].get(SCRIPT_RULE) or (STEP[base] if group in focus else base)
+            caused_by = stopped.get(script["node"]) if result.get("reason") == "node_stopped" else None
+            if caused_by is None:
+                counts[cls] += 1
+            out.append({"id": f"f{len(out) + 1}", "code": SCRIPT_RULE, "script_id": script["id"], "group": group,
+                        "class": cls, "base_class": base, "counted": caused_by is None and cls != "note",
+                        "caused_by": caused_by, "nodes": [script["node"]], "ifaces": [],
+                        "message": scripts_mod.message(script, result)})
+        statuses = [r["status"] for r in scripts]
+        if "fail" in statuses:
+            rules.append({"code": SCRIPT_RULE, "group": "host", "status": "fail"})
+        elif "pass" in statuses:
+            rules.append({"code": SCRIPT_RULE, "group": "host", "status": "pass"})
+        else:
+            rules.append({"code": SCRIPT_RULE, "group": "host", "status": "skipped", "reason": scripts[0].get("reason")})
     mark = None
     if not incomplete:
         mark = grading["fail_mark"]
@@ -1750,11 +1793,13 @@ def grade(rules: list, findings: list, grading: dict, checks: dict | None):
                 mark = row["mark"]
                 break
     return {"outcome": "incomplete" if incomplete else "graded", "mark": mark, "counts": counts,
-            "rules": rules, "findings": out}
+            "rules": rules, "findings": out, "scripts": list(scripts or []) if defined else [],
+            "nonce": nonce if defined else None}
 
 
 def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict | None, images: dict,
-               checks: dict | None, grading: dict, stale: set, now=None, consoles=None) -> dict:
+               checks: dict | None, grading: dict, stale: set, now=None, consoles=None, scripts: list | None = None,
+               nonce: str | None = None) -> dict:
     """Everything a run needs, in one call: the `result` document of CONTRACTS.md §2.9.
 
     consoles: node_id -> console_type as the plugin sees it; nodes with `none` (ISP, Linux switch) are service nodes
@@ -1770,7 +1815,7 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
                                persistence=persistence_of(model, definition, images, checks),
                                isp_lans=uplink_lans(model, roles, definition, images),
                                isp_nodes=isp_nodes_of(model, definition, images))
-    return grade(rules, findings, grading, checks)
+    return grade(rules, findings, grading, checks, scripts, nonce)
 
 
 def with_unsaved_iol(model: Model, roles: dict, state: dict):

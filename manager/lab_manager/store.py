@@ -639,6 +639,12 @@ class Store:
                 ("failed" if error is not None else "done", Jsonb(result) if result is not None else None,
                  Jsonb(error) if error is not None else None, facts_rev, checks_def, run_id))
 
+    async def extend_check_run(self, run_id, seconds):
+        """Give a run in progress `seconds` more before it times out (the timeouts of its scripts)."""
+        async with self.pool.connection() as conn:
+            await conn.execute("UPDATE check_runs SET extra_seconds = %s WHERE id = %s AND status = 'running'",
+                               (seconds, run_id))
+
     async def fail_orphan_check_runs(self, timeout_seconds):
         """Runs in progress whose session is no longer running, or that took longer than the timeout."""
         async with self.pool.connection() as conn:
@@ -646,7 +652,7 @@ class Store:
                 "UPDATE check_runs c SET status = 'failed', finished_at = now(), error = CASE"
                 " WHEN s.status = 'running' THEN %s::jsonb ELSE %s::jsonb END"
                 " FROM sessions s WHERE s.id = c.session_id AND c.status IN ('queued', 'running')"
-                " AND (s.status <> 'running' OR c.requested_at < now() - make_interval(secs => %s))",
+                " AND (s.status <> 'running' OR c.requested_at < now() - make_interval(secs => %s + c.extra_seconds))",
                 (Jsonb({"code": "TIMEOUT", "message": "Проверка не завершилась вовремя"}),
                  Jsonb({"code": "CHECK_FAILED", "message": "Лаба остановлена до окончания проверки"}),
                  timeout_seconds))

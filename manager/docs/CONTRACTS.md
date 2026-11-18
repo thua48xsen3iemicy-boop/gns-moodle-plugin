@@ -706,7 +706,7 @@ Windows) — `skipped` с `no_collector`. Путь в интернет — по 
   решает плагин.
 - Прогоны студента в элементе курса, лимит попыток и запись в журнал оценок Moodle — забота плагина.
 
-🆕 **Свои скрипты преподавателя: `scripts`** (этап 4, формат утверждён владельцем 2026-11-18; менеджер — в работе,
+🆕 **Свои скрипты преподавателя: `scripts`** (этап 4, формат утверждён владельцем 2026-11-18; менеджер 0.31.0,
 возможность `check-scripts` в `info.features`). Проект — `docs/autochecks/README.md` §7. Скрипт выполняется в госте ноды через
 `qga/exec` слота (§4.2), вывод сравнивает менеджер.
 
@@ -732,8 +732,9 @@ Windows) — `skipped` с `no_collector`. Путь в интернет — по 
 - **Выполнение.** После ожидания свежих фактов, до расчёта правил, по одному в порядке массива: `POST …/qga/exec` с `command`,
   `timeout_seconds` = `timeout` скрипта и `shell`, если он задан.
 - **Сравнение.** `stdout`: `\r\n` → `\n`, пробельные символы в конце отрезаются, сравниваются первые 64 КиБ. `stderr` не сравнивается.
-- **Класс.** `class` скрипта, профиль не действует; `grading.overrides["script_failed"]` заменяет его у всех скриптов, затем
-  `focus` поднимает на ступень, если `group` скрипта в `focus`.
+- **Класс.** `class` скрипта, профиль не действует; `focus` поднимает его на ступень, если `group` скрипта в `focus`.
+  `grading.overrides["script_failed"]` (код допустим в `overrides`) задаёт класс всех скриптов, и `focus` его уже не поднимает —
+  как у правил.
 
 `result.scripts[]` — по строке на скрипт, в порядке массива (в `GET …/checks` списком прогонов не отдаётся, как `findings`):
 
@@ -741,7 +742,7 @@ Windows) — `skipped` с `no_collector`. Путь в интернет — по 
 |---|---|
 | `id`, `node` | из скрипта |
 | `status` | `pass` · `fail` · `skipped` |
-| `reason` | у `fail`: `exit` (код выхода не тот), `mismatch` (вывод не прошёл `match`/`contains`/`not_contains`), `timeout` (не уложился: `504 EXEC_TIMEOUT` слота с `exec-shell`), `node_stopped` (нода остановлена). У `skipped`: `collect_failed` (агент гостя не ответил, слот недоступен) — временная причина, как в §3 проекта: если `group` скрипта в `focus` или `focus` пуст, `outcome: "incomplete"`; `unsupported_os` (семейство гостя не совпало с `shell` — `409 SHELL_MISMATCH` слота, или слот без `exec-shell` и `shell: "powershell"`) |
+| `reason` | у `fail`: `exit` (код выхода не тот), `mismatch` (вывод не прошёл `match`/`contains`/`not_contains`), `timeout` (не уложился: `504 EXEC_TIMEOUT` слота с `exec-shell`; без неё таймаут не отличить от сбоя канала — `collect_failed`), `node_stopped` (нода остановлена). У `skipped`: `collect_failed` (агент гостя не ответил, слот недоступен) — временная причина, как в §3 проекта: если `group` скрипта в `focus` или `focus` пуст, `outcome: "incomplete"`; `unsupported_os` (семейство гостя не совпало с `shell` — `409 SHELL_MISMATCH` слота, или слот без `exec-shell` и `shell: "powershell"`) |
 | `exit_code` | int или `null`, если скрипт не выполнился |
 | `stdout`, `stderr` | первые 2048 и 1024 байта (UTF-8, по границе символа); `""`, если не выполнился |
 | `truncated` | `true`, если `stdout` или `stderr` обрезаны здесь или слотом |
@@ -1674,7 +1675,7 @@ node_id без самого источника, `timeout` — строгий int
 | `extra_disks` | менеджер | 🆕 (0.22.0) поле ноды `disks` в определении лабы, `extra_disks` образов и `limits.max_disk_gb` (§2.1, §2.6) |
 | `extra-disks` | слот | 🆕 (0.18.0) `NodeSpec.disks`: дополнительные пустые диски QEMU-узла (§4.2). Только при годном `blank.qcow2` в `/opt/gns3/images/QEMU`; менеджер и слот выпускаются вместе |
 | `uplink` | слот; менеджер | 🆕 `NodeSpec.uplink_port`: узел «Интернет», его внешний порт получает `SLOT_UPLINK_MAC` и подключается к `eth1` слота через облако GNS3 (§4.2). Только при заданном `SLOT_UPLINK_MAC` и наличии `eth1`; лаба с `uplink_port` выбирает только такие слоты. Менеджер не опрашивает слот (свободный слот — выключенный LXC): возможность записывает администратор в `slots.json` (`"features": ["uplink"]`, `lab-provision secrets` делает это при заданном `INET_BRIDGE`); сам слот в любом случае отклонит такую лабу `422` |
-| `check-scripts` | менеджер | 🆕 (этап 4, в работе) поле `scripts` в `gns3lab.checks/1` и `result.scripts`, `result.nonce` прогона (§2.9). Плагин показывает поле скриптов в редакторе лабы только при ней |
+| `check-scripts` | менеджер | 🆕 (0.31.0) поле `scripts` в `gns3lab.checks/1` и `result.scripts`, `result.nonce` прогона (§2.9). Плагин показывает поле скриптов в редакторе лабы только при ней |
 | `exec-shell` | слот | 🆕 (просьба `SLOT_REQUESTS.md` §9) `qga/exec`: PowerShell у Windows-гостя, поле `shell` со сверкой, вывод не больше 64 КиБ (§4.2). Без неё скрипты с `shell: "powershell"` — `skipped` с `unsupported_os` |
 | `student-state` | слот | 🆕 состояние лабы переносится вместе с каталогом студента (`/opt/gns3/projects`): проект продолжается в любом слоте. Без этой возможности межслотовый `resume` не включается |
 

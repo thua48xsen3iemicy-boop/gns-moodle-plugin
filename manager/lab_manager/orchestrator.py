@@ -52,6 +52,7 @@ from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotSt
                            AgentRejected, AgentSourceMissing, AgentUncertain, AgentWrongNode)
 from . import checks as checks_mod
 from . import labdef
+from . import scripts as scripts_mod
 from .facts import build_state, parse_slot_facts
 from .labs import LabError, deploy_ticket
 from .proxmox import PveApiError, PveError
@@ -72,6 +73,7 @@ NODE_STATUSES = {"started", "stopped", "suspended"}
 UNREFRESHED_COLLECTORS = frozenset({"iol.l1"})
 # A collector this far behind the newest one of its node is no longer published by the slot (CONTRACTS 4.6).
 ABANDONED_COLLECTOR = timedelta(minutes=5)
+CHECK_FAILED = {"code": "CHECK_FAILED", "message": "Проверка не выполнена из-за ошибки"}
 CHECK_REASK = 6  # Seconds between the requests of a check run to collect now: over the slot's 5 s rate limit
 
 # The CT may be running with the student's directory mounted read-write.
@@ -239,6 +241,7 @@ class Orchestrator:
         self._facts_next: dict[str, float] = {}  # session id -> monotonic time of the next read
         self._facts_refreshed: dict[str, object] = {}  # session id -> facts_refresh_at already served
         self._check_asked: dict[str, float] = {}  # session id -> monotonic time a check run last asked the slot
+        self._scripted: dict[str, str] = {}  # session id -> the check run whose scripts were started (run once)
         self._live_cache: dict[str, tuple[float, dict]] = {}
         self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
         self._iso: dict[str, dict] = {}  # session id -> iso_nodes()
@@ -567,6 +570,7 @@ class Orchestrator:
         self._facts_next.pop(s["id"], None)
         self._facts_refreshed.pop(s["id"], None)
         self._check_asked.pop(s["id"], None)
+        self._scripted.pop(s["id"], None)
         self._consoleless.pop(s["id"], None)
         self._guest_facts.pop(s["id"], None)
         self._iso.pop(s["id"], None)
@@ -1112,16 +1116,21 @@ class Orchestrator:
                 self._facts_next[sid] = min(self._facts_next.get(sid, mono + 3), mono + 3)
                 return
             self._check_asked.pop(sid, None)
-            fresh = await self.store.session(sid)
+            if self._scripted.get(sid) == run["id"]:
+                return  # The teacher's scripts of this run are running, or ran and the run is being finished
             try:
-                result, checks_def = await self._grade_checks(s, run, rows, statuses, stale, nodes)
+                lab = await self._checks_of(s)
             except Exception:  # noqa: BLE001 - a broken run must not break the session
                 log.exception("Check %s of session %s failed", run["id"], sid)
-                await self.store.finish_check_run(run["id"], error={"code": "CHECK_FAILED",
-                                                                    "message": "Проверка не выполнена из-за ошибки"})
+                await self.store.finish_check_run(run["id"], error=CHECK_FAILED)
                 return
-            await self.store.finish_check_run(run["id"], result=result, facts_rev=fresh["facts_rev"],
-                                              checks_def=checks_def)
+            if (lab[2] or {}).get("scripts"):
+                # Scripts take up to minutes: they run beside the session, which keeps answering stop and the rest.
+                self._scripted[sid] = run["id"]
+                self._tasks["check:" + sid] = asyncio.create_task(
+                    self._scripted_check(s, run, rows, statuses, stale, nodes, lab))
+                return
+            await self._finish_check(s, run, rows, statuses, stale, nodes, lab)
         except SlotOwnerLost:
             raise
         except psycopg.Error as exc:
@@ -1138,8 +1147,8 @@ class Orchestrator:
             log.warning("Check %s: facts refresh failed: %s", run["id"], exc)
         self._facts_next[s["id"]] = time.monotonic() + 3  # Time for the slot to collect
 
-    async def _grade_checks(self, s, run, rows, statuses, stale, nodes):
-        """(result, checks_def) of a run over the stored facts of the session."""
+    async def _checks_of(self, s):
+        """(definition, images, checks) of the lab of a session: what its runs are graded by."""
         definition, images, checks = None, {}, None
         if s["lab_def"]:
             ws = await self.store.workspace(s["workspace_id"])
@@ -1148,11 +1157,68 @@ class Orchestrator:
             checks = definition.get("checks")
         else:
             checks = (await asyncio.to_thread(self.catalog.get, s["lab_ref"])).checks
+        return definition, images, checks
+
+    async def _finish_check(self, s, run, rows, statuses, stale, nodes, lab, scripts=None, nonce=None):
+        fresh = await self.store.session(s["id"])
+        try:
+            result, checks_def = await self._grade_checks(s, run, rows, statuses, stale, nodes, lab, scripts, nonce)
+        except Exception:  # noqa: BLE001 - a broken run must not break the session
+            log.exception("Check %s of session %s failed", run["id"], s["id"])
+            await self.store.finish_check_run(run["id"], error=CHECK_FAILED)
+            return
+        await self.store.finish_check_run(run["id"], result=result, facts_rev=fresh["facts_rev"],
+                                          checks_def=checks_def)
+
+    async def _scripted_check(self, s, run, rows, statuses, stale, nodes, lab):
+        """Run the teacher's scripts of a run in the guests (CONTRACTS 2.9 `scripts`), then grade it."""
+        scripts = lab[2]["scripts"]
+        try:
+            await self.store.extend_check_run(run["id"], sum(x["timeout"] for x in scripts))
+            client = self._slot(s)
+            project_id = str(s["project_id"])
+            try:
+                exec_shell = "exec-shell" in ((await client.capabilities()).get("features") or [])
+            except SlotOwnerLost:
+                raise
+            except SlotError:
+                exec_shell = False
+
+            async def execute(node_id, command, timeout, shell):
+                try:
+                    return await client.qga_exec(project_id, node_id, command, timeout, shell)
+                except SlotOwnerLost:
+                    raise
+                except SlotError as exc:
+                    if exc.status == 504 and exc.code == "EXEC_TIMEOUT":
+                        raise scripts_mod.ScriptError("timeout") from exc
+                    if exc.status == 409 and exc.code == "SHELL_MISMATCH":
+                        raise scripts_mod.ScriptError("shell_mismatch") from exc
+                    log.warning("Check %s: script in node %s: %s", run["id"], node_id, exc)
+                    raise scripts_mod.ScriptError("unavailable") from exc
+
+            nonce = scripts_mod.new_nonce()
+            node_ids = {n["name"]: n["node_id"] for n in s["topology"]["topology"]["nodes"]}
+            results = await scripts_mod.run(scripts, nonce=nonce, node_ids=node_ids, statuses=statuses,
+                                            exec_shell=exec_shell, execute=execute)
+        except SlotOwnerLost:
+            await self.store.finish_check_run(run["id"], error={
+                "code": "SLOT_UNAVAILABLE", "message": "Слот не принял команду: проверка не выполнена"})
+            return
+        except Exception:  # noqa: BLE001 - a broken run must not break the session
+            log.exception("Scripts of check %s of session %s failed", run["id"], s["id"])
+            await self.store.finish_check_run(run["id"], error=CHECK_FAILED)
+            return
+        await self._finish_check(s, run, rows, statuses, stale, nodes, lab, results, nonce)
+
+    async def _grade_checks(self, s, run, rows, statuses, stale, nodes, lab, scripts=None, nonce=None):
+        """(result, checks_def) of a run over the stored facts of the session."""
+        definition, images, checks = lab
         state = build_state(0, rows, statuses, self.settings.facts_ttl)
         result = await asyncio.to_thread(
             checks_mod.run_checks, topology=s["topology"], state=state, statuses=statuses, definition=definition,
             images=images, checks=checks, grading=run["grading"], stale=stale, now=now(),
-            consoles={node_id: n.get("console_type") for node_id, n in nodes.items()})
+            consoles={node_id: n.get("console_type") for node_id, n in nodes.items()}, scripts=scripts, nonce=nonce)
         return result, checks_mod.digest(checks)
 
     # ------------------------------------------------------------------ stopping

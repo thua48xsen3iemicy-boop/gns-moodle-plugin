@@ -347,6 +347,10 @@ class FakeSlot:
         self.shutdown_errors = {}
         self.refreshes = []  # project ids the manager asked to collect now
         self.on_refresh = None  # callable(project_id): what the slot does on a refresh (collects, drops it...)
+        self.exec_shell = False  # exec-shell (CONTRACTS 4.2): PowerShell for Windows, `shell`, EXEC_TIMEOUT
+        self.exec_requests = []  # (project_id, node_id, body) of POST .../qga/exec
+        # callable(node_id, body) -> (status, body) of POST .../qga/exec; by default every command succeeds
+        self.on_exec = lambda node_id, body: (200, {"exit_code": 0, "stdout": "", "stderr": ""})
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -435,7 +439,8 @@ class FakeSlot:
         assert request.headers["Authorization"] == "Bearer " + "a" * 40
         if path == "/v1/capabilities":
             return self._json(200, {"features": (["guest-shutdown"] if self.guest_shutdown else [])
-                                    + (["iso-mount"] if self.iso_mount else [])})
+                                    + (["iso-mount"] if self.iso_mount else [])
+                                    + (["exec-shell"] if self.exec_shell else [])})
         if path == "/v1/readyz":
             self.timeline.append(("slot:readyz", self.ready))
             return self._json(200 if self.ready else 503,
@@ -466,6 +471,12 @@ class FakeSlot:
                   "iso_targets": body["targets"]}
             self.ops[oid] = op
             return self._json(202, self._present(op))
+        qga = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/nodes/([0-9a-f-]+)/qga/exec", path)
+        if qga:
+            body = json.loads(request.content)
+            self.exec_requests.append((*qga.groups(), body))
+            status, answer = self.on_exec(qga.group(2), body)
+            return self._json(status, answer)
         shutdown = re.fullmatch(r"/v1/labs/([0-9a-f-]+)/nodes/([0-9a-f-]+)/shutdown", path)
         if shutdown:
             if not self.shutdown_route:

@@ -1,4 +1,14 @@
-# Lab Manager — 0.30.0
+# Lab Manager — 0.31.0
+
+0.31.0: свои скрипты преподавателя в автопроверке (`../docs/autochecks/README.md` §7, CONTRACTS §2.9 `scripts`). Поле `scripts`
+в `gns3lab.checks/1`: скрипт, нода, оболочка, `expect` (код выхода, `match` — RE2, `contains`, `not_contains`), группа и класс;
+до 20 скриптов, до 60 с на скрипт и 120 с на все. Прогон после сбора свежих фактов выполняет их по одному через `qga/exec`
+слота, в фоновой задаче рядом с сессией, подставляет маркер прогона `{{nonce}}` и сравнивает вывод; результат —
+`result.scripts`, `result.nonce` и находки `script_failed`. Возможность `check-scripts` в `info.features`. Слот без `exec-shell`
+(`docs/SLOT_REQUESTS.md` §9) получает команды без поля `shell`, скрипты PowerShell тогда пропускаются (`unsupported_os`).
+Новая зависимость `google-re2` (выражения преподавателя без экспоненциального перебора) и миграция `015_check_run_scripts.sql`
+(`extra_seconds`: прогон со скриптами получает `TIMEOUT` позже на сумму их таймаутов) —
+`python -m lab_manager.admin migrate` перед запуском.
 
 0.30.0: ISO из каталога гостя (CONTRACTS §2.12, §4.7). Поля каталога образов `iso_source` (каталог гостя, из которого студент
 собирает ISO) и `iso_target` (ноды образа принимают ISO в CD-ROM); в сессии — `features` с `iso` и поле `iso` с источниками и
