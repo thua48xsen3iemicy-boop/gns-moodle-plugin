@@ -22,7 +22,7 @@
  * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
-import {svgEl as el} from 'mod_gns3lab/dom';
+import {svgEl as el, store} from 'mod_gns3lab/dom';
 import {clamp, isHost} from 'mod_gns3lab/model';
 import {factsStatus, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 import {PILL_H, canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
@@ -97,6 +97,37 @@ export class CanvasView {
         // button appears once the checks state arrives or a counter grows a digit.
         const actions = stage.r('canvasActions');
         if (actions && window.ResizeObserver) new ResizeObserver(() => { if (this.hudBg) this.renderHud(); }).observe(actions);
+        // The HUD (layers, overview, assignment, facts) slides beyond the left edge; a tongue there brings it back.
+        this.hudOff = store.get('hudoff', false) === true;
+        const fold = stage.r('hudFold'), tongue = stage.r('hudTongue');
+        if (fold && tongue) {
+            fold.onclick = () => this.setHudOff(true);
+            tongue.onclick = () => this.setHudOff(false);
+            this.applyHud();
+        }
+    }
+
+    /**
+     * Hides the HUD beyond the left edge of the scheme or brings it back; the choice is kept in the browser.
+     *
+     * @param {boolean} off true hides the HUD
+     */
+    setHudOff(off) {
+        if (this.hudOff === off) return;
+        this.hudOff = off;
+        store.set('hudoff', off);
+        this.applyHud();
+        const s = this.stage;
+        if (off) s.r('hudTongue').focus({preventScroll: true});
+        else s.r('hudFold').focus({preventScroll: true});
+    }
+
+    applyHud() {
+        const s = this.stage, fold = s.r('hudFold');
+        s.wrap.classList.toggle('hud-off', this.hudOff);
+        if (fold) fold.setAttribute('aria-expanded', String(!this.hudOff));
+        const layer = s.r('hudTongueLayer');
+        if (layer) layer.textContent = String(s.layer || '').toUpperCase();
     }
 
     reset() {
@@ -488,11 +519,15 @@ export class CanvasView {
             });
             const note = text('hud-note', 29, 94, layerHelp(s, s.layer));
             const measure = t => { try { return t.getComputedTextLength(); } catch (e) { return 0; } };
-            this.hudW = clamp(Math.max(4 * bw + 3 * gap, measure(kicker), measure(note), natural) + 30, 200, maxW);
+            // The kicker row also holds the button that hides the HUD at its right end.
+            this.hudW = clamp(Math.max(4 * bw + 3 * gap, measure(kicker) + 30, measure(note), natural) + 30, 200, maxW);
             bg.setAttribute('width', this.hudW);
             this.hudBg = bg;
         }
         if (tools) tools.style.width = (this.hudW - 30) + 'px';
+        const fold = s.r('hudFold');
+        if (fold) fold.style.left = (14 + this.hudW - 36) + 'px';
+        this.applyHud();
         const height = TOOLS_TOP - 14 + (tools ? tools.offsetHeight + 12 : 0);
         this.hudBg.setAttribute('height', height);
         s.hudBottom = 14 + height;
@@ -569,7 +604,9 @@ export class CanvasView {
         s.r('factStatus').dataset.state = status.state;
         s.r('canvasFacts').textContent = status.text;
         s.r('issueCount').textContent = layerIssues(s).length;
-        s.r('canvasRefresh').disabled = !s.factsLive || !s.liveDoc;
+        // While the page waits for the facts it asked for, the button stays busy (lab.js paintRefresh).
+        const refresh = s.r('canvasRefresh');
+        refresh.disabled = !s.factsLive || !s.liveDoc || refresh.dataset.state === 'busy';
         // After the texts above: the HUD measures them.
         this.renderHud();
         this.positionSubnets();
