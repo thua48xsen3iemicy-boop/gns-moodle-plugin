@@ -1,0 +1,145 @@
+"""Window size of the browser terminal for the serial console of a Linux guest (CONTRACTS.md §6.1).
+
+A Linux guest on ttyS0 takes its screen for 80x24 while the terminal in the browser fits its window: nano and other
+full-screen programs then draw past a smaller window and the student edits another line than the one on the screen.
+The console gateway sends the size of the window (`{"resize": {"cols", "rows"}}` over lab-slot.2); the slot sets it on
+the guest's ttyS0 through QGA (`stty`), and the kernel tells the program on the screen (SIGWINCH).
+
+Per node, only the last size matters: a frame waits for SLOT_WINSIZE_DELAY seconds of quiet, and while a command runs
+the next frames are only remembered, so a node never has more than one size command in the QGA queue. After a logout
+serial-getty starts again and the guest may be back to 80x24: input re-applies the last size when SLOT_WINSIZE_REFRESH
+seconds have passed since the previous attempt. Failures leave the console alone and are only logged.
+"""
+import asyncio
+import json
+import logging
+import os
+import time
+
+from api.qga import Priority
+
+log = logging.getLogger("lab-slot.winsize")
+
+MAX_SIZE = 1000
+SERIAL = "/dev/ttyS0"  # the console of serial-getty (api/nodes.py, Lifecycle.provision)
+TIMEOUT = 5.0  # the queue and the command together
+
+
+def delay():
+    return float(os.getenv("SLOT_WINSIZE_DELAY", "0.25"))
+
+
+def refresh():
+    return float(os.getenv("SLOT_WINSIZE_REFRESH", "30"))
+
+
+def parse_control(text):
+    """(cols, rows) of a `{"resize": {"cols", "rows"}}` control frame, None for anything else."""
+    try:
+        frame = json.loads(text)
+    except ValueError:
+        return None
+    size = frame.get("resize") if isinstance(frame, dict) else None
+    if not isinstance(size, dict):
+        return None
+    cols, rows = size.get("cols"), size.get("rows")
+    if not all(type(v) is int and 1 <= v <= MAX_SIZE for v in (cols, rows)):  # bool is not a size
+        return None
+    return cols, rows
+
+
+def command(cols, rows):
+    return f"stty -F {SERIAL} rows {int(rows)} cols {int(cols)}"
+
+
+class _Node:
+    __slots__ = ("pid", "size", "changed", "dirty", "tried", "worker", "consoles")
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.size = None  # (cols, rows) last asked for
+        self.changed = 0.0  # monotonic time of the last change: the quiet pause counts from it
+        self.dirty = False  # a size waits to be applied
+        self.tried = None  # monotonic time of the last attempt
+        self.worker = None
+        self.consoles = 0
+
+
+class WindowSizes:
+    """The window size of each node's serial console, applied to the guest one command at a time."""
+
+    def __init__(self):
+        self.nodes = {}
+
+    def opened(self, pid, node_id):
+        entry = self.nodes.get(node_id)
+        if entry is None or entry.pid != pid:
+            entry = self.nodes[node_id] = _Node(pid)
+        entry.consoles += 1
+
+    def closed(self, node_id):
+        entry = self.nodes.get(node_id)
+        if entry is None:
+            return
+        entry.consoles -= 1
+        if entry.consoles <= 0 and entry.worker is None:
+            del self.nodes[node_id]
+
+    def resize(self, lifecycle, node_id, cols, rows):
+        """A new size from a console of the node: applied after the quiet pause."""
+        entry = self.nodes.get(node_id)
+        if entry is None:
+            return
+        entry.size = (cols, rows)
+        entry.changed = time.monotonic()
+        entry.dirty = True
+        self._start(lifecycle, node_id, entry)
+
+    def touch(self, lifecycle, node_id):
+        """Input in a console of the node: re-applies the last size once in SLOT_WINSIZE_REFRESH seconds."""
+        entry = self.nodes.get(node_id)
+        if entry is None or entry.size is None or entry.dirty or entry.worker is not None:
+            return
+        now = time.monotonic()
+        if entry.tried is not None and now - entry.tried < refresh():
+            return
+        entry.changed = now - delay()  # no pause: the size is known and the student is typing
+        entry.dirty = True
+        self._start(lifecycle, node_id, entry)
+
+    def _start(self, lifecycle, node_id, entry):
+        if entry.worker is None:
+            entry.worker = asyncio.create_task(self._run(lifecycle, node_id, entry))
+
+    async def _run(self, lifecycle, node_id, entry):
+        try:
+            while entry.dirty:
+                wait = entry.changed + delay() - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    continue
+                entry.dirty = False
+                entry.tried = time.monotonic()
+                await self.apply(lifecycle, entry.pid, node_id, *entry.size)
+        finally:
+            entry.worker = None
+            if entry.consoles <= 0 and self.nodes.get(node_id) is entry:
+                del self.nodes[node_id]
+
+    @staticmethod
+    async def apply(lifecycle, pid, node_id, cols, rows):
+        """Sets the size on ttyS0 of a Linux guest with an agent; returns whether the command succeeded."""
+        try:
+            if not lifecycle.has_guest_agent(pid, node_id):
+                return False
+            if await lifecycle.guest_family(node_id, Priority.COMMAND) != "posix":
+                return False  # Windows has no serial getty, RouterOS its own console
+            result = await lifecycle.qga.exec(node_id, command(cols, rows), timeout=TIMEOUT,
+                                              priority=Priority.COMMAND)
+        except Exception as exc:  # noqa: BLE001 - a background task; the console works on without the size
+            log.info("window size %sx%s not set on %s: %s: %s", cols, rows, node_id, type(exc).__name__, exc)
+            return False
+        if result.get("exit_code") != 0:
+            log.info("window size %sx%s not set on %s: exit %s", cols, rows, node_id, result.get("exit_code"))
+            return False
+        return True

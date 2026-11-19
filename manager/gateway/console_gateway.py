@@ -13,13 +13,15 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
   * пускает браузер только по одноразовому билету, который выдал менеджер лаб
     (токен слота в браузер не попадает никогда);
   * подключается к WebSocket консоли Slot с консольным токеном этого слота
-    (субпротоколы ["lab-slot", "bearer.<токен>"]; см. slot/README.md);
+    (субпротоколы ["lab-slot.2", "lab-slot", "bearer.<токен>"]; см. slot/README.md); слот выбирает
+    "lab-slot.2" (размер окна, CONTRACTS.md §6.1) или, если он старый, "lab-slot";
   * тип консоли задаёт билет (поле `console`, его ставит менеджер по живому типу ноды):
       - `telnet` (по умолчанию):
           · пересылает вывод как есть: Slot уже вырезал согласование telnet (IAC …),
             повторная фильтрация испортила бы байт 0xFF в данных;
-          · пропускает от браузера только текстовые кадры (ввод с клавиатуры). Бинарные кадры,
-            в том числе {"cols": N, "rows": M}, отбрасываются: Slot пока не передаёт размер окна (telnet NAWS);
+          · ввод с клавиатуры — текстовые кадры браузера. Слоту "lab-slot.2" он уходит двоичными кадрами,
+            а двоичный кадр браузера {"cols": N, "rows": M} — текстовым кадром {"resize": {"cols": N, "rows": M}};
+            негодный размер отбрасывается. Слоту "lab-slot" ввод уходит текстом, двоичные кадры отбрасываются;
           · режим наблюдателя: вывод идёт, ввод отбрасывается;
       - `vnc` (экран QEMU, в браузере noVNC): по соединению идёт сырой RFB. Двоичные кадры идут в обе стороны
         без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателя у экрана нет
@@ -89,6 +91,9 @@ MAX_PER_PROJECT = int(os.environ.get("GW_MAX_PER_PROJECT", "40"))
 MAX_PER_NODE = int(os.environ.get("GW_MAX_PER_NODE", "6"))
 MAX_TICKETS_PER_PROJECT = int(os.environ.get("GW_MAX_TICKETS_PER_PROJECT", "40"))
 HANDSHAKE_TIMEOUT = float(os.environ.get("GW_HANDSHAKE_TIMEOUT", "15"))  # TCP, TLS and the WebSocket upgrade
+# Console subprotocols (CONTRACTS.md §6.1): with "lab-slot.2" input goes as binary frames and text frames carry control JSON.
+SLOT_PROTOCOL, SLOT_PROTOCOL_2 = "lab-slot", "lab-slot.2"
+MAX_WINSIZE = 1000       # cols and rows of a window size frame: 1..MAX_WINSIZE
 
 log = logging.getLogger("console-gw")
 
@@ -143,6 +148,20 @@ class Limits:
             counts[key] -= 1
             if not counts[key]:
                 del counts[key]
+
+
+def window_size(data: bytes) -> dict | None:
+    """{"cols", "rows"} of a browser window size frame, or None for anything else (CONTRACTS.md §6.1)."""
+    try:
+        frame = json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(frame, dict):
+        return None
+    size = {key: frame.get(key) for key in ("cols", "rows")}
+    if not all(type(v) is int and 1 <= v <= MAX_WINSIZE for v in size.values()):  # bool is not a size
+        return None
+    return size
 
 
 def canonical_uuid(value):
@@ -216,8 +235,9 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
         try:
             # The whole handshake is bounded: a slot that accepts TCP and never upgrades must not hold the console.
             up = await asyncio.wait_for(
-                http.ws_connect(url, protocols=("lab-slot", "bearer." + SLOTS[slot]), heartbeat=HEARTBEAT,
-                                max_msg_size=MAX_MSG_SLOT[g["console"]], ssl=request.app["slot_tls"]),
+                http.ws_connect(url, protocols=(SLOT_PROTOCOL_2, SLOT_PROTOCOL, "bearer." + SLOTS[slot]),
+                                heartbeat=HEARTBEAT, max_msg_size=MAX_MSG_SLOT[g["console"]],
+                                ssl=request.app["slot_tls"]),
                 HANDSHAKE_TIMEOUT,
             )
         except (ClientError, asyncio.TimeoutError) as exc:
@@ -234,6 +254,8 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
             await browser.close(code=4001, message=b"upstream unavailable")
             log.info("консоль недоступна: %s %s/%s (%s)", g["who"], slot, node_id, upstream_error)
             return browser
+        # A slot that knows lab-slot.2 takes the window size; vnc stays a raw RFB stream whatever it answers.
+        control = not vnc and up.protocol == SLOT_PROTOCOL_2
         log.info("консоль открыта: %s %s/%s%s%s", g["who"], slot, node_id,
                  " (vnc)" if vnc else "", " (наблюдатель)" if g["readonly"] else "")
 
@@ -245,7 +267,14 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
                     if m.type == WSMsgType.BINARY:  # RFB: байты клиента как есть
                         await up.send_bytes(m.data)
                 elif m.type == WSMsgType.TEXT:
-                    await up.send_str(m.data)
+                    if control:
+                        await up.send_bytes(m.data.encode())
+                    else:
+                        await up.send_str(m.data)
+                elif m.type == WSMsgType.BINARY and control:
+                    size = window_size(m.data)
+                    if size:
+                        await up.send_str(json.dumps({"resize": size}))
 
         async def to_browser():
             async for m in up:
