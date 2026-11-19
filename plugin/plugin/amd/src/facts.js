@@ -113,6 +113,19 @@ export const portEnd = (der, f, i) => {
   return p ? endState(der, {nodeId: f.id, adapter: p.adapter, port: p.port}) : null;
 };
 
+/**
+ * The cable an interface of a node sits on (a subinterface: the cable of its parent).
+ *
+ * @param {object} m topology model
+ * @param {object|null} f facts record of the node
+ * @param {object} i interface of the node
+ * @returns {object|null} link of the model, null if the interface is on no cable
+ */
+export const linkOfIf = (m, f, i) => {
+  const p = f && portOf(f, i);
+  return (p && m.links.find(l => endIs(l.a, f.id, p) || endIs(l.b, f.id, p))) || null;
+};
+
 /*
  * L1: линк не работает, если приостановлен, нода остановлена или интерфейс выключен / без несущей.
  * ends — состояние каждого конца линка. У конца с mirror: true собственные admin / oper не читаются: порт коммутатора,

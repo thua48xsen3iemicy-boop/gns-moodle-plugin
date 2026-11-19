@@ -4972,7 +4972,9 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .pdot{display:none}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] .l3-scene{display:inline}
 .gns3lab-student.canvas-ui .subnet-edge{stroke:var(--net-color,#547c90);stroke-opacity:.75;stroke-width:1.2;vector-effect:non-scaling-stroke;fill:none}
-.gns3lab-student.canvas-ui .ghost-wire{stroke:#6d93a3;stroke-opacity:.38;stroke-width:1.4;vector-effect:non-scaling-stroke;pointer-events:none}
+/* The cables under the lines of L3: a wide muted band, so that the coloured subnet lines read over it and the cable
+   itself is still seen on the dark canvas. */
+.gns3lab-student.canvas-ui .ghost-wire{stroke:#93b8c6;stroke-opacity:.55;stroke-width:3;stroke-linecap:round;vector-effect:non-scaling-stroke;pointer-events:none}
 .gns3lab-student.canvas-ui .subnet-edge.down{stroke:var(--bad);stroke-dasharray:4 5}
 .gns3lab-student.canvas-ui .subnet-object{cursor:pointer}
 .gns3lab-student.canvas-ui .subnet-object rect{fill:#193e50;stroke:var(--net-color,#73c7ed);stroke-width:1;vector-effect:non-scaling-stroke}
