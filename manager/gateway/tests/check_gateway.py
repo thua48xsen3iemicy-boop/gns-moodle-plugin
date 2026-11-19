@@ -1,5 +1,5 @@
 """Проверка шлюза против поддельного Lab Slot: билеты, субпротокол с токеном, наблюдатель, коды закрытия,
-консоль telnet и экран vnc (сырой RFB: двоичные кадры в обе стороны), пределы консолей и билетов,
+консоль telnet и экран vnc (сырой RFB: двоичные кадры в обе стороны), размер окна слоту lab-slot.2, пределы консолей и билетов,
 срок рукопожатия со слотом, закрытие соединения со слотом при любом сбое.
 Запуск: pip install aiohttp && python3 manager/gateway/tests/check_gateway.py
 """
@@ -14,9 +14,10 @@ from aiohttp import web, ClientSession, WSMsgType
 P, N1, N2, OFF, VNC = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
                        "33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444",
                        "55555555-5555-4555-8555-555555555555")
+V2 = "99999999-9999-4999-8999-999999999999"              # нода нового слота: он выбирает lab-slot.2
 
 # --- поддельный Slot: /v1/console/{project_id}/{node_id}, токен в субпротоколе, вывод уже без telnet-команд
-seen, seen_vnc, paths = [], [], []
+seen, seen_vnc, seen2, paths, offered = [], [], [], [], []
 BANNER = b"RFB 003.008\n\xff\x00\xfe"                        # начало потока RFB: 0xFF и 0x00 в данных
 BIG = bytes(range(256)) * (2 * 4096)                      # 2 МиБ: больше, чем разрешено telnet-консоли от слота
 async def vnc_cons(ws):
@@ -31,8 +32,17 @@ async def vnc_cons(ws):
 async def cons(r):
     paths.append(r.path)
     protocols = [x.strip() for x in r.headers.get("Sec-WebSocket-Protocol", "").split(",")]
+    offered.append(protocols)
     if "lab-slot" not in protocols or "bearer.console-secret" not in protocols or r.match_info["n"] == OFF:
         return web.Response(status=403)                  # как Starlette: close() до accept()
+    if r.match_info["n"] == V2 and "lab-slot.2" in protocols:
+        ws = web.WebSocketResponse(protocols=("lab-slot.2",)); await ws.prepare(r)
+        await ws.send_bytes(b"\r\nR1> ")
+        async for m in ws:                                # ввод — двоичные кадры, текстовые — управление
+            seen2.append((m.type, m.data))
+            if m.type == WSMsgType.BINARY:
+                await ws.send_bytes(m.data)
+        return ws
     ws = web.WebSocketResponse(protocols=("lab-slot",)); await ws.prepare(r)
     if r.match_info["n"] == VNC:
         return await vnc_cons(ws)
@@ -157,6 +167,28 @@ async def main():
         await ws.close()
         assert [x[1] for x in seen if x[0] in (WSMsgType.TEXT, WSMsgType.BINARY)] == ["en\r"], seen
         print("explicit telnet OK")
+        # новый слот (lab-slot.2): ввод уходит двоичными кадрами, размер окна — текстовым {"resize": …}
+        assert all(p[:2] == ["lab-slot.2", "lab-slot"] for p in offered), offered
+        seen2.clear(); _, t = await ticket(False, nodes=(V2,))
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{V2}?ticket={t}", headers=moodle)
+        await prompt(ws)
+        await ws.send_bytes(b'{"cols":120,"rows":40}')
+        for bad in (b'{"cols":0,"rows":40}', b'{"cols":120,"rows":1001}', b'{"cols":true,"rows":40}',
+                    b'{"cols":"120","rows":40}', b'{"cols":120}', b'[120,40]', b'\xff\x00', b'{"cols":80.5,"rows":24}'):
+            await ws.send_bytes(bad)
+        await ws.send_str("ip a\r"); await ws.send_bytes(b'{"cols":1000,"rows":1,"x":5}')
+        assert (await ws.receive()).data == b"ip a\r"
+        await asyncio.sleep(0.2); await ws.close()
+        assert seen2 == [(WSMsgType.TEXT, '{"resize": {"cols": 120, "rows": 40}}'), (WSMsgType.BINARY, b"ip a\r"),
+                         (WSMsgType.TEXT, '{"resize": {"cols": 1000, "rows": 1}}')], seen2
+        # наблюдатель новому слоту не шлёт ни ввод, ни размер
+        seen2.clear(); _, t = await ticket(True, nodes=(V2,))
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{V2}?ticket={t}", headers=moodle)
+        await prompt(ws)
+        await ws.send_bytes(b'{"cols":120,"rows":40}'); await ws.send_str("conf t\r")
+        await asyncio.sleep(0.3); await ws.close(); await asyncio.sleep(0.2)
+        assert seen2 == [], seen2
+        print("lab-slot.2: input as binary, window size as resize, bad sizes dropped, observer silent OK")
         # vnc: двоичные кадры в обе стороны без изменений
         seen_vnc.clear(); _, t = await ticket(False, console="vnc")
         ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}", headers=moodle)
