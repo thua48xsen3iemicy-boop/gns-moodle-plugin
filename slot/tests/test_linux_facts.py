@@ -5,6 +5,7 @@ configurations in their comments; only the section marks and the `methods` secti
 Collection and scheduling of these collectors are tested in test_facts.py.
 """
 
+import os
 import stat
 import subprocess
 
@@ -481,12 +482,269 @@ def test_the_same_configuration_gives_the_same_data():
     assert parse_linux_config(reordered) == parse_linux_config(IFUPDOWN_OK)
 
 
-def test_no_mechanism_and_mechanisms_not_read_yet():
+def test_no_mechanism():
     assert parse_linux_config(f"{M} mechanism none\n") == {
         "net_saved": {"mechanism": "none", "ok": True, "interfaces": []}
     }
-    for name in ("netplan", "networkd", "networkmanager"):
-        assert parse_linux_config(f"{M} mechanism {name}\n") == {"net_saved": {"mechanism": name, "supported": False}}
+
+
+# --- linux.config/1: networkd and netplan -------------------------------------------------------------------------
+
+def link(name, mac, kind="1", driver="virtio_net", assign="0", altnames=(), devtype=""):
+    """A `link` section as the command prints it; driver None is a virtual interface (no device)."""
+    text = f"{M} link {name}\naddress={mac}\ntype={kind}\naddr_assign_type={assign}\ndevtype={devtype}\n"
+    if driver is not None:
+        text += f"driver={driver}\n"
+    return text + "".join(f"altname={a}\n" for a in altnames)
+
+
+def conf(path, text, uid="0", mode="644"):
+    """A `file` section: every line of the file after a `|`, then the empty line of the closing `echo`."""
+    body = "".join(f"|{line}\n" for line in text.splitlines())
+    return f"{M} file {uid} {mode} {path}\n{body}\n"
+
+
+LINKS = (link("lo", "00:00:00:00:00:00", "772", None) + link("ens3", "0c:aa:bb:00:00:01")
+         + link("ens4", "0c:aa:bb:00:00:02") + link("ens5", "0c:aa:bb:00:00:03", altnames=("enp0s5",)))
+CONTAINER_HOST0 = "[Match]\nVirtualization=container\nName=host0\n\n[Network]\nDHCP=yes\n"  # systemd's own file
+
+
+def networkd(*files, mechanism="networkd", generate=None):
+    text = f"{M} mechanism {mechanism}\n" + LINKS
+    if generate is not None:
+        text += f"{M} generate {generate[0]}\n" + "".join(f"|{line}\n" for line in generate[1].splitlines())
+    return parse_linux_config(text + "".join(files))["net_saved"]
+
+
+def test_networkd_files_by_name_first_match_wins():
+    saved = networkd(
+        conf("/usr/lib/systemd/network/80-container-host0.network", CONTAINER_HOST0),
+        conf("/etc/systemd/network/10-ens3.network",
+             "[Match]\nMACAddress=0C:AA:BB:00:00:01\n\n[Network]\nAddress=10.0.0.1/24\nGateway=10.0.0.254\n"
+             "Address=fe80::1/64\nGateway=fe80::ff\n\n[Address]\nAddress=10.0.1.1/24\n\n"
+             "[Route]\nDestination=192.168.5.0/24\nGateway=10.0.0.2\nMetric=50\n\n"
+             "[Route]\nDestination=172.16.0.0/12\nGateway=10.0.0.3\nTable=100\n\n[Route]\nDestination=10.9.0.0/16\n"),
+        conf("/etc/systemd/network/50-all.network", "[Match]\nName=ens*\n\n[Network]\nDHCP=ipv4\n"),
+        conf("/etc/systemd/network/20-five.network", "[Match]\nName=enp0s5\n\n[Network]\nDHCP=no\n"),
+    )
+    assert saved == {"mechanism": "networkd", "ok": True, "interfaces": [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24", "10.0.1.1/24"], "gateway": "10.0.0.254",
+         "routes": [{"dst": "192.168.5.0/24", "via": "10.0.0.2"}]},
+        {"name": "ens4", "method": "dhcp", "ipv4": []},
+        {"name": "ens5", "method": "manual", "ipv4": []},  # matched by its alternative name
+    ]}
+
+
+def test_networkd_etc_hides_lib_masks_and_drop_ins():
+    lib = "[Match]\nName=ens3\n\n[Network]\nAddress=10.0.0.9/24\n"
+    saved = networkd(
+        conf("/usr/lib/systemd/network/10-a.network", lib),
+        conf("/etc/systemd/network/10-a.network", "[Match]\nName=ens3\n\n[Network]\nAddress=10.0.0.1/24\n"),
+        conf("/etc/systemd/network/10-a.network.d/gw.conf", "[Network]\nGateway=10.0.0.254\n"),
+        conf("/usr/lib/systemd/network/10-a.network.d/gw.conf", "[Network]\nGateway=10.0.0.9\n"),
+        conf("/usr/lib/systemd/network/20-b.network", "[Match]\nName=ens4\n\n[Network]\nAddress=10.4.0.1/24\n"),
+        f"{M} file 0 0 /etc/systemd/network/20-b.network\n\n",  # a link to /dev/null
+        conf("/run/systemd/network/30-c.network", "[Match]\nName=ens5\n\n[Network]\nAddress=10.5.0.1/24\n"),
+    )
+    assert saved["interfaces"] == [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"], "gateway": "10.0.0.254"},
+        {"name": "ens5", "method": "static", "ipv4": ["10.5.0.1/24"]},
+    ]
+
+
+@pytest.mark.parametrize("match, matched", [
+    ("Name=!ens3 ens4", False),
+    ("Name=ens*\nName=!ens3", False),
+    ("Name=ens9\nName=\nName=ens3", True),  # an empty assignment clears the list
+    ("Type=ether\nDriver=virtio*", True),
+    ("Type=wlan", False),
+    ("Kind=veth", False),  # a device of hardware has no kind
+    ("PermanentMACAddress=0c:aa:bb:00:00:01 0c:aa:bb:00:00:09", True),
+    ("MACAddress=0c:aa:bb:00:00:09", False),
+    ("Name=ens3\nHost=lab", None),  # the slot does not know the host name networkd compares
+    ("Name=ens9\nPath=pci-*", False),  # decided without the unknown condition
+])
+def test_networkd_match(match, matched):
+    saved = networkd(conf("/etc/systemd/network/a.network", f"[Match]\n{match}\n\n[Network]\nAddress=10.0.0.1/24\n"))
+    if matched is None:
+        assert saved["supported"] is False and "cannot be checked for ens3" in saved["message"]
+    else:
+        assert ("ens3" in [i["name"] for i in saved["interfaces"]]) is matched
+
+
+def test_networkd_unmanaged_and_broken_values():
+    saved = networkd(
+        conf("/etc/systemd/network/a.network", "[Match]\nName=ens3\n\n[Link]\nUnmanaged=yes\n"),
+        conf("/etc/systemd/network/b.network",
+             "[Match]\nName=ens4\n\n[Network]\nAddress=10.0.0.300/24\nAddress=10.4.0.1/24\nGateway=10.4.0\n"),
+        conf("/etc/systemd/network/c.network", "[Match]\nName=lan9\n\n[Network]\nAddress=bad\n"),  # no such link
+    )
+    assert saved == {"mechanism": "networkd", "ok": False,
+                     "message": "/etc/systemd/network/b.network: bad Address=10.0.0.300/24",
+                     "interfaces": [{"name": "ens4", "method": "static", "ipv4": ["10.4.0.1/24"]}]}
+
+
+def test_networkd_address_without_prefix_is_not_guessed():
+    saved = networkd(conf("/etc/systemd/network/a.network", "[Match]\nName=ens3\n[Network]\nAddress=10.0.0.1\n"))
+    assert saved == {"mechanism": "networkd", "supported": False,
+                     "message": "/etc/systemd/network/a.network: Address=10.0.0.1 has no prefix length"}
+
+
+# What netplan 1.1.2 (Ubuntu 24.04) generates for:  ethernets: {gns3lab0: {match: {macaddress: …}, addresses:
+# [10.0.0.1/24], routes: [{to: 0.0.0.0/0, via: 10.0.0.254}]}, ens4: {dhcp4: true}}
+NETPLAN_GNS3LAB = ("[Match]\nPermanentMACAddress=0c:aa:bb:00:00:01\n\n[Network]\nLinkLocalAddressing=ipv6\n"
+                   "Address=10.0.0.1/24\n\n[Route]\nDestination=0.0.0.0/0\nGateway=10.0.0.254\n")
+NETPLAN_ENS4 = "[Match]\nName=ens4\n\n[Network]\nDHCP=ipv4\nLinkLocalAddressing=ipv6\n\n[DHCP]\nRouteMetric=100\n"
+
+
+def test_netplan_is_what_its_generator_writes():
+    saved = networkd(conf("/run/systemd/network/10-netplan-gns3lab0.network", NETPLAN_GNS3LAB, mode="600"),
+                     conf("/run/systemd/network/10-netplan-ens4.network", NETPLAN_ENS4, mode="600"),
+                     mechanism="netplan", generate=("0", "\n** (generate:1): WARNING **: `gateway4` deprecated\n"))
+    assert saved == {"mechanism": "netplan", "ok": True, "interfaces": [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"], "gateway": "10.0.0.254"},
+        {"name": "ens4", "method": "dhcp", "ipv4": []},
+    ]}
+
+
+def test_netplan_that_does_not_generate():
+    error = ("/etc/netplan/90-gns3lab.yaml:5:18: Error in network definition: malformed address '10.0.0.300/24', "
+             "must be X.X.X.X/NN or X:X:X:X:X:X:X:X/NN\n      addresses: [10.0.0.300/24]\n                 ^\n")
+    saved = networkd(conf("/etc/systemd/network/20-ens5.network", "[Match]\nName=ens5\n[Network]\nDHCP=yes\n"),
+                     mechanism="netplan", generate=("1", error))
+    assert saved["ok"] is False and saved["message"].startswith("/etc/netplan/90-gns3lab.yaml:5:18: Error in network")
+    assert saved["interfaces"] == [{"name": "ens5", "method": "dhcp", "ipv4": []}]
+    assert networkd(mechanism="netplan", generate=("missing", "")) == {
+        "mechanism": "netplan", "supported": False, "message": "netplan's generator cannot be run in the guest"}
+
+
+def test_file_lines_cannot_open_sections():
+    saved = networkd(conf("/etc/systemd/network/a.network",
+                          f"[Match]\nName=ens3\n{M} link evil\n[Network]\nAddress=10.0.0.1/24\n"))
+    assert [i["name"] for i in saved["interfaces"]] == ["ens3"]
+
+
+# --- linux.config/1: NetworkManager -------------------------------------------------------------------------------
+
+NM_DEVICES = "ens3:ethernet:connected\nens4:ethernet:disconnected\nlo:loopback:unmanaged\n"
+NM_CONFIG = "# NetworkManager configuration: /etc/NetworkManager/NetworkManager.conf\n\n[main]\n# dhcp=internal\n" \
+            "plugins=ifupdown,keyfile\n\n[ifupdown]\nmanaged=false\n"
+SC = "/etc/NetworkManager/system-connections"
+
+
+def profile(name, ipv4, connection="", ethernet=""):
+    text = f"[connection]\nid={name}\nuuid=00000000-0000-4000-8000-{name:0>12}\ntype=ethernet\n{connection}"
+    if ethernet:
+        text += f"\n[ethernet]\n{ethernet}"
+    return text + f"\n[ipv4]\n{ipv4}"
+
+
+def nm(*files, devices=NM_DEVICES, config=NM_CONFIG, devices_rc=0):
+    text = f"{M} mechanism networkmanager\n" + link("ens3", "52:54:00:00:00:03") + link("ens4", "52:54:00:00:00:04") \
+        + link("lo", "00:00:00:00:00:00", "772", None) + f"{M} devices\n{devices}{M} rc {devices_rc}\n" \
+        + f"{M} config 0\n" + "".join(f"|{line}\n" for line in config.splitlines())
+    return parse_linux_config(text + "".join(files))["net_saved"]
+
+
+def test_nm_profiles_per_device():
+    saved = nm(
+        conf(f"{SC}/static.nmconnection", profile("a1", "method=manual\naddress1=10.0.0.1/24,10.0.0.254\n"
+             "address2=10.0.1.1\nroute1=192.168.5.0/24,10.0.0.2,50\nroute2=10.8.0.0/16\n"
+             "route3=172.16.0.0/12,10.0.0.3\nroute3_options=table=100\n", "interface-name=ens3\n"), mode="600"),
+        conf(f"{SC}/mac", profile("a2", "method=manual\naddresses1=10.4.0.1/24;\ngateway=10.4.0.254\n"
+                                  "route1=0.0.0.0/0,10.4.0.253\n", ethernet="mac-address=52:54:00:00:00:04\n"),
+             mode="600"),
+    )
+    assert saved == {"mechanism": "networkmanager", "ok": True, "interfaces": [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24", "10.0.1.1/24"], "gateway": "10.0.0.254",
+         "routes": [{"dst": "192.168.5.0/24", "via": "10.0.0.2"}]},
+        {"name": "ens4", "method": "static", "ipv4": ["10.4.0.1/24"], "gateway": "10.4.0.254",
+         "routes": [{"dst": "default", "via": "10.4.0.253"}]},
+    ]}
+
+
+def test_nm_priority_then_the_latest_profile_wins():
+    netplan = "[connection]\nid=netplan-ens3\ntype=ethernet\ninterface-name=ens3\n\n[ipv4]\nmethod=auto\n"
+    dhcp = conf("/run/NetworkManager/system-connections/netplan-ens3.nmconnection", netplan, mode="600")
+    static = conf(f"{SC}/s.nmconnection", profile("b1", "method=manual\naddress1=10.0.0.1/24\n",
+                                                  "interface-name=ens3\n"), mode="600")
+    stamps = conf("/var/lib/NetworkManager/timestamps", "[timestamps]\n00000000-0000-4000-8000-0000000000b1=1763460000\n")
+    assert nm(dhcp, static, stamps)["interfaces"][0]["ipv4"] == ["10.0.0.1/24"]
+    with_priority = conf("/run/NetworkManager/system-connections/netplan-ens3.nmconnection",
+                         netplan.replace("ens3\n", "ens3\nautoconnect-priority=10\n"), mode="600")
+    assert nm(with_priority, static, stamps)["interfaces"][0] == {"name": "ens3", "method": "dhcp", "ipv4": []}
+    saved = nm(dhcp, static)  # never up: nothing tells them apart
+    assert saved["supported"] is False and saved["message"].startswith("profiles for ens3 are equally likely")
+
+
+def test_nm_files_it_does_not_load():
+    saved = nm(
+        conf(f"{SC}/open.nmconnection", profile("c1", "method=manual\naddress1=10.0.0.1/24\n"), mode="644"),
+        conf(f"{SC}/user.nmconnection", profile("c2", "method=manual\naddress1=10.0.0.2/24\n"), uid="1000",
+             mode="600"),
+        conf(f"{SC}/gw.nmconnection", profile("c3", "method=manual\naddress1=10.0.0.3/24\ngateway=10.0.0\n"),
+             mode="600"),
+        conf(f"{SC}/empty.nmconnection", profile("c4", "method=manual\n"), mode="600"),
+        conf(f"{SC}/x.nmconnection~", profile("c5", "method=manual\naddress1=10.0.0.5/24\n"), mode="600"),
+        conf("/usr/lib/NetworkManager/system-connections/off", profile("c6", "method=auto\n"), mode="600"),
+        conf(f"{SC}/typeless.nmconnection", "[connection]\nid=t\n[ipv4]\nmethod=auto\n", mode="600"),
+        devices="ens3:ethernet:connected\n",
+    )
+    assert saved["ok"] is False
+    assert saved["message"] == f"{SC}/empty.nmconnection: NetworkManager does not load the profile: method=manual " \
+                               "without an address"  # files in name order
+    assert saved["interfaces"] == [{"name": "ens3", "method": "dhcp", "ipv4": []}]  # its own "Wired connection 1"
+
+
+def test_nm_default_wired_connection_and_no_auto_default():
+    off = conf(f"{SC}/off.nmconnection", profile("d1", "method=auto\n", "autoconnect=false\ninterface-name=ens3\n"),
+               mode="600")
+    assert nm(off)["interfaces"] == [{"name": "ens4", "method": "dhcp", "ipv4": []}]  # ens3 has a profile, not up
+    assert nm(config=NM_CONFIG.replace("[main]\n", "[main]\nno-auto-default=*\n"))["interfaces"] == []
+    config = NM_CONFIG.replace("[main]\n", "[main]\nno-auto-default=52:54:00:00:00:03,interface-name:ens4\n")
+    assert nm(config=config)["interfaces"] == []
+    state = conf("/var/lib/NetworkManager/no-auto-default.state", "52:54:00:00:00:04\n")
+    assert nm(state)["interfaces"] == [{"name": "ens3", "method": "dhcp", "ipv4": []}]
+    unread_but_covered = NM_CONFIG.replace("[main]\n", "[main]\nno-auto-default=driver:e1000,*\n")
+    assert nm(config=unread_but_covered)["interfaces"] == []
+
+
+@pytest.mark.parametrize("files, kwargs, reason", [
+    ((), {"devices": "ens3:ethernet:unmanaged\n"}, "NetworkManager does not manage ens3"),
+    ((), {"devices": "", "devices_rc": 8}, "nmcli does not answer"),
+    ((conf(f"{SC}/br.nmconnection", "[connection]\nid=br\ntype=bridge\ninterface-name=br0\n", mode="600"),), {},
+     "profiles of type bridge are not read"),
+    ((conf(f"{SC}/p.nmconnection", profile("e1", "method=auto\n", "interface-name=ens3\ncontroller=br0\n"),
+           mode="600"),), {}, "a port of br0 is not read"),
+    ((conf(f"{SC}/m.nmconnection", "[connection]\nid=m\ntype=ethernet\n[match]\ndriver=virtio_net\n", mode="600"),),
+     {}, "whether it fits ens3 cannot be checked"),
+    ((conf(f"{SC}/any.nmconnection", profile("e2", "method=manual\naddress1=10.0.0.1/24\n"), mode="600"),), {},
+     "fits several devices"),
+    ((), {"config": "[main]\nno-auto-default=except:mac:52:54:00:00:00:03\n"}, "no-auto-default except:mac"),
+    ((), {"config": "[main]\nplugins=ifcfg-rh\n", "devices": "ens3:ethernet:connected\n"}, None),
+])
+def test_nm_what_the_slot_does_not_read(files, kwargs, reason):
+    saved = nm(*files, **kwargs)
+    if reason is None:
+        assert saved.get("supported") is not False  # ifcfg-rh enabled, but no ifcfg file
+    else:
+        assert saved["supported"] is False and reason in saved["message"], saved
+
+
+def test_nm_ifcfg_profiles_are_not_read():
+    text = f"{M} ifcfg ifcfg-lo\n{M} ifcfg ifcfg-eth0\n"
+    saved = nm(text, config="[main]\nplugins=ifcfg-rh,keyfile\n")
+    assert saved == {"mechanism": "networkmanager", "supported": False,
+                     "message": "profiles of the ifcfg-rh plugin are not read"}
+
+
+def test_nm_match_interface_name():
+    match = conf(f"{SC}/m.nmconnection", profile("f1", "method=manual\naddress1=10.0.0.1/24\n")
+                 + "\n[match]\ninterface-name=ens*;!ens4;\n", mode="600")
+    assert nm(match)["interfaces"] == [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"]},
+        {"name": "ens4", "method": "dhcp", "ipv4": []},
+    ]
 
 
 @pytest.mark.parametrize(
@@ -584,6 +842,96 @@ def test_the_config_command_asks_ifupdown_and_only_with_no_act(tmp_path):
 def test_the_mechanism_is_chosen_as_the_manager_writes_it(tmp_path, active, netplan, ifupdown, mechanism):
     saved = run_config(tools(tmp_path, active, netplan, ifupdown))
     assert saved["mechanism"] == mechanism
+
+
+def fake_root(tmp_path):
+    """A guest tree for GNS3LAB_ROOT: two NICs of virtio and the loopback, as /sys/class/net shows them."""
+    root = tmp_path / "root"
+    for name, mac, kind in (("lo", "00:00:00:00:00:00", "772"), ("ens3", "0c:aa:bb:00:00:01", "1"),
+                            ("ens4", "0c:aa:bb:00:00:02", "1")):
+        node = root / "sys/class/net" / name
+        node.mkdir(parents=True)
+        (node / "address").write_text(mac + "\n")
+        (node / "type").write_text(kind + "\n")
+        (node / "addr_assign_type").write_text("0\n")
+        (node / "uevent").write_text(f"INTERFACE={name}\n")
+        if name != "lo":
+            (root / "drivers/virtio_net").mkdir(parents=True, exist_ok=True)
+            (node / "device").mkdir()
+            (node / "device/driver").symlink_to(root / "drivers/virtio_net")
+    return root
+
+
+def put(root, path, text, mode=0o644):
+    target = root / path.lstrip("/")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    target.chmod(mode)
+
+
+def test_the_config_command_reads_networkd_files(tmp_path):
+    root = fake_root(tmp_path)
+    put(root, "/etc/systemd/network/10-ens3.network", "[Match]\nMACAddress=0c:aa:bb:00:00:01\n[Network]\n"
+        "Address=10.0.0.1/24\nGateway=10.0.0.254\n")
+    put(root, "/etc/systemd/network/10-ens3.network.d/more.conf", "[Address]\nAddress=10.0.1.1/24\n")
+    put(root, "/usr/lib/systemd/network/20-ens4.network", "[Match]\nName=ens4\n[Network]\nDHCP=yes\n")
+    (root / "etc/systemd/network/20-ens4.network").symlink_to("/dev/null")
+    put(root, "/usr/lib/systemd/network/80-container-host0.network", CONTAINER_HOST0)
+    put(root, "/run/systemd/network/30-ens4.network", "[Match]\nName=ens4\n[Network]\nAddress=10.4.0.1/24\n")
+    env = tools(tmp_path, ("systemd-networkd",), ifupdown=False)
+    env["GNS3LAB_ROOT"] = str(root)
+    assert run_config(env) == {"mechanism": "networkd", "ok": True, "interfaces": [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24", "10.0.1.1/24"], "gateway": "10.0.0.254"},
+    ]}  # ens4: its file is masked, and /run is gone after a reboot
+
+
+FAKE_NMCLI = "#!/bin/sh\nprintf 'ens3:ethernet:connected\\nens4:ethernet:unavailable\\nlo:loopback:unmanaged\\n'\n"
+FAKE_NM = "#!/bin/sh\n[ \"$1\" = --print-config ] || exit 2\nprintf '[main]\\nplugins=keyfile\\nno-auto-default=*\\n'\n"
+
+
+def test_the_config_command_reads_networkmanager_keyfiles(tmp_path):
+    root = fake_root(tmp_path)
+    put(root, f"{SC}/lab.nmconnection", profile("a1", "method=manual\naddress1=10.0.0.1/24,10.0.0.254\n",
+                                                "interface-name=ens3\n"), 0o600)
+    put(root, f"{SC}/ens4", profile("a2", "method=auto\n", ethernet="mac-address=0C:AA:BB:00:00:02\n"), 0o600)
+    env = tools(tmp_path, ("NetworkManager",), ifupdown=False)
+    for name, text in (("nmcli", FAKE_NMCLI), ("NetworkManager", FAKE_NM)):
+        (tmp_path / "bin" / name).write_text(text)
+        (tmp_path / "bin" / name).chmod(0o755)
+    env["GNS3LAB_ROOT"] = str(root)
+    expected = [{"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"], "gateway": "10.0.0.254"},
+                {"name": "ens4", "method": "dhcp", "ipv4": []}]
+    if os.geteuid() == 0:  # a file of another user is ignored by NetworkManager: only root can make one here
+        assert run_config(env) == {"mechanism": "networkmanager", "ok": True, "interfaces": expected}
+    else:
+        saved = run_config(env)
+        assert saved["ok"] is False and "must belong to root" in saved["message"]
+
+
+NETPLAN_GENERATE = next((p for p in ("/usr/libexec/netplan/generate", "/usr/lib/netplan/generate",
+                                     "/lib/netplan/generate") if os.access(p, os.X_OK)), None)
+
+
+@pytest.mark.skipif(NETPLAN_GENERATE is None, reason="netplan is not installed")
+def test_the_config_command_runs_netplans_generator_on_a_copy(tmp_path):
+    root = fake_root(tmp_path)
+    yaml = ("network:\n  version: 2\n  renderer: networkd\n  ethernets:\n    gns3lab0:\n      match:\n"
+            "        macaddress: \"0c:aa:bb:00:00:01\"\n      addresses: [10.0.0.1/24]\n      routes:\n"
+            "        - to: 0.0.0.0/0\n          via: 10.0.0.254\n    ens4:\n      dhcp4: true\n")
+    put(root, "/etc/netplan/90-gns3lab.yaml", yaml, 0o600)
+    put(root, "/run/systemd/network/10-netplan-ens4.network", "[Match]\nName=ens4\n[Network]\nAddress=10.4.0.1/24\n")
+    env = tools(tmp_path, ("systemd-networkd",), netplan=True, ifupdown=False)
+    env["GNS3LAB_ROOT"] = str(root)
+    before = sorted(str(p) for p in root.rglob("*"))
+    assert run_config(env) == {"mechanism": "netplan", "ok": True, "interfaces": [
+        {"name": "ens3", "method": "static", "ipv4": ["10.0.0.1/24"], "gateway": "10.0.0.254"},
+        {"name": "ens4", "method": "dhcp", "ipv4": []},  # what the YAML says now, not the stale /run
+    ]}
+    assert sorted(str(p) for p in root.rglob("*")) == before
+    put(root, "/etc/netplan/90-gns3lab.yaml", yaml.replace("10.0.0.1/24", "10.0.0.300/24"), 0o600)
+    saved = run_config(env)
+    assert saved["ok"] is False and saved["message"].startswith("/etc/netplan/90-gns3lab.yaml:")
+    assert str(root) not in saved["message"]
 
 
 # --- linux.sys/1: source NAT --------------------------------------------------------------------------------------

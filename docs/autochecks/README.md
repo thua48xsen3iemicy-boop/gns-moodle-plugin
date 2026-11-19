@@ -585,8 +585,11 @@ netplan/networkd/NetworkManager пока `supported: false`); `hostname` в `win
 - [ ] Плагин: снижение максимума оценки за повторные попытки; история проверок в карточке «Лабы курса»; сброс курса
   (reset) для прогонов и оценок.
 - [ ] Плагин: решить, сколько баллов даёт оценка 2 при переводе в баллы (сейчас 40 % максимума).
-- [ ] Слот: чтение netplan, systemd-networkd и NetworkManager в `linux.config` (сейчас `supported: false`); `metric`
-  маршрутов из `net_saved`; маршруты из `pre-up`; `ip_forward` у Windows.
+- [x] ~~Слот: чтение netplan, systemd-networkd и NetworkManager в `linux.config`~~ — слот 0.28.0 (`CONTRACTS.md` §4.6).
+- [ ] Стенд (владелец): `persistence: saved` на гостях с netplan (Ubuntu Server), networkd без netplan и NetworkManager —
+  см. `slot/README.md` 0.28.0.
+- [ ] Слот: `metric` маршрутов из `net_saved`; маршруты из `pre-up`; `ip_forward` у Windows; мосты, bond и VLAN
+  NetworkManager и `.netdev` networkd (сейчас `supported: false`).
 - [ ] Менеджер: правило `facts_conflict` (§6: источники фактов противоречат друг другу).
 - [ ] Менеджер: копия JSON результата в дереве `results/<key>/` (DESIGN §10) — сейчас результат только в PostgreSQL.
 - [ ] Возможный режим «финальная проверка с перезагрузкой ноды» (§4.4).
