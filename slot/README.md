@@ -1,4 +1,16 @@
-# Lab Slot — 0.27.0
+# Lab Slot — 0.28.0
+
+0.28.0: `linux.config/1` читает все четыре механизма сети, а не только ifupdown (CONTRACTS §4.6). **networkd** — файлы
+`.network` и их drop-in в `/etc` и `/usr/lib` (порядок, маскирование и `[Match]` — как у networkd; `/run` после
+перезагрузки пуст и не читается). **netplan** — собственный генератор netplan на копии YAML во временном корне: что
+генератор запишет при загрузке, плюс файлы networkd; ошибка YAML — `ok: false` с текстом netplan. **NetworkManager** —
+keyfile в `/etc` и `/usr/lib` и то, что netplan сгенерирует для NetworkManager; профиль для устройства выбирается, как
+его выбирает NetworkManager при загрузке (приоритет, затем последний поднятый), файл не 0600/не root и профиль, который
+NetworkManager не загрузит, — `ok: false`; устройство без профиля получает автоматический DHCP, если его не отключает
+`no-auto-default`. Где слот не может честно сказать, с чем поднимется гость (условие `[Match]`, которое он не видит,
+мост или bond NetworkManager, неуправляемое устройство, два равноправных профиля), — `supported: false` с причиной в
+`message`, и менеджер пропускает правила `saved`, как раньше. Гость по-прежнему ничего не меняет: временный каталог
+генератора удаляется.
 
 0.27.0: `exec-shell` для скриптов преподавателя в автопроверках (CONTRACTS §4.2, просьба `manager/docs/SLOT_REQUESTS.md` §9).
 `POST …/qga/exec` запускает команду в оболочке семейства гостя: у Windows теперь PowerShell (раньше — `/bin/sh`, который
@@ -395,12 +407,12 @@ stop/resume и смена владельца. Сверять `show interfaces st
   systemd-resolved (`127.0.0.53`), `servers` — из `/run/systemd/resolve/resolv.conf` и `resolver: "systemd-resolved"`.
   `linux.config` отдаёт `net_saved` — сохранённую настройку сети, с которой гость поднимется после перезагрузки
   (`persistence: saved`). Механизм выбирается так же, как в преднастройке менеджера (`netconfig.py`): NetworkManager →
-  netplan → networkd → ifupdown → `none`. Читается пока только **ifupdown**, и его же средствами: `ifquery --list -a`
+  netplan → networkd → ifupdown → `none`. В 0.17.0 читался только **ifupdown** (остальные — с 0.28.0), и его же средствами: `ifquery --list -a`
   и `--allow=hotplug` (что поднимается при загрузке; `source`/`source-directory` разворачивает сам ifupdown),
   `ifquery <iface>` (параметры), `ifup --no-act --force` (применится ли), `--no-mappings` везде. Метод (`static`,
   `dhcp`, …) берётся из строк `iface <имя> inet <метод>` тех файлов, которые назвал `ifquery -v`. Сломанная
   настройка — факт, а не сбой: `net_saved.ok: false` с текстом ifupdown, запись коллектора `ok: true`. Для
-  NetworkManager, netplan и networkd — только `{"mechanism": …, "supported": false}`. Два коллектора, а не один:
+  NetworkManager, netplan и networkd — до 0.28.0 только `{"mechanism": …, "supported": false}`. Два коллектора, а не один:
   разные журналы у менеджера и разная цена (у `linux.config` — дюжина коротких процессов), сбой `ifquery` не
   отнимает у ноды `hostname`. Формат — `manager/docs/CONTRACTS.md` §4.6.
 - 🆕 **Имя узла у Windows и RouterOS** (0.17.0). `windows.net/1` отдаёт ещё `hostname`
