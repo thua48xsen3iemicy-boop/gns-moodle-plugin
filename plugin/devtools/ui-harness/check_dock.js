@@ -2,7 +2,8 @@
 /**
  * Checks the tab bar and the hiding of the console panel (consoles.js, panel mode), in Chromium:
  *
- *   eight consoles open in a narrow panel → the wheel over the tabs scrolls them sideways; a tab dragged to the first
+ *   eight consoles open in a narrow panel → the wheel over the tabs scrolls them sideways; Shift+arrows scroll the bar
+ *   to the chosen tab, round both ways; a tab dragged to the first
  *   place moves there and Shift+Right follows the new order; the button of the bar pushes the panel beyond the edge
  *   (the scheme gets the width, a tongue with the number of consoles stays), new output marks the tongue, a click on
  *   the tongue brings the panel back; opening a console from the scheme or choosing the panel mode brings it back too.
@@ -100,6 +101,7 @@ async function scenario(browser) {
     const overflow = await tabs.evaluate(t => t.scrollWidth > t.clientWidth);
     check('the tabs do not fit the narrow panel', overflow);
 
+    const order0 = await tabNames(page);
     // The wheel over the bar scrolls it sideways.
     await tabs.evaluate(t => { t.scrollLeft = 0; });
     const tb = await tabs.boundingBox();
@@ -110,6 +112,30 @@ async function scenario(browser) {
     await page.mouse.wheel(0, -1000);
     await until(async() => (await tabs.evaluate(t => t.scrollLeft)) === 0, 2000);
     check('...and back', (await tabs.evaluate(t => t.scrollLeft)) === 0);
+
+    // Shift+arrows walk round the tabs: the bar follows the chosen tab, it never stays out of sight.
+    const inView = () => tabs.evaluate(t => {
+        const a = t.querySelector('[aria-selected="true"]').getBoundingClientRect(), b = t.getBoundingClientRect();
+        return a.left >= b.left - 1 && a.right <= b.right + 1;
+    });
+    await tabs.locator('.tab').nth(0).click();
+    await tabs.evaluate(t => { t.scrollLeft = 0; });
+    let walked = true;
+    for (let i = 0; i < count * 2; i++) {
+        await page.keyboard.press(i < count ? 'Shift+ArrowRight' : 'Shift+ArrowLeft');
+        await sleep(120);
+        if (!(await inView())) {
+            walked = false;
+            break;
+        }
+    }
+    check('Shift+arrows scroll the bar to the chosen tab', walked, await selected(page));
+    await page.keyboard.press('Shift+ArrowLeft');
+    await sleep(120);
+    check('...also round from the first tab to the last', (await inView()) && (await selected(page)) === order0[count - 1],
+        await selected(page));
+    await tabs.locator('.tab').nth(count - 1).click();
+    await tabs.evaluate(t => { t.scrollLeft = 0; });
 
     // The third tab is dragged to the first place.
     const order = await tabNames(page);
