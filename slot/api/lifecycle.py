@@ -27,10 +27,14 @@ PROVISION_MESSAGE_LIMIT = 200
 NODE_ACTIONS = ("shutdown", "iso")
 
 
-def provision_failure(result):
-    """The error of a failed provisioning command: its exit code and the last line it wrote to stderr."""
+def provision_failure(result, node=None):
+    """The error of a failed provisioning command: its exit code, the node and the last line it wrote to stderr.
+
+    The lab is rolled back with its slot, so this text is all that says which node failed."""
     lines = [line.strip() for line in str(result.get("stderr") or "").splitlines() if line.strip()]
     text = f"Mandatory provisioning command failed (exit {result.get('exit_code')})"
+    if node:
+        text += f" on node {str(node)[:64]}"
     if lines:
         text += ": " + lines[-1][:PROVISION_MESSAGE_LIMIT]
     return text
@@ -915,13 +919,13 @@ class Lifecycle:
                 )
                 if result["exit_code"] != 0:
                     # The lab is rolled back with its slot: what the guest said is the only trace left.
-                    raise RuntimeError(provision_failure(result))
+                    raise RuntimeError(provision_failure(result, node.get("name")))
         # A stop powers the nodes off; what was just written in the guest (the console unit, the network set
         # up by the first provisioning) must be on its disk before the node counts as ready.
         if qga_needed and not routeros and await self.guest_family(node["node_id"]) == "posix":
             result = await self.qga.exec(node["node_id"], "sync", timeout=60, priority=Priority.LIFECYCLE)
             if result["exit_code"] != 0:
-                raise RuntimeError(provision_failure(result))
+                raise RuntimeError(provision_failure(result, node.get("name")))
 
     async def run(self, op, lab):
         pid = lab["project_id"]
