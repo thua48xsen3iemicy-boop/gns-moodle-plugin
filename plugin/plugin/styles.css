@@ -4985,6 +4985,11 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .subnet-info .dot{fill:var(--net-color,#73c7ed);fill-opacity:.22;stroke:var(--net-color,#73c7ed);stroke-width:1}
 .gns3lab-student.canvas-ui .subnet-info text{fill:var(--net-color,#73c7ed);font:700 10px var(--display);font-style:italic}
 .gns3lab-student.canvas-ui .subnet-info:hover .dot{fill-opacity:.5}
+.gns3lab-student.canvas-ui .vlan-info{cursor:pointer}
+.gns3lab-student.canvas-ui .vlan-info .hit{fill:transparent}
+.gns3lab-student.canvas-ui .l2-virtual .vlan-info .dot{fill:var(--vlan-color,#79d8c6);fill-opacity:.22;stroke:var(--vlan-color,#79d8c6);stroke-width:1;filter:none}
+.gns3lab-student.canvas-ui .vlan-info text{fill:var(--vlan-color,#79d8c6);font:700 10px var(--display);font-style:italic;text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .vlan-info:hover .dot{fill-opacity:.5}
 .gns3lab-student.canvas-ui .subnet-object:focus{outline:none}
 .gns3lab-student.canvas-ui [data-region="vp"] .connection-dim{opacity:.2}
 .gns3lab-student.canvas-ui [data-region="svg"][data-connection-focus="true"] [data-region="lyrDraw"]{opacity:.35}

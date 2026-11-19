@@ -205,11 +205,18 @@ export class CanvasView {
             el('rect', {x: -v.w / 2, y: -PILL_H / 2, width: v.w, height: PILL_H, rx: PILL_H / 2}, g);
             el('circle', {cx: -v.w / 2 + 13, cy: 0, r: 4, class: 'vmark'}, g);
             el('text', {x: -v.w / 2 + 23, y: 0, class: 'vtitle'}, g).textContent = 'VLAN ' + v.vlan + (mixed ? ' !' : '');
+            // The "i" opens the card of the VLAN, as on a subnet pill of L3; a tap elsewhere on the pill only selects.
+            const info = el('g', {class: 'vlan-info', 'data-virtual-info': v.id, transform: `translate(${v.w / 2 - 13} 0)`}, g);
+            el('circle', {r: 13, class: 'hit'}, info);
+            el('circle', {r: 7.5, class: 'dot'}, info);
+            el('text', {y: 1}, info).textContent = 'i';
+            el('title', {}, info).textContent = s.s('ui_act_info');
             // The root bridge of the spanning tree of this VLAN, as the console showed it (docs/live-state.md §8.2).
             const root = stpRoot(s.fx && s.fx.nodes.get(v.orig.id), v.vlan) === true;
             if (root) {
                 g.classList.add('stp-root');
-                const tag = el('g', {class: 'stp-root-tag', transform: `translate(${v.w / 2 - 10} ${-PILL_H / 2})`}, g);
+                // On the top edge, left of the "i".
+                const tag = el('g', {class: 'stp-root-tag', transform: `translate(${v.w / 2 - 38} ${-PILL_H / 2})`}, g);
                 el('rect', {x: -15, y: -7, width: 30, height: 14, rx: 7}, tag);
                 el('text', {x: 0, y: .5}, tag).textContent = 'root';
             }

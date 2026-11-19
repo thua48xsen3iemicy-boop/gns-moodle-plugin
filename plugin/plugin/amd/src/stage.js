@@ -1089,6 +1089,14 @@ export class Stage {
             this.call('details', this.sel);
             return;
         }
+        const vlanInfo = near('[data-virtual-info]');
+        if (vlanInfo) {
+            // The "i" of a VLAN pill opens its card, as the "i" of a subnet pill on L3.
+            this.call('closeOverlays');
+            this.select({kind: 'switchvlan', id: vlanInfo.getAttribute('data-virtual-info')});
+            this.call('details', this.sel);
+            return;
+        }
         const virtual = near('[data-virtual]');
         if (virtual) {
             const v = this.canvas.l2 && this.canvas.l2.virtuals.get(virtual.dataset.virtual);
@@ -1097,8 +1105,9 @@ export class Stage {
                 this.call('console', v.orig);
                 return;
             }
+            // A tap on the pill only selects the VLAN and lights its lines; the card opens from its "i" (or Enter).
+            this.call('closeOverlays');
             this.select({kind: 'switchvlan', id: virtual.dataset.virtual});
-            this.call('details', this.sel);
             return;
         }
         const badge = near('.cbadge'), nodeEl = near('.node');
