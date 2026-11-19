@@ -827,6 +827,10 @@ def test_a_failed_provisioning_command_names_what_the_guest_said(tmp_path, monke
 
     assert provision_failure({"exit_code": 1, "stderr": ""}) == "Mandatory provisioning command failed (exit 1)"
     assert len(provision_failure({"exit_code": 1, "stderr": "x" * 999})) < 260
+    # The node is named: the slot is rolled back after a failed lab, and nothing else is left to tell.
+    assert provision_failure({"exit_code": 2, "stderr": "RTNETLINK answers: File exists\n"}, "OFF1-ADM-1") == (
+        "Mandatory provisioning command failed (exit 2) on node OFF1-ADM-1: RTNETLINK answers: File exists")
+    assert len(provision_failure({"exit_code": 1, "stderr": "x" * 999}, "n" * 999)) < 330
 
 
 # ---- NodeSpec.role: told by the catalog, it builds nothing in GNS3 ------------------------------------------------

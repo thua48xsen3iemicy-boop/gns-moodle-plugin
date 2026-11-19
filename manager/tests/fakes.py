@@ -401,6 +401,10 @@ class FakeSlot:
         if lab and ticket and ticket != lab["ticket"]:
             return self._json(409, {"detail": "Existing project manifest differs"})
         cold = unprovisioned
+        # Slot labs.py: GNS3 lists every project of the student directory; a new one may not take a used name.
+        clash = lab is None and record is None and any(
+            other != pid and p["ticket"].get("name") == (ticket or {}).get("name")
+            for other, p in self.projects.items())
         if lab is None:
             cold = cold or record is not None
             lab = self.labs[pid] = {"project_id": pid, "ticket": ticket}
@@ -411,7 +415,9 @@ class FakeSlot:
         lab["state"] = "STOPPING" if action == "stop" else "DEPLOYING"
         op = {"operation_id": str(uuid.uuid4()), "project_id": pid, "action": action, "status": "RUNNING",
               "fingerprint": fingerprint, "remaining": self.op_polls, "error": None,
-              "fail": {"code": "PROVISIONING_UNKNOWN" if self.student_state else "RuntimeError",
+              "fail": {"code": "HTTPException",
+                       "message": "409: Project name already exists; specify its project_id to resume"} if clash else
+                      {"code": "PROVISIONING_UNKNOWN" if self.student_state else "RuntimeError",
                        "message": "Provisioning completion is unknown; refusing to "
                        "skip or replay commands. Operator reconciliation required"} if cold else
                       {"code": "PROJECT_MISSING", "message": "Saved project is missing"} if missing else None}

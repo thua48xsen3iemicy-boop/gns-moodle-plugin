@@ -1,4 +1,8 @@
-# Lab Slot — 0.28.0
+# Lab Slot — 0.28.1
+
+0.28.1: в тексте ошибки преднастройки теперь есть имя ноды: `Mandatory provisioning command failed (exit 2) on node
+OFF1-ADM-1: RTNETLINK answers: File exists`. Слот после сбоя лабы откатывается к снимку, и раньше понять, на какой ноде
+упала команда, было уже негде. Начало текста прежнее.
 
 0.28.0: `linux.config/1` читает все четыре механизма сети, а не только ifupdown (CONTRACTS §4.6). **networkd** — файлы
 `.network` и их drop-in в `/etc` и `/usr/lib` (порядок, маскирование и `[Match]` — как у networkd; `/run` после
