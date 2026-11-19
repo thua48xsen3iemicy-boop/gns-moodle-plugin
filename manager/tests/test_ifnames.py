@@ -48,21 +48,43 @@ def test_names_reject_bad_counts():
 
 # --- script ----------------------------------------------------------------------------------------------------
 
-def run(mechanism, adapters, tmp_path, *, active=(), files=None, nics=NICS, state=()):
+IP_STUB = r'''echo "ip $*" >> "$LOG"
+N="$ROOT/sys/class/net"
+if [ "$1" = -o ] && [ "$3" = show ]; then
+  if [ -d "$N/$5" ]; then echo "2: $5: <BROADCAST,MULTICAST> mtu 1500"; exit 0; fi
+  for f in "$N"/*/altname_"$5"; do
+    if [ -e "$f" ]; then d=${f%/*}; echo "2: ${d##*/}: <BROADCAST,MULTICAST> mtu 1500"; exit 0; fi
+  done
+  echo "Device \"$5\" does not exist." >&2; exit 1
+fi
+if [ "$2" = property ] && [ "$3" = del ]; then rm "$N/$5/altname_$7"; exit; fi
+if [ "$2" = set ] && [ "$5" = name ]; then
+  for f in "$N/$6" "$N"/*/altname_"$6"; do
+    if [ -e "$f" ]; then echo "RTNETLINK answers: File exists" >&2; exit 2; fi
+  done
+  mv "$N/$4" "$N/$6"
+fi
+'''
+
+
+def run(mechanism, adapters, tmp_path, *, active=(), files=None, nics=NICS, state=(), altnames=None):
     root = tmp_path / "root"
     for name, mac in nics.items():
         (root / "sys/class/net" / name).mkdir(parents=True)
         (root / "sys/class/net" / name / "address").write_text(mac + "\n")
         (root / "sys/class/net" / name / "type").write_text("1\n")
+        for alt in (altnames or {}).get(name, ()):
+            (root / "sys/class/net" / name / f"altname_{alt}").write_text("")
     for name, text in (files or {}).items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text)
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(parents=True)
     stubs = {
         "systemctl": 'for u in $ACTIVE; do [ "$u" = "$3" ] && exit 0; done\nexit 3\n',
-        # `ip link set dev OLD name NEW` moves the fake sysfs entry, so the guest sees the new name.
-        "ip": 'echo "ip $*" >> "$LOG"\nif [ "$5" = name ]; then mv "$ROOT/sys/class/net/$4" "$ROOT/sys/class/net/$6"; fi\n',
+        # `ip link set dev OLD name NEW` moves the fake sysfs entry, so the guest sees the new name. Like the kernel, a
+        # name that is taken, also as an alternative name (altname_<name> file of an interface), is "File exists".
+        "ip": IP_STUB,
         "ifquery": 'for i in $STATE; do [ "$i" = "$2" ] && exit 0; done\nexit 1\n',
     }
     for name in ("udevadm", "nmcli", "netplan", "networkctl", "ifup", "ifdown", "ifquery", "ip", "systemctl"):
@@ -114,6 +136,30 @@ def test_ifupdown_guest_gets_link_files_new_names_and_config(tmp_path):
     assert (root / "etc/cloud/cloud.cfg.d/99-gns3lab-network.cfg").exists()
     assert "ip link set dev ens9 name gns3lab0" in calls and "ip link set dev gns3lab0 name ens3" in calls
     assert calls[-1] == "ifup ens3"  # Only what ifupdown had up comes up again
+
+
+def test_a_new_name_held_as_an_alternative_name_is_released(tmp_path):
+    # Debian 12 (systemd 252): ens3 also answers as enp0s3, and the altname stays with the interface when it is renamed.
+    # Seen on the stand: a project whose node drew enp0s3 failed its first start with "RTNETLINK answers: File exists".
+    nics = {"ens3": "0c:aa:00:00:00:00", "ens4": "0c:aa:00:00:00:01"}
+    altnames = {"ens3": ["enp0s3"], "ens4": ["enp0s4"]}
+    done, root, calls = run("ifupdown", {0: "enp0s3", 1: "enp0s4"}, tmp_path, nics=nics, altnames=altnames)
+    assert done.returncode == 0, done.stderr
+    net = root / "sys/class/net"
+    assert sorted(p.name for p in net.iterdir()) == ["enp0s3", "enp0s4"]
+    assert (net / "enp0s3/address").read_text() == "0c:aa:00:00:00:00\n"
+    assert not list(net.glob("*/altname_*"))
+    assert "ip link property del dev gns3lab0 altname enp0s3" in calls
+    assert "ip link property del dev gns3lab1 altname enp0s4" in calls
+
+    # Another adapter's alternative name, and a guest without any: nothing to release, nothing deleted.
+    done, root, calls = run("ifupdown", {0: "enp0s4", 1: "eno1"}, tmp_path / "2", nics=nics, altnames=altnames)
+    assert done.returncode == 0, done.stderr
+    assert sorted(p.name for p in (root / "sys/class/net").iterdir()) == ["eno1", "enp0s4"]
+    assert "ip link property del dev gns3lab1 altname enp0s4" in calls
+    done, root, calls = run("ifupdown", {0: "eno1"}, tmp_path / "3", nics={"ens3": "0c:aa:00:00:00:00"})
+    assert done.returncode == 0, done.stderr
+    assert not any("property" in c for c in calls)
 
 
 def test_a_dhcp_client_of_the_boot_is_stopped_first(tmp_path):

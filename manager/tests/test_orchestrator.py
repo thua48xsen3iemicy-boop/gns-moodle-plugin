@@ -278,6 +278,10 @@ async def test_project_whose_first_provisioning_did_not_finish_is_rebuilt(tmp_pa
         s = await session(env, again)
         assert s["status"] == "running", s["error"]
         assert str(s["project_id"]) != old and env.projects[str(s["project_id"])]["provisioned"]
+        # The half-built project is still in the student directory: the new one may not take its name (the fake slot
+        # refuses it like GNS3). Seen on the stand: every retry failed with "Project name already exists".
+        assert s["project_name"] != first["project_name"]
+        assert s["project_name"] == f"{first['project_name']}-{s['project_id'].hex[:8]}"
         [queued] = await _rows(env, "SELECT project_id, student_key FROM project_purges")
         assert str(queued["project_id"]) == old and queued["student_key"] == first["student_key"]
         [ws] = await _rows(env, "SELECT project_id, deployed FROM workspaces")

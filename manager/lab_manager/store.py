@@ -7,6 +7,7 @@ slots.generation still equals the generation the session got at allocation time.
 import asyncio
 from datetime import datetime, timezone
 import json
+import re
 from contextlib import asynccontextmanager
 import secrets
 import uuid
@@ -229,9 +230,14 @@ class Store:
         for key in keys:
             await conn.execute("INSERT INTO project_purges (project_id, student_key) VALUES (%s, %s)"
                                " ON CONFLICT DO NOTHING", (ws["project_id"], key))
+        # A new name too: GNS3 lists every project of the student directory, and the half-built one stays there until
+        # the agent deletes it (only once no slot holds the directory). The slot refuses a new project with a used name
+        # ("Project name already exists"), so with the old name every next start would fail the same way.
+        new_id = uuid.uuid4()
+        base = re.sub(r"-[0-9a-f]{8}$", "", ws["project_name"])
         cur = await conn.execute(
-            "UPDATE workspaces SET project_id = %s, ticket = NULL WHERE id = %s RETURNING *",
-            (uuid.uuid4(), ws["id"]))
+            "UPDATE workspaces SET project_id = %s, project_name = %s, ticket = NULL WHERE id = %s RETURNING *",
+            (new_id, f"{base[:111]}-{new_id.hex[:8]}", ws["id"]))
         rebuilt = await cur.fetchone()
         await self._event(conn, None, None, "workspace_rebuilt",
                           {"workspace_id": ws["id"], "old_project_id": str(ws["project_id"]),

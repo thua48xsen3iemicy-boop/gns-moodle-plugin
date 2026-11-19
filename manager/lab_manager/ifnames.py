@@ -10,7 +10,8 @@ these names. It runs once through QGA when the project is created, before the ne
   1. checks the mechanism declared by the image, like netconfig, and that the guest has `ip` and udev,
   2. finds the interfaces by MAC (adapter N is the N-th by ascending MAC, netconfig.FIND),
   3. writes /etc/systemd/network/10-gns3lab-<mac>.link (Name= by MACAddress=), so udev names them so on every boot,
-  4. renames them now (through temporary names, so two adapters may swap names), carries the old names over in the
+  4. renames them now (through temporary names, so two adapters may swap names; a new name that is an alternative
+     name of an interface is taken from it first), carries the old names over in the
      network files of the guest, switches cloud-init's network part off and lets the mechanism see the new names.
 
 Names come from this module only (checked against NAME_RE); `@mac` is turned into `enx<mac>` in the guest.
@@ -136,6 +137,13 @@ quiet() {
   nodhcp "$1"
   if has ifdown; then t ifdown --force "$1" >/dev/null 2>&1 || true; fi
 }
+# systemd's 99-default.link gives an interface alternative names too (Debian 12: ens3 also answers as enp0s3). They
+# share the namespace of the names and stay with the interface when it is renamed, so a new name that is one of them
+# is "RTNETLINK answers: File exists". Our .link files match first and give none: after a reboot they do not return.
+release() {
+  h=$(ip -o link show dev "$1" 2>/dev/null | sed -n 's/^[0-9]*: *\([^:@ ]*\).*/\1/p')
+  if [ -n "$h" ] && [ "$h" != "$1" ]; then ip link property del dev "$h" altname "$1"; fi
+}
 renamed() {
   UP=""
   for p in $PAIRS; do
@@ -150,6 +158,7 @@ renamed() {
   for p in $PAIRS; do
     a=${p%%:*}; r=${p#*:}; o=${r%%:*}; n=${r#*:}
     if [ "$o" = "$n" ]; then continue; fi
+    release "$n"
     ip link set dev "gns3lab$a" name "$n"
     carry "gns3lab$a" "$n"
     ip link set dev "$n" up
