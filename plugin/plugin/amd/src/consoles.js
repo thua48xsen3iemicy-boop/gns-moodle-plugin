@@ -56,6 +56,10 @@ const FONT_MOBILE = 13;
 
 /** Most remembered console font choices; the oldest are dropped. */
 const FONT_KEEP = 200;
+/** A tab of the panel starts to move after the pointer went this far sideways: a shorter move is still a click. */
+const TAB_DRAG = 6;
+/** Dragging a tab this close to an edge of the tab bar scrolls the bar. */
+const TAB_EDGE = 28;
 
 /** Ctrl + wheel turns the size by one step after this much scrolling (a wheel notch is 100, a trackpad pinch is many small ones). */
 const FONT_WHEEL_STEP = 50;
@@ -751,6 +755,10 @@ export class Consoles {
         if (!this.fonts || typeof this.fonts !== 'object' || Array.isArray(this.fonts)) this.fonts = {};
         this.pins = store.get('snippins', {});
         this.barsFolded = store.get('tbarfolded', false) === true;
+        // The console panel pushed beyond the right edge, a tongue left on the edge brings it back.
+        this.dockOff = store.get('dockoff', false) === true;
+        this.tabDrag = false;
+        this.tabDropped = false;
         this.snip = new SnipMenu(this);
         // Windows by default: students like them best; a mode the student chose is kept in the browser.
         this.mode = store.get('mode', 'windows');
@@ -767,6 +775,7 @@ export class Consoles {
         this.dock = r('dock');
         this.tabs = r('tabs');
         this.dockBody = r('dockBody');
+        this.tongue = r('dockTongue');
         this.grid = r('grid');
         this.wins = r('wins');
         this.ov = r('ov');
@@ -922,6 +931,12 @@ export class Consoles {
             this.enterDive(c);
             return;
         }
+        // A console opened from the scheme comes with its panel: hidden, it would open out of sight.
+        if (this.mode === 'panel' && this.dockOff) {
+            this.setDockOff(false, false);
+            c.focus();
+            return;
+        }
         if (this.mode === 'windows' && c.min) {
             this.layout();
             this.restoreWin(c);
@@ -1044,7 +1059,7 @@ export class Consoles {
         if (this.stage.mobile) return this.diving && this.active === c.n.id;
         if (this.mode === 'grid') return true;
         if (this.mode === 'windows') return !c.min;
-        return this.active === c.n.id;
+        return !this.dockOff && this.active === c.n.id;
     }
 
     paintBadges(c) {
@@ -1074,6 +1089,7 @@ export class Consoles {
         this.root.classList.toggle('mob', mobile);
         this.box.dataset.mode = mobile ? 'mobile' : this.mode;
         this.box.classList.toggle('has-cons', this.cons.size > 0);
+        this.box.classList.toggle('dock-off', !mobile && this.mode === 'panel' && this.dockOff && this.cons.size > 0);
         this.root.querySelectorAll('[data-region="modes"] button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === this.mode)));
         this.grid.textContent = '';
         this.box.style.gridTemplateColumns = '';
@@ -1107,6 +1123,10 @@ export class Consoles {
 
     renderPanel() {
         const tabs = this.tabs, body = this.dockBody;
+        // A tab being dragged stays under the pointer: the bar is drawn again when it is dropped.
+        if (this.tabDrag) return;
+        this.paintTongue();
+        const scrolled = tabs.scrollLeft;
         tabs.textContent = '';
         if (!this.cons.size) {
             body.textContent = '';
@@ -1132,11 +1152,143 @@ export class Consoles {
                 c.focus();
             };
         });
+        tabs.scrollLeft = scrolled;
+        // A console that became active (opened, chosen by Shift+arrows) shows its tab, the bar keeps its place otherwise.
+        if (this.tabShown !== this.active) {
+            this.tabShown = this.active;
+            tabs.querySelector('[aria-selected="true"]')?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+        }
         const act = this.cons.get(this.active);
         Array.from(body.children).forEach(ch => {
             if (ch !== act.host) ch.remove();
         });
         act.attach(body);
+    }
+
+    /**
+     * The tongue of the hidden panel: how many consoles are open there and whether one of them printed something new.
+     */
+    paintTongue() {
+        this.r('dockCount').textContent = this.cons.size ? String(this.cons.size) : '';
+        this.r('dockUnread').hidden = !Array.from(this.cons.values()).some(c => c.unread);
+    }
+
+    /**
+     * Pushes the console panel beyond the right edge of the scheme or brings it back. The terminals stay connected
+     * and keep their size; the scheme gets the whole width while the panel is away.
+     *
+     * @param {boolean} off true hides the panel
+     * @param {boolean} [focus] give the keyboard to the tongue (hidden) or to the active console (back)
+     */
+    setDockOff(off, focus = true) {
+        if (this.dockOff === off) return;
+        this.dockOff = off;
+        store.set('dockoff', off);
+        if (off) {
+            this.unmax(false);
+            this.snip.close(false);
+        } else {
+            const dock = this.dock;
+            dock.classList.remove('dock-in');
+            // Reading the layout restarts the animation when the panel comes back twice in a row.
+            dock.getBoundingClientRect();
+            dock.classList.add('dock-in');
+            dock.addEventListener('animationend', () => dock.classList.remove('dock-in'), {once: true});
+            const c = this.cons.get(this.active);
+            if (c) {
+                c.unread = false;
+                this.paintBadges(c);
+            }
+        }
+        this.layout();
+        if (!focus) return;
+        if (off) this.tongue.focus({preventScroll: true});
+        else this.cons.get(this.active)?.focus();
+    }
+
+    /**
+     * Puts the open consoles in a new order: tabs, tiles, windows and Shift+arrows follow it.
+     *
+     * @param {string[]} ids node ids in the new order; consoles left out keep their place after them
+     */
+    reorder(ids) {
+        const next = new Map();
+        ids.forEach(id => {
+            if (this.cons.has(id)) next.set(id, this.cons.get(id));
+        });
+        this.cons.forEach((c, id) => {
+            if (!next.has(id)) next.set(id, c);
+        });
+        this.cons = next;
+    }
+
+    /**
+     * The tab bar of the panel: a tab is dragged to another place, the wheel scrolls the bar sideways.
+     */
+    bindTabs() {
+        const tabs = this.tabs;
+        let d = null;
+        tabs.addEventListener('wheel', e => {
+            if (e.ctrlKey || tabs.scrollWidth <= tabs.clientWidth) return;
+            // A sideways swipe of a trackpad scrolls the bar by itself.
+            if (!e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+            tabs.scrollLeft += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+            e.preventDefault();
+        }, {passive: false});
+        tabs.addEventListener('pointerdown', e => {
+            this.tabDropped = false;
+            if (e.button !== 0 || this.mode !== 'panel' || e.target.closest('[data-x]')) return;
+            const t = e.target.closest('.tab');
+            if (t) d = {id: t.dataset.con, x: e.clientX, pid: e.pointerId, t: null};
+        });
+        tabs.addEventListener('pointermove', e => {
+            if (!d || e.pointerId !== d.pid) return;
+            if (!d.t) {
+                if (Math.abs(e.clientX - d.x) < TAB_DRAG) return;
+                d.t = tabs.querySelector(`.tab[data-con="${CSS.escape(d.id)}"]`);
+                if (!d.t) {
+                    d = null;
+                    return;
+                }
+                // The bar holds the pointer: the tab itself moves in the DOM, which would drop a capture on it.
+                tabs.setPointerCapture(e.pointerId);
+                this.tabDrag = true;
+                d.t.classList.add('dragging');
+                tabs.classList.add('dragging');
+            }
+            const box = tabs.getBoundingClientRect();
+            if (e.clientX < box.left + TAB_EDGE) tabs.scrollLeft -= TAB_EDGE / 2;
+            else if (e.clientX > box.right - TAB_EDGE) tabs.scrollLeft += TAB_EDGE / 2;
+            const before = Array.from(tabs.children).find(x => {
+                if (x === d.t) return false;
+                const r = x.getBoundingClientRect();
+                return e.clientX < r.left + r.width / 2;
+            });
+            if (before && d.t.nextElementSibling !== before) tabs.insertBefore(d.t, before);
+            else if (!before && tabs.lastElementChild !== d.t) tabs.appendChild(d.t);
+        });
+        const end = e => {
+            if (!d || e.pointerId !== d.pid) return;
+            const moved = d.t;
+            d = null;
+            if (!moved) return;
+            this.tabDrag = false;
+            this.tabDropped = true;
+            tabs.classList.remove('dragging');
+            this.reorder(Array.from(tabs.children).map(x => x.dataset.con));
+            this.renderPanel();
+            this.drawLinks();
+        };
+        tabs.addEventListener('pointerup', end);
+        tabs.addEventListener('pointercancel', end);
+        // The click that ends a drag does not choose the tab under the pointer.
+        tabs.addEventListener('click', e => {
+            if (this.tabDropped) {
+                this.tabDropped = false;
+                e.stopPropagation();
+                e.preventDefault();
+            }
+        }, true);
     }
 
     renderGrid() {
@@ -1542,7 +1694,10 @@ export class Consoles {
     /* ---------------- controls ---------------- */
 
     bind() {
-        this.tabs.title = this.s('ui_max_title');
+        this.tabs.title = this.s('ui_tabs_title');
+        this.bindTabs();
+        this.r('dockHide').onclick = () => this.setDockOff(true);
+        this.tongue.onclick = () => this.setDockOff(false);
         this.tabs.addEventListener('dblclick', e => {
             if (this.mode === 'panel' && !e.target.closest('[data-x]')) this.toggleMax(this.r('dock'));
         });
@@ -1551,6 +1706,11 @@ export class Consoles {
                 this.unmax(false);
                 this.mode = b.dataset.mode;
                 store.set('mode', this.mode);
+                // Choosing the panel shows it, also when it was pushed beyond the edge before.
+                if (this.mode === 'panel' && this.dockOff) {
+                    this.dockOff = false;
+                    store.set('dockoff', false);
+                }
                 if (this.mode === 'windows') {
                     this.cons.forEach(c => {
                         c.min = false;

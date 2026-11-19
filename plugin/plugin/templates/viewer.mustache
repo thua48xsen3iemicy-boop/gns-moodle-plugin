@@ -167,9 +167,13 @@
         </div>
         <div class="splitter" data-region="splitter" role="separator" aria-orientation="vertical" aria-label="{{#str}}ui_splitter, mod_gns3lab{{/str}}"></div>
         <section class="dock" data-region="dock" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}">
-            <div class="tabs" data-region="tabs" role="tablist" aria-label="{{#str}}consoletabs, mod_gns3lab{{/str}}"></div>
+            <div class="dockhead">
+                <div class="tabs" data-region="tabs" role="tablist" aria-label="{{#str}}consoletabs, mod_gns3lab{{/str}}"></div>
+                <button class="dockhide" type="button" data-region="dockHide" aria-label="{{#str}}ui_dock_hide, mod_gns3lab{{/str}}" title="{{#str}}ui_dock_hide, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M4 3l5 5-5 5M9 3l5 5-5 5"/></svg></button>
+            </div>
             <div class="dockbody" data-region="dockBody"></div>
         </section>
+        <button class="docktongue" type="button" data-region="dockTongue" aria-label="{{#str}}ui_dock_show, mod_gns3lab{{/str}}" title="{{#str}}ui_dock_show, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16"><path d="M10 3L5 8l5 5"/></svg><b data-region="dockCount"></b><span class="unr" data-region="dockUnread"></span></button>
         <section class="grid" data-region="grid" aria-label="{{#str}}consoles, mod_gns3lab{{/str}}"></section>
     </main>
 
