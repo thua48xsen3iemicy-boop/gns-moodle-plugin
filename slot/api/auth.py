@@ -17,13 +17,18 @@ def require_token(credentials: HTTPAuthorizationCredentials | None = Depends(bea
                             headers={"WWW-Authenticate": "Bearer"})
 
 
+def offered_protocols(protocol_header: str | None) -> list[str]:
+    """The subprotocols a WebSocket client offers, as listed in its Sec-WebSocket-Protocol header."""
+    return [x.strip() for x in (protocol_header or "").split(",")]
+
+
 def websocket_token_ok(protocol_header: str | None) -> bool:
-    """Clients: new WebSocket(url, ['lab-slot', `bearer.${token}`]).
+    """Clients: new WebSocket(url, ['lab-slot', `bearer.${token}`]); the gateway also offers 'lab-slot.2'.
 
     The console gateway uses SLOT_CONSOLE_TOKEN, which opens consoles only, never the REST API.
     """
-    tokens = [x.strip() for x in (protocol_header or "").split(",")]
+    tokens = offered_protocols(protocol_header)
     secrets_ok = [s for s in (os.environ.get("SLOT_API_TOKEN"),
                               os.environ.get("SLOT_CONSOLE_TOKEN")) if s]
-    return bool(os.environ.get("SLOT_API_TOKEN") and "lab-slot" in tokens and
+    return bool(os.environ.get("SLOT_API_TOKEN") and ("lab-slot" in tokens or "lab-slot.2" in tokens) and
                 any(secrets.compare_digest(t, "bearer." + s) for t in tokens for s in secrets_ok))
