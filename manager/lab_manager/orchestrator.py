@@ -77,6 +77,13 @@ CHECK_FAILED = {"code": "CHECK_FAILED", "message": "Проверка не вып
 CHECK_REASK = 6  # Seconds between the requests of a check run to collect now: over the slot's 5 s rate limit
 
 # The CT may be running with the student's directory mounted read-write.
+# live_nodes() for the pages: the plugin waits for the manager about as long as SLOT_TIMEOUT (10 s by default), so a page
+# read must not wait for a slot that does not answer longer than this; the snapshot of the start answers instead
+# (nodes_stale, plugin request П6). After such a failure the slot is asked again only after LIVE_STALE_CACHE seconds:
+# polls of many pages would otherwise each wait LIVE_TIMEOUT again.
+LIVE_CACHE = 3.0
+LIVE_TIMEOUT = 3.0
+LIVE_STALE_CACHE = 10.0
 MOUNTED_STAGES = ("ct_start", "slot_ready", "lab_submit", "lab_wait", "ready", "lab_stop", "lab_stop_wait")
 # The lab may exist in the slot: stop it before the CT.
 LAB_STAGES = ("lab_submit", "lab_wait", "ready")
@@ -285,6 +292,8 @@ class Orchestrator:
                 raise
             except (psycopg.Error, OSError) as exc:
                 log.error("Database unavailable for the orchestrator: %s", type(exc).__name__)
+            except Exception:  # noqa: BLE001 - a bug must not stop the loop for good while the API keeps answering
+                log.exception("Orchestrator loop failed; leadership is given up and taken again")
             finally:
                 self.leader = False
                 self.epoch = None
@@ -295,6 +304,8 @@ class Orchestrator:
                     await asyncio.gather(*tasks, return_exceptions=True)
                 self._tasks.clear()
                 self._claims.clear()
+                # The cancelled tasks included the teacher's scripts of check runs: a new leadership runs them again.
+                self._scripted.clear()
             await self.sleep(5)
 
     async def tick(self):
@@ -574,6 +585,7 @@ class Orchestrator:
         self._consoleless.pop(s["id"], None)
         self._guest_facts.pop(s["id"], None)
         self._iso.pop(s["id"], None)
+        self._live_cache.pop(s["id"], None)
 
     @staticmethod
     def _recorded_slot_state(error, slot_state):
@@ -1375,15 +1387,18 @@ class Orchestrator:
         """Node statuses of a running session, cached a few seconds.
 
         Returns (nodes, stale): stale is True when the slot did not answer and the snapshot from
-        the start of the session is returned instead (plugin request П6).
+        the start of the session is returned instead (plugin request П6). Without `fresh` the slot gets LIVE_TIMEOUT
+        to answer and a stale answer is kept LIVE_STALE_CACHE seconds; `fresh` (a decision about a stopping lab)
+        asks the slot now and waits the whole SLOT_TIMEOUT.
         """
         cached = self._live_cache.get(s["id"])
-        if not fresh and cached and time.monotonic() - cached[0] < 3:
+        if not fresh and cached and time.monotonic() - cached[0] < (LIVE_STALE_CACHE if cached[2] else LIVE_CACHE):
             return cached[1], cached[2]
         nodes, stale = node_states(s["topology"]), True
         observed_at = now()
         try:
-            raw = await self._slot(s).topology(str(s["project_id"]))
+            timeout = None if fresh else min(self.settings.slot_timeout, LIVE_TIMEOUT)
+            raw = await self._slot(s).topology(str(s["project_id"]), timeout=timeout)
             live = node_states(session_topology(s["project_name"], raw))
             nodes, stale = {k: live.get(k, v) for k, v in nodes.items()}, False
             await self.store.observe_nodes(s, {n["name"]: n.get("status", "unknown") for n in raw.get("nodes", [])}, observed_at=observed_at)

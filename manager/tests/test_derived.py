@@ -351,7 +351,7 @@ async def test_unreachable_status_before_stop_requires_force(tmp_path, dsn):
         env.slots[201].stopped_nodes.add('PC0')
         await env.orch.live_nodes(await env.services.store.session(sid), fresh=True)
         original = env.services.slots[201].topology
-        async def unavailable(pid):
+        async def unavailable(pid, **_):
             raise SlotUnavailable('Status temporarily unavailable')
         env.services.slots[201].topology = unavailable
         await env.client.post(f'/api/v1/sessions/{sid}/stop')

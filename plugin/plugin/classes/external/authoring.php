@@ -88,6 +88,7 @@ class authoring extends external_api {
                 throw new \invalid_parameter_exception('Unknown derived image');
             }
             $changes = [];
+            $title = trim($title);
             if ($featured !== -1) {
                 require_capability('mod/gns3lab:manageimages', $context);
                 $changes['featured'] = (bool) $featured;
@@ -103,6 +104,10 @@ class authoring extends external_api {
                 if ($retired !== -1) {
                     $changes['retired'] = (bool) $retired;
                 }
+            }
+            if (!$changes) {
+                // The lab manager refuses an empty change (400): say what is wrong here instead.
+                throw new \invalid_parameter_exception('Nothing to change: give a title, featured or retired');
             }
             $client->patch_image($imageid, $changes);
             return ['images' => image_data::export($client->get_images(true))];

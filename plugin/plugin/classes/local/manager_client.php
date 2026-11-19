@@ -92,17 +92,21 @@ class manager_client {
      * A manager without GET /api/v1/info only knows SPEC §3: then nothing beyond it is sent.
      * The answer is cached per manager URL; a failed request is retried sooner than a good answer expires.
      *
-     * @return \stdClass known (bool: the manager answered info), options (string[]), features (string[]),
+     * @param bool $fresh ask the manager even if the cache has an answer
+     * @return \stdClass known (bool: the manager answered info), failed (bool: the request failed, so nothing is
+     *     known about the manager; a manager without the route is not failed), options (string[]), features (string[]),
      *     limits (stdClass|null: per-site limits for lab definitions), lab_formats (string[])
      */
-    public function get_info(): \stdClass {
+    public function get_info(bool $fresh = false): \stdClass {
         $cache = \cache::make('mod_gns3lab', 'info');
         $key = 'm' . md5($this->baseurl);
         $hit = $cache->get($key);
-        if ($hit && $hit->until > time()) {
+        if (!$fresh && $hit && $hit->until > time()) {
             return $hit->info;
         }
-        $info = (object) ['known' => false, 'options' => [], 'features' => [], 'limits' => null, 'lab_formats' => []];
+        $info = (object) [
+            'known' => false, 'failed' => false, 'options' => [], 'features' => [], 'limits' => null, 'lab_formats' => [],
+        ];
         $ttl = self::INFO_TTL;
         try {
             $data = $this->expect_object($this->request('GET', '/api/v1/info'));
@@ -114,6 +118,7 @@ class manager_client {
         } catch (manager_exception $e) {
             if (!$e->is_not_found()) {
                 $ttl = self::INFO_RETRY;
+                $info->failed = true;
             }
         }
         $cache->set($key, (object) ['until' => time() + $ttl, 'info' => $info]);
@@ -267,7 +272,9 @@ class manager_client {
      * Starts a session or returns the live one of the same activity (idempotent).
      *
      * Options and the client description are sent only when GET /api/v1/info says the manager takes them:
-     * the manager refuses unknown fields (CONTRACTS §1.2).
+     * the manager refuses unknown fields (CONTRACTS §1.2). A failed info request (a blip of the manager, cached for
+     * INFO_RETRY seconds) is asked again; if it still fails and the activity has a time limit, the lab is not started:
+     * without the option the manager would give it its own, possibly longer, default.
      *
      * @param int $userid Moodle user id
      * @param int $instanceid gns3lab instance id
@@ -292,6 +299,12 @@ class manager_client {
             'course_id' => $courseid,
         ];
         $info = $this->get_info();
+        if (!empty($info->failed)) {
+            $info = $this->get_info(true);
+            if (!empty($info->failed) && $maxduration > 0) {
+                throw new manager_exception('unreachable', 0, 'GET /api/v1/info failed: the time limit cannot be sent');
+            }
+        }
         if ($maxduration > 0 && in_array('max_duration', $info->options, true)) {
             $body['options'] = ['max_duration' => $maxduration];
         }

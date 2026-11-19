@@ -203,6 +203,41 @@ final class manager_client_test extends \advanced_testcase {
         $this->assertSame(['consoles', 'resume'], $this->client->get_info()->features);
     }
 
+    public function test_failed_info_is_asked_again_before_a_timed_lab_starts(): void {
+        $this->manager->on('GET', '/api/v1/info', 503, ['error' => 'storage_unavailable', 'message' => 'x']);
+        $this->assertTrue($this->client->get_info()->failed);
+        $this->manager->with_info();
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+
+        $this->client->create_session(42, 7, 3, 'cisco-3x2', 120);
+
+        [$request] = $this->manager->requests_to('POST', '/api/v1/sessions');
+        $this->assertSame(['max_duration' => 120], $request['body']['options'], 'the cached failure is not trusted');
+        $this->assertCount(2, $this->manager->requests_to('GET', '/api/v1/info'));
+    }
+
+    public function test_timed_lab_is_not_started_without_info(): void {
+        $this->manager->on('GET', '/api/v1/info', 503, ['error' => 'storage_unavailable', 'message' => 'x']);
+        $this->manager->on('POST', '/api/v1/sessions', 201, fake_manager::session('queued'));
+        try {
+            $this->client->create_session(42, 7, 3, 'cisco-3x2', 120);
+            $this->fail('a lab with a time limit must not start without it');
+        } catch (manager_exception $e) {
+            $this->assertSame('unreachable', $e->remotecode);
+        }
+        $this->assertSame([], $this->manager->requests_to('POST', '/api/v1/sessions'));
+
+        // Without a limit of the activity there is nothing to lose: the lab starts with what is known.
+        $this->client->create_session(42, 7, 3, 'cisco-3x2', 0);
+        $this->assertCount(1, $this->manager->requests_to('POST', '/api/v1/sessions'));
+    }
+
+    public function test_manager_without_info_route_is_not_failed(): void {
+        $info = $this->client->get_info();
+        $this->assertFalse($info->known);
+        $this->assertFalse($info->failed);
+    }
+
     public function test_session_export_of_new_fields(): void {
         $failed = fake_manager::session('failed');
         $failed['error'] = ['code' => 'SLOT_START_FAILED', 'retryable' => true];
