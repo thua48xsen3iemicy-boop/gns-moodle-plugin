@@ -70,6 +70,30 @@ def test_command_names_the_serial_console():
     assert command(120, 40) == "stty -F /dev/ttyS0 rows 40 cols 120"
 
 
+def test_a_redraw_changes_the_size_twice():
+    assert command(120, 40, redraw=True) == \
+        "stty -F /dev/ttyS0 rows 39 cols 120 && stty -F /dev/ttyS0 rows 40 cols 120"
+    assert command(80, 1, redraw=True) == "stty -F /dev/ttyS0 rows 2 cols 80 && stty -F /dev/ttyS0 rows 1 cols 80"
+
+
+def test_a_new_console_redraws_the_screen_once():
+    async def run():
+        guest, sizes = Guest(), WindowSizes()
+        sizes.opened("p1", "n1")
+        sizes.resize(guest, "n1", 120, 40)
+        await settle(sizes)
+        sizes.resize(guest, "n1", 100, 30)
+        await settle(sizes)
+        # A reloaded page: the same size from a new console still makes nano redraw.
+        sizes.closed("n1")
+        sizes.opened("p1", "n1")
+        sizes.resize(guest, "n1", 100, 30)
+        await settle(sizes)
+        assert [c[1] for c in guest.calls] == [command(120, 40, True), command(100, 30), command(100, 30, True)]
+
+    asyncio.run(run())
+
+
 def test_quick_sizes_are_one_command_with_the_last_size():
     async def run():
         guest, sizes = Guest(), WindowSizes()
@@ -79,7 +103,7 @@ def test_quick_sizes_are_one_command_with_the_last_size():
             await asyncio.sleep(0.01)
         assert guest.calls == []  # the quiet pause is still running
         await settle(sizes)
-        assert guest.calls == [("n1", "stty -F /dev/ttyS0 rows 40 cols 120",
+        assert guest.calls == [("n1", command(120, 40, redraw=True),
                                 {"timeout": winsize.TIMEOUT, "priority": Priority.COMMAND})]
 
     asyncio.run(run())
@@ -101,8 +125,7 @@ def test_a_size_during_a_command_waits_for_it():
         assert len(guest.calls) == 1  # one command of the node in the queue at a time
         guest.hold.set()
         await settle(sizes)
-        assert [c[1] for c in guest.calls] == ["stty -F /dev/ttyS0 rows 30 cols 100",
-                                               "stty -F /dev/ttyS0 rows 20 cols 80"]
+        assert [c[1] for c in guest.calls] == [command(100, 30, redraw=True), command(80, 20)]
 
     asyncio.run(run())
 
@@ -124,7 +147,7 @@ def test_input_reapplies_the_size_once_per_refresh():
         sizes.touch(guest, "n1")
         await asyncio.sleep(0.02)
         await settle(sizes)
-        assert [c[1] for c in guest.calls] == ["stty -F /dev/ttyS0 rows 40 cols 120"] * 2
+        assert [c[1] for c in guest.calls] == [command(120, 40, redraw=True), command(120, 40)]
 
     asyncio.run(run())
 
@@ -153,8 +176,8 @@ def test_a_failure_is_swallowed_and_the_next_size_is_tried(error):
         guest.fail = None
         sizes.resize(guest, "n1", 100, 30)
         await settle(sizes)
-        assert [c[1] for c in guest.calls] == ["stty -F /dev/ttyS0 rows 40 cols 120",
-                                               "stty -F /dev/ttyS0 rows 30 cols 100"]
+        # The redraw failed with the first command, so the next one still makes it.
+        assert [c[1] for c in guest.calls] == [command(120, 40, redraw=True), command(100, 30, redraw=True)]
 
     asyncio.run(run())
 
@@ -233,8 +256,8 @@ def test_lab_slot_2_takes_binary_input_and_control_text(mock_server, monkeypatch
     monkeypatch.setenv("SLOT_CONSOLE_TOKEN", "console-token")
     applied = []
 
-    async def apply(lifecycle, pid, node_id, cols, rows):
-        applied.append((pid, node_id, cols, rows))
+    async def apply(lifecycle, pid, node_id, cols, rows, redraw=False):
+        applied.append((pid, node_id, cols, rows, redraw))
         return True
 
     monkeypatch.setattr(WindowSizes, "apply", staticmethod(apply))
@@ -252,7 +275,7 @@ def test_lab_slot_2_takes_binary_input_and_control_text(mock_server, monkeypatch
     # Control frames never reach the console, input does.
     assert received == [b"root\r"]
     # Only a QEMU node is asked; the guest agent and the family are checked in `apply`.
-    assert applied == ([(pid, nid, 120, 40)] if node_type == "qemu" else [])
+    assert applied == ([(pid, nid, 120, 40, True)] if node_type == "qemu" else [])
 
 
 @pytest.mark.parametrize("console_type,offered", [("telnet", ["lab-slot"]), ("vnc", ["lab-slot.2", "lab-slot"])],

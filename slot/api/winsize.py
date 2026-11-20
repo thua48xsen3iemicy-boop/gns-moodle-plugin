@@ -9,6 +9,11 @@ Per node, only the last size matters: a frame waits for SLOT_WINSIZE_DELAY secon
 the next frames are only remembered, so a node never has more than one size command in the QGA queue. After a logout
 serial-getty starts again and the guest may be back to 80x24: input re-applies the last size when SLOT_WINSIZE_REFRESH
 seconds have passed since the previous attempt. Failures leave the console alone and are only logged.
+
+A new console of a node (a reloaded page, another browser) gets nothing until the guest prints, and the kernel tells the
+program nothing when the size stays the same: nano would leave a black terminal. So the first size after a console
+opens is set with a nudge, one row less and then the size itself: two real changes, SIGWINCH, and the full-screen
+program redraws its whole screen (a shell at its prompt redraws the prompt line).
 """
 import asyncio
 import json
@@ -48,12 +53,17 @@ def parse_control(text):
     return cols, rows
 
 
-def command(cols, rows):
-    return f"stty -F {SERIAL} rows {int(rows)} cols {int(cols)}"
+def command(cols, rows, redraw=False):
+    """The stty command; with `redraw` the size changes twice, so the program on the screen redraws it."""
+    size = f"stty -F {SERIAL} rows {int(rows)} cols {int(cols)}"
+    if not redraw:
+        return size
+    other = int(rows) - 1 if rows > 1 else int(rows) + 1
+    return f"stty -F {SERIAL} rows {other} cols {int(cols)} && {size}"
 
 
 class _Node:
-    __slots__ = ("pid", "size", "changed", "dirty", "tried", "worker", "consoles")
+    __slots__ = ("pid", "size", "changed", "dirty", "tried", "worker", "consoles", "redraw")
 
     def __init__(self, pid):
         self.pid = pid
@@ -63,6 +73,7 @@ class _Node:
         self.tried = None  # monotonic time of the last attempt
         self.worker = None
         self.consoles = 0
+        self.redraw = False  # a console opened since the last command: the next one makes the screen redraw
 
 
 class WindowSizes:
@@ -76,6 +87,7 @@ class WindowSizes:
         if entry is None or entry.pid != pid:
             entry = self.nodes[node_id] = _Node(pid)
         entry.consoles += 1
+        entry.redraw = True
 
     def closed(self, node_id):
         entry = self.nodes.get(node_id)
@@ -120,21 +132,26 @@ class WindowSizes:
                     continue
                 entry.dirty = False
                 entry.tried = time.monotonic()
-                await self.apply(lifecycle, entry.pid, node_id, *entry.size)
+                redraw, entry.redraw = entry.redraw, False
+                if not await self.apply(lifecycle, entry.pid, node_id, *entry.size, redraw=redraw) and redraw:
+                    entry.redraw = True  # the screen is still to be redrawn by the next attempt
         finally:
             entry.worker = None
             if entry.consoles <= 0 and self.nodes.get(node_id) is entry:
                 del self.nodes[node_id]
 
     @staticmethod
-    async def apply(lifecycle, pid, node_id, cols, rows):
-        """Sets the size on ttyS0 of a Linux guest with an agent; returns whether the command succeeded."""
+    async def apply(lifecycle, pid, node_id, cols, rows, redraw=False):
+        """Sets the size on ttyS0 of a Linux guest with an agent; returns whether the command succeeded.
+
+        With `redraw` the size is nudged first, so a full-screen program redraws even when the size is the same.
+        """
         try:
             if not lifecycle.has_guest_agent(pid, node_id):
                 return False
             if await lifecycle.guest_family(node_id, Priority.COMMAND) != "posix":
                 return False  # Windows has no serial getty, RouterOS its own console
-            result = await lifecycle.qga.exec(node_id, command(cols, rows), timeout=TIMEOUT,
+            result = await lifecycle.qga.exec(node_id, command(cols, rows, redraw), timeout=TIMEOUT,
                                               priority=Priority.COMMAND)
         except Exception as exc:  # noqa: BLE001 - a background task; the console works on without the size
             log.info("window size %sx%s not set on %s: %s: %s", cols, rows, node_id, type(exc).__name__, exc)

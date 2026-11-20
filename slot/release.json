@@ -1,10 +1,10 @@
 {
-  "version": "0.29.0",
-  "build_id": "sha256:868aaf06d9ffd8457337cb32b867e8c441464e6285e1ce015ae08ffb6e15567d",
+  "version": "0.29.1",
+  "build_id": "sha256:963d465111dabe84f57f6fc5fe55a260fc822e24e5add5e5f47e6445d74feed9",
   "files": {
     "AGENTS.md": "2022c85b1d62f4815d4daad8618bee150d40e1d16e095943d0867b14052cb068",
     "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
-    "README.md": "f034746625ed423658f583d5cf8676899bafdc8453ea3ecb8b77e52db0ca4f42",
+    "README.md": "090ea5c2c2bae5bf309937648835bf8a5880c1cc4f25e16c071e092382162aed",
     "api/__init__.py": "b61bb532c208db9570b32a1b4903291e1cb21600ea4bd89c101ca995f7ec324d",
     "api/auth.py": "a556ee58be1167f5597ede11b30797c15b6c268372c3c12e11df50ad81816628",
     "api/carrier.py": "672f3ecfb27386af60d17d50a044e191996a24ecb69b2fb410dfdcb548e6dc4d",
@@ -25,12 +25,12 @@
     "api/nodes.py": "63a5e19d52bd7616ae304c0acb01863607d74a905af657dc2e0ff6b6ac41bdf8",
     "api/qga.py": "de7ff0be6f0c02be099812710610fe4ba8aea5682034a2243ace05cd86e04c32",
     "api/uplink.py": "227ad1fda51aa08bb4976d05a19c1b71fafc47fca4da65db132b284cfc82e91b",
-    "api/winsize.py": "eff74263bc66e5eec0a970625f78c601aba8c449abd08740d45ff41c3543422b",
+    "api/winsize.py": "511819cc58591bdf8a9fa787edbf87ca0fac8db43257656ed72d2f9223ab4d2c",
     "docs/ALIGNMENT.md": "bd3906d89f5562236638728caa9aecc5c9cd72aa0edfb57a815a1746661430b7",
     "examples/cisco-3x2.json": "c96f71ffb6f753998dc7bf0fbf9f5517e51a613df839f51e2cc09d167903aeab",
     "lab-slot.service": "6d4af7568b72bd18abf137d0c2659c53e39ec2433544e35a0087c382d4bfa754",
     "main.py": "abb867ca32c11592b7aa9579467ff7a7b2ef9a0e968bd9981e11f9f44e9246d8",
-    "release.py": "ac7f803b4e85f6082ffaaec7685dc0cfd0b86d29de0a4fed2ff5aa62fabf2a4a",
+    "release.py": "8ce4403c1e2c76b4fe38d43dbca7a99fbd074c0248d9ea04c5b020d56923a100",
     "requirements.txt": "4c096559578f14792cece3b25e61ae0df1d3589b75016be731a3dd9553994e4b",
     "run.py": "5f0776bd540d202c4b751011f438b331ca5e90aad245057b31a48c2e8242c92c",
     "slot.env.example": "a33300e20f4b1ee561260f1c22ecfc0e28a3efb817c260d95ae094526b4e10b7",
@@ -59,7 +59,7 @@
     "tests/test_student_state.py": "df830da5ebf588f9b7d4548dcde03b472332ee71e5261d8e264be58044ddf546",
     "tests/test_uplink.py": "f421d9c2abafaab5efc50982725328a76f170684c1e58389f28c747c2a99a107",
     "tests/test_vnc.py": "5bc9e8ec52ed3ea2e7699fa5c21757b0f7a5e2d17b8945e3b000b2e688b1c26c",
-    "tests/test_winsize.py": "5beba0db1b2c212ef0b96d683e46cc3e7404d9fff2bbd7351673e551bcc49a2b",
+    "tests/test_winsize.py": "2501a910d594af533944c5a358c3a2da0cfcb0a288dce591a6f353d9735b63a6",
     "tools/check_slot.py": "5dda7eacaf6816872080168e0196c8bed4a779a073987a3ec4999b6d18b4476a"
   }
 }
