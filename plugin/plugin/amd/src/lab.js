@@ -65,6 +65,11 @@ const FACTS_POLL = 30000;
 
 /** After "Refresh now" the facts are read again this much later: the collection takes a few seconds, ms. */
 const FACTS_AFTER_REFRESH = 5000;
+/** After "Refresh now" the page reads the facts this often until new ones arrive, at most REFRESH_WAIT. */
+const REFRESH_POLL = 3000;
+const REFRESH_WAIT = 45000;
+/** How long the button tells the outcome before it is "Refresh now" again. */
+const REFRESH_SHOW = 3500;
 
 /** A saved configuration (`write memory`) asks for new facts at most this often, ms (docs/live-state.md §8.2). */
 const SAVE_REFRESH_GAP = 10000;
@@ -104,7 +109,8 @@ const UI_KEYS = [
     'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',
     'consoleneedsrunning', 'consolenone',
     'ui_facts_at', 'ui_facts_ago', 'ui_facts_ago_now', 'ui_facts_stale', 'ui_facts_stale_mark', 'ui_facts_nodata',
-    'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
+    'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_refreshing', 'ui_facts_refreshed', 'ui_facts_nochange',
+    'ui_facts_late', 'ui_facts_refresh_failed', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
     'ui_mac_table', 'ui_mac_col_mac', 'ui_mac_col_port', 'ui_mac_col_vlan', 'ui_mac_empty', 'ui_mac_truncated', 'ui_mac_note',
     'ui_seen_at', 'ui_seen_mark', 'ui_seen_note',
     'ui_fog_unknown', 'ui_fog_unknown_note', 'ui_fog_unknown_count', 'ui_fog_unexplored', 'ui_fog_found_note',
@@ -349,12 +355,9 @@ class LabPage {
         };
         const refresh = region('canvasRefresh');
         if (refresh) {
-            refresh.onclick = async() => {
-                refresh.disabled = true;
-                try {
-                    await this.refreshFacts();
-                } finally {
-                    refresh.disabled = false;
+            refresh.onclick = () => {
+                if (refresh.dataset.state !== 'busy') {
+                    this.refreshFacts();
                 }
             };
         }
@@ -515,6 +518,10 @@ class LabPage {
      */
     stopFacts() {
         clearTimeout(this.factsTimer);
+        if (this.refreshWait) {
+            this.refreshWait = null;
+            this.paintRefresh('');
+        }
         this.factsSession = null;
         this.factsDoc = null;
         this.factsRev = 0;
@@ -556,6 +563,9 @@ class LabPage {
         }
         if (result) {
             this.takeFacts(result);
+            if (this.refreshWait && this.waitRefresh(result)) {
+                return;
+            }
         } else if (Object.values((this.factsDoc && this.factsDoc.nodes) || {}).some(n => n.l1_ports)) {
             this.showFacts(); // Let L1 expire even when this request failed.
         }
@@ -589,6 +599,9 @@ class LabPage {
             changed = true;
         }
         const at = result.generatedat ? result.generatedat * 1000 : null;
+        if (result.generatedat) {
+            this.factsAt = result.generatedat;
+        }
         const stale = !!at && Date.now() - at > result.ttl * 1000;
         this.stage.setFactsMeta({at, stale});
         if (changed) {
@@ -828,16 +841,20 @@ class LabPage {
         if (!this.factsSession) {
             return;
         }
+        if (!auto) {
+            // The button says what goes on until the new facts are on the scheme (or they do not come).
+            this.refreshWait = {rev: this.factsRev, at: this.factsAt || 0, until: Date.now() + REFRESH_WAIT};
+            this.paintRefresh('busy');
+        }
         try {
             await Promise.all(Ajax.call([{
                 methodname: 'mod_gns3lab_refresh_facts',
                 args: {cmid: this.cmid, userid: this.userid},
             }]));
-            if (!auto) {
-                this.toast(this.strings.ui_facts_refresh_sent);
-            }
         } catch (error) {
             if (!auto) {
+                this.refreshWait = null;
+                this.paintRefresh('failed');
                 this.toast(error.message || String(error));
                 this.details.refresh();
             }
@@ -845,6 +862,62 @@ class LabPage {
         }
         clearTimeout(this.factsTimer);
         this.factsTimer = setTimeout(() => this.pollFacts(), FACTS_AFTER_REFRESH);
+    }
+
+    /**
+     * A read of the facts while "Refresh now" waits: new facts end the wait, else the page reads again soon.
+     *
+     * @param {object} result answer of get_facts
+     * @returns {boolean} true when the next read is scheduled here
+     */
+    waitRefresh(result) {
+        const wait = this.refreshWait;
+        const fresh = result.available && (result.rev !== wait.rev || (result.generatedat || 0) > wait.at);
+        if (fresh) {
+            this.refreshWait = null;
+            // A new collection with the same content moves only its time: the scheme did not change.
+            this.paintRefresh(result.rev !== wait.rev ? 'refreshed' : 'nochange');
+            const status = this.stage.r('factStatus');
+            if (status) {
+                status.classList.remove('fresh');
+                status.getBoundingClientRect();
+                status.classList.add('fresh');
+            }
+            return false;
+        }
+        if (Date.now() >= wait.until) {
+            this.refreshWait = null;
+            this.paintRefresh('late');
+            return false;
+        }
+        clearTimeout(this.factsTimer);
+        this.factsTimer = setTimeout(() => this.pollFacts(), REFRESH_POLL);
+        return true;
+    }
+
+    /**
+     * The "Refresh now" button: busy while the facts are collected, then the outcome for a moment.
+     *
+     * @param {string} state busy, refreshed, nochange, late, failed or '' (idle)
+     */
+    paintRefresh(state) {
+        const button = this.stage.r('canvasRefresh');
+        if (!button) {
+            return;
+        }
+        clearTimeout(this.refreshShown);
+        const label = {
+            busy: 'ui_facts_refreshing', refreshed: 'ui_facts_refreshed', nochange: 'ui_facts_nochange',
+            late: 'ui_facts_late', failed: 'ui_facts_refresh_failed',
+        }[state] || 'ui_facts_refresh';
+        button.dataset.state = state;
+        button.textContent = this.strings[label];
+        button.title = state === 'busy' ? this.strings.ui_facts_refresh_sent : '';
+        button.setAttribute('aria-busy', String(state === 'busy'));
+        button.disabled = state === 'busy' || !this.factsSession;
+        if (state && state !== 'busy') {
+            this.refreshShown = setTimeout(() => this.paintRefresh(''), REFRESH_SHOW);
+        }
     }
 
     /* ---------------- consoles: can the student open one now ---------------- */

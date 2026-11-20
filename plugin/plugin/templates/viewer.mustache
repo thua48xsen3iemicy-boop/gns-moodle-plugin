@@ -146,8 +146,10 @@
                     <button class="btn tasks-toggle" type="button" data-region="assignmentsOpen" aria-expanded="false" aria-controls="{{uniqid}}-assignments">{{#str}}ui_assignments, mod_gns3lab{{/str}}</button>
                     <button class="btn" type="button" data-region="checksOpen" aria-expanded="false" aria-controls="{{uniqid}}-checks" hidden>{{#str}}chk_open, mod_gns3lab{{/str}} <span class="task-count" data-region="checksMark" hidden></span></button>
                 </div>
-                <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
+                <div class="fact-status" data-region="factStatus" role="status"><span data-region="canvasFacts"></span><button type="button" data-region="canvasRefresh" data-state="">{{#str}}ui_facts_refresh, mod_gns3lab{{/str}}</button></div>
             </div>
+            <button class="hud-fold" type="button" data-region="hudFold" aria-expanded="true" aria-label="{{#str}}ui_hud_hide, mod_gns3lab{{/str}}" title="{{#str}}ui_hud_hide, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg></button>
+            <button class="hud-tongue" type="button" data-region="hudTongue" aria-label="{{#str}}ui_hud_show, mod_gns3lab{{/str}}" title="{{#str}}ui_hud_show, mod_gns3lab{{/str}}"><b data-region="hudTongueLayer"></b><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button>
             <div class="empty-surface" data-region="canvasEmpty" hidden></div>
             <aside class="object-drawer" data-region="details"></aside>
             <aside class="canvas-panel" data-region="overviewPanel" id="{{uniqid}}-overview" aria-labelledby="{{uniqid}}-overview-title" hidden>

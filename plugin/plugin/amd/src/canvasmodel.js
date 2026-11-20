@@ -34,12 +34,12 @@ export const PILL_H = 26;
 const GAP = 8, PAD = 12;
 
 /**
- * Width of a VLAN pill: a colour dot and "VLAN n".
+ * Width of a VLAN pill: a colour dot, "VLAN n" and the "i" that opens its card.
  *
  * @param {number} vlan VLAN id
  * @returns {number}
  */
-export const pillWidth = vlan => Math.round(34 + 6.4 * ('VLAN ' + vlan).length);
+export const pillWidth = vlan => Math.round(52 + 6.4 * ('VLAN ' + vlan).length);
 
 /**
  * Offsets of the VLAN pills of one switch from its centre for a shape: a row, a column or two columns.

@@ -22,11 +22,11 @@
  * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
-import {svgEl as el} from 'mod_gns3lab/dom';
+import {svgEl as el, store} from 'mod_gns3lab/dom';
 import {clamp, isHost} from 'mod_gns3lab/model';
 import {factsStatus, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 import {PILL_H, canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
-import {portStp, stpBlocks, stpRoot, stpShort} from 'mod_gns3lab/facts';
+import {linkOfIf, portStp, stpBlocks, stpRoot, stpShort} from 'mod_gns3lab/facts';
 
 export const STRING_KEYS = [
     'ui_canvas_title', 'ui_canvas_l4', 'ui_canvas_duplex',
@@ -59,6 +59,24 @@ const DUPLEX_K = 2.3;
 /** Distance between the control points of fanned L2 lines with the same ends; the curves part by half of it. */
 const FAN = 20;
 
+/**
+ * Order of two subnets by their address ("10.0.12.0/30" before "10.0.12.8/29", then the shorter mask first).
+ *
+ * @param {string} a subnet key
+ * @param {string} b subnet key
+ * @returns {number}
+ */
+const subnetOrder = (a, b) => {
+    const num = key => {
+        const [ip, pre] = String(key).split('/');
+        const parts = ip.split('.').map(Number);
+        return parts.length === 4 && parts.every(Number.isFinite) ? [((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3], Number(pre) || 0] : null;
+    };
+    const x = num(a), y = num(b);
+    if (!x || !y) return String(a).localeCompare(String(b));
+    return x[0] - y[0] || x[1] - y[1];
+};
+
 /** Colours of the subnets on L3, in the order of the subnets. */
 const NET_COLORS = ['#73c7ed', '#60dfaf', '#f0bd73', '#da9fe8', '#ff9f8f', '#b7e07a', '#8bb5fa', '#f2a5c8', '#7fe0d6', '#e6d27a'];
 
@@ -79,6 +97,37 @@ export class CanvasView {
         // button appears once the checks state arrives or a counter grows a digit.
         const actions = stage.r('canvasActions');
         if (actions && window.ResizeObserver) new ResizeObserver(() => { if (this.hudBg) this.renderHud(); }).observe(actions);
+        // The HUD (layers, overview, assignment, facts) slides beyond the left edge; a tongue there brings it back.
+        this.hudOff = store.get('hudoff', false) === true;
+        const fold = stage.r('hudFold'), tongue = stage.r('hudTongue');
+        if (fold && tongue) {
+            fold.onclick = () => this.setHudOff(true);
+            tongue.onclick = () => this.setHudOff(false);
+            this.applyHud();
+        }
+    }
+
+    /**
+     * Hides the HUD beyond the left edge of the scheme or brings it back; the choice is kept in the browser.
+     *
+     * @param {boolean} off true hides the HUD
+     */
+    setHudOff(off) {
+        if (this.hudOff === off) return;
+        this.hudOff = off;
+        store.set('hudoff', off);
+        this.applyHud();
+        const s = this.stage;
+        if (off) s.r('hudTongue').focus({preventScroll: true});
+        else s.r('hudFold').focus({preventScroll: true});
+    }
+
+    applyHud() {
+        const s = this.stage, fold = s.r('hudFold');
+        s.wrap.classList.toggle('hud-off', this.hudOff);
+        if (fold) fold.setAttribute('aria-expanded', String(!this.hudOff));
+        const layer = s.r('hudTongueLayer');
+        if (layer) layer.textContent = String(s.layer || '').toUpperCase();
     }
 
     reset() {
@@ -205,11 +254,18 @@ export class CanvasView {
             el('rect', {x: -v.w / 2, y: -PILL_H / 2, width: v.w, height: PILL_H, rx: PILL_H / 2}, g);
             el('circle', {cx: -v.w / 2 + 13, cy: 0, r: 4, class: 'vmark'}, g);
             el('text', {x: -v.w / 2 + 23, y: 0, class: 'vtitle'}, g).textContent = 'VLAN ' + v.vlan + (mixed ? ' !' : '');
+            // The "i" opens the card of the VLAN, as on a subnet pill of L3; a tap elsewhere on the pill only selects.
+            const info = el('g', {class: 'vlan-info', 'data-virtual-info': v.id, transform: `translate(${v.w / 2 - 13} 0)`}, g);
+            el('circle', {r: 13, class: 'hit'}, info);
+            el('circle', {r: 7.5, class: 'dot'}, info);
+            el('text', {y: 1}, info).textContent = 'i';
+            el('title', {}, info).textContent = s.s('ui_act_info');
             // The root bridge of the spanning tree of this VLAN, as the console showed it (docs/live-state.md §8.2).
             const root = stpRoot(s.fx && s.fx.nodes.get(v.orig.id), v.vlan) === true;
             if (root) {
                 g.classList.add('stp-root');
-                const tag = el('g', {class: 'stp-root-tag', transform: `translate(${v.w / 2 - 10} ${-PILL_H / 2})`}, g);
+                // On the top edge, left of the "i".
+                const tag = el('g', {class: 'stp-root-tag', transform: `translate(${v.w / 2 - 38} ${-PILL_H / 2})`}, g);
                 el('rect', {x: -15, y: -7, width: 30, height: 14, rx: 7}, tag);
                 el('text', {x: 0, y: .5}, tag).textContent = 'root';
             }
@@ -362,24 +418,80 @@ export class CanvasView {
         // Pills keep clear of the nodes and of each other only: near the screen edge or under a panel they stay put,
         // so the scheme moves as one picture while it is dragged.
         const intersects = (a, b) => a.x < b.x + b.w + 5 && a.x + a.w + 5 > b.x && a.y < b.y + b.h + 5 && a.y + a.h + 5 > b.y;
-        this.subnets.forEach(x => {
-            if (!x.g) return;
-            const origin = s.toScreen(x.x, x.y), offsets = [[0, 0]];
-            for (const r of [24, 48, 80, 120, 176, 240]) for (let a = 0; a < 360; a += 45) offsets.push([r * Math.cos(a * Math.PI / 180), r * Math.sin(a * Math.PI / 180)]);
-            const offset = offsets.find(([dx, dy]) => {
-                const b = {x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh};
-                return !busy.some(o => intersects(b, o));
-            });
-            x.g.style.display = offset ? '' : 'none'; x.g.setAttribute('tabindex', offset ? '0' : '-1');
-            const [dx, dy] = offset || [0, 0]; x.cx = x.x + dx / k; x.cy = x.y + dy / k;
+        // The view is a scale and a shift: a point on the screen goes back to the scheme through the origin.
+        const zero = s.toScreen(0, 0);
+        const box = (x, at) => ({x: at.x - x.hw, y: at.y - x.hh, w: 2 * x.hw, h: 2 * x.hh});
+        const free = (x, at) => !busy.some(o => intersects(box(x, at), o));
+        const place = (x, at) => {
+            x.g.style.display = at ? '' : 'none'; x.g.setAttribute('tabindex', at ? '0' : '-1');
+            const w = at ? {x: (at.x - zero.x) / k, y: (at.y - zero.y) / k} : {x: x.x, y: x.y};
+            x.cx = w.x; x.cy = w.y;
             x.g.setAttribute('transform', `translate(${x.cx} ${x.cy})`);
             x.g.querySelector('.subnet-pill').setAttribute('transform', `scale(${1 / k})`);
-            if (offset) busy.push({x: origin.x + dx - x.hw, y: origin.y + dy - x.hh, w: 2 * x.hw, h: 2 * x.hh});
+            if (at) busy.push(box(x, at));
             x.edges.forEach(({line, label, node}) => {
-                line.style.display = offset ? '' : 'none'; label.parentNode.style.display = offset ? '' : 'none';
+                line.style.display = at ? '' : 'none'; label.parentNode.style.display = at ? '' : 'none';
                 line.setAttribute('x2', x.cx); line.setAttribute('y2', x.cy);
                 label.setAttribute('x', node.cx + (x.cx - node.cx) * .4); label.setAttribute('y', node.cy + (x.cy - node.cy) * .4 - 5 / k);
             });
+        };
+        // Several subnets on the same cable (a few addresses on one interface, a wrong mask on one end): they would each
+        // look for a free place of their own and scatter round the cable. They go as one stack across their cable instead,
+        // in the order of their addresses, so that every line of the stack leaves its nodes the same way.
+        const visible = this.subnets.filter(x => x.g);
+        const groups = new Map();
+        visible.forEach(x => {
+            const where = new Map();
+            x.members.forEach(m => {
+                const link = linkOfIf(s.model, s.fx && s.fx.nodes.get(m.nodeId), m.iface);
+                if (link) where.set('L|' + link.id, [link.a.nodeId, link.b.nodeId]);
+                else where.set('I|' + m.nodeId + '|' + m.iface.name, [m.nodeId]);
+            });
+            const key = [...where.keys()].sort().join(' ');
+            if (!groups.has(key)) groups.set(key, {list: [], ids: [...new Set([...where.values()].flat())]});
+            groups.get(key).list.push(x);
+        });
+        const done = new Set();
+        groups.forEach(({list, ids}) => {
+            if (list.length < 2) return;
+            const nodes = ids.map(id => s.model.nodes.get(id)).filter(Boolean);
+            if (!nodes.length) return;
+            list.sort((a, b) => subnetOrder(a.key, b.key));
+            const pts = nodes.map(n => s.toScreen(n.cx, n.cy));
+            const o = {x: pts.reduce((a, p) => a + p.x, 0) / pts.length, y: pts.reduce((a, p) => a + p.y, 0) / pts.length};
+            if (nodes.length === 1) {
+                // The subnets of one interface on no cable: their own place, as facts.js chose it for the first.
+                Object.assign(o, s.toScreen(list[0].x, list[0].y));
+            }
+            // Along the cable of two nodes; a stack of more nodes, or of one, is a column.
+            let d = {x: 1, y: 0};
+            if (pts.length === 2) {
+                const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y, len = Math.hypot(dx, dy);
+                if (len > 1) d = {x: dx / len, y: dy / len};
+            }
+            // Across the cable, downwards on the screen: the stack reads top to bottom (or left to right).
+            let nx = -d.y, ny = d.x;
+            if (ny < 0 || (Math.abs(ny) < 1e-6 && nx < 0)) { nx = -nx; ny = -ny; }
+            const hw = Math.max(...list.map(x => x.hw)), hh = Math.max(...list.map(x => x.hh));
+            const step = Math.min(Math.abs(nx) > 1e-6 ? (2 * hw + 8) / Math.abs(nx) : Infinity,
+                Math.abs(ny) > 1e-6 ? (2 * hh + 6) / Math.abs(ny) : Infinity);
+            const slots = t => list.map((x, i) => {
+                const u = (i - (list.length - 1) / 2) * step;
+                return {x: o.x + d.x * t + nx * u, y: o.y + d.y * t + ny * u};
+            });
+            // The stack slides along its cable to keep clear of the nodes and of the pills placed before it.
+            const shifts = [0];
+            for (let t = 18; t <= 180; t += 18) shifts.push(t, -t);
+            const at = shifts.map(slots).find(set => set.every((p, i) => free(list[i], p)));
+            if (!at) return;
+            list.forEach((x, i) => { place(x, at[i]); done.add(x); });
+        });
+        visible.forEach(x => {
+            if (done.has(x)) return;
+            const origin = s.toScreen(x.x, x.y), offsets = [[0, 0]];
+            for (const r of [24, 48, 80, 120, 176, 240]) for (let a = 0; a < 360; a += 45) offsets.push([r * Math.cos(a * Math.PI / 180), r * Math.sin(a * Math.PI / 180)]);
+            const offset = offsets.find(([dx, dy]) => free(x, {x: origin.x + dx, y: origin.y + dy}));
+            place(x, offset ? {x: origin.x + offset[0], y: origin.y + offset[1]} : null);
         });
     }
 
@@ -407,11 +519,15 @@ export class CanvasView {
             });
             const note = text('hud-note', 29, 94, layerHelp(s, s.layer));
             const measure = t => { try { return t.getComputedTextLength(); } catch (e) { return 0; } };
-            this.hudW = clamp(Math.max(4 * bw + 3 * gap, measure(kicker), measure(note), natural) + 30, 200, maxW);
+            // The kicker row also holds the button that hides the HUD at its right end.
+            this.hudW = clamp(Math.max(4 * bw + 3 * gap, measure(kicker) + 30, measure(note), natural) + 30, 200, maxW);
             bg.setAttribute('width', this.hudW);
             this.hudBg = bg;
         }
         if (tools) tools.style.width = (this.hudW - 30) + 'px';
+        const fold = s.r('hudFold');
+        if (fold) fold.style.left = (14 + this.hudW - 36) + 'px';
+        this.applyHud();
         const height = TOOLS_TOP - 14 + (tools ? tools.offsetHeight + 12 : 0);
         this.hudBg.setAttribute('height', height);
         s.hudBottom = 14 + height;
@@ -488,7 +604,9 @@ export class CanvasView {
         s.r('factStatus').dataset.state = status.state;
         s.r('canvasFacts').textContent = status.text;
         s.r('issueCount').textContent = layerIssues(s).length;
-        s.r('canvasRefresh').disabled = !s.factsLive || !s.liveDoc;
+        // While the page waits for the facts it asked for, the button stays busy (lab.js paintRefresh).
+        const refresh = s.r('canvasRefresh');
+        refresh.disabled = !s.factsLive || !s.liveDoc || refresh.dataset.state === 'busy';
         // After the texts above: the HUD measures them.
         this.renderHud();
         this.positionSubnets();
