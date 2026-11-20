@@ -1602,8 +1602,12 @@ node_id без самого источника, `timeout` — строгий int
 
 **Бюджет запуска и карантин (агент 1.2.1, менеджер 0.11.1).** 🆕 `GET /capabilities` →
 `{"version", "start_budget_seconds", "guest_action_timeout_seconds"}`. `start_budget_seconds` — худший случай
-`POST /slots/{vmid}/start` без правки монтирований: `pct start` (120 с) + 3 × `LAB_GUEST_ACTION_TIMEOUT`
-агента (по умолчанию 120 с, пределы 30–600). Менеджер сверяет его со своим `AGENT_START_TIMEOUT` (нужен запас 60 с) и
+`POST /slots/{vmid}/start` без правки монтирований: `pct start` (120 с) + ожидание systemd в госте (60 с, агент
+1.4.1) + 3 × `LAB_GUEST_ACTION_TIMEOUT` агента (по умолчанию 120 с, пределы 30–600). С агентом 1.4.1 по умолчанию это
+540 с, с запасом 60 с — 600 с, ниже `AGENT_START_TIMEOUT` по умолчанию (720 с). 🆕 **Агент 1.4.1:** при непустом
+`actions` агент перед ними ждёт сокет systemd гостя (`/run/systemd/private`) до 60 с: без этого `systemctl` в
+`lab-slot-init` под нагрузкой падал с `Failed to connect to bus`, а слот уходил в `failed` (`SLOT_START_FAILED`).
+Не дождался — тот же `409 PCT_FAILED`, формат ответов не меняется. Менеджер сверяет его со своим `AGENT_START_TIMEOUT` (нужен запас 60 с) и
 предупреждает в журнале при старте и в `lab-manager-admin check`; ничего другого из `capabilities` он не берёт.
 Агент без маршрута (404, старше 1.2.1) — бюджета нет, предупреждения тоже. 🆕 В теле `504 PCT_TIMEOUT` — поле
 `detail.command`: подкоманда `pct` (`start`, `exec`, `stop`, …), как `command` в отметке fencing; вывода команды в

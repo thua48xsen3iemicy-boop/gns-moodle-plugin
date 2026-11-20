@@ -49,6 +49,13 @@ PCT_START_TIMEOUT = 120
 GUEST_ACTION_TIMEOUT_MIN, GUEST_ACTION_TIMEOUT_MAX = 30, 600
 # Most guest actions one /start request may carry (Start.actions max_length).
 START_ACTIONS_MAX = 3
+# `pct start` returns once the guest's init is spawned, not once systemd inside is up. A guest action that
+# calls systemctl before that fails with "Failed to connect to bus" (seen under load), so /start waits up to
+# GUEST_BOOT_TIMEOUT for the socket systemctl uses as root, probing every GUEST_BOOT_INTERVAL seconds.
+GUEST_BOOT_TIMEOUT = 60
+GUEST_BOOT_INTERVAL = 1
+GUEST_BOOT_PROBE_TIMEOUT = 10
+GUEST_BOOT_PROBE = ("/usr/bin/test", "-S", "/run/systemd/private")
 
 
 def guest_action_timeout() -> int:
@@ -69,7 +76,7 @@ GUEST_ACTION_TIMEOUT = guest_action_timeout()
 
 def start_budget_seconds(actions: int = START_ACTIONS_MAX) -> int:
     """Longest the route /start can take for this many guest actions (mount edits not counted)."""
-    return PCT_START_TIMEOUT + actions * GUEST_ACTION_TIMEOUT
+    return PCT_START_TIMEOUT + (GUEST_BOOT_TIMEOUT if actions else 0) + actions * GUEST_ACTION_TIMEOUT
 
 
 def ceph_subdir(name: str, default: str) -> Path:
@@ -198,7 +205,7 @@ def require_fence(vmid, request):
 
 app = FastAPI(
     title="Lab Node Agent",
-    version="1.4.0",
+    version="1.4.1",
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -285,6 +292,39 @@ def run_cmd(args: list[str], timeout: int = 45) -> str:
             raise api_error(503, "STORAGE_UNAVAILABLE", "Cannot inspect CephFS mount")
         raise api_error(409, "PCT_FAILED", f"Proxmox command failed: {detail}")
     return p.stdout.strip()
+
+
+def guest_systemd_ready(vmid: int, timeout: float) -> bool:
+    """One read-only probe inside the guest: is the systemd socket for root's systemctl there yet?
+
+    Not run_cmd: the fixed probe changes nothing, so it is not fenced as a mutating command, and a probe that
+    fails or hangs only means "not yet" (no `uncertain` mark, no warning per attempt in the journal)."""
+    try:
+        p = subprocess.run(
+            [PCT, "exec", str(vmid), "--", *GUEST_BOOT_PROBE], stdin=subprocess.DEVNULL, capture_output=True,
+            timeout=timeout, check=False, env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"},
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError:
+        raise api_error(503, "PCT_UNAVAILABLE", "Proxmox command could not be executed")
+    return p.returncode == 0
+
+
+def wait_guest_boot(vmid: int) -> None:
+    """Block until systemd in the just started guest accepts systemctl, at most GUEST_BOOT_TIMEOUT seconds."""
+    started = time.monotonic()
+    deadline = started + GUEST_BOOT_TIMEOUT
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            log.warning("guest systemd not ready vmid=%s after %ss", vmid, GUEST_BOOT_TIMEOUT)
+            raise api_error(409, "PCT_FAILED",
+                            f"Proxmox command failed: guest systemd did not become ready in {GUEST_BOOT_TIMEOUT} s")
+        if guest_systemd_ready(vmid, min(GUEST_BOOT_PROBE_TIMEOUT, remaining)):
+            log.info("guest systemd ready vmid=%s after %.1fs", vmid, time.monotonic() - started)
+            return
+        time.sleep(min(GUEST_BOOT_INTERVAL, max(0.0, deadline - time.monotonic())))
 
 
 def lxc_state(vmid: int) -> str:
@@ -448,6 +488,8 @@ def start(vmid: VMID, spec: Start, request: Request):
         source_paths(spec)  # Recheck immediately before pct resolves the configured paths.
         # Start happens only after the privileged mount edit succeeds.
         run_cmd([PCT, "start", str(vmid)], timeout=PCT_START_TIMEOUT)
+        if spec.actions:
+            wait_guest_boot(vmid)  # Guest actions call systemctl; it fails until systemd inside is up
         completed: list[str] = []
         for name in dict.fromkeys(spec.actions):
             # pct exec executes INSIDE guest; -- marks the following command.

@@ -63,6 +63,7 @@ HTTP-статусами, что сейчас. Ошибки валидации з
 по умолчанию 120 с (30–600) вместо 45 с. 🆕 `GET /capabilities` →
 `{"version", "start_budget_seconds", "guest_action_timeout_seconds"}`; `start_budget_seconds` =
 120 + 3 × `LAB_GUEST_ACTION_TIMEOUT` (три действия — максимум запроса; правка монтирований не входит).
+С агента 1.4.1 к бюджету добавлены 60 с ожидания systemd в госте перед действиями (CONTRACTS §5).
 Карантин не ослаблен: тайм-аут любой изменяющей команды ставит `uncertain`, `claim` его не снимает.
 
 Клиент менеджера (`lab_manager/agent_client.py`, `CODES`) уже понимает эти коды, а без них

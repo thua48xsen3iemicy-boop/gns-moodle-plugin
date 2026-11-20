@@ -1,4 +1,4 @@
-# Lab Node Agent 1.4.0 — Proxmox LXC + CephFS
+# Lab Node Agent 1.4.1 — Proxmox LXC + CephFS
 
 Small **privileged helper** for each Proxmox VE cluster node. **mTLS required**. The standard Proxmox API with its limited-permission token should still handle cloning, networks, CPU/RAM, resource discovery and normal cluster orchestration.
 
@@ -159,10 +159,17 @@ curl --cert /etc/lab-manager/manager.crt \
 ### Start timeouts
 
 `POST /slots/{vmid}/start` runs `pct start` (120 s) and then each requested guest action with `pct exec`.
+`pct start` returns before systemd inside the guest is up, and a guest action that calls `systemctl` too early fails
+with `Failed to connect to bus` (1.4.0 and older: seen under load as `PCT_FAILED` of `lab-slot-init`). Since 1.4.1,
+when the request carries actions, the agent first waits up to **60** s (fixed) for `/run/systemd/private` in the
+guest, probing `pct exec <vmid> -- /usr/bin/test -S /run/systemd/private` every second. The probe is read-only and
+not fenced: a failed or hung probe means "not yet". After 60 s the start fails with `409 PCT_FAILED`
+(`guest systemd did not become ready in 60 s`); the CT is left running, as after any failed guest action.
 The limit for one guest action is `LAB_GUEST_ACTION_TIMEOUT` (service unit, default **120** s, allowed 30-600;
 any other value stops the service at startup). The other `pct` limits are fixed.
 `GET /capabilities` reports the worst case of the route as `start_budget_seconds` =
-120 + 3 x `LAB_GUEST_ACTION_TIMEOUT` (three actions is the request maximum; the mount edit is not counted),
+120 + 60 + 3 x `LAB_GUEST_ACTION_TIMEOUT` (the boot wait since 1.4.1; three actions is the request maximum;
+the mount edit is not counted),
 so the Manager can compare it with its own `AGENT_START_TIMEOUT`.
 
 A timeout of any mutating command, `pct exec` included, still marks the slot `uncertain`
