@@ -41,7 +41,15 @@ async function prototypeParity(browser, page) {
             const card = document.querySelector('.object-card'), style = getComputedStyle(card), box = card.getBoundingClientRect();
             const title = getComputedStyle(card.querySelector('h2')), tabs = getComputedStyle(card.querySelector('.object-tabs button[aria-selected="true"]'));
             const hud = document.querySelector(isPrototype ? '#canvasHud .hud-bg' : '[data-region="layerSeg"] .hud-bg');
-            return {palette: ['--canvas', '--panel', '--fg', '--accent', '--ico', '--line'].map(k => getComputedStyle(root).getPropertyValue(k).trim()),
+            // The colours as used: the plugin keeps light-dark() pairs in its variables (theme.js), the prototype plain colours.
+            const used = k => {
+                const probe = root.appendChild(document.createElement('i'));
+                probe.style.color = `var(${k})`;
+                const c = getComputedStyle(probe).color;
+                probe.remove();
+                return c;
+            };
+            return {palette: ['--canvas', '--panel', '--fg', '--accent', '--ico', '--line'].map(used),
                 // The card is a drawer on the right in the plugin, not a card anchored on the scheme as in the prototype:
                 // only the look is compared, the geometry is checked by drawerGeometry().
                 card: {background: style.backgroundColor, border: isPrototype ? style.borderTopColor : style.borderLeftColor,
@@ -93,7 +101,8 @@ async function captureStage(page) {
             if (await fetch(base + '/gw/stats').then(r => r.ok).catch(() => false)) break;
             await sleep(100);
         }
-        const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+        // The prototype is dark: the live page is compared with it in a dark system theme (theme.js follows the system).
+        const page = await browser.newPage({viewport: {width: 1440, height: 1000}, colorScheme: 'dark'});
         page.on('pageerror', e => errors.push(e.message));
         await page.goto(`${base}/index.en.html?fast${min}`);
         await page.locator('[data-region="start"]').click();

@@ -54,6 +54,7 @@
             <button class="gbtn" type="button" data-act="check" {{^canpublish}}disabled{{/canpublish}}>{{#str}}ed_check, mod_gns3lab{{/str}}</button>
             <button class="gbtn" type="button" data-act="save">{{#str}}ed_save, mod_gns3lab{{/str}}</button>
             <button class="gbtn primary" type="button" data-act="publish" {{^canpublish}}disabled{{/canpublish}}>{{#str}}ed_publish, mod_gns3lab{{/str}}</button>
+            {{> mod_gns3lab/theme_toggle }}
         </div>
     </header>
     <div class="stage">
