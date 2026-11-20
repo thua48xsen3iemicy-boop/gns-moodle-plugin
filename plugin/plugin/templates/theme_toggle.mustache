@@ -1,0 +1,45 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_gns3lab/theme_toggle
+
+    The light / dark switch in the bar of a full-screen page (amd/src/theme.js). A click goes system → light → dark.
+    The button stays hidden without JavaScript; the page then follows the system theme.
+    Include it inside the root element of the page, whose id is the uniqid followed by "-app".
+
+    Context variables required for this template:
+    * uniqid - prefix of the page ids
+
+    Example context (json):
+    {
+        "uniqid": "abc"
+    }
+}}
+<button class="theme-toggle" type="button" id="{{uniqid}}-theme" data-mode="auto" hidden
+        data-label-auto="{{#str}}theme_auto, mod_gns3lab{{/str}}"
+        data-label-light="{{#str}}theme_light, mod_gns3lab{{/str}}"
+        data-label-dark="{{#str}}theme_dark, mod_gns3lab{{/str}}"
+        title="{{#str}}theme_auto, mod_gns3lab{{/str}}" aria-label="{{#str}}theme_auto, mod_gns3lab{{/str}}">
+    <svg class="ti-auto" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 0 0 12z" class="fill"/></svg>
+    <svg class="ti-light" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.05 3.05l1.13 1.13M11.82 11.82l1.13 1.13M3.05 12.95l1.13-1.13M11.82 4.18l1.13-1.13"/></svg>
+    <svg class="ti-dark" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5 5.8 5.8 0 1 0 13.5 9.6z"/></svg>
+</button>
+{{#js}}
+require(['mod_gns3lab/theme'], function(theme) {
+    theme.init('{{uniqid}}');
+});
+{{/js}}

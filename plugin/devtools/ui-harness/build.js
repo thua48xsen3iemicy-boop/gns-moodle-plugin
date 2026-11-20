@@ -124,13 +124,16 @@ function page(lang, extra = {}) {
         js: () => () => '',
         ...extra,
     };
-    return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons, 'mod_gns3lab/canvas_icons': fs.readFileSync(path.join(plugin, 'templates/canvas_icons.mustache'), 'utf8')});
+    return Mustache.render(tpl, view, {'mod_gns3lab/icons': icons, 'mod_gns3lab/canvas_icons': fs.readFileSync(path.join(plugin, 'templates/canvas_icons.mustache'), 'utf8'), ...THEME_PARTIAL});
 }
+// The light / dark switch of the bar (its own {{#js}} block in Moodle; here the shell starts it before the page).
+const THEME_PARTIAL = {'mod_gns3lab/theme_toggle': fs.readFileSync(path.join(plugin, 'templates/theme_toggle.mustache'), 'utf8')};
+const THEME_INIT = "require(['mod_gns3lab/theme'], function(theme) { theme.init('u1'); });";
 const LAB_INIT = "require(['mod_gns3lab/lab'], function(lab) { lab.init('u1', 1, q.has('observer') ? 7 : 0); });";
 const EDITOR_INIT = "require(['mod_gns3lab/editor'], function(editor) { editor.init('u1'); });";
 const shell = (lang, lab, body, mode = 'live', start = '', init = LAB_INIT) => fs.readFileSync(path.join(__dirname, 'index.template.html'), 'utf8')
     .replaceAll('{{lang}}', lang).replaceAll('{{lab}}', lab).replaceAll('{{mode}}', mode).replaceAll('{{start}}', start)
-    .replace('{{init}}', () => init).replace('{{body}}', () => body);
+    .replace('{{init}}', () => THEME_INIT + init).replace('{{body}}', () => body);
 // The modes of the scheme (docs/lab-constructor/README.md §2): index.<lang>.seen.html, .fog.html, and .fog-start.html
 // where the fog starts from PC1 (the activity setting `fogstart`).
 const MODES = {seen: {mode: 'seen', start: []}, fog: {mode: 'fog', start: []}, 'fog-start': {mode: 'fog', start: ['PC1']}};
@@ -277,7 +280,7 @@ function editorPage(lang, def, constructor, extra = {}) {
         js: () => () => '',
     };
     const icons = fs.readFileSync(path.join(plugin, 'templates/icons.mustache'), 'utf8');
-    return Mustache.render(fs.readFileSync(path.join(plugin, 'templates/editor.mustache'), 'utf8'), view, {'mod_gns3lab/icons': icons});
+    return Mustache.render(fs.readFileSync(path.join(plugin, 'templates/editor.mustache'), 'utf8'), view, {'mod_gns3lab/icons': icons, ...THEME_PARTIAL});
 }
 for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `editor.${lang}.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, true), 'live', '', EDITOR_INIT));
@@ -340,7 +343,7 @@ for (const lang of ['en', 'ru']) {
         },
         js: () => () => '',
     };
-    const body = Mustache.render(fs.readFileSync(path.join(plugin, 'templates/course.mustache'), 'utf8'), view);
+    const body = Mustache.render(fs.readFileSync(path.join(plugin, 'templates/course.mustache'), 'utf8'), view, THEME_PARTIAL);
     fs.writeFileSync(path.join(dist, `index.${lang}.course.html`), shell(lang, '', body, 'live', '', COURSE_INIT));
 }
 

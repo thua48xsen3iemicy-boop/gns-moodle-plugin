@@ -7,48 +7,42 @@
  */
 
 .gns3lab-app {
-    --bg: var(--bs-secondary-bg, #e8ecef);
-    --canvas: var(--bs-tertiary-bg, #f4f6f8);
-    --panel: var(--bs-body-bg, #fff);
-    --fg: var(--bs-body-color, #16212b);
-    --muted: var(--bs-secondary-color, #57656f);
-    --line: var(--bs-border-color, #cad2d9);
-    --grid: #c9d2da;
-    --wire: #566878;
-    --accent: var(--bs-primary, #1f6fc5);
-    --accent-ink: #fff;
-    --ico: #2c4a63;
-    --ico-glyph: #f4f6f8;
-    --chip: var(--bs-secondary-bg, #e4eaef);
-    --ok: var(--bs-success, #1e8e4f);
-    --warn: #ad7f08;
-    --bad: var(--bs-danger, #c8423a);
-    --c1: #2f6fd0;
-    --c2: #1e8e4f;
-    --c3: #b5730a;
-    --c4: #8e44ad;
-    --c5: #b83280;
-    --c6: #0e7c86;
+    --bg: light-dark(var(--bs-secondary-bg, #e8ecef), #2b3035);
+    --canvas: light-dark(var(--bs-tertiary-bg, #f4f6f8), #212529);
+    --panel: light-dark(var(--bs-body-bg, #fff), #1a1d20);
+    --fg: light-dark(var(--bs-body-color, #16212b), #dee2e6);
+    --muted: light-dark(var(--bs-secondary-color, #57656f), #adb5bd);
+    --line: light-dark(var(--bs-border-color, #cad2d9), #495057);
+    --grid: light-dark(#c9d2da, #24313b);
+    --wire: light-dark(#566878, #8094a4);
+    --accent: light-dark(var(--bs-primary, #1f6fc5), #6ea8fe);
+    --accent-ink: light-dark(#fff, #0e1418);
+    --ico: light-dark(#2c4a63, #8aafcc);
+    --ico-glyph: light-dark(#f4f6f8, #121a20);
+    --chip: light-dark(var(--bs-secondary-bg, #e4eaef), #343a40);
+    --ok: light-dark(var(--bs-success, #1e8e4f), #75b798);
+    --warn: light-dark(#ad7f08, #e0b13a);
+    --bad: light-dark(var(--bs-danger, #c8423a), #ea868f);
+    --c1: light-dark(#2f6fd0, #6aa6f5);
+    --c2: light-dark(#1e8e4f, #4cc98a);
+    --c3: light-dark(#b5730a, #e6b64a);
+    --c4: light-dark(#8e44ad, #c08be0);
+    --c5: light-dark(#b83280, #e879b9);
+    --c6: light-dark(#0e7c86, #4ec3cc);
     --display: var(--bs-body-font-family, system-ui, sans-serif);
     --body: var(--bs-body-font-family, system-ui, sans-serif);
     --mono: var(--bs-font-monospace, ui-monospace, monospace);
     position: relative;
     overflow: hidden;
     line-height: 1.4;
+    color-scheme: light dark;
 }
-[data-bs-theme="dark"] .gns3lab-app {
-    --grid: #24313b;
-    --wire: #8094a4;
-    --accent-ink: #0e1418;
-    --ico: #8aafcc;
-    --ico-glyph: #121a20;
-    --warn: #e0b13a;
-    --c1: #6aa6f5;
-    --c2: #4cc98a;
-    --c3: #e6b64a;
-    --c4: #c08be0;
-    --c5: #e879b9;
-    --c6: #4ec3cc;
+.gns3lab-app[data-theme="light"] {
+    color-scheme: light;
+}
+.gns3lab-app[data-theme="dark"],
+[data-bs-theme="dark"] .gns3lab-app:not([data-theme]) {
+    color-scheme: dark;
 }
 body.gns3lab-fullscreen {
     overflow: hidden;
@@ -640,34 +634,34 @@ body.gns3lab-fullscreen {
 /* stylelint-disable csstree/validator */
 
 .gns3lab-student {
-    --bg: var(--bs-secondary-bg,#e8ecef);
-    --canvas: var(--bs-tertiary-bg,#f4f6f8);
-    --panel: var(--bs-body-bg,#fff);
-    --fg: var(--bs-body-color,#16212b);
-    --muted: var(--bs-secondary-color,#57656f);
-    --line: var(--bs-border-color,#cad2d9);
-    --grid: #c9d2da;
-    --wire: #566878;
-    --accent: var(--bs-primary,#1f6fc5);
-    --accent-ink: #fff;
-    --ico: #2c4a63;
-    --ico-glyph: #f4f6f8;
-    --chip: var(--bs-secondary-bg,#e4eaef);
-    --ok: var(--bs-success,#1e8e4f);
-    --warn: #ad7f08;
-    --bad: var(--bs-danger,#c8423a);
-    --off: #8a97a1;
-    --c1: #2f6fd0;
-    --c2: #1e8e4f;
-    --c3: #b5730a;
-    --c4: #8e44ad;
-    --c5: #b83280;
-    --c6: #0e7c86;
-    --term-bg: #0f171d;
+    --bg: light-dark(var(--bs-secondary-bg,#e8ecef), #2b3035);
+    --canvas: light-dark(var(--bs-tertiary-bg,#f4f6f8), #212529);
+    --panel: light-dark(var(--bs-body-bg,#fff), #1a1d20);
+    --fg: light-dark(var(--bs-body-color,#16212b), #dee2e6);
+    --muted: light-dark(var(--bs-secondary-color,#57656f), #adb5bd);
+    --line: light-dark(var(--bs-border-color,#cad2d9), #495057);
+    --grid: light-dark(#c9d2da, #24313b);
+    --wire: light-dark(#566878, #8094a4);
+    --accent: light-dark(var(--bs-primary,#1f6fc5), #6ea8fe);
+    --accent-ink: light-dark(#fff, #0e1418);
+    --ico: light-dark(#2c4a63, #8aafcc);
+    --ico-glyph: light-dark(#f4f6f8, #121a20);
+    --chip: light-dark(var(--bs-secondary-bg,#e4eaef), #343a40);
+    --ok: light-dark(var(--bs-success,#1e8e4f), #75b798);
+    --warn: light-dark(#ad7f08, #e0b13a);
+    --bad: light-dark(var(--bs-danger,#c8423a), #ea868f);
+    --off: light-dark(#8a97a1, #5e6e7a);
+    --c1: light-dark(#2f6fd0, #6aa6f5);
+    --c2: light-dark(#1e8e4f, #4cc98a);
+    --c3: light-dark(#b5730a, #e6b64a);
+    --c4: light-dark(#8e44ad, #c08be0);
+    --c5: light-dark(#b83280, #e879b9);
+    --c6: light-dark(#0e7c86, #4ec3cc);
+    --term-bg: light-dark(#0f171d, #0a1014);
     --term-fg: #d6dee5;
     --term-dim: #7f909c;
-    --term-line: #24323c;
-    --shadow: 0 10px 30px rgb(16 33 43 / .16);
+    --term-line: light-dark(#24323c, #22303a);
+    --shadow: 0 10px 30px light-dark(rgb(16 33 43 / .16), rgb(0 0 0 / .45));
     --display: var(--bs-body-font-family,system-ui,sans-serif);
     --body: var(--bs-body-font-family,system-ui,sans-serif);
     --mono: var(--bs-font-monospace,ui-monospace,monospace);
@@ -678,24 +672,14 @@ body.gns3lab-fullscreen {
     font-family: var(--body);
     line-height: 1.4;
     overflow: hidden;
+    color-scheme: light dark;
 }
-[data-bs-theme="dark"] .gns3lab-student {
-    --grid: #24313b;
-    --wire: #8094a4;
-    --accent-ink: #0e1418;
-    --ico: #8aafcc;
-    --ico-glyph: #121a20;
-    --off: #5e6e7a;
-    --warn: #e0b13a;
-    --c1: #6aa6f5;
-    --c2: #4cc98a;
-    --c3: #e6b64a;
-    --c4: #c08be0;
-    --c5: #e879b9;
-    --c6: #4ec3cc;
-    --term-bg: #0a1014;
-    --term-line: #22303a;
-    --shadow: 0 10px 30px rgb(0 0 0 / .45);
+.gns3lab-student[data-theme="light"] {
+    color-scheme: light;
+}
+.gns3lab-student[data-theme="dark"],
+[data-bs-theme="dark"] .gns3lab-student:not([data-theme]) {
+    color-scheme: dark;
 }
 .gns3lab-student.is-fullscreen {
     position: fixed;
@@ -3560,18 +3544,18 @@ body.gns3lab-fullscreen {
 
 /* Course page of a teacher (course.php, amd/src/course.js): the summary, one lab and the card of a student in a lab. */
 .gns3lab-course {
-    --bg: var(--bs-secondary-bg,#e8ecef);
-    --canvas: var(--bs-tertiary-bg,#f4f6f8);
-    --panel: var(--bs-body-bg,#fff);
-    --fg: var(--bs-body-color,#16212b);
-    --muted: var(--bs-secondary-color,#57656f);
-    --line: var(--bs-border-color,#cad2d9);
-    --wire: #566878;
-    --accent: var(--bs-primary,#1f6fc5);
-    --ok: var(--bs-success,#1e8e4f);
-    --warn: #ad7f08;
-    --bad: var(--bs-danger,#c8423a);
-    --off: #8a97a1;
+    --bg: light-dark(var(--bs-secondary-bg,#e8ecef), #2b3035);
+    --canvas: light-dark(var(--bs-tertiary-bg,#f4f6f8), #212529);
+    --panel: light-dark(var(--bs-body-bg,#fff), #1a1d20);
+    --fg: light-dark(var(--bs-body-color,#16212b), #dee2e6);
+    --muted: light-dark(var(--bs-secondary-color,#57656f), #adb5bd);
+    --line: light-dark(var(--bs-border-color,#cad2d9), #495057);
+    --wire: light-dark(#566878, #8094a4);
+    --accent: light-dark(var(--bs-primary,#1f6fc5), #6ea8fe);
+    --ok: light-dark(var(--bs-success,#1e8e4f), #75b798);
+    --warn: light-dark(#ad7f08, #e0b13a);
+    --bad: light-dark(var(--bs-danger,#c8423a), #ea868f);
+    --off: light-dark(#8a97a1, #5e6e7a);
     --display: var(--bs-body-font-family,system-ui,sans-serif);
     --body: var(--bs-body-font-family,system-ui,sans-serif);
     --mono: var(--bs-font-monospace,ui-monospace,monospace);
@@ -3582,11 +3566,14 @@ body.gns3lab-fullscreen {
     font-family: var(--body);
     line-height: 1.4;
     overflow: hidden;
+    color-scheme: light dark;
 }
-[data-bs-theme="dark"] .gns3lab-course {
-    --wire: #8094a4;
-    --off: #5e6e7a;
-    --warn: #e0b13a;
+.gns3lab-course[data-theme="light"] {
+    color-scheme: light;
+}
+.gns3lab-course[data-theme="dark"],
+[data-bs-theme="dark"] .gns3lab-course:not([data-theme]) {
+    color-scheme: dark;
 }
 .gns3lab-course.is-fullscreen {
     position: fixed;
@@ -4655,7 +4642,7 @@ body.gns3lab-fullscreen {
 .gns3lab-student.canvas-ui .pdot{fill:var(--ok);stroke:var(--canvas);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .pdot.down{fill:var(--bad)}
 .gns3lab-student.canvas-ui .pdot.unknown{fill:var(--off)}
-.gns3lab-student.canvas-ui .plabel-bg{fill:#0e2430;stroke:#3d6270;stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+.gns3lab-student.canvas-ui .plabel-bg{fill:var(--k-plabel-bg);stroke:var(--k-edge);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
 .gns3lab-student.canvas-ui .link.down .plabel-bg{stroke:var(--bad)}
 .gns3lab-student.canvas-ui .plabel{font:600 9px var(--mono);font-size:calc(11px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .pip{font:500 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
@@ -4898,43 +4885,34 @@ from{transform:translateY(40%);opacity:.3}
   background:var(--panel);border-top:1px solid var(--line);flex:none;scrollbar-width:none;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))}
 .gns3lab-student.canvas-ui .key{flex:none;min-width:44px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);color:var(--fg);font:600 13px var(--mono);cursor:pointer;touch-action:manipulation}
 .gns3lab-student.canvas-ui .key:active{background:var(--accent);color:var(--accent-ink)}
-.gns3lab-student.canvas-ui /* Canvas experiment: the topology owns its facts,
-.gns3lab-student.canvas-ui controls and popovers. */
-:root{
-  --bg:#0b1520;--canvas:#101f2b;--panel:#172b38;--fg:#eaf3f5;--muted:#9ab2bc;
-  --line:#31505d;--grid:#25404b;--wire:#648b9a;--accent:#57dfcf;--accent-ink:#092126;
-  --ico:#244b5c;--ico-glyph:#d8f5f0;--chip:#1e3744;--ok:#64dda6;--warn:#f3bd66;
-  --bad:#ef817c;--off:#6f8792;--shadow:0 18px 44px rgb(0 8 17 / .4);color-scheme:dark;
-}
-.gns3lab-student.canvas-ui body{background:var(--canvas)}
-.gns3lab-student.canvas-ui .bar{background:#0c1a25;border-bottom-color:#294653;padding-block:13px}
+.gns3lab-student.canvas-ui .bar{background:var(--k-bar-bg);border-bottom-color:var(--k-bar-line);padding-block:13px}
 .gns3lab-student.canvas-ui .ttl h1{font-size:21px;letter-spacing:.015em}
 .gns3lab-student.canvas-ui .bar .btn,
-.gns3lab-student.canvas-ui .bar .seg{background:#172b38;border-radius:10px}
-.gns3lab-student.canvas-ui .bar .seg button[aria-pressed="true"]{background:#295c62;color:#d9fff7}
-.gns3lab-student.canvas-ui .wrap{background:radial-gradient(ellipse at 46% 40%,#193341 0%,#10212d 58%,#0d1c27 100%)}
-.gns3lab-student.canvas-ui .dots{fill:#315260;opacity:.55}
+.gns3lab-student.canvas-ui .bar .seg{background:var(--k-seg-bg);border-radius:10px}
+.gns3lab-student.canvas-ui .bar .seg button[aria-pressed="true"]{background:var(--k-seg-on);color:var(--k-seg-on-fg)}
+.gns3lab-student.canvas-ui .wrap{background:radial-gradient(ellipse at 46% 40%,var(--k-wrap-1) 0%,var(--k-wrap-2) 58%,var(--k-wrap-3) 100%)}
+.gns3lab-student.canvas-ui .dots{fill:var(--k-dots);opacity:.55}
 .gns3lab-student.canvas-ui .drawing rect,
 .gns3lab-student.canvas-ui .drawing ellipse,
 .gns3lab-student.canvas-ui .drawing circle,
 .gns3lab-student.canvas-ui .drawing line{stroke-width:1;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .wire{stroke:#557e8e;stroke-width:2.3}
+.gns3lab-student.canvas-ui .wire{stroke:var(--k-wire-line);stroke-width:2.3}
 .gns3lab-student.canvas-ui .duplex{display:none;pointer-events:none}
 .gns3lab-student.canvas-ui [data-factlayer="l1"][data-duplex="on"] .duplex{display:inline}
 .gns3lab-student.canvas-ui [data-factlayer="l1"][data-duplex="on"] .physical-wire{display:none}
 .gns3lab-student.canvas-ui .duplex .wire{stroke-width:1.4}
 .gns3lab-student.canvas-ui .link.sel .duplex .wire,
 .gns3lab-student.canvas-ui .link:focus-visible .duplex .wire{stroke-width:1.6}
-.gns3lab-student.canvas-ui .duplex-arrow{fill:none;stroke:#9ac8d2;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .duplex-arrow{fill:none;stroke:var(--k-duplex);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .link.sel .duplex-arrow,
 .gns3lab-student.canvas-ui .link:focus-visible .duplex-arrow{stroke:var(--accent)}
 .gns3lab-student.canvas-ui .link.down .duplex-arrow{stroke:var(--bad)}
 .gns3lab-student.canvas-ui .link.suspended .duplex-arrow{opacity:.5}
-.gns3lab-student.canvas-ui .duplex-label{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:#b5d9df;text-anchor:middle;dominant-baseline:middle;
+.gns3lab-student.canvas-ui .duplex-label{font:500 9px var(--mono);font-size:calc(9px * var(--inv,1));fill:var(--k-ink-cyan);text-anchor:middle;dominant-baseline:middle;
   paint-order:stroke;stroke:var(--canvas);stroke-width:2.5px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .duplex-label-lead{stroke:#6c929e;stroke-width:.7;fill:none;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .duplex-label-lead{stroke:var(--k-lead);stroke-width:.7;fill:none;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .node .halo{stroke-width:var(--node-ring,1px)}
-.gns3lab-student.canvas-ui .node:hover .halo{stroke:var(--accent);fill:rgb(87 223 207 / .04)}
+.gns3lab-student.canvas-ui .node:hover .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 4%,transparent)}
 .gns3lab-student.canvas-ui .node .if{filter:drop-shadow(0 5px 9px rgb(0 0 0 / .3))}
 .gns3lab-student.canvas-ui .nname{letter-spacing:.03em}
 .gns3lab-student.canvas-ui [data-region="svg"][data-factlayer="l1"] .pip,
@@ -4945,10 +4923,10 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="svg"][data-factlayer="l4"] .pip,
 .gns3lab-student.canvas-ui [data-factlayer="l4"] .nsub,
 .gns3lab-student.canvas-ui [data-factlayer="l4"] .nadj{visibility:hidden;opacity:0}
-.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="10"] .wire{stroke:#66dcb5}
-.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="20"] .wire{stroke:#e5b971}
-.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="trunk"] .wire{stroke:#98aaf5}
-.gns3lab-student.canvas-ui [data-factlayer="l3"] .link .wire{stroke:#73b5df}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="10"] .wire{stroke:var(--k-vl10)}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="20"] .wire{stroke:var(--k-vl20)}
+.gns3lab-student.canvas-ui [data-factlayer="l2"] .link[data-vlan="trunk"] .wire{stroke:var(--k-vltrunk)}
+.gns3lab-student.canvas-ui [data-factlayer="l3"] .link .wire{stroke:var(--k-l3wire)}
 .gns3lab-student.canvas-ui [data-factlayer="l4"] [data-region="vp"]{opacity:.54}
 /* The scheme is pale while the lab of the student is not running (not started, starting, stopping, stopped, failed). */
 .gns3lab-student.canvas-ui [data-region="vp"] > g{transition:opacity .4s ease,filter .4s ease}
@@ -4971,40 +4949,40 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .auto-label,
 .gns3lab-student.canvas-ui [data-factlayer="l3"] [data-region="lyrLinks"] .pdot{display:none}
 .gns3lab-student.canvas-ui [data-factlayer="l3"] .l3-scene{display:inline}
-.gns3lab-student.canvas-ui .subnet-edge{stroke:var(--net-color,#547c90);stroke-opacity:.75;stroke-width:1.2;vector-effect:non-scaling-stroke;fill:none}
+.gns3lab-student.canvas-ui .subnet-edge{stroke:color-mix(in oklab,var(--net-color,#547c90) 58%,light-dark(#0b2530,var(--net-color,#547c90)));stroke-opacity:.75;stroke-width:1.2;vector-effect:non-scaling-stroke;fill:none}
 /* The cables under the lines of L3: a wide muted band, so that the coloured subnet lines read over it and the cable
    itself is still seen on the dark canvas. */
-.gns3lab-student.canvas-ui .ghost-wire{stroke:#93b8c6;stroke-opacity:.55;stroke-width:3;stroke-linecap:round;vector-effect:non-scaling-stroke;pointer-events:none}
+.gns3lab-student.canvas-ui .ghost-wire{stroke:var(--k-ghost);stroke-opacity:.55;stroke-width:3;stroke-linecap:round;vector-effect:non-scaling-stroke;pointer-events:none}
 .gns3lab-student.canvas-ui .subnet-edge.down{stroke:var(--bad);stroke-dasharray:4 5}
 .gns3lab-student.canvas-ui .subnet-object{cursor:pointer}
-.gns3lab-student.canvas-ui .subnet-object rect{fill:#193e50;stroke:var(--net-color,#73c7ed);stroke-width:1;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .subnet-object rect{fill:var(--k-subnet-bg);stroke:color-mix(in oklab,var(--net-color,#73c7ed) 58%,light-dark(#0b2530,var(--net-color,#73c7ed)));stroke-width:1;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .subnet-object.warn rect{stroke:var(--warn)}
 .gns3lab-student.canvas-ui .subnet-object.sel rect,
 .gns3lab-student.canvas-ui .subnet-object:focus-visible rect{stroke:var(--accent);stroke-width:1.4}
-.gns3lab-student.canvas-ui .subnet-object text{fill:#e3f7fc;font:500 10.5px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .subnet-object text{fill:var(--k-subnet-fg);font:500 10.5px var(--mono);text-anchor:middle;dominant-baseline:middle}
 .gns3lab-student.canvas-ui .subnet-info{cursor:pointer}
 .gns3lab-student.canvas-ui .subnet-info .hit{fill:transparent}
-.gns3lab-student.canvas-ui .subnet-info .dot{fill:var(--net-color,#73c7ed);fill-opacity:.22;stroke:var(--net-color,#73c7ed);stroke-width:1}
-.gns3lab-student.canvas-ui .subnet-info text{fill:var(--net-color,#73c7ed);font:700 10px var(--display);font-style:italic}
+.gns3lab-student.canvas-ui .subnet-info .dot{fill:color-mix(in oklab,var(--net-color,#73c7ed) 58%,light-dark(#0b2530,var(--net-color,#73c7ed)));fill-opacity:.22;stroke:color-mix(in oklab,var(--net-color,#73c7ed) 58%,light-dark(#0b2530,var(--net-color,#73c7ed)));stroke-width:1}
+.gns3lab-student.canvas-ui .subnet-info text{fill:color-mix(in oklab,var(--net-color,#73c7ed) 58%,light-dark(#0b2530,var(--net-color,#73c7ed)));font:700 10px var(--display);font-style:italic}
 .gns3lab-student.canvas-ui .subnet-info:hover .dot{fill-opacity:.5}
 .gns3lab-student.canvas-ui .vlan-info{cursor:pointer}
 .gns3lab-student.canvas-ui .vlan-info .hit{fill:transparent}
-.gns3lab-student.canvas-ui .l2-virtual .vlan-info .dot{fill:var(--vlan-color,#79d8c6);fill-opacity:.22;stroke:var(--vlan-color,#79d8c6);stroke-width:1;filter:none}
-.gns3lab-student.canvas-ui .vlan-info text{fill:var(--vlan-color,#79d8c6);font:700 10px var(--display);font-style:italic;text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .l2-virtual .vlan-info .dot{fill:color-mix(in oklab,var(--vlan-color,#79d8c6) 58%,light-dark(#0b2530,var(--vlan-color,#79d8c6)));fill-opacity:.22;stroke:color-mix(in oklab,var(--vlan-color,#79d8c6) 58%,light-dark(#0b2530,var(--vlan-color,#79d8c6)));stroke-width:1;filter:none}
+.gns3lab-student.canvas-ui .vlan-info text{fill:color-mix(in oklab,var(--vlan-color,#79d8c6) 58%,light-dark(#0b2530,var(--vlan-color,#79d8c6)));font:700 10px var(--display);font-style:italic;text-anchor:middle;dominant-baseline:middle}
 .gns3lab-student.canvas-ui .vlan-info:hover .dot{fill-opacity:.5}
 .gns3lab-student.canvas-ui .subnet-object:focus{outline:none}
 .gns3lab-student.canvas-ui [data-region="vp"] .connection-dim{opacity:.2}
 .gns3lab-student.canvas-ui [data-region="svg"][data-connection-focus="true"] [data-region="lyrDraw"]{opacity:.35}
 .gns3lab-student.canvas-ui [data-region="svg"][data-connection-focus="true"] [data-region="lyrLabelLeads"]{opacity:.35}
-.gns3lab-student.canvas-ui [data-region="vp"] .node.connection-related .halo{stroke:var(--accent);fill:rgb(87 223 207 / .03);stroke-width:var(--node-ring,1px)}
-.gns3lab-student.canvas-ui [data-region="vp"] .node.connection-primary .halo{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:rgb(87 223 207 / .08)}
+.gns3lab-student.canvas-ui [data-region="vp"] .node.connection-related .halo{stroke:var(--accent);fill:color-mix(in srgb,var(--accent) 3%,transparent);stroke-width:var(--node-ring,1px)}
+.gns3lab-student.canvas-ui [data-region="vp"] .node.connection-primary .halo{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:color-mix(in srgb,var(--accent) 8%,transparent)}
 .gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related:not(.down):not(.unknown) .wire{stroke:var(--accent)}
 .gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related .wire{stroke-width:2.2}
 .gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related .duplex .wire{stroke-width:1.6}
 .gns3lab-student.canvas-ui [data-region="vp"] .link.connection-related:not(.down):not(.unknown) .duplex-arrow{stroke:var(--accent)}
 .gns3lab-student.canvas-ui [data-region="vp"] .l2-path.connection-related .stroke{stroke-width:2.4}
 .gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-related > rect{stroke-width:calc(var(--node-ring,1px) * 1.15)}
-.gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-primary > rect{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:#224b59}
+.gns3lab-student.canvas-ui [data-region="vp"] .l2-virtual.connection-primary > rect{stroke-width:calc(var(--node-ring,1px) * 1.35);fill:var(--k-vbox-sel)}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related{stroke-width:1.7}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related:not(.down){stroke:var(--net-color,var(--accent));stroke-opacity:1}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-related:not(.warn) rect{stroke:var(--net-color,var(--accent));stroke-width:1.2}
@@ -5013,37 +4991,37 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .link.unknown .pdot{fill:var(--off)}
 .gns3lab-student.canvas-ui .link.unknown .duplex-arrow{stroke:var(--off)}
 .gns3lab-student.canvas-ui .node.silhouette .ico{display:none}
-.gns3lab-student.canvas-ui .node.silhouette .halo{stroke:var(--muted);stroke-dasharray:4 5;fill:#19303c}
+.gns3lab-student.canvas-ui .node.silhouette .halo{stroke:var(--muted);stroke-dasharray:4 5;fill:var(--k-silhouette)}
 .gns3lab-student.canvas-ui .node.silhouette .nname{fill:var(--muted)}
 .gns3lab-student.canvas-ui .node.silhouette .sdot{display:none}
 .gns3lab-student.canvas-ui [data-region="svg"][data-source="stale"] [data-region="vp"],
 .gns3lab-student.canvas-ui [data-region="svg"][data-source="error"] [data-region="vp"]{opacity:.58}
 .gns3lab-student.canvas-ui .node.collection-error .halo{stroke:var(--warn);stroke-dasharray:3 4}
-.gns3lab-student.canvas-ui .l2-chassis rect{fill:rgb(26 61 72 / .34);stroke:#4f8290;stroke-width:.8;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .l2-chassis text{fill:#a6c5cc;font:600 12px var(--display);letter-spacing:.04em;paint-order:stroke;stroke:var(--canvas);stroke-width:3px}
+.gns3lab-student.canvas-ui .l2-chassis rect{fill:var(--k-chassis);stroke:var(--k-chassis-line);stroke-width:.8;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-chassis text{fill:var(--k-chassis-fg);font:600 12px var(--display);letter-spacing:.04em;paint-order:stroke;stroke:var(--canvas);stroke-width:3px}
 .gns3lab-student.canvas-ui .l2-virtual{cursor:pointer}
-.gns3lab-student.canvas-ui .l2-virtual rect{fill:#173747;stroke:var(--vlan-color,#79d8c6);stroke-width:var(--node-ring,1px);vector-effect:non-scaling-stroke;filter:drop-shadow(0 7px 13px rgb(0 0 0 / .22))}
+.gns3lab-student.canvas-ui .l2-virtual rect{fill:var(--k-vbox);stroke:color-mix(in oklab,var(--vlan-color,#79d8c6) 58%,light-dark(#0b2530,var(--vlan-color,#79d8c6)));stroke-width:var(--node-ring,1px);vector-effect:non-scaling-stroke;filter:drop-shadow(0 7px 13px rgb(0 0 0 / .22))}
 .gns3lab-student.canvas-ui .l2-virtual:hover rect,
-.gns3lab-student.canvas-ui .l2-virtual.sel rect{fill:#224b59;stroke-width:calc(var(--node-ring,1px) * 1.2)}
-.gns3lab-student.canvas-ui .l2-virtual.mixed > rect{stroke:#ffbc69;stroke-width:calc(var(--node-ring,1px) * 1.4)}
-.gns3lab-student.canvas-ui .l2-virtual .vmark{fill:var(--vlan-color,#79d8c6)}
-.gns3lab-student.canvas-ui .l2-virtual .vtitle{fill:#f2fafa;font:600 12px var(--display);dominant-baseline:central}
-.gns3lab-student.canvas-ui .l2-virtual.idle > rect{stroke-dasharray:4 3;fill:#132b37;filter:none}
-.gns3lab-student.canvas-ui .l2-virtual.idle .vtitle{fill:#a6c3c9}
+.gns3lab-student.canvas-ui .l2-virtual.sel rect{fill:var(--k-vbox-sel);stroke-width:calc(var(--node-ring,1px) * 1.2)}
+.gns3lab-student.canvas-ui .l2-virtual.mixed > rect{stroke:var(--k-amber);stroke-width:calc(var(--node-ring,1px) * 1.4)}
+.gns3lab-student.canvas-ui .l2-virtual .vmark{fill:color-mix(in oklab,var(--vlan-color,#79d8c6) 58%,light-dark(#0b2530,var(--vlan-color,#79d8c6)))}
+.gns3lab-student.canvas-ui .l2-virtual .vtitle{fill:var(--k-vtitle);font:600 12px var(--display);dominant-baseline:central}
+.gns3lab-student.canvas-ui .l2-virtual.idle > rect{stroke-dasharray:4 3;fill:var(--k-vbox-idle);filter:none}
+.gns3lab-student.canvas-ui .l2-virtual.idle .vtitle{fill:var(--k-vtitle-idle)}
 .gns3lab-student.canvas-ui .l2-virtual:focus{outline:none}
-.gns3lab-student.canvas-ui .l2-endpoint .halo{stroke:#527886}
-.gns3lab-student.canvas-ui .l2-endpoint .if{fill:#2b5261}
+.gns3lab-student.canvas-ui .l2-endpoint .halo{stroke:var(--k-ep-halo)}
+.gns3lab-student.canvas-ui .l2-endpoint .if{fill:var(--k-ep-if)}
 .gns3lab-student.canvas-ui .l2-endpoint .nname{font-size:clamp(calc(10.5px * var(--inv,1)),13px,calc(19px * var(--inv,1)))}
 .gns3lab-student.canvas-ui .l2-path{cursor:pointer}
 .gns3lab-student.canvas-ui .l2-path .hit{stroke-width:18;stroke:transparent;fill:none;pointer-events:stroke}
-.gns3lab-student.canvas-ui .l2-path .stroke{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-width:1.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .l2-path .casing{fill:none;stroke:var(--vlan-color,#81aeb9);stroke-opacity:.22;stroke-width:6.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path .stroke{fill:none;stroke:color-mix(in oklab,var(--vlan-color,#81aeb9) 58%,light-dark(#0b2530,var(--vlan-color,#81aeb9)));stroke-width:1.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path .casing{fill:none;stroke:color-mix(in oklab,var(--vlan-color,#81aeb9) 58%,light-dark(#0b2530,var(--vlan-color,#81aeb9)));stroke-opacity:.22;stroke-width:6.5;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .gns3lab-student.canvas-ui .l2-path.sel .casing,
 .gns3lab-student.canvas-ui .l2-path.on .casing{stroke-opacity:.34}
 .gns3lab-student.canvas-ui .l2-trunk-pill{cursor:pointer}
-.gns3lab-student.canvas-ui .l2-trunk-pill rect{fill:#173643;stroke:#5f8f9b;stroke-width:1;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .l2-trunk-pill text{font:600 9px var(--mono);fill:#b5d9df;text-anchor:middle;dominant-baseline:central;letter-spacing:.02em}
-.gns3lab-student.canvas-ui .l2-trunk-pill.on rect{stroke:var(--accent);fill:#1d4654}
+.gns3lab-student.canvas-ui .l2-trunk-pill rect{fill:var(--k-pill-bg);stroke:var(--k-pill-line);stroke-width:1;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-trunk-pill text{font:600 9px var(--mono);fill:var(--k-ink-cyan);text-anchor:middle;dominant-baseline:central;letter-spacing:.02em}
+.gns3lab-student.canvas-ui .l2-trunk-pill.on rect{stroke:var(--accent);fill:var(--k-pill-on)}
 .gns3lab-student.canvas-ui .l2-trunk-pill.on text{fill:var(--fg)}
 .gns3lab-student.canvas-ui .l2-path.down .casing,
 .gns3lab-student.canvas-ui .l2-path.unknown .casing{stroke-opacity:.1}
@@ -5062,19 +5040,19 @@ from{transform:translateY(40%);opacity:.3}
 
 
 }
-.gns3lab-student.canvas-ui .l2-path.down .stroke{stroke:#ef817c;stroke-dasharray:5 7;opacity:.8}
-.gns3lab-student.canvas-ui .l2-path .caption{fill:#c7e3e5;stroke:#112a37;stroke-width:4;paint-order:stroke;
+.gns3lab-student.canvas-ui .l2-path.down .stroke{stroke:var(--k-down);stroke-dasharray:5 7;opacity:.8}
+.gns3lab-student.canvas-ui .l2-path .caption{fill:var(--k-caption);stroke:var(--k-caption-halo);stroke-width:4;paint-order:stroke;
   font:600 10px var(--mono);font-size:calc(10px * var(--inv,1));text-anchor:middle;pointer-events:none;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .l2-path.down .caption{fill:#e49c97}
+.gns3lab-student.canvas-ui .l2-path.down .caption{fill:var(--k-down-fg)}
 /* Not enough facts to tell (as on L1): grey, not the red of a line that does not pass. Assumed: solid, paler. */
-.gns3lab-student.canvas-ui .l2-path.down.unknown .stroke{stroke:#8aa3ad;stroke-dasharray:3 6;opacity:.7}
+.gns3lab-student.canvas-ui .l2-path.down.unknown .stroke{stroke:var(--k-unknown);stroke-dasharray:3 6;opacity:.7}
 .gns3lab-student.canvas-ui .l2-path.assumed .stroke{stroke-opacity:.6}
-.gns3lab-student.canvas-ui .l2-path.problem .stroke{stroke:#ff927d;stroke-width:2.6;stroke-dasharray:6 5}
-.gns3lab-student.canvas-ui .l2-path.problem .caption{fill:#ffb5a5}
-.gns3lab-student.canvas-ui .l2-path.mismatch .stroke{stroke:#ffbc69;stroke-width:2.6;stroke-dasharray:9 4}
-.gns3lab-student.canvas-ui .l2-path.mismatch .caption{fill:#ffd29a}
-.gns3lab-student.canvas-ui .l2-p2p .stroke{stroke:#637e8b;stroke-width:1.8}
-.gns3lab-student.canvas-ui .l2-p2p .caption{fill:#91aeb8}
+.gns3lab-student.canvas-ui .l2-path.problem .stroke{stroke:var(--k-problem);stroke-width:2.6;stroke-dasharray:6 5}
+.gns3lab-student.canvas-ui .l2-path.problem .caption{fill:var(--k-problem-fg)}
+.gns3lab-student.canvas-ui .l2-path.mismatch .stroke{stroke:var(--k-amber);stroke-width:2.6;stroke-dasharray:9 4}
+.gns3lab-student.canvas-ui .l2-path.mismatch .caption{fill:var(--k-amber-fg)}
+.gns3lab-student.canvas-ui .l2-p2p .stroke{stroke:var(--k-p2p);stroke-width:1.8}
+.gns3lab-student.canvas-ui .l2-p2p .caption{fill:var(--k-p2p-fg)}
 @media(prefers-reduced-motion:reduce){
 .gns3lab-student.canvas-ui .l2-scene,
 .gns3lab-student.canvas-ui [data-region="lyrDraw"],
@@ -5083,29 +5061,29 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="lyrCards"]{transition:none}
 
 }
-.gns3lab-student.canvas-ui .layer-vlan{visibility:hidden;opacity:0;fill:#dcf8f3;stroke:var(--canvas);stroke-width:4;paint-order:stroke;
+.gns3lab-student.canvas-ui .layer-vlan{visibility:hidden;opacity:0;fill:var(--k-vlan-fg);stroke:var(--canvas);stroke-width:4;paint-order:stroke;
   font:600 9px var(--mono);text-anchor:middle;pointer-events:none}
 .gns3lab-student.canvas-ui [data-region="canvasUi"]{font-family:var(--body)}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-bg{fill:#102633;stroke:#3a6570;stroke-width:1;filter:drop-shadow(0 12px 24px rgb(0 0 0 / .26))}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-kicker{fill:#78ddd1;font:600 10px var(--mono);letter-spacing:1.4px}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-meta{fill:#aac1c9;font:500 10px var(--mono)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-bg{fill:var(--k-hud-bg);stroke:var(--k-hud-line);stroke-width:1;filter:drop-shadow(0 12px 24px rgb(0 0 0 / .26))}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-kicker{fill:var(--k-accent-soft);font:600 10px var(--mono);letter-spacing:1.4px}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-meta{fill:var(--k-hud-meta);font:500 10px var(--mono)}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button{cursor:pointer}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button rect{fill:#203d49;stroke:#3d6270;stroke-width:1}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button text{fill:#b3cbd2;font:600 12px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button rect{fill:var(--k-ctl);stroke:var(--k-edge);stroke-width:1}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button text{fill:var(--k-ctl-fg);font:600 12px var(--mono);text-anchor:middle;dominant-baseline:middle}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:hover rect,
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:focus-visible rect{stroke:#81e6d8}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button.active rect{fill:#58ddcb;stroke:#58ddcb}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button.active text{fill:#09252b}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:focus-visible rect{stroke:var(--k-focus)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button.active rect{fill:var(--k-on);stroke:var(--k-on)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button.active text{fill:var(--k-on-fg)}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .layer-button:focus{outline:none}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-note{fill:#8daab4;font:500 10px var(--body)}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .hud-note{fill:var(--k-hud-note);font:500 10px var(--body)}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump{cursor:pointer}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump rect{fill:#1c3c49;stroke:var(--vlan-color,#6ccdbf);stroke-width:1.2}
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump text{fill:#d7edef;font:600 10px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump rect{fill:var(--k-jump);stroke:color-mix(in oklab,var(--vlan-color,#6ccdbf) 58%,light-dark(#0b2530,var(--vlan-color,#6ccdbf)));stroke-width:1.2}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump text{fill:var(--k-jump-fg);font:600 10px var(--mono);text-anchor:middle;dominant-baseline:middle}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:hover rect,
-.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus-visible rect{fill:#315e6a;stroke-width:2}
+.gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus-visible rect{fill:var(--k-jump-focus);stroke-width:2}
 .gns3lab-student.canvas-ui [data-region="canvasUi"] .domain-jump:focus{outline:none}
-.gns3lab-student.canvas-ui .hint{background:rgb(15 36 48 / .84);border:1px solid #315460;color:#bcd2d7}
-.gns3lab-student.canvas-ui .zoom{background:#17313e;border-radius:12px}
+.gns3lab-student.canvas-ui .hint{background:var(--k-hint-bg);border:1px solid var(--k-hint-line);color:var(--k-hint-fg)}
+.gns3lab-student.canvas-ui .zoom{background:var(--k-zoom-bg);border-radius:12px}
 .gns3lab-student.canvas-ui .details{display:none !important}
 @media(max-width:760px){
 .gns3lab-student.canvas-ui .bar{padding-block:9px}
@@ -5118,9 +5096,9 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .auto-label.label-hidden{display:none}
 .gns3lab-student.canvas-ui .auto-label .nsub{font-size:clamp(calc(9px * var(--inv,1)),8px,calc(12px * var(--inv,1)))}
 .gns3lab-student.canvas-ui .auto-label .nadj{font-size:clamp(calc(8.5px * var(--inv,1)),7px,calc(11px * var(--inv,1)))}
-.gns3lab-student.canvas-ui .label-lead{stroke:#6c929e;stroke-width:1;stroke-dasharray:2 3;opacity:.65;pointer-events:none}
+.gns3lab-student.canvas-ui .label-lead{stroke:var(--k-lead);stroke-width:1;stroke-dasharray:2 3;opacity:.65;pointer-events:none}
 .gns3lab-student.canvas-ui .object-card,
-.gns3lab-student.canvas-ui .tasks-panel{box-sizing:border-box;background:#142c39;color:var(--fg);border:1px solid #54838a;
+.gns3lab-student.canvas-ui .tasks-panel{box-sizing:border-box;background:var(--k-card);color:var(--fg);border:1px solid var(--k-card-line);
   border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
 .gns3lab-student.canvas-ui .object-card{height:100%;display:flex;flex-direction:column}
 /* The object card: a drawer on the right, as high as the scheme; on a narrow scheme a sheet above the zoom controls. */
@@ -5128,7 +5106,7 @@ from{transform:translateY(40%);opacity:.3}
   box-sizing:border-box;visibility:hidden;transform:translateX(calc(100% + 24px));
   transition:transform .22s ease,visibility 0s linear .22s}
 .gns3lab-student.canvas-ui .object-drawer.open{visibility:visible;transform:none;transition:transform .22s ease}
-.gns3lab-student.canvas-ui .object-drawer .object-card{border-radius:0;border-width:0 0 0 1px;box-shadow:-18px 0 44px rgb(0 8 17 / .4)}
+.gns3lab-student.canvas-ui .object-drawer .object-card{border-radius:0;border-width:0 0 0 1px;box-shadow:-18px 0 44px var(--k-drawer-shadow)}
 .gns3lab-student.canvas-ui .object-drawer.sheet{top:auto;left:8px;right:8px;bottom:64px;width:auto;height:min(62%,calc(100% - 140px));
   transform:translateY(calc(100% + 80px))}
 .gns3lab-student.canvas-ui .object-drawer.sheet.open{transform:none}
@@ -5146,7 +5124,7 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .object-card .ib,
 .gns3lab-student.canvas-ui .tasks-panel .ib{width:36px;height:36px}
 .gns3lab-student.canvas-ui .object-tabs{display:flex;gap:6px;margin:0 20px 12px;flex:none}
-.gns3lab-student.canvas-ui .object-tabs button{flex:1;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#203d49;color:var(--muted);cursor:pointer;font:600 13px var(--mono)}
+.gns3lab-student.canvas-ui .object-tabs button{flex:1;min-height:38px;border:1px solid var(--line);border-radius:8px;background:var(--k-ctl);color:var(--muted);cursor:pointer;font:600 13px var(--mono)}
 .gns3lab-student.canvas-ui .object-tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .gns3lab-student.canvas-ui .object-tabs button:focus-visible,
 .gns3lab-student.canvas-ui .object-card button:focus-visible,
@@ -5162,24 +5140,24 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .object-content .card-foot{font-size:12px;margin-top:14px}
 .gns3lab-student.canvas-ui .object-content .card-empty{padding:18px 0}
 .gns3lab-student.canvas-ui .object-content .mac-toggle{margin-bottom:10px}
-.gns3lab-student.canvas-ui .tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:#203d49;border-color:#54838a;border-radius:10px;box-shadow:var(--shadow)}
+.gns3lab-student.canvas-ui .tasks-toggle{position:absolute;right:14px;top:14px;z-index:5;height:40px;background:var(--k-ctl);border-color:var(--k-card-line);border-radius:10px;box-shadow:var(--shadow)}
 .gns3lab-student.canvas-ui .hud-tools{position:absolute;left:29px;top:106px;z-index:4;display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
 .gns3lab-student.canvas-ui .canvas-actions{display:flex;gap:6px;width:max-content}
 .gns3lab-student.canvas-ui .canvas-actions .tasks-toggle{position:static;box-shadow:none}
-.gns3lab-student.canvas-ui .canvas-actions .btn{height:28px;min-height:0;padding:0 10px;font-size:12px;line-height:1;background:#203d49;border-color:#3d6270;border-radius:8px}
+.gns3lab-student.canvas-ui .canvas-actions .btn{height:28px;min-height:0;padding:0 10px;font-size:12px;line-height:1;background:var(--k-ctl);border-color:var(--k-edge);border-radius:8px}
 .gns3lab-student.canvas-ui .canvas-actions .btn[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
 .gns3lab-student.canvas-ui .canvas-panel{position:absolute;right:14px;top:14px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;
-  display:flex;flex-direction:column;background:#142c39;border:1px solid #54838a;border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
+  display:flex;flex-direction:column;background:var(--k-card);border:1px solid var(--k-card-line);border-radius:17px;box-shadow:var(--shadow);font:13px/1.5 var(--body);overflow:hidden}
 .gns3lab-student.canvas-ui .canvas-panel header{display:flex;align-items:flex-start;justify-content:space-between;padding:18px 20px 12px;gap:12px}
 .gns3lab-student.canvas-ui .canvas-panel h2{margin:0;font:600 24px var(--display)}
 .gns3lab-student.canvas-ui .canvas-panel p{color:var(--muted);margin:6px 0}
 .gns3lab-student.canvas-ui .panel-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
 .gns3lab-student.canvas-ui .panel-body label{display:block;margin:14px 0 5px;color:var(--muted)}
-.gns3lab-student.canvas-ui .panel-body select{width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--line);border-radius:7px;background:#203d49;color:var(--fg);font:13px var(--body)}
+.gns3lab-student.canvas-ui .panel-body select{width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--line);border-radius:7px;background:var(--k-ctl);color:var(--fg);font:13px var(--body)}
 .gns3lab-student.canvas-ui .panel-body .check-label{display:flex;align-items:center;gap:8px}
 .gns3lab-student.canvas-ui .panel-body input{accent-color:var(--accent)}
 .gns3lab-student.canvas-ui .panel-tabs{display:flex;gap:6px;margin:10px 0 14px}
-.gns3lab-student.canvas-ui .panel-tabs button{flex:1;height:34px;border:1px solid var(--line);border-radius:7px;background:#203d49;color:var(--muted);cursor:pointer}
+.gns3lab-student.canvas-ui .panel-tabs button{flex:1;height:34px;border:1px solid var(--line);border-radius:7px;background:var(--k-ctl);color:var(--muted);cursor:pointer}
 .gns3lab-student.canvas-ui .panel-tabs button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
 .gns3lab-student.canvas-ui .overview-row,
 .gns3lab-student.canvas-ui .issue-row{display:block;width:100%;padding:12px 0;text-align:left;color:var(--fg);background:transparent;border:0;border-top:1px solid var(--line);font:13px/1.45 var(--body);cursor:pointer}
@@ -5197,12 +5175,12 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .object-content .fact-banner{padding:9px 10px;border:1px solid var(--line);border-radius:7px;margin:0 0 12px;font-size:12px}
 .gns3lab-student.canvas-ui .object-content .fact-banner.warn{border-color:var(--warn);color:var(--warn)}
 .gns3lab-student.canvas-ui .object-content .object-links{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
-.gns3lab-student.canvas-ui .object-content .object-links button{border:1px solid var(--line);border-radius:6px;background:#203d49;color:var(--accent);padding:7px 9px;font:11px var(--mono);cursor:pointer}
+.gns3lab-student.canvas-ui .object-content .object-links button{border:1px solid var(--line);border-radius:6px;background:var(--k-ctl);color:var(--accent);padding:7px 9px;font:11px var(--mono);cursor:pointer}
 .gns3lab-student.canvas-ui .object-content .inspect-output{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.5 var(--mono);color:var(--term-fg);padding:10px;background:var(--term-bg);border-radius:7px}
 .gns3lab-student.canvas-ui .object-content .section-label{margin-top:18px;font-weight:600}
-.gns3lab-student.canvas-ui .empty-surface{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:2;width:min(360px,calc(100% - 40px));padding:18px;border:1px dashed var(--line);border-radius:12px;background:#102633;color:var(--muted);text-align:center;font:13px/1.6 var(--body);pointer-events:none}
+.gns3lab-student.canvas-ui .empty-surface{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:2;width:min(360px,calc(100% - 40px));padding:18px;border:1px dashed var(--line);border-radius:12px;background:var(--k-hud-bg);color:var(--muted);text-align:center;font:13px/1.6 var(--body);pointer-events:none}
 .gns3lab-student.canvas-ui .tasks-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
-.gns3lab-student.canvas-ui .task-count{font:600 10px var(--mono);background:#102633;border-radius:4px;padding:2px 5px}
+.gns3lab-student.canvas-ui .task-count{font:600 10px var(--mono);background:var(--k-hud-bg);border-radius:4px;padding:2px 5px}
 .gns3lab-student.canvas-ui .tasks-panel{position:absolute;right:14px;top:14px;width:min(460px,calc(100% - 28px));max-height:calc(100% - 126px);z-index:8;display:flex;flex-direction:column}
 .gns3lab-student.canvas-ui .tasks-body{padding:0 20px 18px;overflow:auto;overscroll-behavior:contain}
 .gns3lab-student.canvas-ui .tasks-progress{width:100%;height:5px;accent-color:var(--accent);margin:12px 0}
@@ -5212,7 +5190,7 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .task-item.done label span{text-decoration:line-through;color:var(--muted)}
 .gns3lab-student.canvas-ui .task-item p{font-size:12px;margin:8px 0 10px 28px}
 .gns3lab-student.canvas-ui .task-targets{display:flex;gap:6px;flex-wrap:wrap;margin-left:28px}
-.gns3lab-student.canvas-ui .task-targets button{font:500 11px var(--mono);cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:#203d49;color:var(--accent)}
+.gns3lab-student.canvas-ui .task-targets button{font:500 11px var(--mono);cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--k-ctl);color:var(--accent)}
 @media(max-width:760px){
 .gns3lab-student.canvas-ui .canvas-panel,
 .gns3lab-student.canvas-ui .tasks-panel{top:12px;max-height:calc(100% - 126px)}
@@ -5230,16 +5208,104 @@ from{transform:translateY(40%);opacity:.3}
 
 
 .gns3lab-student.canvas-ui {
- --bg:#0b1520;--canvas:#101f2b;--panel:#172b38;--fg:#eaf3f5;--muted:#9ab2bc;
- --line:#31505d;--grid:#25404b;--wire:#648b9a;--accent:#57dfcf;--accent-ink:#092126;
- --ico:#244b5c;--ico-glyph:#d8f5f0;--chip:#1e3744;--ok:#64dda6;--warn:#f3bd66;
- --bad:#ef817c;--off:#6f8792;--shadow:0 18px 44px rgb(0 8 17 / .4);
+ --bg:light-dark(#e9eff2,#0b1520);
+ --canvas:light-dark(#f3f7f9,#101f2b);
+ --panel:light-dark(#ffffff,#172b38);
+ --fg:light-dark(#12232d,#eaf3f5);
+ --muted:light-dark(#4f6670,#9ab2bc);
+ --line:light-dark(#c3d2d8,#31505d);
+ --grid:light-dark(#d5e0e5,#25404b);
+ --wire:light-dark(#6f8d99,#648b9a);
+ --accent:light-dark(#0d8a7e,#57dfcf);
+ --accent-ink:light-dark(#ffffff,#092126);
+ --ico:light-dark(#2c5a6b,#244b5c);
+ --ico-glyph:light-dark(#eefaf8,#d8f5f0);
+ --chip:light-dark(#e3ecef,#1e3744);
+ --ok:light-dark(#1a8a5a,#64dda6);
+ --warn:light-dark(#a66a00,#f3bd66);
+ --bad:light-dark(#c43d36,#ef817c);
+ --off:light-dark(#8b9ca4,#6f8792);
+ --shadow:0 18px 44px light-dark(rgb(16 40 52 / .16),rgb(0 8 17 / .4));
  --term-bg:#0F171D;--term-fg:#D6DEE5;--term-dim:#7F909C;--term-line:#24323C;
  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
- color-scheme:dark;font-family:var(--body);background:var(--canvas);color:var(--fg);
+ --k-plabel-bg:light-dark(#ffffff,#0e2430);
+ --k-edge:light-dark(#c3d4da,#3d6270);
+ --k-hud-line:light-dark(#c3d4da,#3a6570);
+ --k-bar-bg:light-dark(#ffffff,#0c1a25);
+ --k-bar-line:light-dark(#d3dfe4,#294653);
+ --k-seg-bg:light-dark(#e8eff2,#172b38);
+ --k-seg-on:light-dark(#cdeee9,#295c62);
+ --k-seg-on-fg:light-dark(#0b5e56,#d9fff7);
+ --k-wrap-1:light-dark(#f9fbfc,#193341);
+ --k-wrap-2:light-dark(#eff4f6,#10212d);
+ --k-wrap-3:light-dark(#e7eef1,#0d1c27);
+ --k-dots:light-dark(#b4c6cd,#315260);
+ --k-wire-line:light-dark(#8aa3ad,#557e8e);
+ --k-duplex:light-dark(#3f7280,#9ac8d2);
+ --k-ink-cyan:light-dark(#2e5d69,#b5d9df);
+ --k-lead:light-dark(#8fa9b2,#6c929e);
+ --k-vl10:light-dark(#17946b,#66dcb5);
+ --k-vl20:light-dark(#a8700c,#e5b971);
+ --k-vltrunk:light-dark(#4a5fc4,#98aaf5);
+ --k-l3wire:light-dark(#2b7ab0,#73b5df);
+ --k-ghost:light-dark(#a9bec6,#93b8c6);
+ --k-subnet-bg:light-dark(#eaf4f9,#193e50);
+ --k-subnet-fg:light-dark(#12323f,#e3f7fc);
+ --k-vbox-sel:light-dark(#dff2ee,#224b59);
+ --k-silhouette:light-dark(#e2e9ec,#19303c);
+ --k-chassis:light-dark(rgb(150 180 190 / .16),rgb(26 61 72 / .34));
+ --k-chassis-line:light-dark(#93b2bc,#4f8290);
+ --k-chassis-fg:light-dark(#4a707b,#a6c5cc);
+ --k-vbox:light-dark(#ffffff,#173747);
+ --k-amber:light-dark(#c27408,#ffbc69);
+ --k-vtitle:light-dark(#12232d,#f2fafa);
+ --k-vbox-idle:light-dark(#f2f6f8,#132b37);
+ --k-vtitle-idle:light-dark(#6b8690,#a6c3c9);
+ --k-ep-halo:light-dark(#8fabb5,#527886);
+ --k-ep-if:light-dark(#3d6878,#2b5261);
+ --k-pill-bg:light-dark(#ffffff,#173643);
+ --k-pill-line:light-dark(#9cb7c0,#5f8f9b);
+ --k-pill-on:light-dark(#e0f3f0,#1d4654);
+ --k-down:light-dark(#c43d36,#ef817c);
+ --k-caption:light-dark(#24434e,#c7e3e5);
+ --k-caption-halo:light-dark(#f3f7f9,#112a37);
+ --k-down-fg:light-dark(#b2443d,#e49c97);
+ --k-unknown:light-dark(#92a6ae,#8aa3ad);
+ --k-problem:light-dark(#d2492f,#ff927d);
+ --k-problem-fg:light-dark(#b03823,#ffb5a5);
+ --k-amber-fg:light-dark(#94560a,#ffd29a);
+ --k-p2p:light-dark(#839ba5,#637e8b);
+ --k-p2p-fg:light-dark(#52707b,#91aeb8);
+ --k-vlan-fg:light-dark(#0f4a44,#dcf8f3);
+ --k-hud-bg:light-dark(#ffffff,#102633);
+ --k-accent-soft:light-dark(#0d8379,#78ddd1);
+ --k-hud-meta:light-dark(#5a7580,#aac1c9);
+ --k-ctl:light-dark(#edf3f5,#203d49);
+ --k-ctl-fg:light-dark(#3b5964,#b3cbd2);
+ --k-focus:light-dark(#0d8a7e,#81e6d8);
+ --k-on:light-dark(#0f9a8c,#58ddcb);
+ --k-on-fg:light-dark(#ffffff,#09252b);
+ --k-hud-note:light-dark(#688490,#8daab4);
+ --k-jump:light-dark(#eef5f7,#1c3c49);
+ --k-jump-fg:light-dark(#1d3a44,#d7edef);
+ --k-jump-focus:light-dark(#d4eae6,#315e6a);
+ --k-hint-bg:light-dark(rgb(255 255 255 / .92),rgb(15 36 48 / .84));
+ --k-hint-line:light-dark(#c3d4da,#315460);
+ --k-hint-fg:light-dark(#3b5964,#bcd2d7);
+ --k-zoom-bg:light-dark(#ffffff,#17313e);
+ --k-card:light-dark(#ffffff,#142c39);
+ --k-card-line:light-dark(#b3cad0,#54838a);
+ --k-assign-head:light-dark(#eef4f6,#1b3846);
+ --k-assign-line:light-dark(#d3dfe4,#2f5866);
+ --k-drawer-shadow:light-dark(rgb(16 40 52 / .16),rgb(0 8 17 / .4));
+ color-scheme:light dark;font-family:var(--body);background:var(--canvas);color:var(--fg);
 }
+/* The switch of the bar (theme.js): no attribute follows the system, as does Moodle in its dark theme. */
+.gns3lab-student.canvas-ui[data-theme="light"]{color-scheme:light}
+.gns3lab-student.canvas-ui[data-theme="dark"],
+[data-bs-theme="dark"] .gns3lab-student.canvas-ui:not([data-theme]){color-scheme:dark}
 
 /* The activity/session controls and live consoles use the same Canvas surface. */
 .gns3lab-student.canvas-ui,
@@ -5489,7 +5555,7 @@ from{transform:translateY(40%);opacity:.3}
    scheme, a sheet above the zoom controls on a narrow screen. */
 .gns3lab-student.canvas-ui .canvas-panel,
 .gns3lab-student.canvas-ui .tasks-panel{top:0;right:0;bottom:0;max-height:none;width:min(440px,calc(100% - 48px));z-index:8;
-  border-radius:0;border-width:0 0 0 1px;box-shadow:-18px 0 44px rgb(0 8 17 / .4);animation:gns3lab-drawer-in .22s ease}
+  border-radius:0;border-width:0 0 0 1px;box-shadow:-18px 0 44px var(--k-drawer-shadow);animation:gns3lab-drawer-in .22s ease}
 .gns3lab-student.canvas-ui .canvas-panel h2{font:600 25px/1.2 var(--display);margin:5px 0}
 .gns3lab-student.canvas-ui .canvas-panel p{margin:4px 0}
 .gns3lab-student.canvas-ui .panel-body,
@@ -5508,15 +5574,15 @@ from{transform:translateY(40%);opacity:.3}
 
 /* Spanning tree on L2, as the console showed it (docs/live-state.md §8.2): the root bridge and the blocked ports. */
 .gns3lab-student.canvas-ui .l2-path.stp-blocked .stroke{stroke-dasharray:3 6;stroke-opacity:.75}
-.gns3lab-student.canvas-ui .l2-path .stp-block circle{fill:#173747;stroke:#ffbc69;stroke-width:1.6;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .l2-path .stp-block line{stroke:#ffbc69;stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.gns3lab-student.canvas-ui .l2-virtual .stp-root-tag rect{fill:#ffd36e;stroke:#173747;stroke-width:1;filter:none}
-.gns3lab-student.canvas-ui .l2-virtual .stp-root-tag text{fill:#173747;font:700 9px var(--display);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .l2-path .stp-block circle{fill:var(--k-vbox);stroke:var(--k-amber);stroke-width:1.6;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-path .stp-block line{stroke:var(--k-amber);stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .l2-virtual .stp-root-tag rect{fill:#ffd36e;stroke:#0f2a36;stroke-width:1;filter:none}
+.gns3lab-student.canvas-ui .l2-virtual .stp-root-tag text{fill:#0f2a36;font:700 9px var(--display);text-anchor:middle;dominant-baseline:middle}
 
 /* The assignment: a floating window in the layer of the console windows (amd/src/assignment.js). It is dragged by its
    title, resized by its corner and folds to the title; on a narrow screen it is a sheet above the zoom controls. */
 .gns3lab-student.canvas-ui .assign-win{position:absolute;pointer-events:auto;box-sizing:border-box;display:flex;flex-direction:column;
-  min-width:260px;min-height:160px;resize:both;overflow:hidden;background:#142c39;color:var(--fg);border:1px solid #54838a;
+  min-width:260px;min-height:160px;resize:both;overflow:hidden;background:var(--k-card);color:var(--fg);border:1px solid var(--k-card-line);
   border-radius:12px;box-shadow:var(--shadow);font:13px/1.5 var(--body)}
 .gns3lab-student.canvas-ui .assign-win[hidden]{display:none}
 .gns3lab-student.canvas-ui .assign-win:focus{outline:none}
@@ -5524,14 +5590,14 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .assign-win.folded .assign-head h2{padding-right:24px}
 .gns3lab-student.canvas-ui .assign-win.folded .assign-body{display:none}
 .gns3lab-student.canvas-ui .assign-head{flex:none;display:flex;align-items:center;gap:4px;height:40px;box-sizing:border-box;padding:0 6px 0 14px;
-  background:#1b3846;border-bottom:1px solid #2f5866;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}
+  background:var(--k-assign-head);border-bottom:1px solid var(--k-assign-line);cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}
 .gns3lab-student.canvas-ui .assign-win.folded .assign-head{border-bottom:0}
 .gns3lab-student.canvas-ui .assign-head.dragging{cursor:grabbing}
 .gns3lab-student.canvas-ui .assign-head h2{flex:1;min-width:0;margin:0;font:600 14px/1 var(--display);color:var(--fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gns3lab-student.canvas-ui .assign-head button{flex:none;width:30px;height:30px;border:0;border-radius:6px;background:transparent;color:var(--muted);
   cursor:pointer;display:grid;place-items:center;font:400 20px/1 var(--body)}
-.gns3lab-student.canvas-ui .assign-head button:hover{background:#203d49;color:var(--fg)}
+.gns3lab-student.canvas-ui .assign-head button:hover{background:var(--k-ctl);color:var(--fg)}
 .gns3lab-student.canvas-ui .assign-head button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .gns3lab-student.canvas-ui .assign-head svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;transition:transform .15s ease}
@@ -5623,13 +5689,13 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .hud-off [data-region="canvasUi"],
 .gns3lab-student.canvas-ui .hud-off .hud-tools,
 .gns3lab-student.canvas-ui .hud-off .hud-fold{transform:translateX(-460px);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s}
-.gns3lab-student.canvas-ui .hud-fold{position:absolute;top:18px;left:0;z-index:5;width:24px;height:24px;margin:0;padding:0;border:0;border-radius:6px;background:transparent;color:#78ddd1;display:grid;place-items:center;cursor:pointer}
-.gns3lab-student.canvas-ui .hud-fold:hover{background:#203d49}
+.gns3lab-student.canvas-ui .hud-fold{position:absolute;top:18px;left:0;z-index:5;width:24px;height:24px;margin:0;padding:0;border:0;border-radius:6px;background:transparent;color:var(--k-accent-soft);display:grid;place-items:center;cursor:pointer}
+.gns3lab-student.canvas-ui .hud-fold:hover{background:var(--k-ctl)}
 .gns3lab-student.canvas-ui .hud-fold svg,
 .gns3lab-student.canvas-ui .hud-tongue svg{width:14px;height:14px;stroke:currentcolor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .gns3lab-student.canvas-ui .hud-tongue{display:none}
 .gns3lab-student.canvas-ui .hud-off .hud-tongue{position:absolute;left:0;top:14px;z-index:6;display:flex;flex-direction:column;align-items:center;gap:6px;width:30px;margin:0;padding:10px 0;
-  border:1px solid #3a6570;border-left:0;border-radius:0 10px 10px 0;background:#102633;color:#78ddd1;box-shadow:0 12px 24px rgb(0 0 0 / .26);cursor:pointer;transition:width .12s ease}
+  border:1px solid var(--k-hud-line);border-left:0;border-radius:0 10px 10px 0;background:var(--k-hud-bg);color:var(--k-accent-soft);box-shadow:0 12px 24px rgb(0 0 0 / .26);cursor:pointer;transition:width .12s ease}
 .gns3lab-student.canvas-ui .hud-off .hud-tongue:hover{width:36px}
 .gns3lab-student.canvas-ui .hud-tongue b{font:600 11px var(--mono)}
 .gns3lab-student.canvas-ui .hud-fold:focus-visible,
@@ -5640,4 +5706,70 @@ from{transform:translateY(40%);opacity:.3}
   .gns3lab-student.canvas-ui .hud-fold{transition:none}
   .gns3lab-student.canvas-ui .fact-status button[data-state="busy"]::before{animation-duration:2.4s}
   .gns3lab-student.canvas-ui .fact-status.fresh [data-region="canvasFacts"]{animation:none}
+}
+
+/* The light / dark switch in the bar of the full-screen pages (templates/theme_toggle.mustache, amd/src/theme.js). */
+.gns3lab-app .theme-toggle,
+.gns3lab-student .theme-toggle,
+.gns3lab-course .theme-toggle {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--canvas);
+    color: var(--fg);
+    cursor: pointer;
+}
+.gns3lab-student.canvas-ui .bar .theme-toggle {
+    border-color: var(--k-edge);
+    background: var(--k-ctl);
+    border-radius: 8px;
+}
+.gns3lab-app .theme-toggle[hidden],
+.gns3lab-student .theme-toggle[hidden],
+.gns3lab-course .theme-toggle[hidden] {
+    display: none;
+}
+.gns3lab-app .theme-toggle:hover,
+.gns3lab-student .theme-toggle:hover,
+.gns3lab-course .theme-toggle:hover {
+    border-color: var(--accent);
+}
+.gns3lab-app .theme-toggle:focus-visible,
+.gns3lab-student .theme-toggle:focus-visible,
+.gns3lab-course .theme-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.gns3lab-app .theme-toggle svg,
+.gns3lab-student .theme-toggle svg,
+.gns3lab-course .theme-toggle svg {
+    display: none;
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.gns3lab-app .theme-toggle .fill,
+.gns3lab-student .theme-toggle .fill,
+.gns3lab-course .theme-toggle .fill {
+    fill: currentColor;
+}
+.gns3lab-app .theme-toggle[data-mode="auto"] .ti-auto,
+.gns3lab-app .theme-toggle[data-mode="light"] .ti-light,
+.gns3lab-app .theme-toggle[data-mode="dark"] .ti-dark,
+.gns3lab-student .theme-toggle[data-mode="auto"] .ti-auto,
+.gns3lab-student .theme-toggle[data-mode="light"] .ti-light,
+.gns3lab-student .theme-toggle[data-mode="dark"] .ti-dark,
+.gns3lab-course .theme-toggle[data-mode="auto"] .ti-auto,
+.gns3lab-course .theme-toggle[data-mode="light"] .ti-light,
+.gns3lab-course .theme-toggle[data-mode="dark"] .ti-dark {
+    display: block;
 }
