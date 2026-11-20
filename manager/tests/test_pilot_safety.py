@@ -378,3 +378,14 @@ async def test_claim_error_cannot_drop_epoch_check_during_cleanup(tmp_path, dsn)
         finally:
             current.reset(token)
         assert (await env.services.store.session(s["id"]))["status"] == "starting"
+
+
+def test_slot_failure_message_keeps_the_cause_on_one_line():
+    from lab_manager.orchestrator import slot_failure_message
+    error = {"code": "SLOT_START_FAILED", "stage": "ct_start",
+             "message": "Агент не смог запустить слот: Proxmox command failed: Failed to connect\n to bus"}
+    assert slot_failure_message("s-1", "SLOT_START_FAILED", error) == (
+        "session s-1: SLOT_START_FAILED at ct_start: Агент не смог запустить слот: Proxmox command failed: "
+        "Failed to connect to bus")
+    assert slot_failure_message("s-1", "TIMEOUT, then PARK_FAILED", {"code": "TIMEOUT", "message": ""}) == (
+        "session s-1: TIMEOUT, then PARK_FAILED")

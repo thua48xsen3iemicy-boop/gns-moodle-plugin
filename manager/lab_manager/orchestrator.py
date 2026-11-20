@@ -119,6 +119,17 @@ SLOT_STAGE_MESSAGES = {
 }
 
 
+def slot_failure_message(session_id, codes, error) -> str:
+    """state_message of a slot held for the operator: session, codes, stage and the error text itself.
+
+    The text is kept on the slot because the session row may not outlive the investigation: a purge of the
+    student's workspace deletes it (purge.py), and `lab-manager-admin slots` then still shows why."""
+    error = error or {}
+    head = f"session {session_id}: {codes}" + (f" at {error['stage']}" if error.get("stage") else "")
+    text = " ".join(str(error.get("message") or "").split())
+    return f"{head}: {text}" if text else head
+
+
 class Failure(Exception):
     """Unrecoverable for this session: it goes to failed. The slot goes to failed too (after the CT is
     stopped, rolled back and parked when the failure happens in a MOUNTED_STAGES stage), unless
@@ -542,7 +553,7 @@ class Orchestrator:
         await self.store.finish_session(
             s, status="failed", message=error["message"], error=error,
             slot_state=slot_state,
-            slot_message=f"session {s['id']}: {codes}",
+            slot_message=slot_failure_message(s["id"], codes, error),
         )
 
     async def _quarantine(self, s, exc):
@@ -1351,7 +1362,7 @@ class Orchestrator:
             if slot_state == "free" and s["error"].get("slot_state", "free") != "free":
                 # A slot-level failure: parked, but kept for the operator.
                 slot_state = s["error"]["slot_state"]
-                slot_message = f"session {s['id']}: {s['error']['code']}"
+                slot_message = slot_failure_message(s["id"], s["error"]["code"], s["error"])
             lab_failures = None
             if slot_state == "free" and self._counts_against_slot(s["error"]):
                 lab_failures = list((held or {}).get("lab_failures") or [])
