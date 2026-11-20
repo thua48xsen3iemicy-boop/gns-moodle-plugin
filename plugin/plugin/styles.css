@@ -5650,12 +5650,16 @@ from{transform:translateY(40%);opacity:.3}
   transition:transform .22s ease,visibility 0s linear .22s}
 .gns3lab-student .stage[data-mode="panel"] .dock.dock-in{animation:gns3lab-dock-in .22s ease}
 @keyframes gns3lab-dock-in{from{transform:translateX(100%)}}
-/* The tongue left on the edge brings the panel back. */
+/* The tongue left in the top right corner brings the panel back: it takes the place of the tab bar, its arrow stands
+   where the hide button was (the bar is 6px of padding, a 32px tab and a 1px border tall; the button is 32px wide). */
 .gns3lab-student .docktongue{display:none}
-.gns3lab-student .stage.dock-off .docktongue{position:absolute;right:0;top:50%;z-index:16;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;
-  width:24px;margin:0;padding:12px 0;border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;background:var(--panel);color:var(--muted);
-  box-shadow:var(--shadow);cursor:pointer;transition:width .12s ease,color .12s ease}
-.gns3lab-student .stage.dock-off .docktongue:hover{width:30px;color:var(--accent)}
+.gns3lab-student .stage.dock-off .docktongue{position:absolute;right:0;top:0;z-index:16;display:flex;flex-direction:row-reverse;align-items:center;gap:6px;
+  height:39px;box-sizing:border-box;margin:0;padding:0 9px 0 10px;border:1px solid var(--line);border-top:0;border-right:0;border-radius:0 0 0 8px;
+  background:var(--panel);color:var(--muted);box-shadow:var(--shadow);cursor:pointer;transition:padding .12s ease,color .12s ease}
+.gns3lab-student .stage.dock-off .docktongue:hover{padding-left:16px;color:var(--accent)}
+/* The panels on the right of the scheme step down below the tongue so it does not cover their close buttons. */
+.gns3lab-student.canvas-ui .stage.dock-off .canvas-panel{top:53px;max-height:calc(100% - 165px)}
+.gns3lab-student.canvas-ui .stage.dock-off .object-drawer{top:39px}
 .gns3lab-student .docktongue b{font:600 12px var(--mono);color:inherit}
 .gns3lab-student .docktongue .unr[hidden]{display:none}
 @media (prefers-reduced-motion: reduce){
