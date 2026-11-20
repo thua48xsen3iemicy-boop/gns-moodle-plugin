@@ -865,6 +865,9 @@ async def test_failed_slot_is_parked_but_not_rolled_back_until_the_operator_enab
         assert s["status"] == "failed" and s["error"]["code"] == "SLOT_START_FAILED"
         slot = await env.services.store.slot(201)
         assert slot["state"] == "failed"
+        # The cause stays on the slot: a purge of the workspace deletes the session row with its error.
+        assert slot["state_message"] == (f"session {sid}: SLOT_START_FAILED at ct_start: Агент не смог запустить "
+                                         "слот: Proxmox command failed: startup for container '201' failed")
         # The guest is left as it was, for the journal of the slot, GNS3 logs and journald of the guest.
         assert ("agent:reset", 201) not in env.timeline
         assert env.pve.cts[201]["status"] == "stopped"

@@ -5,6 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 import agent
 
+REAL_GUEST_PROBE = agent.guest_systemd_ready
+
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
@@ -52,6 +54,12 @@ def env(tmp_path, monkeypatch):
         return ""
 
     monkeypatch.setattr(agent, "run_cmd", run)
+
+    def probe(vmid, timeout):  # The guest's systemd is up as soon as the CT runs
+        calls.append(["probe", vmid])
+        return state["value"] == "running"
+
+    monkeypatch.setattr(agent, "guest_systemd_ready", probe)
     return TestClient(agent.app, headers={"X-Lab-Epoch": "1", "X-Lab-Generation": "1"}), calls, state, conf, ceph
 
 
@@ -566,7 +574,7 @@ def test_capabilities_report_the_start_budget(env, monkeypatch):
     client, calls, *_ = env
     monkeypatch.setattr(agent, "GUEST_ACTION_TIMEOUT", 90)
     body = client.get("/capabilities").json()
-    assert body == {"version": agent.app.version, "start_budget_seconds": 120 + 3 * 90,
+    assert body == {"version": agent.app.version, "start_budget_seconds": 120 + 60 + 3 * 90,
                     "guest_action_timeout_seconds": 90, "images_capture": False,
                     "capture_timeout_seconds": agent.CAPTURE_TIMEOUT, "projects_delete": True}
     assert calls == []
@@ -582,3 +590,61 @@ def test_pct_timeout_body_carries_the_command(monkeypatch):
     assert err.value.detail == {
         "code": "PCT_TIMEOUT", "message": "Proxmox command timed out; check actual container state",
         "command": "status"}
+
+
+def test_guest_actions_wait_for_the_guest_systemd(env, monkeypatch):
+    """pct start returns before systemd in the guest is up; systemctl then fails with "Failed to connect to bus"."""
+    client, calls, *_ = env
+    answers = iter([False, False, True])
+    monkeypatch.setattr(agent, "guest_systemd_ready", lambda vmid, timeout: calls.append(["probe"]) or next(answers))
+    monkeypatch.setattr(agent.time, "sleep", lambda s: calls.append(["sleep", s]))
+    response = client.post("/slots/2201/start", json={"student_key": "student42", "actions": ["init_slot"]})
+    assert response.status_code == 200, response.text
+    order = [c[0] if c[0] in ("probe", "sleep") else tuple(c[:2]) for c in calls]
+    start = order.index((agent.PCT, "start"))
+    assert order[start + 1:start + 7] == ["probe", "sleep", "probe", "sleep", "probe", (agent.PCT, "exec")]
+
+
+def test_start_without_actions_does_not_wait(env):
+    client, calls, *_ = env
+    assert client.post("/slots/2201/start", json={"student_key": "student42"}).status_code == 200
+    assert not any(c[0] == "probe" for c in calls)
+    assert agent.start_budget_seconds(0) == agent.PCT_START_TIMEOUT
+
+
+def test_guest_that_never_boots_fails_the_start_without_running_actions(env, monkeypatch):
+    client, calls, *_ = env
+    clock = {"now": 0.0}
+    monkeypatch.setattr(agent.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(agent.time, "sleep", lambda s: clock.__setitem__("now", clock["now"] + s))
+    def probe(vmid, timeout):
+        assert 0 < timeout <= agent.GUEST_BOOT_PROBE_TIMEOUT
+        clock["now"] += timeout  # A hung pct exec uses the whole probe limit
+        return False
+    monkeypatch.setattr(agent, "guest_systemd_ready", probe)
+    response = client.post("/slots/2201/start", json={"student_key": "student42", "actions": ["init_slot"]})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "PCT_FAILED"
+    assert "guest systemd did not become ready" in response.json()["detail"]["message"]
+    assert clock["now"] <= agent.GUEST_BOOT_TIMEOUT
+    assert not any(c[:2] == [agent.PCT, "exec"] for c in calls)
+
+
+@pytest.mark.parametrize("outcome, ready", [("ok", True), ("exit", False), ("timeout", False)])
+def test_guest_probe_is_fixed_and_not_fenced(env, monkeypatch, outcome, ready):
+    import subprocess
+    seen = []
+    def run(args, **kwargs):
+        seen.append((args, kwargs["timeout"]))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(args, 1)
+        return subprocess.CompletedProcess(args, 0 if outcome == "ok" else 1, b"", b"")
+    monkeypatch.setattr(agent.subprocess, "run", run)
+    before = agent.fence_state(2201)
+    token = agent.ACTIVE_SLOT.set(2201)
+    try:
+        assert REAL_GUEST_PROBE(2201, 7) is ready
+    finally:
+        agent.ACTIVE_SLOT.reset(token)
+    assert seen == [([agent.PCT, "exec", "2201", "--", "/usr/bin/test", "-S", "/run/systemd/private"], 7)]
+    assert agent.fence_state(2201) == before  # Neither inflight nor uncertain, even after a hung probe
