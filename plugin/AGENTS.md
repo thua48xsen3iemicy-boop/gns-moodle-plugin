@@ -71,7 +71,7 @@ docs/          SPEC.md и прочая документация
   `coursefacts.js` (сводка ячейки и данные карточки из `model.buildModel` + `facts.derive`, без DOM; проверка — `devtools/check_coursefacts.mjs`,
   в браузере — `devtools/ui-harness/check_course.js`). Данные — `mod_gns3lab_get_course_overview` (`classes/external/`), состав страницы
   (лабы, группы, студенты) — `classes/local/course_labs.php`, оценки журнала и сводка прогонов — `classes/local/course_results.php`,
-  кэш сессий лабы — `classes/local/activity_sessions.php`.
+  кэш сессий лабы — `classes/local/activity_sessions.php`, прогноз преподавателя по фактам (0.37.0, §14) — `classes/local/forecasts.php`.
   Оформление — через переменные Moodle (тема Boost/Bootstrap), корень стилей — `.gns3lab-student`; тёмную тему не ломать.
   Тема (0.36.0): цвета корней `.gns3lab-student.canvas-ui`, `.gns3lab-course`, `.gns3lab-app` — пары `light-dark(светлый,тёмный)`,
   тему выбирает `color-scheme` корня (система; `data-theme="light|dark"` от `theme.js` и кнопки `theme_toggle.mustache`).

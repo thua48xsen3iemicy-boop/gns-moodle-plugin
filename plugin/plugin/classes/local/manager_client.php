@@ -49,6 +49,9 @@ class manager_client {
     /** Format of the facts snapshot the plugin reads (docs/live-state.md). */
     public const FACTS_SCHEMA = 'gns3lab.facts/1';
 
+    /** Most sessions in one POST /forecasts (CONTRACTS §2.9a). */
+    public const FORECAST_BATCH = 200;
+
     /** @var int timeout of one request, seconds */
     protected int $timeout;
 
@@ -455,6 +458,35 @@ class manager_client {
             throw new manager_exception('badresponse', 200, 'sessions is not a list');
         }
         return array_map(fn($s) => $this->expect_session($s), $sessions);
+    }
+
+    /**
+     * The teacher's forecasts of sessions (CONTRACTS §2.9a): the last facts snapshot of each graded by the grading of the
+     * activity, without the teacher's scripts. Only with the `forecast` feature.
+     *
+     * @param string[] $sessionids session ids
+     * @param array $grading grading of the activity (checks::grading())
+     * @return array session id => forecast (\stdClass) or null when the session has none yet or is unknown
+     */
+    public function get_forecasts(array $sessionids, array $grading): array {
+        $out = [];
+        foreach (array_chunk(array_values(array_unique($sessionids)), self::FORECAST_BATCH) as $chunk) {
+            $data = $this->expect_object($this->request('POST', '/api/v1/forecasts', [
+                'session_ids' => $chunk,
+                'grading' => $grading,
+            ]));
+            if (!is_array($data->forecasts ?? null)) {
+                throw new manager_exception('badresponse', 200, 'forecasts is not a list');
+            }
+            foreach ($data->forecasts as $item) {
+                if (!($item instanceof \stdClass) || !is_string($item->session_id ?? null)) {
+                    continue;
+                }
+                $forecast = $item->forecast ?? null;
+                $out[$item->session_id] = $forecast instanceof \stdClass && is_int($forecast->mark ?? null) ? $forecast : null;
+            }
+        }
+        return $out;
     }
 
     /**

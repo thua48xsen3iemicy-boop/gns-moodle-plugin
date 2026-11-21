@@ -24,6 +24,7 @@ use core_external\external_value;
 use mod_gns3lab\local\activity_sessions;
 use mod_gns3lab\local\course_labs;
 use mod_gns3lab\local\course_results;
+use mod_gns3lab\local\forecasts;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
 
@@ -31,7 +32,8 @@ use mod_gns3lab\local\manager_client;
  * Students by labs of a course for the teacher page (course.php): who runs which lab and in which state.
  *
  * Only the sessions are here, as short summaries from one list per lab, with the final grade of the gradebook and a
- * summary of the auto-check runs. The topology and the facts of a student come from mod_gns3lab_get_state and
+ * summary of the auto-check runs and, for those who may see grades, the forecast of the manager from the facts
+ * (forecasts.php). The topology and the facts of a student come from mod_gns3lab_get_state and
  * mod_gns3lab_get_facts, which check observe and groups on their own. The session id is not part of the answer.
  *
  * @package    mod_gns3lab
@@ -91,7 +93,7 @@ class get_course_overview extends external_api {
             'id',
             array_map(fn($cm) => (int) $cm->instance, array_values($cms)),
             '',
-            'id, grade, checksenabled'
+            'id, grade, checksenabled, checksprofile, checksoverrides, checksthresholds, checksfailmark'
         );
 
         $configured = manager_client::is_configured();
@@ -104,12 +106,14 @@ class get_course_overview extends external_api {
             $found = course_labs::students($cm, $groupid);
             $lab = ['cmid' => $cm->id, 'name' => \core_external\util::format_string($cm->name, $cm->context), 'error' => ''];
             $sessions = [];
+            $ids = [];
             if (!$configured) {
                 $lab['error'] = 'notconfigured';
             } else if ($found) {
                 $entry = activity_sessions::get($client, (int) $cm->instance);
                 $lab['error'] = $entry->error;
                 $sessions = $entry->sessions;
+                $ids = $entry->ids ?? [];
             }
             // The students are enrolled with mod/gns3lab:use already (course_labs::students), only the groups are left.
             $shared = $access->share_group(array_map('intval', array_keys($found)));
@@ -121,6 +125,10 @@ class get_course_overview extends external_api {
                 $shared
             );
             $checks = course_results::checks((int) $cm->instance, $shared, $showgrades);
+            // A forecast is a grade in all but name: only for those who may see grades, only of students they may observe.
+            $forecasts = $showgrades && $client && isset($settings[$cm->instance])
+                ? forecasts::of_activity($client, $settings[$cm->instance], array_intersect_key($ids, array_flip($shared)))
+                : [];
             $labs[] = $lab + $results['lab'] + ['checks' => !empty($settings[$cm->instance]->checksenabled)];
             $shared = array_flip($shared);
             foreach ($found as $user) {
@@ -133,6 +141,7 @@ class get_course_overview extends external_api {
                     'session' => $observable ? ($sessions[$user->id] ?? null) : null,
                     'grade' => $observable ? ($results['grades'][(int) $user->id] ?? null) : null,
                     'checks' => $observable ? ($checks[(int) $user->id] ?? null) : null,
+                    'forecast' => $observable ? ($forecasts[(int) $user->id] ?? null) : null,
                 ];
             }
         }
@@ -147,7 +156,7 @@ class get_course_overview extends external_api {
             foreach ($cms as $cm) {
                 $row[] = $cells[$cm->id][$user->id] ?? [
                     'cmid' => $cm->id, 'userid' => (int) $user->id, 'observable' => false,
-                    'session' => null, 'grade' => null, 'checks' => null,
+                    'session' => null, 'grade' => null, 'checks' => null, 'forecast' => null,
                 ];
             }
             if (!array_filter($row, fn($cell) => $cell['observable'])) {
@@ -188,6 +197,7 @@ class get_course_overview extends external_api {
                 'session' => \mod_gns3lab\local\session_data::summary_structure(),
                 'grade' => course_results::grade_structure(),
                 'checks' => course_results::checks_structure(),
+                'forecast' => forecasts::structure(),
             ]), 'One cell per student and lab'),
         ]);
     }

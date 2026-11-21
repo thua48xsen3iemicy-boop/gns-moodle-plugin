@@ -49,6 +49,8 @@ const STRING_KEYS = [
     'cl_overridden', 'cl_passed_n', 'cl_sortgrade', 'cl_sortname', 'cl_sortstate', 'cl_sorttotal', 'cl_started',
     'cl_card_checkmark', 'cl_col_attempts', 'cl_col_avg', 'cl_sortattempts', 'cl_sortavg', 'cl_sortchecks', 'cl_sortfacts',
     'cl_sortlab', 'cl_tries', 'cl_tries_title', 'cl_avg_title', 'cl_attempts_title',
+    'cl_forecast', 'cl_forecast_title', 'cl_forecast_noscripts', 'cl_forecast_incomplete', 'cl_card_forecast',
+    'cl_card_forecast_none', 'cl_card_forecast_at',
     'cl_state_failed', 'cl_state_none', 'cl_state_queued', 'cl_state_running', 'cl_state_starting', 'cl_state_stopped',
     'cl_state_stopping', 'cl_student', 'cl_total', 'cl_total_title', 'cl_unobservable', 'cl_updated', 'cl_warn',
     'chk_hist_failed', 'chk_hist_incomplete', 'chk_hist_mark', 'chk_hist_pending', 'chk_n_critical', 'chk_n_major',
@@ -989,14 +991,20 @@ class CoursePage {
                 kind = 'started';
             }
             button.dataset.kind = kind;
-            const text = {
-                none: this.str('cl_state_none'),
-                checking: this.str('cl_checking'),
-                running: this.str('cl_state_running'),
-                failed: this.str('cl_state_failed'),
-                started: this.graded(lab) ? this.str('cl_nograde') : this.str('cl_started'),
-            }[kind];
-            hel('span', 'state', button).textContent = text;
+            const forecast = this.graded(lab) ? cell.forecast : null;
+            if (!forecast || kind !== 'started') {
+                const text = {
+                    none: this.str('cl_state_none'),
+                    checking: this.str('cl_checking'),
+                    running: this.str('cl_state_running'),
+                    failed: this.str('cl_state_failed'),
+                    started: this.graded(lab) ? this.str('cl_nograde') : this.str('cl_started'),
+                }[kind];
+                hel('span', 'state', button).textContent = text;
+            }
+            if (forecast) {
+                this.forecastText(button, forecast);
+            }
         }
         if (live && (result || session.status !== 'running')) {
             // A grade and a lab that is up again: both are worth knowing.
@@ -1006,6 +1014,68 @@ class CoursePage {
         }
         button.setAttribute('aria-label', `${student.fullname}, ${lab.name}: ${button.textContent}`);
         button.addEventListener('click', () => this.show(cell.cmid, cell.userid, true));
+    }
+
+    /**
+     * The line of the card with the forecast from the facts, or that there is none yet.
+     *
+     * @param {HTMLElement} el the card being built
+     * @param {object|null} forecast forecast of the cell
+     */
+    renderCardForecast(el, forecast) {
+        const line = hel('p', 'cgrade cforecast', el);
+        line.title = this.str('cl_forecast_title');
+        hel('span', 'lbl', line).textContent = this.str('cl_card_forecast') + ': ';
+        if (!forecast) {
+            hel('span', 'sub', line).textContent = this.str('cl_card_forecast_none');
+            return;
+        }
+        hel('span', 'grade', line).textContent = String(forecast.mark);
+        if (forecast.topmark) {
+            hel('span', 'sub', line).textContent = ' ' + this.str('cl_card_outof', forecast.topmark);
+        }
+        const notes = [];
+        if (forecast.scriptsignored) {
+            notes.push(this.str('cl_forecast_noscripts'));
+        }
+        if (forecast.incomplete) {
+            notes.push(this.str('cl_forecast_incomplete'));
+        }
+        if (forecast.assessedat) {
+            notes.push(this.str('cl_card_forecast_at', this.when(forecast.assessedat * 1000)));
+        }
+        for (const note of notes) {
+            hel('span', 'sub', line).textContent = ' · ' + note;
+        }
+    }
+
+    /**
+     * The forecast of the manager from the facts (docs/teacher-dashboard.md §14): never a grade, so it looks like none.
+     *
+     * @param {HTMLElement} el where it goes
+     * @param {object} forecast forecast of a cell
+     */
+    forecastText(el, forecast) {
+        const span = hel('span', 'forecast', el);
+        span.textContent = this.str('cl_forecast', forecast.mark);
+        span.title = this.forecastTitle(forecast);
+    }
+
+    /**
+     * What a forecast is, for a tooltip.
+     *
+     * @param {object} forecast forecast of a cell
+     * @returns {string}
+     */
+    forecastTitle(forecast) {
+        const parts = [this.str('cl_forecast_title')];
+        if (forecast.scriptsignored) {
+            parts.push(this.str('cl_forecast_noscripts'));
+        }
+        if (forecast.incomplete) {
+            parts.push(this.str('cl_forecast_incomplete'));
+        }
+        return parts.join('; ');
     }
 
     /**
@@ -1117,6 +1187,8 @@ class CoursePage {
                         grade.dataset.pass = result.passed;
                     }
                     this.gradeText(grade, result, false);
+                } else if (cell.forecast) {
+                    this.forecastText(grade, cell.forecast);
                 } else {
                     grade.textContent = '—';
                     grade.classList.add('muted');
@@ -1487,6 +1559,9 @@ class CoursePage {
             }
             this.gradeText(line, result, false);
             hel('span', 'sub', line).textContent = ' · ' + this.str('cl_tries_title', cell.checks.attempts);
+        }
+        if (this.showgrades && lab.checks && session) {
+            this.renderCardForecast(el, cell.forecast);
         }
         if (this.showgrades && lab.gradetype !== 'none') {
             const grade = hel('p', 'cgrade', el);

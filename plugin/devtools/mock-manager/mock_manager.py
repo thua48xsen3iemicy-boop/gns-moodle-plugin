@@ -53,6 +53,9 @@ ISO из каталога гостя (CONTRACTS §2.12 менеджера 0.30):
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'  # следующий прогон: incomplete
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'      # следующий прогон: failed
     curl -X POST localhost:8090/mock/checks/next -d '{"scripts": true}'          # прогоны со скриптами преподавателя
+- POST /api/v1/forecasts {"session_ids", "grading"?, "details"?} — прогноз преподавателя (CONTRACTS §2.9a): те же
+  находки, что дала бы проверка по снимку сессии, без скриптов (scripts_ignored — как у /mock/checks/next); у сессии,
+  которая не дошла до running, forecast null; чужая или неизвестная — found false;
 
 Поддельный Lab Slot слушает MOCK_SLOT_PORT: /v1/console/{project_id}/{node_id} с субпротоколами
 ["lab-slot", "bearer.<токен>"], отвечает приглашением "<имя ноды>#" и эхом. Команда "reload" закрывает
@@ -659,7 +662,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "purge", "maintenance", "random_ifnames", "extra_disks", "iso"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -1354,6 +1357,39 @@ async def get_check(request):
     return web.json_response(present_run(m, s, run)) if run else error(404, "check_not_found", "Unknown check run")
 
 
+async def forecasts(request):
+    m: Manager = request.app["m"]
+    site = site_of(request)
+    try:
+        body = await read_body(request, {"session_ids": 1, "details": 1,
+                                         "grading": {"profile": 1, "overrides": 1, "thresholds": 1, "fail_mark": 1}})
+        ids = body["session_ids"]
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 200 or not all(isinstance(i, str) for i in ids):
+            raise ValueError("session_ids")
+        grading = normalize_grading(body.get("grading"))
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        return error(400, "invalid_request", f"Invalid fields: {exc}")
+    out = []
+    for sid in dict.fromkeys(ids):
+        s = next((x for x in m.sessions if x.id == sid and x.site == site), None)
+        if s is None:
+            out.append({"session_id": sid, "found": False, "forecast": None})
+            continue
+        if s.status() not in ("running", "stopping", "stopped"):
+            out.append({"session_id": sid, "found": True, "forecast": None})
+            continue
+        result = check_result(m, s, {"_outcome": "graded", "grading": grading})
+        forecast = {"schema": "gns3lab.forecast/1", "facts_rev": s.facts_rev, "assessed_at": iso(time.time()),
+                    "outcome": "graded", "mark": result["mark"], "counts": result["counts"],
+                    "scripts_ignored": m.check_scripts}
+        if body.get("details") is True:
+            forecast["findings"] = result["findings"]
+        out.append({"session_id": sid, "found": True, "forecast": forecast})
+    return web.json_response({"grading": grading, "forecasts": out})
+
+
 async def mock_check_next(request):
     body = await request.json() if (await request.text()).strip() else {}
     m: Manager = request.app["m"]
@@ -1696,6 +1732,7 @@ def make_apps():
     api.router.add_get("/api/v1/sessions/{sid}/state", session_facts)
     api.router.add_post("/api/v1/sessions/{sid}/state/refresh", refresh_facts)
     api.router.add_post("/api/v1/sessions/{sid}/checks", start_check)
+    api.router.add_post("/api/v1/forecasts", forecasts)
     api.router.add_get("/api/v1/sessions/{sid}/checks", list_checks)
     api.router.add_get("/api/v1/sessions/{sid}/checks/{run}", get_check)
     api.router.add_post("/mock/checks/next", mock_check_next)

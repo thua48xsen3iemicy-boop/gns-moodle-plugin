@@ -75,6 +75,7 @@ UNREFRESHED_COLLECTORS = frozenset({"iol.l1"})
 ABANDONED_COLLECTOR = timedelta(minutes=5)
 CHECK_FAILED = {"code": "CHECK_FAILED", "message": "Проверка не выполнена из-за ошибки"}
 CHECK_REASK = 6  # Seconds between the requests of a check run to collect now: over the slot's 5 s rate limit
+FORECAST_INTERVAL = 30  # Seconds between two forecasts of a session (CONTRACTS 2.9a); the last one before a stop is due
 
 # The CT may be running with the student's directory mounted read-write.
 # live_nodes() for the pages: the plugin waits for the manager about as long as SLOT_TIMEOUT (10 s by default), so a page
@@ -259,6 +260,7 @@ class Orchestrator:
         self._facts_next: dict[str, float] = {}  # session id -> monotonic time of the next read
         self._facts_refreshed: dict[str, object] = {}  # session id -> facts_refresh_at already served
         self._check_asked: dict[str, float] = {}  # session id -> monotonic time a check run last asked the slot
+        self._forecast_next: dict[str, float] = {}  # session id -> monotonic time the next forecast may be made
         self._scripted: dict[str, str] = {}  # session id -> the check run whose scripts were started (run once)
         self._live_cache: dict[str, tuple[float, dict]] = {}
         self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
@@ -592,6 +594,7 @@ class Orchestrator:
         self._facts_next.pop(s["id"], None)
         self._facts_refreshed.pop(s["id"], None)
         self._check_asked.pop(s["id"], None)
+        self._forecast_next.pop(s["id"], None)
         self._scripted.pop(s["id"], None)
         self._consoleless.pop(s["id"], None)
         self._guest_facts.pop(s["id"], None)
@@ -1053,9 +1056,11 @@ class Orchestrator:
             msg = {"maxduration": "Время лабы истекло, остановка…",
                    "maintenance": maint.STOPPING_MESSAGE}.get(reason, "Остановка лабы…")
             await self._poll_facts(s, final=True)  # How the lab looked at the end stays in the history
+            await self._forecast_step(s, final=True)  # ...and so does the forecast the teacher sees
             return await self._goto(s, "lab_stop", msg, status="stopping", slot_state="releasing",
                                     stop_requested=True, stop_reason=reason)
         await self._poll_facts(s)
+        await self._forecast_step(s)
         await self._check_step(s)
         last = self._health_checked.get(s["id"], 0)
         if time.monotonic() - last < 30:
@@ -1158,6 +1163,39 @@ class Orchestrator:
             raise
         except psycopg.Error as exc:
             log.warning("Check run of session %s: %s", sid, type(exc).__name__)
+
+    async def _forecast_step(self, s, *, final=False):
+        """Assess the latest facts snapshot of a running session for the teacher's forecast (CONTRACTS 2.9a).
+
+        Only when the snapshot changed since the last forecast, at most every FORECAST_INTERVAL seconds unless the lab
+        is stopping. Nothing is collected and no script is run. Never fails the session.
+        """
+        sid, mono = s["id"], time.monotonic()
+        if not s["topology"] or (not final and mono < self._forecast_next.get(sid, 0)):
+            return
+        try:
+            fresh = await self.store.session(sid)
+            if fresh is None or fresh["facts_rev"] == 0 or fresh["forecast_rev"] == fresh["facts_rev"]:
+                return
+            self._forecast_next[sid] = mono + FORECAST_INTERVAL
+            definition, images, checks = await self._checks_of(s)
+            rows = await self.store.facts_rows(sid)
+            nodes, _ = await self.live_nodes(s)
+            statuses = {node_id: n["status"] for node_id, n in nodes.items()}
+            # A guest that has not reported once is still booting: its objects are not checked yet, as in a run.
+            reported = {row["node_id"] for row in rows}
+            stale = {nid for nid in await self.guest_fact_nodes(s)
+                     if nid not in reported and statuses.get(nid) == "started"}
+            state = build_state(0, rows, statuses, self.settings.facts_ttl)
+            rules, findings = await asyncio.to_thread(
+                checks_mod.assess, topology=s["topology"], state=state, statuses=statuses, definition=definition,
+                images=images, checks=checks, stale=stale, now=now(),
+                consoles={node_id: n.get("console_type") for node_id, n in nodes.items()})
+            await self.store.set_forecast(sid, checks_mod.forecast_basis(rules, findings, checks), fresh["facts_rev"])
+        except (SlotOwnerLost, Fenced):
+            raise
+        except Exception:  # noqa: BLE001 - a forecast must never break the session
+            log.exception("Forecast of session %s failed", sid)
 
     async def _ask_collect(self, s, run):
         """Ask the slot to collect the facts of every node now, and read them a few seconds later."""
