@@ -592,6 +592,21 @@ class Store:
             )
             return rev
 
+    async def set_forecast(self, sid, basis, rev):
+        """Keep the forecast basis of a session (CONTRACTS 2.9a) assessed from facts_rev `rev`.
+        Raises Fenced if the manager is no longer the leader."""
+        async with self.pool.connection() as conn, conn.transaction():
+            await self._check_epoch(conn)
+            await conn.execute("UPDATE sessions SET forecast = %s, forecast_rev = %s, forecast_at = now() WHERE id = %s",
+                               (Jsonb(basis), rev, sid))
+
+    async def forecasts(self, site, sids):
+        """id, status, forecast, forecast_rev, forecast_at of the sessions of a site among sids."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("SELECT id, status, forecast, forecast_rev, forecast_at FROM sessions"
+                                     " WHERE site = %s AND id = ANY(%s)", (site, list(sids)))
+            return await cur.fetchall()
+
     async def request_facts_refresh(self, sid, min_gap=10):
         """The plugin asked for a collection now. A request within min_gap seconds of the last is merged."""
         async with self.pool.connection() as conn:

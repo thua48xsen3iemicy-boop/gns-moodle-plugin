@@ -94,6 +94,12 @@ class CheckRequest(Strict):
     grading: Grading | None = None
 
 
+class ForecastRequest(Strict):
+    session_ids: list[str] = Field(min_length=1, max_length=200)
+    grading: Grading | None = None
+    details: bool = False
+
+
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -371,8 +377,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         # resume: the next session continues the project; checks: CONTRACTS 2.9
         # iso: POST /sessions/{id}/iso (CONTRACTS 2.12); a session says whether its lab has a source and a target
         # check-scripts: the teacher's scripts in `checks` and `result.scripts` of a run (CONTRACTS 2.9)
-        features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "purge", "maintenance",
-                    "iso"]
+        # forecast: POST /forecasts, the teacher's mark from the facts alone (CONTRACTS 2.9a)
+        features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "forecast", "purge",
+                    "maintenance", "iso"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -608,6 +615,29 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if run is None:
             raise ApiError(404, "check_not_found", "Unknown check run")
         return present_run(run)
+
+    # ------------------------------------------------------------------ forecast (CONTRACTS 2.9a)
+    @app.post("/api/v1/forecasts")
+    async def forecasts(body: ForecastRequest, site=Depends(site_of)):
+        """The teacher's forecast of each session: its last facts snapshot graded without scripts, never stored."""
+        try:
+            grading = checks_mod.normalize_grading(body.grading.model_dump(exclude_none=True) if body.grading else None)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_request", str(exc)) from exc
+        rows = {r["id"]: r for r in await store.forecasts(site.slug, set(body.session_ids))}
+        out = []
+        for sid in dict.fromkeys(body.session_ids):
+            r = rows.get(sid)
+            if r is None:
+                out.append({"session_id": sid, "found": False, "forecast": None})
+                continue
+            forecast = None
+            if r["forecast"] is not None:
+                forecast = {"schema": "gns3lab.forecast/1", "facts_rev": r["forecast_rev"],
+                            "assessed_at": iso_or_none(r["forecast_at"]),
+                            **checks_mod.forecast(r["forecast"], grading, details=body.details)}
+            out.append({"session_id": sid, "found": True, "forecast": forecast})
+        return {"grading": grading, "forecasts": out}
 
     # ------------------------------------------------------------------ ISO of a guest directory (CONTRACTS 2.12)
     ISO_STATUS = {"RUNNING": "running", "SUCCEEDED": "succeeded"}

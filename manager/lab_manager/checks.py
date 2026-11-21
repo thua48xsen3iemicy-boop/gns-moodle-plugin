@@ -1733,6 +1733,14 @@ def finish(run: Run, checks: dict):
 STEP = {"note": "minor", "minor": "major", "major": "critical", "critical": "critical"}
 
 
+def mark_of(counts: dict, grading: dict) -> int:
+    """The mark of the first threshold row the counts meet, the fail mark if none."""
+    for row in grading["thresholds"]:
+        if all(row[cls] is None or counts[cls] <= row[cls] for cls in ("critical", "major", "minor")):
+            return row["mark"]
+    return grading["fail_mark"]
+
+
 def grade(rules: list, findings: list, grading: dict, checks: dict | None, scripts: list | None = None,
           nonce: str | None = None):
     """The `result` of a run: outcome, mark, counts, rules, findings as JSON.
@@ -1785,22 +1793,15 @@ def grade(rules: list, findings: list, grading: dict, checks: dict | None, scrip
             rules.append({"code": SCRIPT_RULE, "group": "host", "status": "pass"})
         else:
             rules.append({"code": SCRIPT_RULE, "group": "host", "status": "skipped", "reason": scripts[0].get("reason")})
-    mark = None
-    if not incomplete:
-        mark = grading["fail_mark"]
-        for row in grading["thresholds"]:
-            if all(row[cls] is None or counts[cls] <= row[cls] for cls in ("critical", "major", "minor")):
-                mark = row["mark"]
-                break
+    mark = None if incomplete else mark_of(counts, grading)
     return {"outcome": "incomplete" if incomplete else "graded", "mark": mark, "counts": counts,
             "rules": rules, "findings": out, "scripts": list(scripts or []) if defined else [],
             "nonce": nonce if defined else None}
 
 
-def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict | None, images: dict,
-               checks: dict | None, grading: dict, stale: set, now=None, consoles=None, scripts: list | None = None,
-               nonce: str | None = None) -> dict:
-    """Everything a run needs, in one call: the `result` document of CONTRACTS.md §2.9.
+def assess(*, topology: dict, state: dict, statuses: dict, definition: dict | None, images: dict,
+           checks: dict | None, stale: set, now=None, consoles=None) -> tuple[list, list]:
+    """(rules, findings) of a lab over a snapshot: what grade() turns into a result under any grading.
 
     consoles: node_id -> console_type as the plugin sees it; nodes with `none` (ISP, Linux switch) are service nodes
     whose addresses are not the student's.
@@ -1811,11 +1812,45 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
     if unsaved:
         model = Model(topology, state, statuses, now, consoles)
     expected = build_expected(model, roles, definition, checks)
-    rules, findings = evaluate(model, roles=roles, expected=expected, checks=checks, stale=stale, unsaved=unsaved,
-                               persistence=persistence_of(model, definition, images, checks),
-                               isp_lans=uplink_lans(model, roles, definition, images),
-                               isp_nodes=isp_nodes_of(model, definition, images))
+    return evaluate(model, roles=roles, expected=expected, checks=checks, stale=stale, unsaved=unsaved,
+                    persistence=persistence_of(model, definition, images, checks),
+                    isp_lans=uplink_lans(model, roles, definition, images),
+                    isp_nodes=isp_nodes_of(model, definition, images))
+
+
+def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict | None, images: dict,
+               checks: dict | None, grading: dict, stale: set, now=None, consoles=None, scripts: list | None = None,
+               nonce: str | None = None) -> dict:
+    """Everything a run needs, in one call: the `result` document of CONTRACTS.md §2.9."""
+    rules, findings = assess(topology=topology, state=state, statuses=statuses, definition=definition, images=images,
+                             checks=checks, stale=stale, now=now, consoles=consoles)
     return grade(rules, findings, grading, checks, scripts, nonce)
+
+
+# ---------------------------------------------------------------------- forecast (CONTRACTS 2.9a)
+
+def forecast_basis(rules: list, findings: list, checks: dict | None) -> dict:
+    """What a forecast keeps of an assessment: graded later by forecast() under the grading of the activity."""
+    return {"rules": rules,
+            "findings": [{"id": f.id, "code": f.code, "message": f.message, "nodes": f.nodes, "ifaces": f.ifaces,
+                          "caused_by": f.caused_by} for f in findings],
+            "focus": list((checks or {}).get("focus") or []),
+            "scripts": len((checks or {}).get("scripts") or [])}
+
+
+def forecast(basis: dict, grading: dict, *, details: bool = False) -> dict:
+    """The forecast of a stored basis: a mark from the facts alone, without the teacher's scripts.
+
+    Unlike a run, an incomplete forecast still gets a mark: it tells the teacher how far the student got.
+    """
+    findings = [Finding(f["code"], f["message"], list(f["nodes"]), list(f["ifaces"]), set(), f["id"], f["caused_by"])
+                for f in basis["findings"]]
+    result = grade(basis["rules"], findings, grading, {"focus": basis["focus"]})
+    body = {"outcome": result["outcome"], "mark": mark_of(result["counts"], grading), "counts": result["counts"],
+            "scripts_ignored": basis["scripts"] > 0}
+    if details:
+        body["findings"] = result["findings"]
+    return body
 
 
 def with_unsaved_iol(model: Model, roles: dict, state: dict):
