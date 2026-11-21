@@ -597,6 +597,71 @@ body.gns3lab-fullscreen {
     width: auto;
     height: 32px;
 }
+/* Bootstrap controls of the panels follow the theme of the page, not the one of Moodle: in the dark theme of the
+   page Moodle would give them the colours of its light page (dark blue on dark). */
+.gns3lab-app .btn-primary,
+.gns3lab-app .btn-outline-primary,
+.gns3lab-app .btn-outline-danger {
+    --bs-btn-hover-color: var(--accent-ink);
+    --bs-btn-active-color: var(--accent-ink);
+    --bs-btn-focus-shadow-rgb: 110, 168, 254;
+}
+.gns3lab-app .btn-primary {
+    --bs-btn-color: var(--accent-ink);
+    --bs-btn-bg: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-bg: color-mix(in srgb, var(--accent) 85%, var(--fg));
+    --bs-btn-hover-border-color: var(--bs-btn-hover-bg);
+    --bs-btn-active-bg: var(--bs-btn-hover-bg);
+    --bs-btn-active-border-color: var(--bs-btn-hover-bg);
+    --bs-btn-disabled-color: var(--accent-ink);
+    --bs-btn-disabled-bg: var(--accent);
+    --bs-btn-disabled-border-color: var(--accent);
+}
+.gns3lab-app .btn-outline-primary {
+    --bs-btn-color: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-bg: var(--accent);
+    --bs-btn-hover-border-color: var(--accent);
+    --bs-btn-active-bg: var(--accent);
+    --bs-btn-active-border-color: var(--accent);
+    --bs-btn-disabled-color: var(--accent);
+    --bs-btn-disabled-border-color: var(--accent);
+}
+.gns3lab-app .btn-outline-danger {
+    --bs-btn-color: var(--bad);
+    --bs-btn-border-color: var(--bad);
+    --bs-btn-hover-bg: var(--bad);
+    --bs-btn-hover-border-color: var(--bad);
+    --bs-btn-active-bg: var(--bad);
+    --bs-btn-active-border-color: var(--bad);
+    --bs-btn-disabled-color: var(--bad);
+    --bs-btn-disabled-border-color: var(--bad);
+}
+.gns3lab-app .form-control,
+.gns3lab-app .form-select {
+    color: var(--fg);
+    background-color: var(--panel);
+    border-color: var(--line);
+}
+.gns3lab-app .form-control::placeholder {
+    color: var(--muted);
+}
+.gns3lab-app .form-control:disabled,
+.gns3lab-app .form-control[readonly],
+.gns3lab-app .form-select:disabled {
+    background-color: var(--bg);
+}
+/* the arrow of a select is a picture: a light one on the dark page */
+.gns3lab-app[data-theme="dark"] .form-select,
+[data-bs-theme="dark"] .gns3lab-app:not([data-theme]) .form-select {
+    --bs-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23dee2e6' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+}
+@media (prefers-color-scheme: dark) {
+    .gns3lab-app:not([data-theme]) .form-select {
+        --bs-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23dee2e6' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    }
+}
 @media (max-width: 760px) {
     .gns3lab-editor .stage {
             flex-direction: column;
@@ -5342,6 +5407,8 @@ from{transform:translateY(40%);opacity:.3}
  --k-assign-head:light-dark(#eef4f6,#1b3846);
  --k-assign-line:light-dark(#d3dfe4,#2f5866);
  --k-drawer-shadow:light-dark(rgb(16 40 52 / .16),rgb(0 8 17 / .4));
+ --k-link:light-dark(#0b65a8,#8fcfff);
+ --k-link-visited:light-dark(#6a3fa0,#d2b4ff);
  color-scheme:light dark;font-family:var(--body);background:var(--canvas);color:var(--fg);
 }
 /* The switch of the bar (theme.js): no attribute follows the system, as does Moodle in its dark theme. */
@@ -5647,6 +5714,12 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .assign-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:12px 16px 16px;
   user-select:text;-webkit-user-select:text;cursor:auto}
 .gns3lab-student.canvas-ui .assign-body p{margin:0 0 .6em}
+/* Links of the assignment, those of the Moodle filters too (auto-linked activity and glossary names): the theme of Moodle
+   colours them for its light page, unreadable on the dark card. */
+.gns3lab-student.canvas-ui .assign-body a{color:var(--k-link);text-decoration:underline;text-underline-offset:2px}
+.gns3lab-student.canvas-ui .assign-body a:visited{color:var(--k-link-visited)}
+.gns3lab-student.canvas-ui .assign-body a:hover{color:var(--fg)}
+.gns3lab-student.canvas-ui .assign-body a:focus-visible{outline:2px solid var(--k-focus);outline-offset:1px;border-radius:2px}
 .gns3lab-student.canvas-ui .assignment-content audio,
 .gns3lab-student.canvas-ui .assignment-content iframe{max-width:100%}
 .gns3lab-student.canvas-ui.mob .assign-win{left:8px!important;right:8px;top:auto!important;bottom:64px;width:auto!important;
