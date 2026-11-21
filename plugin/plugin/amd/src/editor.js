@@ -20,7 +20,8 @@
  * their ports and, when the manager has the lab constructor, segments (a broadcast domain with a subnet, an optional
  * VLAN and gateway) of the ports of preconfigurable nodes. The definition is checked by the lab manager (validate),
  * saved as a draft or published through the external functions of the plugin. A lab without segments is sent as
- * lab/1. Node x, y are the top left corner of the node, as in .gns3.
+ * lab/1. Node x, y are the top left corner of the node, as in .gns3. Texts and boxes with captions on the scheme
+ * (`annotations`, lab_definition::ANNOTATIONS) are the plugin's alone: the students see them, the manager never does.
  *
  * @module     mod_gns3lab/editor
  * @copyright  2026 mod_gns3lab contributors
@@ -46,6 +47,10 @@ const UNDO_MAX = 50;
 const ICON = {router: "router", switch: "switch", host: "pc", pc: "pc", server: "server", firewall: "firewall", cloud: "cloud"};
 const PREFIX = {router: "R", switch: "SW", host: "PC", pc: "PC", server: "SRV", firewall: "FW", cloud: "NET"};
 const CATEGORY_ORDER = ["router", "switch", "firewall", "server", "host", "pc", "cloud"];
+/* texts and boxes on the scheme: the same limits and drawing as lab_definition::annotations() and ::drawings() */
+const NOTE_MAX = 200, NOTE_TEXT_MAX = 500, NOTE_SIZE = [8, 72], NOTE_BOX = [20, 5000], NOTE_FILL = "#1e88e5";
+const NOTE_COLORS = ["#d32f2f", "#f57c00", "#f9a825", "#388e3c", "#00897b", "#1e88e5", "#3949ab", "#8e24aa", "#6d4c41",
+  "#757575"];
 
 const esc = s => String(s === null || s === undefined ? "" : s)
   .replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -88,6 +93,7 @@ export const init = (prefix) => {
       links: Array.isArray(def.links) ? def.links : [],
       segments: Array.isArray(def.segments) ? def.segments : [],
       checks: def.checks && typeof def.checks === "object" && !Array.isArray(def.checks) ? def.checks : null,
+      annotations: Array.isArray(def.annotations) ? def.annotations : [],
     },
     sel: null,
     adding: false,
@@ -185,10 +191,11 @@ export const init = (prefix) => {
     }
   };
   /* a lab with segments or checks is lab/2; the checks are kept even when this manager does not take them */
-  const definition = () => JSON.stringify(st.lab.segments.length || st.lab.checks
+  const definition = () => JSON.stringify(Object.assign(st.lab.segments.length || st.lab.checks
     ? Object.assign({format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments},
       st.lab.checks ? {checks: st.lab.checks} : {})
-    : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links});
+    : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links},
+  st.lab.annotations.length ? {annotations: st.lab.annotations} : {}));
 
   /* ---------- изменения и отмена ---------- */
   const snapshot = () => JSON.stringify(st.lab);
@@ -267,6 +274,8 @@ export const init = (prefix) => {
             delete seg.gateway;
           }
         });
+      } else if (s.kind === "note") {
+        st.lab.annotations.splice(s.i, 1);
       } else if (s.kind === "segment") {
         st.lab.segments.splice(s.i, 1);
         st.adding = false;
@@ -275,6 +284,31 @@ export const init = (prefix) => {
         st.lab.links.splice(s.i, 1);
       }
       st.sel = null;
+    });
+  };
+  /* a text or a box with a caption, in the middle of the view */
+  const addNote = kind => {
+    if (st.lab.annotations.length >= NOTE_MAX) {
+      toast(str("ed_annmax", NOTE_MAX), true);
+      return;
+    }
+    let [cx, cy] = viewCenter();
+    if (kind === "text") {
+      /* a text lies under the devices: put it where no device covers it */
+      const covered = (x, y) => st.lab.nodes.some(n => x < n.x + W + 10 && x + 120 > n.x - 10 && y < n.y + H + 30 && y + 30 > n.y);
+      for (let k = 0; k < 40 && covered(snap(cx - 40), snap(cy - 10)); k++) {
+        cy += GRID * 3;
+      }
+    }
+    change(() => {
+      const a = kind === "box"
+        ? {kind, x: snap(cx - 160), y: snap(cy - 100), w: 320, h: 200, text: str("ed_annboxdefault"), size: 14, fill: NOTE_FILL,
+          bold: true}
+        : {kind, x: snap(cx - 40), y: snap(cy - 10), text: str("ed_anntextdefault"), size: 14};
+      st.lab.annotations.push(a);
+      st.sel = {kind: "note", i: st.lab.annotations.length - 1};
+      st.linking = false;
+      st.from = null;
     });
   };
   const tapLinking = i => {
@@ -448,6 +482,47 @@ export const init = (prefix) => {
     return g;
   };
   lyr.preview = el("g", {"data-region": "preview"}, vp);
+  /* texts and boxes lie under the cables and the devices */
+  lyr.notes = el("g", {"data-region": "notes"});
+  vp.insertBefore(lyr.notes, vp.firstChild);
+  /* one text or box as lab_definition::drawings() draws it for the students */
+  const drawNote = (a, i) => {
+    const box = a.kind === "box", size = a.size || 14, step = size * 1.25, pad = box ? 8 : 0;
+    const sel = st.sel && st.sel.kind === "note" && st.sel.i === i;
+    const g = el("g", {class: "ed-ann" + (box ? " box" : "") + (sel ? " sel" : ""), "data-note": i,
+      transform: `translate(${a.x} ${a.y})`}, lyr.notes);
+    if (box) {
+      const fill = a.fill || NOTE_FILL;
+      el("rect", {x: 0, y: 0, width: a.w, height: a.h, rx: 8, fill, "fill-opacity": 0.12, stroke: fill, "stroke-width": 2}, g);
+    }
+    const color = a.color || (box ? a.fill || NOTE_FILL : null);
+    String(a.text || "").split("\n").forEach((line, k) => {
+      if (!line.trim()) {
+        return;
+      }
+      const t = el("text", {x: pad, y: pad + size + k * step, "font-size": size, fill: color,
+        "font-weight": a.bold ? "bold" : null, "font-style": a.italic ? "italic" : null}, g);
+      t.textContent = line;
+    });
+    if (!sel) {
+      return;
+    }
+    let b = {x: 0, y: 0, width: box ? a.w : 40, height: box ? a.h : size * 1.25};
+    if (!box) {
+      try {
+        const r = g.getBBox();
+        if (r.width) {
+          b = r;
+        }
+      } catch (e) {
+        /* без раскладки — рамка по оценке */
+      }
+    }
+    el("rect", {class: "ed-ann-halo", x: b.x - 4, y: b.y - 4, width: b.width + 8, height: b.height + 8, rx: 4}, g);
+    if (box) {
+      el("rect", {class: "ed-ann-grip", "data-grip": i, x: a.w - 7, y: a.h - 7, width: 14, height: 14, rx: 3}, g);
+    }
+  };
   const center = n => [n.x + W / 2, n.y + H / 2];
 
   const renderScene = () => {
@@ -497,6 +572,7 @@ export const init = (prefix) => {
       const t = el("text", {class: "nname", x: cx, y: cy + 42, "text-anchor": "middle", "data-node": i}, lyr.names);
       t.textContent = n.name;
     });
+    st.lab.annotations.forEach(drawNote);
     drawPreview();
   };
 
@@ -947,6 +1023,46 @@ export const init = (prefix) => {
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>`;
   };
 
+  /* a text or a box: text, size, bold and italic, colours, the size of a box */
+  const noteHTML = i => {
+    const a = st.lab.annotations[i], box = a.kind === "box";
+    const swatches = (field, current, auto) => {
+      const custom = current && !NOTE_COLORS.includes(current) ? current : "";
+      const one = (value, title) => `<button type="button" class="ed-swatch${value === (current || "") ? " on" : ""}${
+        value ? "" : " auto"}" data-ncolor="${field}" data-value="${value}" title="${esc(title)}" aria-label="${esc(title)}"${
+        value ? ` style="background:${value}"` : ""}></button>`;
+      return `<div class="ed-swatches">${auto ? one("", auto) : ""}${NOTE_COLORS.map(c => one(c, c)).join("")}
+        <input type="color" class="ed-swatch-pick${custom ? " on" : ""}" data-nfield="${field}" value="${
+          custom || current || (box ? a.fill || NOTE_FILL : "#000000")}" title="${esc(str("ed_anncustom"))}"></div>`;
+    };
+    const first = String(a.text || "").split("\n")[0].trim();
+    return `<div class="ph"><div><p class="eyebrow">${esc(str(box ? "ed_annbox" : "ed_anntext"))}</p>
+      <h2>${esc(first || "—")}</h2></div></div>
+      <label class="ed-field"><span>${esc(str("ed_anntextfield"))}</span>
+        <textarea class="form-control form-control-sm" data-nfield="text" rows="3" maxlength="${NOTE_TEXT_MAX}"
+          spellcheck="true">${esc(a.text || "")}</textarea>
+        <small>${esc(str(box ? "ed_annbox_help" : "ed_anntext_help"))}</small></label>
+      <div class="ed-field"><span>${esc(str("ed_annstyle"))}</span><div class="ed-annfmt">
+        <button type="button" class="gbtn ed-fmt" data-ntoggle="bold" aria-pressed="${!!a.bold}" title="${
+          esc(str("ed_annbold"))}"><b>${esc(str("ed_annbold_short"))}</b></button>
+        <button type="button" class="gbtn ed-fmt" data-ntoggle="italic" aria-pressed="${!!a.italic}" title="${
+          esc(str("ed_annitalic"))}"><i>${esc(str("ed_annitalic_short"))}</i></button>
+        <input type="number" class="form-control form-control-sm" data-nfield="size" min="${NOTE_SIZE[0]}" max="${
+          NOTE_SIZE[1]}" value="${a.size || 14}" title="${esc(str("ed_annsize"))}" aria-label="${esc(str("ed_annsize"))}">
+      </div></div>
+      <div class="ed-field"><span>${esc(str("ed_anncolor"))}</span>${
+        swatches("color", a.color || "", str(box ? "ed_anncolorbox" : "ed_anncolorauto"))}</div>
+      ${box ? `<div class="ed-field"><span>${esc(str("ed_annfill"))}</span>${swatches("fill", a.fill || NOTE_FILL, "")}</div>
+      <label class="ed-field"><span>${esc(str("ed_annwidth"))}</span><input type="number" class="form-control form-control-sm"
+        data-nfield="w" min="${NOTE_BOX[0]}" max="${NOTE_BOX[1]}" value="${a.w}"></label>
+      <label class="ed-field"><span>${esc(str("ed_annheight"))}</span><input type="number" class="form-control form-control-sm"
+        data-nfield="h" min="${NOTE_BOX[0]}" max="${NOTE_BOX[1]}" value="${a.h}"></label>` : ""}
+      <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
+      <p class="ed-note">${esc(str("ed_annstudents"))}</p>
+      <button type="button" class="btn btn-sm btn-outline-danger" data-act="delete">${esc(str(box ? "ed_anndeletebox"
+        : "ed_anndeletetext"))}</button>`;
+  };
+
   const labHTML = () => {
     const res = st.resources ? `<p class="ed-ok">${esc(str("ed_valid", {
       memory: fmtMem(st.resources.memorymb), cores: st.resources.cores}))}</p>` : "";
@@ -960,7 +1076,7 @@ export const init = (prefix) => {
   const renderProps = () => {
     const s = st.sel;
     props.innerHTML = !s ? labHTML() : s.kind === "node" ? nodeHTML(s.i)
-      : s.kind === "segment" ? segmentHTML(s.i) : linkHTML(s.i);
+      : s.kind === "segment" ? segmentHTML(s.i) : s.kind === "note" ? noteHTML(s.i) : linkHTML(s.i);
   };
 
   const renderChrome = () => {
@@ -984,7 +1100,7 @@ export const init = (prefix) => {
   };
 
   const render = () => {
-    const pool = {node: st.lab.nodes, link: st.lab.links, segment: st.lab.segments};
+    const pool = {node: st.lab.nodes, link: st.lab.links, segment: st.lab.segments, note: st.lab.annotations};
     if (st.sel && !(pool[st.sel.kind] || [])[st.sel.i]) {
       st.sel = null;
     }
@@ -1026,15 +1142,17 @@ export const init = (prefix) => {
   };
   const fit = () => {
     const r = svg.getBoundingClientRect();
-    if (!st.lab.nodes.length) {
+    const boxes = st.lab.nodes.map(n => [n.x - 50, n.y - 50, n.x + W + 50, n.y + H + 70])
+      .concat(st.lab.annotations.map(a => [a.x - 20, a.y - 20, a.x + (a.w || 200) + 20, a.y + (a.h || 40) + 20]));
+    if (!boxes.length) {
       view.k = 1;
       view.tx = r.width / 2;
       view.ty = r.height / 2;
       applyView();
       return;
     }
-    const xs = st.lab.nodes.map(n => n.x), ys = st.lab.nodes.map(n => n.y);
-    const x0 = Math.min(...xs) - 50, y0 = Math.min(...ys) - 50, x1 = Math.max(...xs) + W + 50, y1 = Math.max(...ys) + H + 70;
+    const x0 = Math.min(...boxes.map(b => b[0])), y0 = Math.min(...boxes.map(b => b[1]));
+    const x1 = Math.max(...boxes.map(b => b[2])), y1 = Math.max(...boxes.map(b => b[3]));
     view.k = Math.min(1.4, Math.max(KMIN, Math.min(r.width / (x1 - x0), r.height / (y1 - y0))));
     view.tx = r.width / 2 - (x0 + x1) / 2 * view.k;
     view.ty = r.height / 2 - (y0 + y1) / 2 * view.k;
@@ -1060,12 +1178,19 @@ export const init = (prefix) => {
       return;
     }
     const nodeEl = e.target.closest("[data-node]"), linkEl = e.target.closest("[data-link]");
+    const gripEl = e.target.closest("[data-grip]"), noteEl = e.target.closest("[data-note]");
     const start = local(e);
-    if (nodeEl) {
+    if (gripEl && !st.linking) {
+      const i = +gripEl.dataset.grip, a = st.lab.annotations[i], [mx, my] = toModel(start);
+      gest = {type: "grip", i, dx: a.x + a.w - mx, dy: a.y + a.h - my, start, moved: false, before: snapshot()};
+    } else if (nodeEl) {
       const i = +nodeEl.dataset.node, n = st.lab.nodes[i], [mx, my] = toModel(start);
       gest = {type: "node", i, dx: mx - n.x, dy: my - n.y, start, moved: false, before: snapshot()};
     } else if (linkEl) {
       gest = {type: "link", i: +linkEl.dataset.link, start, moved: false};
+    } else if (noteEl && !st.linking && !st.adding) {
+      const i = +noteEl.dataset.note, a = st.lab.annotations[i], [mx, my] = toModel(start);
+      gest = {type: "note", i, dx: mx - a.x, dy: my - a.y, start, moved: false, before: snapshot()};
     } else {
       gest = {type: "pan", start, tx: view.tx, ty: view.ty, moved: false};
     }
@@ -1096,6 +1221,21 @@ export const init = (prefix) => {
       n.y = snap(my - gest.dy);
       st.dirty = true;
       renderScene();
+    } else if (gest.type === "note" || gest.type === "grip") {
+      if (!gest.moved) {
+        pushUndo(gest.before);
+      }
+      const a = st.lab.annotations[gest.i], [mx, my] = toModel(pos);
+      if (gest.type === "note") {
+        a.x = snap(mx - gest.dx);
+        a.y = snap(my - gest.dy);
+      } else {
+        a.w = Math.min(NOTE_BOX[1], Math.max(NOTE_BOX[0], snap(mx + gest.dx - a.x)));
+        a.h = Math.min(NOTE_BOX[1], Math.max(NOTE_BOX[0], snap(my + gest.dy - a.y)));
+      }
+      st.dirty = true;
+      st.sel = {kind: "note", i: gest.i};
+      renderScene();
     } else if (gest.type === "pan") {
       view.tx = gest.tx + pos[0] - gest.start[0];
       view.ty = gest.ty + pos[1] - gest.start[1];
@@ -1118,6 +1258,9 @@ export const init = (prefix) => {
       if (g.type === "node") {
         st.sel = {kind: "node", i: g.i};
         render();
+      } else if (g.type === "note" || g.type === "grip") {
+        st.sel = {kind: "note", i: g.i};
+        render();
       }
       return;
     }
@@ -1133,16 +1276,19 @@ export const init = (prefix) => {
       st.sel = {kind: "node", i: g.i};
     } else if (g.type === "link") {
       st.sel = {kind: "link", i: g.i};
+    } else if (g.type === "note" || g.type === "grip") {
+      st.sel = {kind: "note", i: g.i};
     } else {
       st.sel = null;
       st.from = null;
     }
     render();
   };
-  /* right click on a device or a link deletes it at once; Ctrl+Z brings it back */
+  /* right click on a device, a link, a text or a box deletes it at once; Ctrl+Z brings it back */
   svg.addEventListener("contextmenu", e => {
     const nodeEl = e.target.closest("[data-node]"), linkEl = e.target.closest("[data-link]");
-    if (!nodeEl && !linkEl) {
+    const noteEl = !nodeEl && !linkEl && e.target.closest("[data-note]");
+    if (!nodeEl && !linkEl && !noteEl) {
       return;
     }
     e.preventDefault();
@@ -1150,7 +1296,8 @@ export const init = (prefix) => {
     if (e.pointerType && e.pointerType !== "mouse" || gest) {
       return;
     }
-    st.sel = nodeEl ? {kind: "node", i: +nodeEl.dataset.node} : {kind: "link", i: +linkEl.dataset.link};
+    st.sel = nodeEl ? {kind: "node", i: +nodeEl.dataset.node} : linkEl ? {kind: "link", i: +linkEl.dataset.link}
+      : {kind: "note", i: +noteEl.dataset.note};
     deleteSel();
   });
   svg.addEventListener("pointerup", endPtr);
@@ -1466,6 +1613,55 @@ export const init = (prefix) => {
       });
     }
   };
+  /* the text of a note follows the typing on the scheme; one undo step for the whole edit */
+  let noteBefore = null;
+  props.addEventListener("focusin", e => {
+    noteBefore = e.target.dataset.nfield === "text" ? snapshot() : null;
+  });
+  props.addEventListener("input", e => {
+    const s = st.sel, t = e.target;
+    if (!s || s.kind !== "note" || t.dataset.nfield !== "text") {
+      return;
+    }
+    if (noteBefore !== null) {
+      pushUndo(noteBefore);
+      noteBefore = null;
+    }
+    st.lab.annotations[s.i].text = t.value.slice(0, NOTE_TEXT_MAX);
+    st.dirty = true;
+    renderScene();
+    renderChrome();
+  });
+  const noteChange = t => {
+    const a = st.lab.annotations[st.sel.i], f = t.dataset.nfield;
+    if (!a || !f) {
+      return;
+    }
+    if (f === "text") {
+      render(); // the text is already in the lab: the heading of the panel catches up
+      return;
+    }
+    if (f === "color" || f === "fill") {
+      if (/^#[0-9a-fA-F]{6}$/.test(t.value) && t.value.toLowerCase() !== a[f]) {
+        change(() => {
+          a[f] = t.value.toLowerCase();
+        });
+      }
+      return;
+    }
+    const [min, max] = f === "size" ? NOTE_SIZE : NOTE_BOX;
+    const v = intField(t, min, max);
+    if (v === undefined || v === null) {
+      fieldError(str("ed_range", `${min}…${max}`));
+      t.value = a[f] || "";
+      return;
+    }
+    if (v !== a[f]) {
+      change(() => {
+        a[f] = v;
+      });
+    }
+  };
   props.addEventListener("change", e => {
     const s = st.sel, t = e.target;
     if (!s) {
@@ -1482,6 +1678,10 @@ export const init = (prefix) => {
     }
     if (s.kind === "segment") {
       segmentChange(t);
+      return;
+    }
+    if (s.kind === "note") {
+      noteChange(t);
       return;
     }
     if (s.kind === "link" && t.dataset.end) {
@@ -1599,6 +1799,25 @@ export const init = (prefix) => {
         st.sel = {kind: "node", i: idx};
         render();
       }
+      return;
+    }
+    const toggle = e.target.closest("[data-ntoggle]"), swatch = e.target.closest("[data-ncolor]");
+    if ((toggle || swatch) && st.sel && st.sel.kind === "note") {
+      const a = st.lab.annotations[st.sel.i];
+      change(() => {
+        if (toggle) {
+          const f = toggle.dataset.ntoggle;
+          if (a[f]) {
+            delete a[f];
+          } else {
+            a[f] = true;
+          }
+        } else if (swatch.dataset.value) {
+          a[swatch.dataset.ncolor] = swatch.dataset.value;
+        } else {
+          delete a[swatch.dataset.ncolor]; // the colour of the theme or of the box
+        }
+      });
       return;
     }
     const iconButton = e.target.closest("[data-icon]");
@@ -1723,6 +1942,8 @@ export const init = (prefix) => {
       undo();
     } else if (act === "link") {
       setLinking(!st.linking);
+    } else if (act === "addtext" || act === "addbox") {
+      addNote(act === "addtext" ? "text" : "box");
     } else if (act === "preview") {
       st.preview = !st.preview;
       render();

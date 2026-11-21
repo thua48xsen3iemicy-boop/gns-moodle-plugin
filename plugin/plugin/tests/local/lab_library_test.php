@@ -106,6 +106,20 @@ final class lab_library_test extends \advanced_testcase {
         $this->assertSame(lab_library::PUBLISHED, lab_library::latest_version($labid)->status);
     }
 
+    public function test_a_change_the_manager_does_not_see_still_makes_a_version(): void {
+        [$labid, $def] = $this->lab();
+        $first = lab_library::publish($labid, $def);
+
+        $def['annotations'] = [['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => 'Office A', 'size' => 14]];
+        $second = lab_library::publish($labid, $def);
+
+        $this->assertNotEquals($first->id, $second->id);
+        $this->assertSame(2, (int) $second->version);
+        $this->assertSame('Office A', lab_definition::decode($second->definition)['annotations'][0]['text']);
+        $requests = $this->manager->requests_to('POST', '/api/v1/labs/validate');
+        $this->assertArrayNotHasKey('annotations', end($requests)['body']['lab']);
+    }
+
     public function test_problems_keep_the_draft(): void {
         [$labid, $def] = $this->lab();
         $this->manager->on('POST', '/api/v1/labs/validate', 422, [

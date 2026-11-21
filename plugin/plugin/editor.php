@@ -89,7 +89,7 @@ $keys = [
 ];
 $keys = array_merge($keys, ['stoplab', 'ed_save']);
 foreach (array_keys(get_string_manager()->load_component_strings('gns3lab', current_language())) as $key) {
-    if (str_starts_with($key, 'authoring') || str_starts_with($key, 'ed_script')) {
+    if (str_starts_with($key, 'authoring') || str_starts_with($key, 'ed_script') || str_starts_with($key, 'ed_ann')) {
         $keys[] = $key;
     }
 }

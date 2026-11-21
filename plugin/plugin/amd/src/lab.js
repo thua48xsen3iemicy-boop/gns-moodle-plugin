@@ -463,6 +463,12 @@ class LabPage {
                 n.guest = guests.get(n.name);
             }
         });
+        // The texts and boxes a teacher put on a library lab are the plugin's (lab_definition::drawings): the project of
+        // the session has none of them, so the scheme keeps those of the lab.
+        const own = doc.topology && Array.isArray(doc.topology.drawings) && doc.topology.drawings.length;
+        if (doc.topology && !own && ref && Array.isArray(ref.drawings) && ref.drawings.length) {
+            doc.topology.drawings = ref.drawings;
+        }
         // The project name of a session is technical (lab-…-s-…): the title stays the name of the lab.
         doc.name = this.stage.model ? this.stage.model.name : doc.name;
         this.liveKey = key;

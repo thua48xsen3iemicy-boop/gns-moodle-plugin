@@ -18,7 +18,7 @@
  * and three labs with grades and checks (`window.__stub.course`), for one lab when asked with cmid; get_state and get_facts
  * called with the id of a student of the page (11 to 14) play that student's lab: 11 has correct facts, 12 the broken ones,
  * get_checks with a userid gives the runs of that student. `?laberror` makes the second lab fail like a manager that does
- * not answer, `?nogrades` plays a teacher who may not see grades. window.__stub.course.set(cmid, userid, session|null)
+ * not answer, `?livenodrawings` gives the live project no drawings (a library lab), `?nogrades` plays a teacher who may not see grades. window.__stub.course.set(cmid, userid, session|null)
  * changes a cell, .result(cmid, userid, grade|null, checks|null) its grade and checks, .bump(userid) moves the rev of facts.
  */
 define([], function() {
@@ -95,6 +95,10 @@ define([], function() {
         const running = session.status === 'running';
         const doc = JSON.parse(JSON.stringify(demo.topology));
         doc.name = 'lab-1-s-1';
+        if (cfg.livenodrawings) {
+            // ?livenodrawings: a library lab, whose project has no drawings (they are the plugin's, CONTRACTS §2.3).
+            doc.topology.drawings = [];
+        }
         return {
             sessionid: 's-1',
             status: session.status,

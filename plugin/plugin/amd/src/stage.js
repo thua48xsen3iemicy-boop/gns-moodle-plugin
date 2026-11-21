@@ -59,7 +59,7 @@ const LAYERS = ['l1', 'l2', 'l3', 'l4'];
 
 const OK_EL = new Set(['rect', 'ellipse', 'circle', 'line', 'text']);
 const OK_AT = new Set(['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'x1', 'y1', 'x2', 'y2', 'fill', 'fill-opacity',
-    'stroke', 'stroke-opacity', 'stroke-width', 'stroke-dasharray', 'font-size', 'font-weight', 'opacity']);
+    'stroke', 'stroke-opacity', 'stroke-width', 'stroke-dasharray', 'font-size', 'font-weight', 'font-style', 'opacity']);
 
 /**
  * Whitelist sanitizer of a .gns3 drawing: only these shapes and attributes, never innerHTML (the file is untrusted).
