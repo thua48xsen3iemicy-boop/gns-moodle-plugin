@@ -60,7 +60,7 @@
         </div>
     </header>
     <div class="stage">
-        <aside class="ed-palette" data-region="palette" aria-label="{{#str}}ed_catalog, mod_gns3lab{{/str}}"></aside>
+        <aside class="ed-palette" id="{{uniqid}}-palette" data-region="palette" aria-label="{{#str}}ed_catalog, mod_gns3lab{{/str}}"></aside>
         <div class="wrap" data-region="wrap">
             <svg class="gns3lab-svg" data-region="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
             <defs>
@@ -78,9 +78,13 @@
                 </g>
             </svg>
             <p class="hint" data-region="hint"></p>
+            <button type="button" class="ed-fold left" data-fold="palette" aria-controls="{{uniqid}}-palette" aria-expanded="true"
+                title="{{#str}}ed_fold_palette_hide, mod_gns3lab{{/str}}" aria-label="{{#str}}ed_fold_palette_hide, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></button>
+            <button type="button" class="ed-fold right" data-fold="props" aria-controls="{{uniqid}}-props" aria-expanded="true"
+                title="{{#str}}ed_fold_props_hide, mod_gns3lab{{/str}}" aria-label="{{#str}}ed_fold_props_hide, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button>
             <div class="gtoast" data-region="toast" role="status" hidden></div>
         </div>
-        <aside class="panel ed-props" data-region="props" aria-label="{{#str}}details, mod_gns3lab{{/str}}"></aside>
+        <aside class="panel ed-props" id="{{uniqid}}-props" data-region="props" aria-label="{{#str}}details, mod_gns3lab{{/str}}"></aside>
     </div>
 </div>
 {{#js}}

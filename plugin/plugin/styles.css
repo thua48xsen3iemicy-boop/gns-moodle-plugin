@@ -4646,6 +4646,31 @@ body.gns3lab-fullscreen {
 .gns3lab-editor .ed-swatch-pick.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
 .gns3lab-editor .ed-swatch-pick { width: 28px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 4px; }
 .gns3lab-editor .ed-capture-dialog label { display: block; }
+/* side columns: wider properties, and both fold into tabs on the edges of the scheme (editor.js applyFolds) */
+.gns3lab-editor .ed-palette { width: 220px; box-sizing: border-box; }
+.gns3lab-editor .panel.ed-props { width: 400px; box-sizing: border-box; overflow-x: hidden; }
+.gns3lab-editor .ed-props td { overflow-wrap: anywhere; }
+.gns3lab-editor .ed-members .ed-host { width: 4.5em; }
+.gns3lab-editor.ed-no-palette .ed-palette,
+.gns3lab-editor.ed-no-props .ed-props { display: none; }
+.gns3lab-editor .ed-fold {
+    position: absolute; top: 50%; z-index: 3; transform: translateY(-50%);
+    width: 18px; height: 56px; padding: 0; display: grid; place-items: center;
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer;
+    box-shadow: 0 2px 6px rgb(0 0 0 / .12);
+}
+.gns3lab-editor .ed-fold.left { left: 0; border-left: 0; border-radius: 0 8px 8px 0; }
+.gns3lab-editor .ed-fold.right { right: 0; border-right: 0; border-radius: 8px 0 0 8px; }
+.gns3lab-editor .ed-fold:hover { color: var(--fg); background: var(--chip); }
+.gns3lab-editor .ed-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gns3lab-editor .ed-fold svg {
+    width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+    stroke-linejoin: round; transition: transform .15s ease;
+}
+.gns3lab-editor .ed-fold[aria-expanded="false"] svg { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) {
+    .gns3lab-editor .ed-fold svg { transition: none; }
+}
 .gns3lab-editor .ed-authoring-dialog { width: 97vw; height: 95vh; max-width: none; }
 .gns3lab-editor .ed-authoring-dialog iframe { width: 100%; height: calc(100% - 3rem); border: 0; display: block; }
 @media (max-width: 760px) {
@@ -4658,6 +4683,19 @@ body.gns3lab-fullscreen {
     }
     .gns3lab-editor .ed-image-entry .ed-img { white-space: normal; }
     .gns3lab-editor .ed-image-entry { margin-bottom: .3rem; }
+    /* the list is above the scheme and the properties below it: the tabs sit on the top and the bottom edge */
+    .gns3lab-editor .panel.ed-props { width: auto; }
+    .gns3lab-editor .ed-fold.left,
+    .gns3lab-editor .ed-fold.right {
+        left: 50%; right: auto; top: auto; bottom: auto; transform: translateX(-50%); width: 56px; height: 18px;
+        border: 1px solid var(--line);
+    }
+    .gns3lab-editor .ed-fold.left { top: 0; border-top: 0; border-radius: 0 0 8px 8px; }
+    .gns3lab-editor .ed-fold.right { bottom: 0; border-bottom: 0; border-radius: 8px 8px 0 0; }
+    .gns3lab-editor .ed-fold.left svg { transform: rotate(90deg); }
+    .gns3lab-editor .ed-fold.right svg { transform: rotate(90deg); }
+    .gns3lab-editor .ed-fold.left[aria-expanded="false"] svg,
+    .gns3lab-editor .ed-fold.right[aria-expanded="false"] svg { transform: rotate(-90deg); }
 }
 
 /* Student Canvas: complete scoped presentation from student-ui-canvas.html. */

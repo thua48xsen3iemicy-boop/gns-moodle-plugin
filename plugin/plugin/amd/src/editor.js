@@ -34,6 +34,7 @@ import {buildModel, ICONS} from 'mod_gns3lab/model';
 import {derive, hostPart} from 'mod_gns3lab/facts';
 import * as Seg from 'mod_gns3lab/segments';
 import {init as initImages} from 'mod_gns3lab/editorimages';
+import {store} from 'mod_gns3lab/dom';
 
 const NS = "http://www.w3.org/2000/svg";
 const FORMAT = "gns3lab.lab/1";
@@ -1989,6 +1990,38 @@ export const init = (prefix) => {
       e.returnValue = "";
     }
   });
+
+  /* the side columns fold into tabs on the edges of the scheme; the browser remembers it, the scheme keeps its centre */
+  const FOLD_KEY = "editor.fold";
+  const folds = Object.assign({palette: false, props: false}, store.get(FOLD_KEY, {}));
+  const applyFolds = () => {
+    ["palette", "props"].forEach(side => {
+      const hidden = folds[side] === true;
+      root.classList.toggle("ed-no-" + side, hidden);
+      const b = root.querySelector(`[data-fold="${side}"]`);
+      if (b) {
+        const label = str(`ed_fold_${side}_${hidden ? "show" : "hide"}`);
+        b.setAttribute("aria-expanded", String(!hidden));
+        b.title = label;
+        b.setAttribute("aria-label", label);
+      }
+    });
+  };
+  root.addEventListener("click", e => {
+    const b = e.target.closest("[data-fold]");
+    if (!b) {
+      return;
+    }
+    const [mx, my] = viewCenter();
+    folds[b.dataset.fold] = !folds[b.dataset.fold];
+    store.set(FOLD_KEY, folds);
+    applyFolds();
+    const r = svg.getBoundingClientRect();
+    view.tx = r.width / 2 - mx * view.k;
+    view.ty = r.height / 2 - my * view.k;
+    applyView();
+  });
+  applyFolds();
 
   initImages(root, D, {
     definition,
