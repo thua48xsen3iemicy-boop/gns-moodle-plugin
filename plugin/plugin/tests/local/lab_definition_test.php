@@ -94,6 +94,69 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json(json_encode($raw), 'Icons');
     }
 
+    public function test_annotations_stay_in_moodle_and_become_drawings(): void {
+        $raw = ['nodes' => [['name' => 'R1', 'image' => 'cisco-iou-l3', 'x' => 0, 'y' => 0]], 'links' => [],
+            'annotations' => [
+                ['kind' => 'box', 'x' => -20, 'y' => -40, 'w' => 300, 'h' => 200, 'text' => 'Office <A>', 'size' => 16,
+                    'fill' => '#1E88E5', 'bold' => true, 'italic' => false, 'extra' => 1],
+                ['kind' => 'text', 'x' => 10.4, 'y' => 200, 'text' => "line 1\r\nline \"2\"", 'color' => '#d32f2f',
+                    'italic' => true],
+                ['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => "  \n "],
+            ]];
+        $def = lab_definition::from_json(json_encode($raw), 'Notes');
+        $this->assertSame([
+            ['kind' => 'box', 'x' => -20, 'y' => -40, 'w' => 300, 'h' => 200, 'text' => 'Office <A>', 'size' => 16,
+                'fill' => '#1e88e5', 'bold' => true],
+            ['kind' => 'text', 'x' => 10, 'y' => 200, 'text' => "line 1\nline \"2\"", 'size' => 14, 'color' => '#d32f2f',
+                'italic' => true],
+        ], $def['annotations'], 'known fields only, an empty text is dropped');
+
+        $this->assertArrayNotHasKey('annotations', lab_definition::for_manager($def), 'the lab manager refuses unknown fields');
+
+        $drawings = lab_definition::to_topology($def, [])->topology->drawings;
+        $this->assertCount(2, $drawings);
+        $this->assertSame([-20, -40, 0], [$drawings[0]['x'], $drawings[0]['y'], $drawings[0]['z']]);
+        $this->assertStringContainsString('<rect x="0" y="0" width="300" height="200"', $drawings[0]['svg']);
+        $this->assertStringContainsString('font-weight="bold" fill="#1e88e5">Office &lt;A&gt;</text>', $drawings[0]['svg']);
+        $this->assertSame(1, $drawings[1]['z'], 'texts lie over the boxes');
+        $this->assertSame(2, substr_count($drawings[1]['svg'], '<text '));
+        $this->assertStringContainsString('font-style="italic" fill="#d32f2f">line &quot;2&quot;</text>', $drawings[1]['svg']);
+        $this->assertNotFalse(simplexml_load_string($drawings[0]['svg']));
+
+        $this->assertSame([], lab_definition::to_topology(lab_definition::from_json(json_encode(['nodes' => []]), 'x'), [])
+            ->topology->drawings);
+    }
+
+    /**
+     * Broken texts and boxes.
+     *
+     * @return array
+     */
+    public static function broken_annotations(): array {
+        return [
+            'not a list' => [['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => 'a']],
+            'kind' => [[['kind' => 'ellipse', 'x' => 0, 'y' => 0, 'text' => 'a']]],
+            'no place' => [[['kind' => 'text', 'text' => 'a']]],
+            'box without size' => [[['kind' => 'box', 'x' => 0, 'y' => 0, 'text' => 'a']]],
+            'tiny box' => [[['kind' => 'box', 'x' => 0, 'y' => 0, 'w' => 5, 'h' => 50]]],
+            'colour' => [[['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => 'a', 'color' => 'red']]],
+            'size' => [[['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => 'a', 'size' => 200]]],
+            'bold' => [[['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => 'a', 'bold' => 1]]],
+            'long text' => [[['kind' => 'text', 'x' => 0, 'y' => 0, 'text' => str_repeat('я', 501)]]],
+        ];
+    }
+
+    /**
+     * Refuses broken texts and boxes.
+     *
+     * @param array $annotations annotations
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('broken_annotations')]
+    public function test_refuses_broken_annotations(array $annotations): void {
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode(['nodes' => [], 'annotations' => $annotations]), 'Notes');
+    }
+
     public function test_keeps_additional_disks_and_drops_an_empty_list(): void {
         $raw = ['nodes' => [['name' => 'PC1', 'image' => 'debian12', 'x' => 0, 'y' => 0,
             'disks' => [['size_gb' => 5, 'format' => 'raw'], ['size_gb' => 1]]],

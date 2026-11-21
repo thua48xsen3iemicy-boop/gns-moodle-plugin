@@ -1037,6 +1037,13 @@ body.gns3lab-fullscreen {
 .gns3lab-student .dtext {
     font-family: var(--display);
 }
+/* a text of the scheme without its own colour follows the theme (lab_definition::drawings) */
+.gns3lab-student .dtext:not([fill]) {
+    fill: var(--fg);
+}
+.gns3lab-preview .pv-drawings text:not([fill]) {
+    fill: var(--pv-fg);
+}
 .gns3lab-student .drawings text {
     font-family: var(--display);
 }
@@ -4552,6 +4559,27 @@ body.gns3lab-fullscreen {
 .gns3lab-editor .ed-icon svg { width: 100%; height: 100%; display: block; }
 .gns3lab-editor .ed-icon:first-child { border-style: dashed; }
 .gns3lab-editor .ed-icon.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+/* texts and boxes on the scheme (lab_definition::ANNOTATIONS) */
+.gns3lab-editor .ed-ann { cursor: move; }
+.gns3lab-editor .ed-ann text { font-family: var(--display, inherit); user-select: none; }
+.gns3lab-editor .ed-ann text:not([fill]) { fill: var(--fg); }
+.gns3lab-editor .ed-ann-halo { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+.gns3lab-editor .ed-ann:not(.box) .ed-ann-halo { fill: transparent; pointer-events: all; }
+.gns3lab-editor .ed-ann-grip { fill: var(--bg); stroke: var(--accent); stroke-width: 1.5; cursor: nwse-resize; }
+.gns3lab-editor .linking .ed-ann { cursor: default; }
+.gns3lab-editor .ed-annfmt { display: flex; gap: 4px; align-items: center; }
+.gns3lab-editor .ed-annfmt input { width: 5em; }
+.gns3lab-editor .ed-fmt { min-width: 2.2em; }
+.gns3lab-editor .ed-fmt[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.gns3lab-editor .ed-swatches { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.gns3lab-editor .ed-swatch {
+    width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 50%; cursor: pointer;
+    background: transparent;
+}
+.gns3lab-editor .ed-swatch.auto { background: linear-gradient(135deg, var(--bg) 50%, var(--fg) 50%); }
+.gns3lab-editor .ed-swatch.on,
+.gns3lab-editor .ed-swatch-pick.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+.gns3lab-editor .ed-swatch-pick { width: 28px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 4px; }
 .gns3lab-editor .ed-capture-dialog label { display: block; }
 .gns3lab-editor .ed-authoring-dialog { width: 97vw; height: 95vh; max-width: none; }
 .gns3lab-editor .ed-authoring-dialog iframe { width: 100%; height: calc(100% - 3rem); border: 0; display: block; }

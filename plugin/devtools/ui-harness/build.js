@@ -181,6 +181,23 @@ for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `index.${lang}.nopaste.html`), shell(lang, '', body));
 }
 
+// Texts and boxes a teacher put on a library lab (lab_definition::drawings, the same SVG): index.<lang>.notes.html; open it
+// with ?livenodrawings so that the live project has none of its own, as a lab from Moodle (check_annotations.js).
+const NOTE_DRAWINGS = [
+    {drawing_id: 'note-0', x: -260, y: -260, z: 0, rotation: 0, svg: '<svg xmlns="http://www.w3.org/2000/svg" width="300" '
+        + 'height="200"><rect x="0" y="0" width="300" height="200" rx="8" fill="#388e3c" fill-opacity="0.12" stroke="#388e3c" '
+        + 'stroke-width="2"/><text x="8" y="26" font-size="18" font-weight="bold" fill="#388e3c">Office &lt;Moscow&gt;</text></svg>'},
+    {drawing_id: 'note-1', x: 120, y: -300, z: 1, rotation: 0, svg: '<svg xmlns="http://www.w3.org/2000/svg" width="120" '
+        + 'height="35"><text x="0" y="14" font-size="14" font-style="italic" fill="#d32f2f">Area 0</text><text x="0" y="31.5" '
+        + 'font-size="14">backbone</text></svg>'},
+];
+for (const lang of ['en', 'ru']) {
+    const doc = data.topology;
+    const topology = {...doc, topology: {...doc.topology, drawings: NOTE_DRAWINGS}};
+    const body = page(lang, {datajson: JSON.stringify({...data, topology})});
+    fs.writeFileSync(path.join(dist, `index.${lang}.notes.html`), shell(lang, '', body));
+}
+
 // The lab editor of the library (classes/local/lab_definition.php, editor.php): a catalog of the lab manager with the
 // lab constructor, a lab of a switch, two Debian, a VPCS and a router, no segments yet. editor.<lang>.html is a manager
 // with the lab constructor; editor.<lang>.plain.html is one without it (a lab/1 manager); editor.<lang>.segments.html

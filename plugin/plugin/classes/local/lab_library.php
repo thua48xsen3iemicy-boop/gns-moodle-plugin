@@ -281,7 +281,8 @@ class lab_library {
      * Publishes a definition: the lab manager checks it, then the draft becomes a frozen version.
      *
      * If the lab manager finds problems, manager_exception lab_invalid carries them in details->problems and
-     * the draft is saved anyway. Publishing what the last published version already has publishes nothing.
+     * the draft is saved anyway. Publishing what the last published version already has publishes nothing; a change the
+     * lab manager does not see (icons, texts and boxes on the scheme) still makes a new version.
      *
      * @param int $labid lab id
      * @param array $def clean definition
@@ -309,7 +310,7 @@ class lab_library {
         $result = \core\di::get(manager_client::class)->validate_lab($def);
 
         $last = self::last_published($lab->id);
-        if ($last && $last->labdef === $result->lab_def) {
+        if ($last && $last->labdef === $result->lab_def && $last->definition === $draft->definition) {
             $DB->delete_records('gns3lab_lab_versions', ['id' => $draft->id]);
             return $last;
         }

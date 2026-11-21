@@ -24,7 +24,8 @@ namespace mod_gns3lab\local;
  * without them is lab/1, whatever format the editor named.
  *
  * The plugin only checks the shape and the size: the lab manager knows the images and their limits and
- * checks the rest (POST /api/v1/labs/validate). Drawings and texts of a lab are not part of the definition.
+ * checks the rest (POST /api/v1/labs/validate). The texts and boxes a teacher puts on the scheme (ANNOTATIONS) belong to
+ * the plugin alone: for_manager() leaves them out and to_topology() draws them as the drawings of the .gns3 document.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -87,6 +88,32 @@ class lab_definition {
     /** Icons a node may take: the symbols of templates/icons.mustache, without unknown. */
     public const ICONS = ['router', 'switch', 'pc', 'server', 'firewall', 'cloud', 'hypervisor'];
 
+    /**
+     * Top level field of the plugin alone: texts and boxes with captions on the scheme of the lab.
+     *
+     * Each is {kind: text|box, x, y, text, size, color?, bold?, italic?} and a box also has w, h and fill. The lab
+     * manager never sees them (for_manager()); the lab pages get them as .gns3 drawings (to_topology()).
+     */
+    public const ANNOTATIONS = 'annotations';
+
+    /** Most texts and boxes on one scheme. */
+    public const MAX_ANNOTATIONS = 200;
+
+    /** Longest text of one annotation, in characters. */
+    public const ANNOTATION_TEXT_MAX = 500;
+
+    /** Font sizes an annotation may take. */
+    public const ANNOTATION_SIZE = [8, 72];
+
+    /** Font size of an annotation that names none. */
+    public const ANNOTATION_SIZE_DEFAULT = 14;
+
+    /** Box colour when the editor names none. */
+    public const ANNOTATION_FILL_DEFAULT = '#1e88e5';
+
+    /** Sizes a box may take, in scene units. */
+    public const ANNOTATION_BOX = [20, 5000];
+
     /** Node fields besides name, image, x and y; the lab manager uses the image default for a missing one. */
     protected const NUMBERS = ['ram_mb', 'cpus', 'adapters', 'uplink_port'];
 
@@ -101,12 +128,13 @@ class lab_definition {
     }
 
     /**
-     * The definition as the lab manager takes it: without the node fields that only the plugin knows.
+     * The definition as the lab manager takes it: without the fields that only the plugin knows.
      *
      * @param array $def clean definition
      * @return array
      */
     public static function for_manager(array $def): array {
+        unset($def[self::ANNOTATIONS]);
         foreach ($def['nodes'] ?? [] as $i => $node) {
             if (is_array($node)) {
                 unset($def['nodes'][$i][self::NOPASTE], $def['nodes'][$i][self::ICON]);
@@ -247,7 +275,135 @@ class lab_definition {
             $def['segments'] = $segments;
             $def['checks'] = self::checks_objects($checks);
         }
+        $annotations = self::annotations($raw[self::ANNOTATIONS] ?? []);
+        if ($annotations) {
+            $def[self::ANNOTATIONS] = $annotations;
+        }
         return $def;
+    }
+
+    /**
+     * Keeps the known fields of the texts and boxes on the scheme and refuses a wrong shape.
+     *
+     * A text without any letters is dropped: the editor leaves one behind when the teacher clears it.
+     *
+     * @param mixed $raw annotations as sent by the editor
+     * @return array clean annotations
+     * @throws \moodle_exception labdefinvalid when the shape is wrong
+     */
+    protected static function annotations(mixed $raw): array {
+        if (!is_array($raw) || !array_is_list($raw) || count($raw) > self::MAX_ANNOTATIONS) {
+            throw self::invalid(self::ANNOTATIONS);
+        }
+        $out = [];
+        foreach ($raw as $i => $item) {
+            $where = self::ANNOTATIONS . "[{$i}]";
+            $kind = is_array($item) ? ($item['kind'] ?? null) : null;
+            if ($kind !== 'text' && $kind !== 'box') {
+                throw self::invalid("{$where}.kind");
+            }
+            $text = $item['text'] ?? '';
+            if (!is_string($text) || \core_text::strlen($text) > self::ANNOTATION_TEXT_MAX) {
+                throw self::invalid("{$where}.text");
+            }
+            $text = rtrim(str_replace(["\r\n", "\r"], "\n", $text));
+            if ($kind === 'text' && trim($text) === '') {
+                continue;
+            }
+            $clean = ['kind' => $kind, 'x' => self::number($item, 'x', $where, -100000, 100000),
+                'y' => self::number($item, 'y', $where, -100000, 100000)];
+            if ($kind === 'box') {
+                [$min, $max] = self::ANNOTATION_BOX;
+                $clean['w'] = self::number($item, 'w', $where, $min, $max);
+                $clean['h'] = self::number($item, 'h', $where, $min, $max);
+            }
+            $clean['text'] = $text;
+            [$min, $max] = self::ANNOTATION_SIZE;
+            $clean['size'] = array_key_exists('size', $item) && $item['size'] !== null
+                ? self::number($item, 'size', $where, $min, $max) : self::ANNOTATION_SIZE_DEFAULT;
+            foreach (['color', 'fill'] as $key) {
+                $value = $item[$key] ?? null;
+                if ($value === null || $value === '' || ($key === 'fill' && $kind !== 'box')) {
+                    continue;
+                }
+                if (!is_string($value) || !preg_match('/^#[0-9a-fA-F]{6}$/', $value)) {
+                    throw self::invalid("{$where}.{$key}");
+                }
+                $clean[$key] = strtolower($value);
+            }
+            if ($kind === 'box' && !isset($clean['fill'])) {
+                $clean['fill'] = self::ANNOTATION_FILL_DEFAULT;
+            }
+            foreach (['bold', 'italic'] as $key) {
+                if (array_key_exists($key, $item) && $item[$key] !== null) {
+                    if (!is_bool($item[$key])) {
+                        throw self::invalid("{$where}.{$key}");
+                    }
+                    if ($item[$key]) {
+                        $clean[$key] = true;
+                    }
+                }
+            }
+            $out[] = $clean;
+        }
+        return $out;
+    }
+
+    /**
+     * The .gns3 drawings of the texts and boxes of a definition, as the lab pages draw them (stage.js sanitizeDrawing).
+     *
+     * A box lies under the texts. Its caption sits in its top left corner, in the colour of the box unless it has one.
+     * A text without a colour takes the text colour of the page theme. Lines go one under the other, 1.25 font sizes
+     * apart: editor.js draws the same.
+     *
+     * @param array $def definition
+     * @return array drawings: drawing_id, x, y, z, rotation, svg
+     */
+    public static function drawings(array $def): array {
+        $out = [];
+        foreach ($def[self::ANNOTATIONS] ?? [] as $i => $a) {
+            if (!is_array($a) || !in_array($a['kind'] ?? '', ['text', 'box'], true)) {
+                continue;
+            }
+            $size = (int) ($a['size'] ?? self::ANNOTATION_SIZE_DEFAULT);
+            $isbox = $a['kind'] === 'box';
+            $lines = explode("\n", (string) ($a['text'] ?? ''));
+            $step = $size * 1.25;
+            $pad = $isbox ? 8 : 0;
+            $color = $a['color'] ?? ($isbox ? ($a['fill'] ?? self::ANNOTATION_FILL_DEFAULT) : null);
+            $attrs = ' font-size="' . $size . '"' . (!empty($a['bold']) ? ' font-weight="bold"' : '')
+                . (!empty($a['italic']) ? ' font-style="italic"' : '') . ($color ? ' fill="' . s($color) . '"' : '');
+            $body = '';
+            $widest = 0;
+            foreach ($lines as $k => $line) {
+                $widest = max($widest, \core_text::strlen($line));
+                if (trim($line) === '') {
+                    continue;
+                }
+                $y = round($pad + $size + $k * $step, 2);
+                $body .= '<text x="' . $pad . '" y="' . $y . '"' . $attrs . '>'
+                    . htmlspecialchars($line, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</text>';
+            }
+            if ($isbox) {
+                $w = (int) $a['w'];
+                $h = (int) $a['h'];
+                $fill = s($a['fill'] ?? self::ANNOTATION_FILL_DEFAULT);
+                $body = '<rect x="0" y="0" width="' . $w . '" height="' . $h . '" rx="8" fill="' . $fill
+                    . '" fill-opacity="0.12" stroke="' . $fill . '" stroke-width="2"/>' . $body;
+            } else {
+                $w = (int) ceil($widest * $size * 0.6);
+                $h = (int) ceil(count($lines) * $step);
+            }
+            $out[] = [
+                'drawing_id' => 'note-' . $i,
+                'x' => (int) $a['x'],
+                'y' => (int) $a['y'],
+                'z' => $isbox ? 0 : 1,
+                'rotation' => 0,
+                'svg' => '<svg xmlns="http://www.w3.org/2000/svg" width="' . $w . '" height="' . $h . '">' . $body . '</svg>',
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -475,7 +631,7 @@ class lab_definition {
         }
         return (object) [
             'name' => (string) ($def['title'] ?? ''),
-            'topology' => (object) ['nodes' => $nodes, 'links' => $links, 'drawings' => []],
+            'topology' => (object) ['nodes' => $nodes, 'links' => $links, 'drawings' => self::drawings($def)],
         ];
     }
 
@@ -517,6 +673,27 @@ class lab_definition {
         }
         if (!is_int($value) || abs($value) > 100000) {
             throw self::invalid("nodes[{$i}].{$key}");
+        }
+        return $value;
+    }
+
+    /**
+     * Reads an integer field of an annotation.
+     *
+     * @param array $item annotation
+     * @param string $key field
+     * @param string $where path of the annotation, for the error
+     * @param int $min smallest value
+     * @param int $max largest value
+     * @return int
+     */
+    protected static function number(array $item, string $key, string $where, int $min, int $max): int {
+        $value = $item[$key] ?? null;
+        if (is_float($value) && is_finite($value)) {
+            $value = (int) round($value);
+        }
+        if (!is_int($value) || $value < $min || $value > $max) {
+            throw self::invalid("{$where}.{$key}");
         }
         return $value;
     }
