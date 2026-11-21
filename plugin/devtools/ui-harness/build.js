@@ -107,7 +107,9 @@ function page(lang, extra = {}) {
         labname: lang === 'ru' ? 'Лаба 4 · OSPF multi-area' : 'Lab 4 · OSPF multi-area',
         assignmenthtml: lang === 'ru'
             ? '<p>Проверьте связность узлов топологии.</p><ol><li>Исследуйте порты.</li><li>Проверьте VLAN и адреса.</li></ol>'
-            : '<p>Check connectivity between topology nodes.</p><ol><li>Explore the ports.</li><li>Check VLANs and addresses.</li></ol>',
+                + '<p>Справка: <a class="autolink" title="OSPF" href="#glossary-ospf">OSPF</a>.</p>'
+            : '<p>Check connectivity between topology nodes.</p><ol><li>Explore the ports.</li><li>Check VLANs and addresses.</li></ol>'
+                + '<p>Reference: <a class="autolink" title="OSPF" href="#glossary-ospf">OSPF</a>.</p>',
         backurl: '#back',
         isdemo: true,
         previewerror: false,

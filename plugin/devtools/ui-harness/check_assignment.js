@@ -251,6 +251,19 @@ const box = async loc => {
         check('phone: a sheet across the screen above the zoom controls', sheet.x >= 0 && sheet.x + sheet.w <= 390
             && sheet.y + sheet.h <= zoom.y, JSON.stringify({sheet, zoom}));
         await phone.screenshot({path: path.join(SHOTS, 'assignment-phone.png')});
+        // A link of the description (here one of the Moodle auto-linking filter) stays readable on the dark card.
+        const contrast = await phone.evaluate(() => {
+            const rgb = c => c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+            const lum = c => {
+                const [r, g, b] = rgb(c).map(v => v / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+                return .2126 * r + .7152 * g + .0722 * b;
+            };
+            const a = document.querySelector('.assign-body a.autolink');
+            const fg = lum(getComputedStyle(a).color);
+            const bg = lum(getComputedStyle(document.querySelector('.assign-win')).backgroundColor);
+            return (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05);
+        });
+        check('phone: a link of the description is readable in the dark theme', contrast >= 4.5, contrast.toFixed(2));
         await region(phone, 'assignmentsHead').tap({position: {x: 60, y: 20}});
         const folded = await box(win(phone));
         check('phone: a tap on the title folds it to a bar', folded.h <= 42 && folded.y + folded.h <= zoom.y, JSON.stringify(folded));
