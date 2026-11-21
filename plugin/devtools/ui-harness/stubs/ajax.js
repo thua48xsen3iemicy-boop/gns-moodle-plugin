@@ -207,8 +207,9 @@ define([], function() {
         facts,
     });
     const setCell = (cmid, userid, session, observable = true) => {
-        const old = course.cells.get(cmid + ':' + userid) || {grade: null, checks: null};
-        course.cells.set(cmid + ':' + userid, {cmid, userid, observable, session, grade: old.grade, checks: old.checks});
+        const old = course.cells.get(cmid + ':' + userid) || {grade: null, checks: null, forecast: null};
+        course.cells.set(cmid + ':' + userid, {cmid, userid, observable, session, grade: old.grade, checks: old.checks,
+            forecast: old.forecast});
     };
     // The final grade of the gradebook and the summary of the checks of a cell.
     const grade = (text, ratio, passed = '', overridden = false) => ({text, ratio, passed, overridden, gradedat: now() - 3600});
@@ -243,6 +244,16 @@ define([], function() {
     setResult(4, 12, null, runs(1, 'done', now() - 5000, 5, now() - 5000));
     setResult(4, 13, null, runs(1, 'done', now() - 3000, 4, now() - 3000));
     setResult(4, 14, null, runs(3, 'done', now() - 2000, 2, now() - 2000));
+    // Forecasts of the manager from the facts (teacher-dashboard §14): Chen never ran a check in lab 4, its lab has the
+    // teacher's scripts; Eve stopped lab 7 without a check and one of her devices was still booting.
+    const forecast = (mark, scriptsignored = false, incomplete = false) => ({mark, topmark: 5, failmark: 2, incomplete,
+        scriptsignored, assessedat: now() - 900});
+    course.cells.get('1:13').forecast = forecast(3, true);
+    setCell(4, 15, summary('stopped'));
+    course.cells.get('4:15').forecast = forecast(2, false, true);
+    // A forecast beside a mark: the card shows both, the cell the mark.
+    setCell(4, 11, summary('stopped'));
+    course.cells.get('4:11').forecast = forecast(4);
 
     const courseOverview = async args => {
         course.calls.push(args);
@@ -256,7 +267,7 @@ define([], function() {
         const students = course.students.filter(s => (!args.groupid || s.groups.includes(args.groupid))
             && labs.some(lab => course.cells.get(lab.cmid + ':' + s.userid).observable));
         const cells = [];
-        const hide = cell => (cfg.nogrades ? {...cell, grade: null,
+        const hide = cell => (cfg.nogrades ? {...cell, grade: null, forecast: null,
             checks: cell.checks && {...cell.checks, mark: -1, topmark: 0, failmark: 0, markedat: 0}} : {...cell});
         students.forEach(st => labs.forEach(lab => cells.push(hide(course.cells.get(lab.cmid + ':' + st.userid)))));
         // The average of the gradebook over the graded students of the answer (two decimals, as the gradebook formats).

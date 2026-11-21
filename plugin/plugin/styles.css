@@ -4197,6 +4197,20 @@ body.gns3lab-fullscreen {
     font-size: 14px;
     font-variant-numeric: tabular-nums;
 }
+.gns3lab-course .forecast {
+    margin-left: 4px;
+    color: var(--muted);
+    font-style: italic;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.gns3lab-course .sumbtn .forecast:first-child,
+.gns3lab-course .gradecell .forecast:first-child {
+    margin-left: 0;
+}
+.gns3lab-course .cforecast .grade {
+    font-style: italic;
+}
 .gns3lab-course [data-pass="yes"] .grade {
     color: var(--ok);
 }

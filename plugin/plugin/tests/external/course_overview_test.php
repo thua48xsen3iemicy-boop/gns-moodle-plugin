@@ -32,6 +32,7 @@ use mod_gns3lab\tests\fake_manager;
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\course_labs::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\activity_sessions::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\course_results::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\mod_gns3lab\local\forecasts::class)]
 final class course_overview_test extends \advanced_testcase {
     /** @var fake_manager */
     protected fake_manager $manager;
@@ -424,5 +425,87 @@ final class course_overview_test extends \advanced_testcase {
 
         $this->assertSame(1, $checks['attempts']);
         $this->assertSame(-1, $checks['mark']);
+    }
+
+    /**
+     * A lab with auto-checks on a manager that makes forecasts (CONTRACTS §2.9a), and its answer for the running session.
+     *
+     * @param bool $scripts the lab has scripts of the teacher
+     */
+    protected function with_forecasts(bool $scripts = false): void {
+        global $DB;
+        $DB->set_field('gns3lab', 'checksenabled', 1, ['id' => $this->lab->id]);
+        $this->manager->with_info(['consoles', 'observer', 'facts', 'checks', 'forecast']);
+        $this->manager->on('POST', '/api/v1/forecasts', 200, [
+            'grading' => [],
+            'forecasts' => [
+                ['session_id' => 's-3f9a1c0d2b4e5f60', 'found' => true, 'forecast' => [
+                    'schema' => 'gns3lab.forecast/1', 'facts_rev' => 7, 'assessed_at' => '2026-11-21T10:00:00Z',
+                    'outcome' => 'incomplete', 'mark' => 3, 'counts' => ['critical' => 0, 'major' => 2, 'minor' => 0, 'note' => 0],
+                    'scripts_ignored' => $scripts,
+                ]],
+            ],
+        ]);
+    }
+
+    public function test_a_teacher_gets_the_forecast_of_a_student_without_a_check(): void {
+        $this->with_forecasts(true);
+        $this->setUser($this->teacher);
+
+        $result = $this->overview();
+
+        $forecast = $this->cell($result, $this->lab, $this->student)['forecast'];
+        $this->assertSame(3, $forecast['mark']);
+        $this->assertSame(5, $forecast['topmark'], 'the top mark of the grading of the activity');
+        $this->assertSame(2, $forecast['failmark']);
+        $this->assertTrue($forecast['incomplete']);
+        $this->assertTrue($forecast['scriptsignored']);
+        $this->assertSame(strtotime('2026-11-21T10:00:00Z'), $forecast['assessedat']);
+        $this->assertNull($this->cell($result, $this->lab, $this->other)['forecast'], 'no session, no forecast');
+        $this->assertStringNotContainsString('s-3f9a1c0d2b4e5f60', json_encode($result), 'no session id');
+        [$request] = $this->manager->requests_to('POST', '/api/v1/forecasts');
+        $this->assertSame(['s-3f9a1c0d2b4e5f60'], $request['body']['session_ids']);
+        $this->assertSame('standard', $request['body']['grading']['profile'], 'the grading of the activity');
+        $this->assertSame(2, $request['body']['grading']['fail_mark']);
+
+        $this->overview();
+        $this->assertCount(1, $this->manager->requests_to('POST', '/api/v1/forecasts'), 'kept for a few seconds');
+    }
+
+    public function test_no_forecast_without_the_feature_or_the_checks(): void {
+        global $DB;
+        $this->with_forecasts();
+        $DB->set_field('gns3lab', 'checksenabled', 0, ['id' => $this->lab->id]);
+        $this->setUser($this->teacher);
+
+        $this->assertNull($this->cell($this->overview(), $this->lab, $this->student)['forecast'], 'checks are off');
+
+        $DB->set_field('gns3lab', 'checksenabled', 1, ['id' => $this->lab->id]);
+        $this->manager->with_info(['consoles', 'observer', 'facts', 'checks']);
+        \cache::make('mod_gns3lab', 'info')->purge();
+        $this->assertNull($this->cell($this->overview(), $this->lab, $this->student)['forecast'], 'an older manager');
+        $this->assertCount(0, $this->manager->requests_to('POST', '/api/v1/forecasts'));
+    }
+
+    public function test_a_teacher_who_may_not_see_grades_gets_no_forecast(): void {
+        global $DB;
+        $this->with_forecasts();
+        $roleid = $DB->get_field('role', 'id', ['shortname' => 'teacher'], MUST_EXIST);
+        assign_capability('moodle/grade:viewall', CAP_PROHIBIT, $roleid, \context_course::instance($this->course->id));
+        $this->setUser($this->teacher);
+
+        $this->assertNull($this->cell($this->overview(), $this->lab, $this->student)['forecast']);
+        $this->assertCount(0, $this->manager->requests_to('POST', '/api/v1/forecasts'));
+    }
+
+    public function test_a_manager_that_does_not_answer_the_forecasts_leaves_the_page_working(): void {
+        $this->with_forecasts();
+        $this->manager->on('POST', '/api/v1/forecasts', 503, ['error' => 'storage_unavailable', 'message' => 'x']);
+        $this->setUser($this->teacher);
+
+        $result = $this->overview();
+
+        $this->assertNull($this->cell($result, $this->lab, $this->student)['forecast']);
+        $this->assertSame('running', $this->cell($result, $this->lab, $this->student)['session']['status']);
     }
 }

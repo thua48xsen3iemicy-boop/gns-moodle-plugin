@@ -20,7 +20,8 @@ namespace mod_gns3lab\local;
  * Sessions of all students of an activity for the course page of a teacher, kept for a few seconds in the application cache.
  *
  * Several teachers and a poll every 15 seconds would otherwise ask the manager once each. An answer, or the failure to
- * get one, is used as is for FRESH seconds. Only the short summaries of session_data::summary() are kept, by user id.
+ * get one, is used as is for FRESH seconds. Only the short summaries of session_data::summary() are kept, by user id, and the
+ * session ids (`ids`, never sent to the browser) that the forecasts of the teacher are asked for (forecasts.php).
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -44,15 +45,17 @@ class activity_sessions {
         if ($entry && time() - $entry->fetchedat < self::FRESH) {
             return $entry;
         }
-        $entry = (object) ['sessions' => [], 'error' => '', 'fetchedat' => time()];
+        $entry = (object) ['sessions' => [], 'ids' => [], 'error' => '', 'fetchedat' => time()];
         try {
             foreach ($client->list_activity_sessions($instanceid) as $session) {
                 if (isset($session->user_id) && is_int($session->user_id)) {
                     $entry->sessions[$session->user_id] = session_data::summary($session);
+                    $entry->ids[$session->user_id] = (string) $session->session_id;
                 }
             }
         } catch (manager_exception $e) {
             $entry->sessions = [];
+            $entry->ids = [];
             $entry->error = clean_param($e->remotecode, PARAM_ALPHANUMEXT);
             debugging('mod_gns3lab: no sessions of the activity from the lab manager: ' . $e->debuginfo, DEBUG_DEVELOPER);
         }

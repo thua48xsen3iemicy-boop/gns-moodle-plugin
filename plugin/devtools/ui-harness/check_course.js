@@ -133,6 +133,19 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
             && /Not started/.test(await cellOf(page, 'Dana', 1).innerText()) && /Started/.test(await cellOf(page, 'Alice', 3).innerText()));
         check('a lab that runs without a grade yet says it runs',
             (await cellOf(page, 'Chen', 2).locator('button').getAttribute('data-kind')) === 'running');
+        const chen4 = cellOf(page, 'Chen', 1).locator('button');
+        check('no grade but a forecast from the facts: "≈3" beside the state, not a grade',
+            (await chen4.locator('.forecast').innerText()) === '≈3' && (await chen4.locator('.grade').count()) === 0
+            && (await chen4.getAttribute('data-pass')) === null && /Error/.test(await chen4.innerText()));
+        const chenTitle = await chen4.locator('.forecast').getAttribute('title');
+        check('...its tooltip says what it is and that the teacher\'s scripts are not in it',
+            /^Forecast from the facts, not a grade/.test(chenTitle) && /without the teacher's own checks/.test(chenTitle), chenTitle);
+        const eve7 = cellOf(page, 'Eve', 4).locator('button');
+        check('a stopped lab with a forecast and no grade: the forecast instead of "No grade", not everything checked',
+            (await eve7.innerText()).trim() === '≈2' && /not every device could be checked/.test(
+                await eve7.locator('.forecast').getAttribute('title')), await eve7.innerText());
+        check('a mark wins over the forecast in the cell',
+            (await cellOf(page, 'Alice', 4).locator('.forecast').count()) === 0);
         await page.evaluate(() => window.__stub.course.set(2, 12, {status: 'stopped', startedat: 1, expiresat: 0, facts: 'unknown'}));
         await page.clock.fastForward(15000);
         const nograde = await until(async() => /No grade/.test(await cellOf(page, 'Boris', 2).innerText()), 4000);
@@ -304,6 +317,9 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
             && /No checks/.test(await colOf(page, 'Dana', 'checks').innerText()));
         check('the grade in its column', (await colOf(page, 'Alice', 'gradecell').innerText()) === '5'
             && (await colOf(page, 'Dana', 'gradecell').innerText()) === '—');
+        check('...and the forecast of a student without a grade, as a forecast',
+            (await colOf(page, 'Chen', 'gradecell').locator('.forecast').innerText()) === '≈3'
+            && (await colOf(page, 'Chen', 'gradecell').locator('.grade').count()) === 0);
         c = await calls(page);
         const since = name => (c[name] || 0) - (before[name] || 0);
         check('the topology is read once per session and the facts per session (two running sessions with facts "unknown")',
@@ -395,6 +411,35 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         check('a lab that is not on the page: the server refuses, the page says so', await page.locator('[data-region="notice"]').isVisible());
         await page.close();
 
+        /* ---------------- forecasts in the card ---------------- */
+        const fpage = await newPage(browser, problems);
+        await fpage.goto(URLQ());
+        await fpage.locator('tbody tr').first().waitFor();
+        await cellOf(fpage, 'Alice', 4).locator('button').click();
+        const fcard = fpage.locator('[data-region="card"]');
+        await fcard.waitFor({state: 'visible'});
+        const fline = (await fcard.locator('.cforecast').innerText()).replace(/\s+/g, ' ');
+        check('the card shows the forecast beside the mark, out of what and when the snapshot was assessed',
+            /^Forecast from the facts: 4 out of 5 · snapshot \d/.test(fline)
+            && /Auto-check grade: 5/.test(await fcard.innerText()), fline);
+        await cellOf(fpage, 'Chen', 1).locator('button').click();
+        await until(async() => /Chen/.test(await fcard.innerText()), 4000);
+        check('...a lab with the teacher\'s scripts says the forecast is without them',
+            /Forecast from the facts: 3 out of 5 · without the teacher's own checks/.test(
+                (await fcard.locator('.cforecast').innerText()).replace(/\s+/g, ' ')));
+        await fcard.screenshot({path: path.join(SHOTS, 'course-forecast-card.png')});
+        await cellOf(fpage, 'Boris', 1).locator('button').click();
+        await until(async() => /Boris/.test(await fcard.innerText()), 4000);
+        check('...a lab that runs without a forecast yet: "no data yet", not a bad mark',
+            /Forecast from the facts: no data yet/.test((await fcard.locator('.cforecast').innerText()).replace(/\s+/g, ' ')));
+        await cellOf(fpage, 'Dana', 1).locator('button').click();
+        await until(async() => /Dana/.test(await fcard.innerText()), 4000);
+        check('...a student who never started the lab: no forecast line', (await fcard.locator('.cforecast').count()) === 0);
+        await cellOf(fpage, 'Alice', 2).locator('button').click();
+        await until(async() => /Lab 5/.test(await fcard.innerText()), 4000);
+        check('...a lab without auto-checks: no forecast line', (await fcard.locator('.cforecast').count()) === 0);
+        await fpage.close();
+
         /* ---------------- a teacher who may not see grades ---------------- */
         const blind = await newPage(browser, problems);
         await blind.goto(URLQ('nogrades'));
@@ -405,6 +450,7 @@ const view = page => page.locator('[data-region="views"] [aria-current="page"]')
         await cellOf(blind, 'Alice', 2).locator('button').click();
         await blind.locator('[data-region="card"]').waitFor({state: 'visible'});
         check('...and no grade in the card', (await blind.locator('.cgrade').count()) === 0);
+        check('...and no forecast anywhere', (await blind.locator('.forecast, .cforecast').count()) === 0);
         await blind.close();
 
         /* ---------------- phone ---------------- */
