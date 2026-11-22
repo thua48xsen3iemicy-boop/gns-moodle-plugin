@@ -20,7 +20,8 @@
 
     Context variables required for this template:
     * labname - lab name
-    * libraryurl - URL of the lab library
+    * libraryurl - URL of the lab library, where the back arrow leads when there is no previous page of the site
+      (mod_gns3lab/backlink)
     * canpublish - the lab manager takes lab definitions
     * labconstructor - the lab manager has the lab constructor (segments, lab/2)
     * datajson - JSON with labid, definition, version, status, images, limits, canpublish, labconstructor, catalogerror,
@@ -38,7 +39,7 @@
 <div class="gns3lab-app gns3lab-editor is-fullscreen" id="{{uniqid}}-app" data-json="{{datajson}}">
     <header class="bar">
         <div class="ttl">
-            <a class="gbtn back" href="{{libraryurl}}" title="{{#str}}backtolibrary, mod_gns3lab{{/str}}" aria-label="{{#str}}backtolibrary, mod_gns3lab{{/str}}">&larr;</a>
+            <a class="gbtn back" href="{{libraryurl}}" data-gns3lab-back title="{{#str}}back{{/str}}" aria-label="{{#str}}back{{/str}}">&larr;</a>
             <div>
                 <h2 class="ttl-h">{{labname}}</h2>
                 <p class="meta" data-region="meta"></p>
@@ -96,5 +97,8 @@
 {{#js}}
 require(['mod_gns3lab/editor'], function(editor) {
     editor.init('{{uniqid}}');
+});
+require(['mod_gns3lab/backlink'], function(backlink) {
+    backlink.init();
 });
 {{/js}}

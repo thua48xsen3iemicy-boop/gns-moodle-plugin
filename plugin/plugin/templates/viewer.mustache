@@ -24,7 +24,8 @@
     Context variables required for this template:
     * labname - activity name
     * assignmenthtml - activity description formatted by Moodle, used as the student's assignments
-    * backurl - URL of the activity page, or of the course page of the teacher who came from there
+    * backurl - URL of the activity page, or of the course page of the teacher who came from there; the back arrow
+      goes back in the history instead when the page was opened from another page of the site (mod_gns3lab/backlink)
     * observing - a teacher looks at the lab of a student, read only
     * studentname - full name of that student
     * userid - id of that student, 0 for the user's own lab
@@ -51,7 +52,7 @@
 <div class="gns3lab-student canvas-ui is-fullscreen" id="{{uniqid}}-app" data-json="{{datajson}}">
     <header class="bar">
         <div class="ttl">
-            <a class="back" href="{{backurl}}" title="{{#str}}backtoactivity, mod_gns3lab{{/str}}" aria-label="{{#str}}backtoactivity, mod_gns3lab{{/str}}">&larr;</a>
+            <a class="back" href="{{backurl}}" data-gns3lab-back title="{{#str}}back{{/str}}" aria-label="{{#str}}back{{/str}}">&larr;</a>
             <div class="ttlbox">
                 <h1 class="ttl-h">{{labname}}</h1>
                 <p class="meta">
@@ -208,5 +209,10 @@
 {{#js}}
 require(['mod_gns3lab/lab'], function(lab) {
     lab.init('{{uniqid}}', {{cmid}}, {{userid}});
+});
+{{/js}}
+{{#js}}
+require(['mod_gns3lab/backlink'], function(backlink) {
+    backlink.init();
 });
 {{/js}}

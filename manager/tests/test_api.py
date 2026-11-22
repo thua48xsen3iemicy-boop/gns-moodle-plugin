@@ -200,7 +200,7 @@ async def test_info(tmp_path, dsn):
         r = await env.client.get("/api/v1/info")
         assert r.json() == {"schema": "gns3lab.info/1", "version": r.json()["version"],
                             "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
-                            "features": ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "forecast", "purge", "maintenance", "iso"]}
+                            "features": ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "forecast", "purge", "maintenance", "iso", "live-sessions"]}
         async with anon(env) as c:
             assert (await c.get("/api/v1/info")).status_code == 401
 
@@ -399,3 +399,28 @@ async def test_stop_by_teacher(tmp_path, dsn):
         async with env.services.pool.connection() as conn:
             cur = await conn.execute("SELECT detail FROM events WHERE kind = 'stop_requested_by'")
             assert (await cur.fetchone())["detail"] == {"user_id": 17}
+
+
+async def test_live_sessions_of_the_site(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201, 202, 203)) as env:
+        assert "live-sessions" in (await env.client.get("/api/v1/info")).json()["features"]
+        a = await start(env, course_id=3)
+        await env.run()
+        b = await start(env, user_id=7, instance_id=2)
+        await env.run()
+        done = await start(env, user_id=8, instance_id=3)
+        await env.run()
+        await env.client.post(f"/api/v1/sessions/{done['session_id']}/stop")
+        await env.run()
+        body = (await env.client.get("/api/v1/live-sessions")).json()
+        assert body["schema"] == "gns3lab.live_sessions/1"
+        assert body["slots"] == {"total": 3, "free": 1, "unavailable": 0}
+        rows = body["sessions"]
+        assert [(x["session_id"], x["user_id"], x["instance_id"]) for x in rows] == [
+            (a["session_id"], 42, 1), (b["session_id"], 7, 2)]
+        assert rows[0]["course_id"] == 3 and rows[0]["library_lab_id"] is None and rows[0]["created_at"]
+        assert rows[0]["slot_vmid"] < rows[1]["slot_vmid"]
+        assert all("topology" not in x and "nodes" not in x for x in rows)
+        async with anon(env, **{"Authorization": "Bearer " + "o" * 40,
+                                "X-Moodle-Site": "https://other.example.edu"}) as other:
+            assert (await other.get("/api/v1/live-sessions")).json()["sessions"] == []

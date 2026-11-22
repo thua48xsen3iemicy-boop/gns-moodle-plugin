@@ -1,0 +1,126 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_gns3lab/slots
+
+    Busy slots for the site administrator: who runs which lab in which slot.
+
+    Context variables required for this template:
+    * rows - live sessions: sessionid, slot (VMID or null in the queue), userid, username, fullname, email, profileurl,
+      status, statusclass, authoring, started, expires, created, stoppable, course, courseurl, activity, activityurl,
+      observeurl, lab, labdetail, stopurl (asks to confirm the stop)
+    * hasrows - there are live sessions
+    * slots - counts or null: total, free, unavailable, own, other, queued
+    * warning - why the list is not shown, or empty
+    * refreshurl - URL of this page
+
+    Example context (json):
+    {
+        "rows": [{"sessionid": "s-3f9a1c0d2b4e5f60", "slot": 9012, "userid": 42, "username": "ivanov",
+                  "fullname": "Ivan Ivanov", "email": "ivanov@example.edu", "profileurl": "#",
+                  "status": "The lab is running", "statusclass": "bg-success", "authoring": false,
+                  "started": "22/11/26, 09:10", "expires": "22/11/26, 10:40", "created": "22/11/26, 09:08",
+                  "stoppable": true, "course": "NET-101", "courseurl": "#", "activity": "OSPF lab",
+                  "activityurl": "#", "observeurl": "#", "lab": "OSPF, three areas", "labdetail": "",
+                  "stopurl": "#"}],
+        "hasrows": true,
+        "slots": {"total": 5, "free": 3, "unavailable": 0, "own": 1, "other": 1, "queued": 0},
+        "warning": "",
+        "refreshurl": "#"
+    }
+}}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h2 class="me-auto mb-0">{{#str}}liveslots, mod_gns3lab{{/str}}</h2>
+    <a class="btn btn-secondary" href="{{refreshurl}}">{{#str}}refresh{{/str}}</a>
+</div>
+<p class="text-muted">{{#str}}liveslots_desc, mod_gns3lab{{/str}}</p>
+{{#warning}}
+<div class="alert alert-warning">{{warning}}</div>
+{{/warning}}
+{{#slots}}
+<ul class="list-inline mb-3">
+    <li class="list-inline-item">{{#str}}liveslotstotal, mod_gns3lab, {{total}}{{/str}}</li>
+    <li class="list-inline-item"><span class="badge bg-success">{{#str}}liveslotsown, mod_gns3lab, {{own}}{{/str}}</span></li>
+    <li class="list-inline-item"><span class="badge bg-light text-dark border">{{#str}}liveslotsfree, mod_gns3lab, {{free}}{{/str}}</span></li>
+    {{#other}}<li class="list-inline-item"><span class="badge bg-secondary">{{#str}}liveslotsother, mod_gns3lab, {{other}}{{/str}}</span></li>{{/other}}
+    {{#unavailable}}<li class="list-inline-item"><span class="badge bg-warning text-dark">{{#str}}liveslotsunavailable, mod_gns3lab, {{unavailable}}{{/str}}</span></li>{{/unavailable}}
+    {{#queued}}<li class="list-inline-item"><span class="badge bg-info text-dark">{{#str}}liveslotsqueued, mod_gns3lab, {{queued}}{{/str}}</span></li>{{/queued}}
+</ul>
+{{/slots}}
+{{#hasrows}}
+<div class="table-responsive">
+<table class="table table-striped generaltable gns3lab-slots">
+    <thead>
+        <tr>
+            <th scope="col">{{#str}}liveslotsslot, mod_gns3lab{{/str}}</th>
+            <th scope="col">{{#str}}user{{/str}}</th>
+            <th scope="col">{{#str}}course{{/str}}</th>
+            <th scope="col">{{#str}}liveslotsactivity, mod_gns3lab{{/str}}</th>
+            <th scope="col">{{#str}}status{{/str}}</th>
+            <th scope="col">{{#str}}liveslotstime, mod_gns3lab{{/str}}</th>
+            <th scope="col"><span class="visually-hidden">{{#str}}actions{{/str}}</span></th>
+        </tr>
+    </thead>
+    <tbody>
+        {{#rows}}
+        <tr>
+            <td class="text-nowrap">
+                {{#slot}}<strong>{{slot}}</strong>{{/slot}}
+                {{^slot}}<span class="text-muted">{{#str}}liveslotsinqueue, mod_gns3lab{{/str}}</span>{{/slot}}
+            </td>
+            <td>
+                {{#profileurl}}<a href="{{profileurl}}">{{fullname}}</a>{{/profileurl}}
+                {{^profileurl}}{{fullname}}{{/profileurl}}
+                <div class="small text-muted">
+                    {{#username}}<code>{{username}}</code>{{/username}}
+                    {{#email}} · {{email}}{{/email}}
+                    · id {{userid}}
+                </div>
+            </td>
+            <td>
+                {{#courseurl}}<a href="{{courseurl}}">{{course}}</a>{{/courseurl}}
+                {{^courseurl}}<span class="text-muted">—</span>{{/courseurl}}
+            </td>
+            <td>
+                {{#activityurl}}<a href="{{activityurl}}">{{activity}}</a>{{/activityurl}}
+                {{^activityurl}}{{activity}}{{/activityurl}}
+                {{#authoring}}<span class="badge bg-warning text-dark ms-1">{{#str}}liveslotsauthoringbadge, mod_gns3lab{{/str}}</span>{{/authoring}}
+                <div class="small text-muted">
+                    {{lab}}{{#labdetail}} (<code>{{labdetail}}</code>){{/labdetail}}
+                </div>
+            </td>
+            <td><span class="badge {{statusclass}}">{{status}}</span></td>
+            <td class="small text-nowrap">
+                {{#started}}<div>{{#str}}liveslotsstarted, mod_gns3lab, {{started}}{{/str}}</div>{{/started}}
+                {{^started}}<div>{{#str}}liveslotscreated, mod_gns3lab, {{created}}{{/str}}</div>{{/started}}
+                {{#expires}}<div class="text-muted">{{#str}}liveslotsexpires, mod_gns3lab, {{expires}}{{/str}}</div>{{/expires}}
+            </td>
+            <td class="text-nowrap">
+                {{#observeurl}}<a class="btn btn-sm btn-secondary" href="{{observeurl}}">{{#str}}liveslotsobserve, mod_gns3lab{{/str}}</a>{{/observeurl}}
+                {{#stoppable}}
+                <a class="btn btn-sm btn-outline-danger" href="{{stopurl}}">{{#str}}stoplab, mod_gns3lab{{/str}}</a>
+                {{/stoppable}}
+            </td>
+        </tr>
+        {{/rows}}
+    </tbody>
+</table>
+</div>
+{{/hasrows}}
+{{^hasrows}}
+{{^warning}}<p>{{#str}}liveslotsnone, mod_gns3lab{{/str}}</p>{{/warning}}
+{{/hasrows}}

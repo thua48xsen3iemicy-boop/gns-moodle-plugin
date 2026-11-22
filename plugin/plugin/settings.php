@@ -18,7 +18,7 @@
  * Site settings for mod_gns3lab.
  *
  * Without the lab manager URL and secret activities show the bundled demo topology.
- * The site lab library is linked next to the settings; lab authors, who are not administrators,
+ * The site lab library and the busy slots page (administrators only) are linked next to the settings; lab authors, who are not administrators,
  * find it in the primary navigation (hook_callbacks::primary_extend).
  *
  * @package    mod_gns3lab
@@ -78,6 +78,13 @@ $ADMIN->add('modgns3labfolder', new admin_externalpage(
     new lang_string('library', 'gns3lab'),
     new \core\url('/mod/gns3lab/library.php'),
     'mod/gns3lab:managelabs',
+    $module->is_enabled() === false
+));
+$ADMIN->add('modgns3labfolder', new admin_externalpage(
+    'gns3labslots',
+    new lang_string('liveslots', 'gns3lab'),
+    new \core\url('/mod/gns3lab/slots.php'),
+    'moodle/site:config',
     $module->is_enabled() === false
 ));
 // The settings page is already in the tree.

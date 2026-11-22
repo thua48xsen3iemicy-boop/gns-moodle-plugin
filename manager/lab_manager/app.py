@@ -378,8 +378,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         # iso: POST /sessions/{id}/iso (CONTRACTS 2.12); a session says whether its lab has a source and a target
         # check-scripts: the teacher's scripts in `checks` and `result.scripts` of a run (CONTRACTS 2.9)
         # forecast: POST /forecasts, the teacher's mark from the facts alone (CONTRACTS 2.9a)
+        # live-sessions: GET /live-sessions, every live session of the site for its administrator (CONTRACTS 2.13)
         features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "forecast", "purge",
-                    "maintenance", "iso"]
+                    "maintenance", "iso", "live-sessions"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -452,6 +453,23 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if not s:
             raise ApiError(404, "session_not_found", "No session for this user and instance")
         return await present(s)
+
+    @app.get("/api/v1/live-sessions")
+    async def live_sessions(site=Depends(site_of)):
+        """CONTRACTS 2.13: the site administrator's page of busy slots. Slots are shared by the sites, so only
+        counts of them are given; sessions are this site's alone."""
+        rows = await store.site_live_sessions(site.slug)
+        slots = [r for r in await store.slots() if r["in_config"]]
+        maintenance = await services.maintenance.public_state() if rows else None
+        return {
+            "schema": "gns3lab.live_sessions/1",
+            "slots": {"total": len(slots),
+                      "free": sum(r["state"] == "free" for r in slots),
+                      "unavailable": sum(r["state"] in ("failed", "maintenance") for r in slots)},
+            "sessions": [dict(summary(s, maintenance), user_id=s["user_id"], instance_id=s["instance_id"],
+                              course_id=s["course_id"], library_lab_id=s["library_lab_id"],
+                              created_at=iso_or_none(s["created_at"])) for s in rows],
+        }
 
     @app.post("/api/v1/sessions")
     async def create_session(body: SessionCreate, site=Depends(site_of)):
