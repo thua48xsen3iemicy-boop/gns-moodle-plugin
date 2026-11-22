@@ -48,7 +48,8 @@ function strings(lang) {
     for (const m of text.matchAll(/^\$string\['([^']+)'\] = '((?:[^'\\]|\\.)*)';$/gm)) {
         out[m[1]] = m[2].replace(/\\(['\\])/g, '$1');
     }
-    return out;
+    // the few core strings the templates take from Moodle itself ({{#str}}back{{/str}})
+    return Object.assign({back: lang === 'ru' ? 'Назад' : 'Back'}, out);
 }
 
 fs.rmSync(dist, {recursive: true, force: true});

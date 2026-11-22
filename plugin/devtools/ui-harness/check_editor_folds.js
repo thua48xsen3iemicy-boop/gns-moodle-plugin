@@ -3,6 +3,8 @@
  * Checks the side columns of the lab editor in Chromium: the properties panel is wide enough for the devices of a segment
  * (no sideways scroll), the device list and the properties fold into tabs on the edges of the scheme and back, the scheme
  * keeps its centre, the browser remembers the choice over a reload, and on a phone the tabs sit on the top and the bottom.
+ * The edges of the columns are dragged (and moved with the arrow keys) to set their widths, which the browser remembers;
+ * the help of the network check fits the properties panel.
  *
  *   cd plugin/devtools/ui-harness && npm install && node check_editor_folds.js [--min] [--shots <dir>]
  *
@@ -103,7 +105,7 @@ const offset = page => page.evaluate(() => {
             const p = document.querySelector('.ed-props');
             return {w: Math.round(p.getBoundingClientRect().width), sw: p.scrollWidth, cw: p.clientWidth};
         });
-        check('the properties panel is 400 px wide', props.w === 400, JSON.stringify(props));
+        check('the properties panel is 440 px wide', props.w === 440, JSON.stringify(props));
         check('...and a segment with devices does not scroll sideways', props.sw <= props.cw, JSON.stringify(props));
 
         // ---- the device list folds into a tab and back
@@ -119,7 +121,7 @@ const offset = page => page.evaluate(() => {
         check('...and keeps its centre', Math.abs(o1.x - o0.x) <= 1 && Math.abs(o1.y - o0.y) <= 1, JSON.stringify({o0, o1}));
         await tab('props').click();
         check('the right tab hides the properties', await page.locator('.ed-props').isHidden()
-            && (await tab('props').getAttribute('aria-expanded')) === 'false' && (await svgWidth()) === w1 + 400);
+            && (await tab('props').getAttribute('aria-expanded')) === 'false' && (await svgWidth()) === w1 + 440);
         const tabs = await page.evaluate(() => {
             const s = document.querySelector('[data-region="svg"]').getBoundingClientRect();
             const [l, r] = [...document.querySelectorAll('.ed-fold')].map(b => b.getBoundingClientRect());
@@ -138,6 +140,62 @@ const offset = page => page.evaluate(() => {
         check('the tabs bring both back', await page.locator('.ed-palette').isVisible()
             && await page.locator('.ed-props').isVisible() && (await tab('props').getAttribute('title')) === 'Скрыть панель свойств');
         await page.screenshot({path: path.join(SHOTS, 'editor-unfolded.png')});
+
+        // ---- the help of the network check fits the panel (a long option of the select does not widen its column)
+        await page.goto(`${BASE}/editor.ru.checks.html${MIN}`);
+        await page.locator('.node').first().waitFor();
+        await page.locator('[data-network]').waitFor();
+        const fit = await page.evaluate(() => {
+            const p = document.querySelector('.ed-props').getBoundingClientRect();
+            const help = document.querySelector('[data-network]').parentElement.querySelector('small').getBoundingClientRect();
+            const sel = document.querySelector('[data-network]').getBoundingClientRect();
+            return {panel: Math.round(p.right), help: Math.round(help.right), select: Math.round(sel.right),
+                sw: document.querySelector('.ed-props').scrollWidth, cw: document.querySelector('.ed-props').clientWidth};
+        });
+        check('the help of the network check fits the properties panel',
+            fit.help <= fit.panel && fit.select <= fit.panel && fit.sw <= fit.cw, JSON.stringify(fit));
+
+        // ---- the edges are dragged to set the widths, the browser remembers them, a double click resets
+        const propsW = () => page.locator('.ed-props').evaluate(e => Math.round(e.getBoundingClientRect().width));
+        const paletteW = () => page.locator('.ed-palette').evaluate(e => Math.round(e.getBoundingClientRect().width));
+        const drag = async(side, dx) => {
+            const b = await page.locator(`[data-resize="${side}"]`).boundingBox();
+            const x = b.x + b.width / 2, y = b.y + b.height / 2;
+            await page.mouse.move(x, y);
+            await page.mouse.down();
+            await page.mouse.move(x + dx / 2, y);
+            await page.mouse.move(x + dx, y);
+            await page.mouse.up();
+        };
+        const c0 = await offset(page);
+        await drag('props', -120);
+        check('dragging the left edge of the properties widens them', await propsW() === 560, String(await propsW()));
+        const c1 = await offset(page);
+        check('...and the scheme keeps its centre', Math.abs(c1.x - c0.x) <= 1 && Math.abs(c1.y - c0.y) <= 1,
+            JSON.stringify({c0, c1}));
+        await drag('palette', 60);
+        check('dragging the right edge of the device list widens it', await paletteW() === 280, String(await paletteW()));
+        await drag('props', 1000);
+        check('the properties do not get narrower than 320 px', await propsW() === 320, String(await propsW()));
+        await drag('props', -2000);
+        const sw = await svgWidth();
+        check('...and the scheme keeps at least 240 px', sw >= 239, String(sw));
+        await page.locator('[data-resize="props"]').focus();
+        await page.keyboard.press('Home');
+        await page.keyboard.press('ArrowLeft');
+        check('the arrow keys move a focused edge', await propsW() === 336
+            && (await page.locator('[data-resize="props"]').getAttribute('aria-valuenow')) === '336', String(await propsW()));
+        await page.reload();
+        await page.locator('.node').first().waitFor();
+        check('the widths stay after a reload', await propsW() === 336 && await paletteW() === 280,
+            `${await propsW()} ${await paletteW()}`);
+        await page.locator('[data-resize="props"]').dblclick();
+        await page.locator('[data-resize="palette"]').dblclick();
+        check('a double click brings the usual widths back', await propsW() === 440 && await paletteW() === 220,
+            `${await propsW()} ${await paletteW()}`);
+        await tab('props').click();
+        check('a folded column has no edge to drag', await page.locator('[data-resize="props"]').isHidden());
+        await tab('props').click();
         await context.close();
 
         // ---- a phone: the list above, the properties below
@@ -165,6 +223,8 @@ const offset = page => page.evaluate(() => {
         await phone.screenshot({path: path.join(SHOTS, 'editor-folded-phone.png')});
         const noScroll = await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
         check('phone: no sideways scroll of the page', noScroll);
+        check('phone: no edges to drag', await phone.locator('[data-resize="palette"]').isHidden()
+            && await phone.locator('[data-resize="props"]').isHidden());
         await phoneContext.close();
 
         check('no errors in the page', !problems.length, problems.join(' | '));

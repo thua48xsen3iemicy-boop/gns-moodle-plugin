@@ -4647,8 +4647,27 @@ body.gns3lab-fullscreen {
 .gns3lab-editor .ed-swatch-pick { width: 28px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 4px; }
 .gns3lab-editor .ed-capture-dialog label { display: block; }
 /* side columns: wider properties, and both fold into tabs on the edges of the scheme (editor.js applyFolds) */
-.gns3lab-editor .ed-palette { width: 220px; box-sizing: border-box; }
-.gns3lab-editor .panel.ed-props { width: 400px; box-sizing: border-box; overflow-x: hidden; }
+.gns3lab-editor .ed-palette { width: var(--ed-palette-w, 220px); box-sizing: border-box; }
+.gns3lab-editor .panel.ed-props { width: var(--ed-props-w, 440px); box-sizing: border-box; overflow-x: hidden; }
+/* a field never grows past the panel: the longest option of a select does not widen its column (and clip the help) */
+.gns3lab-editor .ed-field { grid-template-columns: 8em minmax(0, 1fr); }
+.gns3lab-editor .ed-field > * { min-width: 0; max-width: 100%; }
+/* the edges between the scheme and the side columns are dragged to set their width (editor.js applyWidths) */
+.gns3lab-editor .ed-resize {
+    flex: none; width: 8px; margin: 0 -4px; z-index: 4; position: relative;
+    cursor: col-resize; touch-action: none; background: transparent;
+}
+.gns3lab-editor .ed-resize::after {
+    content: ""; position: absolute; inset: 0 3px; border-radius: 1px; background: transparent; transition: background .12s ease;
+}
+.gns3lab-editor .ed-resize:hover::after,
+.gns3lab-editor .ed-resize.on::after { background: var(--accent); }
+.gns3lab-editor .ed-resize:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gns3lab-editor.ed-resizing { cursor: col-resize; user-select: none; }
+.gns3lab-editor.ed-resizing iframe,
+.gns3lab-editor.ed-resizing .wrap { pointer-events: none; }
+.gns3lab-editor.ed-no-palette [data-resize="palette"],
+.gns3lab-editor.ed-no-props [data-resize="props"] { display: none; }
 .gns3lab-editor .ed-props td { overflow-wrap: anywhere; }
 .gns3lab-editor .ed-members .ed-host { width: 4.5em; }
 .gns3lab-editor.ed-no-palette .ed-palette,
@@ -4684,7 +4703,9 @@ body.gns3lab-fullscreen {
     .gns3lab-editor .ed-image-entry .ed-img { white-space: normal; }
     .gns3lab-editor .ed-image-entry { margin-bottom: .3rem; }
     /* the list is above the scheme and the properties below it: the tabs sit on the top and the bottom edge */
+    .gns3lab-editor .ed-palette,
     .gns3lab-editor .panel.ed-props { width: auto; }
+    .gns3lab-editor .ed-resize { display: none; }
     .gns3lab-editor .ed-fold.left,
     .gns3lab-editor .ed-fold.right {
         left: 50%; right: auto; top: auto; bottom: auto; transform: translateX(-50%); width: 56px; height: 18px;

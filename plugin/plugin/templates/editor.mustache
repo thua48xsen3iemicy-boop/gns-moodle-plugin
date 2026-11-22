@@ -62,6 +62,9 @@
     </header>
     <div class="stage">
         <aside class="ed-palette" id="{{uniqid}}-palette" data-region="palette" aria-label="{{#str}}ed_catalog, mod_gns3lab{{/str}}"></aside>
+        <div class="ed-resize" data-resize="palette" role="separator" aria-orientation="vertical" tabindex="0"
+            aria-controls="{{uniqid}}-palette" title="{{#str}}ed_fold_resize_palette, mod_gns3lab{{/str}}"
+            aria-label="{{#str}}ed_fold_resize_palette, mod_gns3lab{{/str}}"></div>
         <div class="wrap" data-region="wrap">
             <svg class="gns3lab-svg" data-region="svg" xmlns="http://www.w3.org/2000/svg" tabindex="0" aria-label="{{#str}}topology, mod_gns3lab{{/str}}">
             <defs>
@@ -85,6 +88,9 @@
                 title="{{#str}}ed_fold_props_hide, mod_gns3lab{{/str}}" aria-label="{{#str}}ed_fold_props_hide, mod_gns3lab{{/str}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button>
             <div class="gtoast" data-region="toast" role="status" hidden></div>
         </div>
+        <div class="ed-resize" data-resize="props" role="separator" aria-orientation="vertical" tabindex="0"
+            aria-controls="{{uniqid}}-props" title="{{#str}}ed_fold_resize_props, mod_gns3lab{{/str}}"
+            aria-label="{{#str}}ed_fold_resize_props, mod_gns3lab{{/str}}"></div>
         <aside class="panel ed-props" id="{{uniqid}}-props" data-region="props" aria-label="{{#str}}details, mod_gns3lab{{/str}}"></aside>
     </div>
 </div>
