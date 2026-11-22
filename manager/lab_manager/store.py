@@ -285,6 +285,16 @@ class Store:
             )
             return await cur.fetchall()
 
+    async def site_live_sessions(self, site):
+        """Every live session of a site, for the administrator's page: those holding a slot first."""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT * FROM sessions WHERE site = %s AND status NOT IN ('stopped', 'failed')"
+                " ORDER BY slot_vmid NULLS LAST, created_at",
+                (site,),
+            )
+            return await cur.fetchall()
+
     async def session(self, sid, site=None):
         async with self.pool.connection() as conn:
             if site is None:

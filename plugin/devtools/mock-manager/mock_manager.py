@@ -10,6 +10,7 @@
   с объектом conflict;
 - GET /sessions?user_id=&instance_id= — живая сессия или последняя завершённая, 404 — если не было;
   GET /sessions?instance_id= — список по одной записи на студента (для наблюдателя);
+  GET /live-sessions — живые сессии сайта и счётчики слотов (MOCK_SLOTS, по умолчанию 8) для администратора (§2.13);
 - сессия идёт queued → starting → running за ~5 с, со stage и progress; stop — stopping → stopped за ~2 с;
   options.max_duration задаёт expires_at; у failed-сессии error {"code", "retryable"};
 - у запущенной сессии topology (properties нод пустые), nodes со статусами и nodes_stale, если включено;
@@ -110,6 +111,7 @@ FIXTURES = Path(os.environ.get("MOCK_FIXTURES", Path(__file__).resolve().parents
 PORT = int(os.environ.get("MOCK_PORT", "8090"))
 SLOT_PORT = int(os.environ.get("MOCK_SLOT_PORT", "8091"))
 SECRET = os.environ.get("MOCK_SECRET", "dev-secret")
+MOCK_SLOTS = int(os.environ.get("MOCK_SLOTS", "8"))  # slots counted by GET /live-sessions
 SLOT_ADDRESS = os.environ.get("MOCK_SLOT_ADDRESS", "127.0.0.1")  # ключ в GW_SLOTS шлюза
 CONSOLE_TOKEN = os.environ.get("MOCK_CONSOLE_TOKEN", "dev-console-token")
 GW_INTERNAL_URL = os.environ.get("GW_INTERNAL_URL", "http://127.0.0.1:8080")
@@ -662,7 +664,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -751,6 +753,20 @@ async def find_session(request):
         return web.json_response([dict(m.summary(s), user_id=s.user_id) for s in rows])
     s = m.latest(site, user_id, instance_id)
     return web.json_response(m.present(s)) if s else error(404, "session_not_found", "No session")
+
+
+async def live_sessions(request):
+    """CONTRACTS 2.13: live sessions of the site for its administrator; the mock has MOCK_SLOTS slots, all its own."""
+    site = site_of(request)
+    m: Manager = request.app["m"]
+    rows = [s for s in m.sessions if s.site == site and s.status() not in ("stopped", "failed")]
+    bodies = [dict(m.summary(s), user_id=s.user_id, instance_id=None if s.mode else s.instance_id,
+                   course_id=s.course_id, library_lab_id=s.library_lab_id, created_at=iso(s.created)) for s in rows]
+    bodies.sort(key=lambda b: (b.get("slot_vmid") is None, b.get("slot_vmid") or 0, b["created_at"]))
+    busy = sum("slot_vmid" in b for b in bodies)
+    return web.json_response({"schema": "gns3lab.live_sessions/1",
+                              "slots": {"total": MOCK_SLOTS, "free": max(MOCK_SLOTS - busy, 0), "unavailable": 0},
+                              "sessions": bodies})
 
 
 async def create_session(request):
@@ -1725,6 +1741,7 @@ def make_apps():
     api.router.add_post("/api/v1/labs/validate", validate_lab)
     api.router.add_get("/api/v1/labs/{ref}/topology", lab_topology)
     api.router.add_get("/api/v1/sessions", find_session)
+    api.router.add_get("/api/v1/live-sessions", live_sessions)
     api.router.add_post("/api/v1/sessions", create_session)
     api.router.add_get("/api/v1/sessions/{sid}", get_session)
     api.router.add_post("/api/v1/sessions/{sid}/stop", stop_session)
