@@ -25,7 +25,6 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['backtoactivity'] = 'Назад, на страницу активности';
-$string['backtolibrary'] = 'Назад, в библиотеку лаб';
 $string['cachedef_activitysessions'] = 'Сессии студентов лабы для страницы преподавателя «Лабы курса»';
 $string['cachedef_facts'] = 'Снимки фактов запущенных лаб от менеджера';
 $string['cachedef_info'] = 'Что принимает и умеет менеджер лаб (GET /api/v1/info)';
