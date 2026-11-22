@@ -175,6 +175,8 @@ export class ConsoleConnection {
         this.pump = null;
         this.openedAt = 0;
         this.gotData = false;
+        // Nothing from the node has been written to this terminal yet: the next connection asks for the past output.
+        this.blank = true;
         this.noteTimer = null;
         this.pendingNote = null;
         this.encoder = new TextEncoder();
@@ -236,7 +238,9 @@ export class ConsoleConnection {
         this.term.options.disableStdin = ticket.readonly;
         let ws;
         try {
-            ws = new WebSocket(consoleUrl(ticket, this.nodeId));
+            // The gateway and the slot replay the tail of the output to a new terminal (CONTRACTS.md §6.2); a terminal
+            // that already shows output does not ask, or the output would be doubled.
+            ws = new WebSocket(consoleUrl(ticket, this.nodeId) + (this.blank ? '&history=1' : ''));
         } catch (error) {
             // A ws:// gateway on an https page or a malformed URL: the browser refuses at once, no close event follows.
             // Without this the console would stay "connecting" for good.
@@ -256,6 +260,7 @@ export class ConsoleConnection {
                 this.attempt = 0;
                 this.flushConnectedNote();
             }
+            this.blank = false;
             this.term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
         };
         ws.onclose = event => this.closed(ws, event);
