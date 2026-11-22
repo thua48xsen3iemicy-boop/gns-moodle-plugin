@@ -624,7 +624,8 @@ export function trace(m, fx, der, fromId, dst){
     hops.push({ nodeId: at, route: best.r || null, iface });
     let to = null;
     if (best.conn) {
-      const dom = der.l2.domFor(at, iface), mb = (der.l3.byIp.get(dst) || []).find(x => x.nodeId !== at && (!dom || !x.dom || x.dom === dom));
+      const here = at, dom = der.l2.domFor(here, iface);
+      const mb = (der.l3.byIp.get(dst) || []).find(x => x.nodeId !== here && (!dom || !x.dom || x.dom === dom));
       if (!mb) return out(false, { nodeId: at, unknown: false, text: `в подсети ${best.conn.c.key} адрес ${dst} не виден по L2` }, src);
       if (mb.down) return out(false, { nodeId: at, unknown: false, text: `интерфейс ${nm(mb.nodeId)} ${mb.iface.name} выключен или без несущей` }, src);
       to = mb.nodeId;
