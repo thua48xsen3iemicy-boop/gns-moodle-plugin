@@ -6,7 +6,8 @@
  *   PC1 and PC2 have the default route to R2 (their `gateway`); R2 a default route to R1 and a static route to
  *   10.2.20.0/24 via R3; R3 a static route back to 10.1.10.0/24 via R2, and a default route to a next hop nobody has
  *   in its subnet 10.0.13.0/30. R1 has no route back: PC1 reaches 10.2.20.0/24 there and back, 192.168.122.0/24 only one way.
- *   The arrows go from their node to the next hop, the broken one ends in "?", the findings name it, a tap on an arrow
+ *   The arrows show from the "Addresses" level of detail on (further out only those of a selected node), go from their
+ *   node to the next hop, the broken one ends in "?", the findings name it, a tap on an arrow
  *   selects its node and paints the subnet pills by what it reaches; the card of the node lists its routes and reach.
  *
  *   cd plugin/devtools/ui-harness && npm install && node check_routes.js [--min]
@@ -51,6 +52,12 @@ const get = url => new Promise((resolve, reject) => {
     }).on('error', reject);
 });
 
+/** Zooms the scheme to k round the centre of the scheme area. */
+const zoomTo = (page, k) => page.evaluate(k => {
+    const s = window.canvasStage, v = s.view, r = s.wrap.getBoundingClientRect(), q = k / v.k;
+    s.animateTo({k, tx: r.width / 2 - (r.width / 2 - v.tx) * q, ty: r.height / 2 - (r.height / 2 - v.ty) * q}, 0);
+}, k);
+
 async function scenario(browser, theme) {
     const context = await browser.newContext({viewport: {width: 1300, height: 760}, colorScheme: theme});
     const page = await context.newPage();
@@ -86,13 +93,39 @@ async function scenario(browser, theme) {
     await page.waitForFunction(() => window.canvasStage);
     await sleep(700);
 
+    // Far out the scheme shows the subnets alone; a selected node shows its routes; closer in all the routes show.
+    await zoomTo(page, 1.2);
+    await sleep(500);
+    const shownArrows = () => page.locator('.route-arrow').evaluateAll(gs => gs.filter(g => getComputedStyle(g).display !== 'none')
+        .map(g => g.dataset.routeNode.slice(-2)));
+    const far = await page.evaluate(() => window.canvasStage.svg.dataset.lod);
+    check('further out (level 1, "Labels") no route arrow shows', Number(far) < 2 && (await shownArrows()).length === 0, `lod ${far}`);
+    await page.evaluate(id => window.canvasStage.select({kind: 'node', id}), PRE + '03');
+    await sleep(200);
+    const selected = await shownArrows();
+    check('...but the routes of a selected node and those to it do', selected.includes('03') && selected.every(id => ['03', '04', '07', '08'].includes(id)),
+        JSON.stringify(selected));
+    await page.evaluate(() => window.canvasStage.select(null));
+    await zoomTo(page, 1.7);
+    await sleep(500);
+    const near = await page.evaluate(() => window.canvasStage.svg.dataset.lod);
+    check('closer in (level 2, "Addresses") every arrow shows', Number(near) >= 2 && (await shownArrows()).length === 7, `lod ${near}`);
+    await page.locator('[data-region="zoomFit"]').click();
+    await sleep(500);
+    // The tap below hits PC1's arrow: in at the "Addresses" level, with PC1 in the middle.
+    await page.evaluate(id => {
+        const s = window.canvasStage, n = s.model.nodes.get(id), r = s.wrap.getBoundingClientRect(), k = 1.7;
+        s.animateTo({k, tx: r.width / 2 - n.cx * k, ty: r.height / 2 - n.cy * k}, 0);
+    }, PRE + '07');
+    await sleep(500);
+
     const arrows = await page.locator('.route-arrow').evaluateAll(gs => gs.map(g => ({
         from: g.dataset.routeNode.slice(-2), to: (g.dataset.routeTo || '').slice(-2), cls: g.getAttribute('class'),
         label: g.querySelector('.route-label').textContent, end: g.querySelector('.route-end text')?.textContent || null})));
     const find = (from, to) => arrows.find(a => a.from === from && a.to === to);
     check('PC1 and PC2 have their default route to R2', ['07', '08'].every(id => find(id, '03') && / default/.test(find(id, '03').cls)
-        && find(id, '03').label === '0/0'), JSON.stringify(arrows));
-    check('R2 → R1 default and R2 → R3 static', find('03', '02')?.label === '0/0' && find('03', '04')?.label === '10.2.20.0/24');
+        && find(id, '03').label === '0.0.0.0/0'), JSON.stringify(arrows));
+    check('R2 → R1 default and R2 → R3 static', find('03', '02')?.label === '0.0.0.0/0' && find('03', '04')?.label === '10.2.20.0/24');
     check('R3 → R2 static back', find('04', '03')?.label === '10.1.10.0/24' && / ok/.test(find('04', '03').cls));
     const stub = arrows.find(a => a.from === '04' && !a.to);
     // Some demo nodes have no addresses in their facts: a missing next hop is a doubt (warn), not an error.
