@@ -479,6 +479,35 @@ check('Routes: the way there works, the way back does not (no route back on R2)'
     assert.match(r.back.fail.text, /у R2 нет маршрута до 10\.0\.1\.10/);
 });
 
+check('Routes: the provider (ISP) needs no way back to the networks of its client', () => {
+    // PC2 is the ISP of the lab: the node with the external port. It knows no network of the client, R2 has no
+    // routes collected, so the reach of 10.0.2.0/24 goes to the ISP.
+    const isp = buildModel({name: 'isp', topology: {
+        nodes: [...routed.nodes.values()].map(n => ({node_id: n.id, name: n.name === 'PC2' ? 'ISP' : n.name,
+            node_type: n.type, x: n.x, y: n.y, properties: {}, ...(n.name === 'PC2' ? {uplink: true} : {})})),
+        links: routed.links.map(l => ({link_id: l.id, nodes: [l.a, l.b].map(e => ({node_id: e.nodeId, adapter_number: e.adapter, port_number: e.port, label: {text: e.text}}))})),
+    }});
+    const nodes = {
+        [RID.PC1]: {status: 'started', interfaces: [rif('eth0', 0, '10.0.1.10/24')], routes: [def('10.0.1.1')]},
+        [RID.R1]: {status: 'started', interfaces: [rif('e0/0', 0, '10.0.1.1/24'), rif('e0/1', 1, '10.0.12.1/30')], routes: [def('10.0.12.2')]},
+        [RID.R2]: {status: 'started', interfaces: [rif('e0/0', 0, '10.0.12.2/30'), rif('e0/1', 1, '10.0.2.1/24')]},
+        [RID.PC2]: {status: 'started', interfaces: [rif('eth0', 0, '10.0.2.10/24')], routes: []},
+    };
+    const {fx, der} = derive(isp, doc(nodes));
+    const r = reach(isp, fx, der, RID.PC1).get('10.0.2.0/24');
+    assert.equal(r.target.nodeId, RID.PC2);
+    assert.equal(r.kind, 'ok');
+    assert.deepEqual(r.nat, {nodeId: RID.R2, ip: '10.0.2.1'});
+    assert.deepEqual(r.back.path.map(id => isp.nodes.get(id).name), ['ISP', 'R2']);
+    // Without the mark the same node is a host with no way back.
+    const plain = derive(routed, doc(nodes));
+    assert.equal(reach(routed, plain.fx, plain.der, RID.PC1).get('10.0.2.0/24').kind, 'oneway');
+    assert.match(texts(plain.der).join('\n'), /PC2: нет шлюза по умолчанию/);
+    // The provider has no reach of its own and no finding for its missing default route.
+    assert.equal(reach(isp, fx, der, RID.PC2).size, 0);
+    assert.doesNotMatch(texts(der).join('\n'), /ISP: нет шлюза/);
+});
+
 check('Routes: a next hop in another L2 domain of the same subnet', () => {
     // SW1 puts PC1 and R1 in different VLANs of one subnet.
     const m = buildModel({name: 'l2', topology: {

@@ -137,6 +137,16 @@ export const portName = (node, adapter, port) => {
  * @param {object} node node of the model
  * @returns {boolean}
  */
+/**
+ * The node is the provider of the lab (ISP): the node with the external port, a GNS3 cloud or NAT, or a node drawn as a
+ * cloud. A provider does not know the networks behind its client and needs no way back to them: it answers the address
+ * a packet came from (NAT on the border router).
+ *
+ * @param {object} node node of the model
+ * @returns {boolean}
+ */
+export const isProvider = node => !!node && (node.uplink === true || node.cat === 'cloud' || node.icon === 'cloud');
+
 export const isHost = node => ['pc', 'server'].includes(node.cat) && !node.guest
     && !['iou', 'dynamips', 'ethernet_switch', 'ethernet_hub'].includes(node.type);
 
@@ -223,6 +233,8 @@ export const buildModel = doc => {
         // The icon only draws the node: what the device is (snippets, hosts, switches) stays its category.
         node.icon = ICONS.includes(n.icon) ? n.icon : node.cat;
         node.guest = guestOf(n);
+        // The node with the external port of the lab (lab_definition::to_topology, the ticket of a library lab).
+        node.uplink = n.uplink === true || Number.isInteger(n.uplink_port);
         nodes.set(n.node_id, node);
     }
     const links = [];

@@ -47,7 +47,7 @@ export const STRING_KEYS = [
     'ui_canvas_no_check', 'ui_canvas_inspect_note', 'ui_canvas_routes', 'ui_canvas_route_dst', 'ui_canvas_route_via',
     'ui_canvas_route_state', 'ui_canvas_route_ok', 'ui_canvas_route_ecmp', 'ui_canvas_route_default', 'ui_canvas_reach',
     'ui_canvas_reach_there', 'ui_canvas_reach_back', 'ui_canvas_reach_direct', 'ui_canvas_reach_ok', 'ui_canvas_reach_oneway',
-    'ui_canvas_reach_fail', 'ui_canvas_reach_unknown', 'ui_canvas_route_foot',
+    'ui_canvas_reach_fail', 'ui_canvas_reach_unknown', 'ui_canvas_route_foot', 'ui_canvas_reach_nat', 'ui_canvas_reach_provider',
 ];
 
 /**
@@ -849,7 +849,8 @@ export class CanvasView {
         const s = this.stage, name = id => s.model.nodes.get(id)?.name || '?';
         const way = t => t.path.map(name).join(' → ') + (t.fail ? ' ✕ ' + t.fail.text : '');
         const text = s.s('ui_canvas_reach_' + r.kind);
-        return [text, r.there && s.s('ui_canvas_reach_there') + ': ' + way(r.there), r.back && s.s('ui_canvas_reach_back') + ': ' + way(r.back)]
+        const nat = r.nat ? ' (' + s.s('ui_canvas_reach_nat').replace('{$a}', name(r.nat.nodeId) + ' ' + r.nat.ip) + ')' : '';
+        return [text, r.there && s.s('ui_canvas_reach_there') + ': ' + way(r.there), r.back && s.s('ui_canvas_reach_back') + ': ' + way(r.back) + nat]
             .filter(Boolean).join('\n');
     }
 
