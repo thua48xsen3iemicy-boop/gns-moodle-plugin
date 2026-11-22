@@ -2023,6 +2023,109 @@ export const init = (prefix) => {
   });
   applyFolds();
 
+  /* the edges of the side columns are dragged (or moved with the arrow keys) to set their width; the browser remembers
+     it, a double click brings the usual width back, the scheme keeps its centre */
+  const WIDTH_KEY = "editor.widths";
+  const WIDTH = {palette: {def: 220, min: 160, max: 420}, props: {def: 440, min: 320, max: 900}};
+  const MIN_SCHEME = 240;
+  const widths = Object.assign({}, store.get(WIDTH_KEY, {}));
+  const column = side => root.querySelector(side === "palette" ? ".ed-palette" : ".ed-props");
+  /* the widest a column may get: its own limit, and the scheme keeps at least MIN_SCHEME pixels */
+  const maxWidth = side => {
+    const stage = root.querySelector(".stage").getBoundingClientRect().width;
+    const other = side === "palette" ? "props" : "palette";
+    const otherCol = column(other);
+    const taken = otherCol && otherCol.offsetParent !== null ? otherCol.getBoundingClientRect().width : 0;
+    return Math.max(WIDTH[side].min, Math.min(WIDTH[side].max, stage - taken - MIN_SCHEME));
+  };
+  const clampWidth = (side, w) => Math.round(Math.min(maxWidth(side), Math.max(WIDTH[side].min, w)));
+  const applyWidths = () => {
+    ["palette", "props"].forEach(side => {
+      if (typeof widths[side] === "number") {
+        root.style.setProperty(`--ed-${side}-w`, `${widths[side]}px`);
+      } else {
+        root.style.removeProperty(`--ed-${side}-w`);
+      }
+      const h = root.querySelector(`[data-resize="${side}"]`);
+      if (h) {
+        h.setAttribute("aria-valuemin", String(WIDTH[side].min));
+        h.setAttribute("aria-valuemax", String(WIDTH[side].max));
+        h.setAttribute("aria-valuenow", String(widths[side] ?? WIDTH[side].def));
+      }
+    });
+  };
+  /* sets a width and keeps the point of the scheme under its centre where it was */
+  const setWidth = (side, w) => {
+    const [mx, my] = viewCenter();
+    if (w === null) {
+      delete widths[side];
+    } else {
+      widths[side] = clampWidth(side, w);
+    }
+    applyWidths();
+    const r = svg.getBoundingClientRect();
+    view.tx = r.width / 2 - mx * view.k;
+    view.ty = r.height / 2 - my * view.k;
+    applyView();
+  };
+  root.querySelectorAll("[data-resize]").forEach(h => {
+    const side = h.dataset.resize;
+    /* the device list is on the left: dragging right widens it; the properties are on the right: dragging left */
+    const sign = side === "palette" ? 1 : -1;
+    h.addEventListener("pointerdown", e => {
+      if (e.button !== 0) {
+        return;
+      }
+      e.preventDefault();
+      const x0 = e.clientX, w0 = column(side).getBoundingClientRect().width;
+      h.setPointerCapture(e.pointerId);
+      h.classList.add("on");
+      root.classList.add("ed-resizing");
+      const move = ev => setWidth(side, w0 + sign * (ev.clientX - x0));
+      const up = () => {
+        h.removeEventListener("pointermove", move);
+        h.removeEventListener("pointerup", up);
+        h.removeEventListener("pointercancel", up);
+        h.classList.remove("on");
+        root.classList.remove("ed-resizing");
+        store.set(WIDTH_KEY, widths);
+      };
+      h.addEventListener("pointermove", move);
+      h.addEventListener("pointerup", up);
+      h.addEventListener("pointercancel", up);
+    });
+    h.addEventListener("dblclick", () => {
+      setWidth(side, null);
+      store.set(WIDTH_KEY, widths);
+    });
+    h.addEventListener("keydown", e => {
+      const step = e.shiftKey ? 64 : 16;
+      const w = column(side).getBoundingClientRect().width;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        setWidth(side, w + sign * (e.key === "ArrowRight" ? step : -step));
+      } else if (e.key === "Home" || e.key === "End") {
+        setWidth(side, e.key === "Home" ? WIDTH[side].min : WIDTH[side].max);
+      } else if (e.key === "Enter") {
+        setWidth(side, null);
+      } else {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      store.set(WIDTH_KEY, widths);
+    });
+  });
+  /* a saved width larger than a narrower window allows shrinks back with it */
+  window.addEventListener("resize", () => {
+    ["palette", "props"].forEach(side => {
+      if (typeof widths[side] === "number" && widths[side] > maxWidth(side)) {
+        widths[side] = clampWidth(side, widths[side]);
+      }
+    });
+    applyWidths();
+  });
+  applyWidths();
+
   initImages(root, D, {
     definition,
     catalog: updateCatalog,
