@@ -50,10 +50,20 @@ export const STRING_KEYS = [
     'ui_canvas_reach_fail', 'ui_canvas_reach_unknown', 'ui_canvas_route_foot',
 ];
 
-/** Short name of a route on its arrow: 0/0 for the default route, the network otherwise. */
+/**
+ * Short name of a route on its arrow: 0/0 for the default route, the network otherwise.
+ *
+ * @param {object} r route of facts.js
+ * @returns {string}
+ */
 const routeName = r => r.def ? '0/0' : r.dst;
 
-/** Class of a route arrow by its state: a loop or an error is bad, a doubt a warning, a backup unused. */
+/**
+ * Class of a route arrow by its state: a loop or an error is bad, a doubt a warning, a backup unused.
+ *
+ * @param {object} r route of facts.js
+ * @returns {string}
+ */
 const routeClass = r => r.loop || r.sev === 'bad' ? 'bad' : r.sev === 'warn' ? 'warn' : r.status === 'unused' ? 'unused' : 'ok';
 
 /** Radius of a port dot on L1, in screen pixels. */
