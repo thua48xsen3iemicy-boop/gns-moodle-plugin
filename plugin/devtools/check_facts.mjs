@@ -1,6 +1,7 @@
 // Checks the pure functions of plugin/amd/src/facts.js without Moodle or a browser: the state of the link ends
 // (docs/live-state.md §4, L1: a switch port repeats its link end), the L2 modes `none` and `native: null` (§3.1) and
-// the rows of the MAC table of a switch (§3.4).
+// the rows of the MAC table of a switch (§3.4), the static and default routes on L3 with the trace and the reach of a
+// node (§4, «Маршруты»).
 //
 //   node plugin/devtools/check_facts.mjs        (Node 22; exit code 1 if a scenario fails)
 import assert from 'node:assert/strict';
@@ -21,7 +22,7 @@ export async function load(url, context, next) {
     return next(url, url.startsWith(src) ? {...context, format: 'module'} : context);
 }`));
 const {buildModel} = await import(srcUrl + 'model.js');
-const {derive, endState, macTable} = await import(srcUrl + 'facts.js');
+const {derive, endState, macTable, reach, trace} = await import(srcUrl + 'facts.js');
 
 const nid = n => `00000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;
 const PC1 = nid(1), SW1 = nid(2), SW2 = nid(3);
@@ -368,6 +369,131 @@ check('Port labels: the "adapter/port" label GNS3 makes for an API link gives wa
     const text = id => [m.links.find(l => l.id === id).a.text, m.links.find(l => l.id === id).b.text];
     assert.deepEqual(text('gen'), ['e0/1', '0/0']); // SW2 has no port list: nothing better than the label
     assert.deepEqual(text('own'), ['uplink', 'E0']); // a label of the author's own stays; a host port is E0
+});
+
+// Routes: PC1 —(10.0.1.0/24)— R1 —(10.0.12.0/30)— R2 —(10.0.2.0/24)— PC2. R1 and R2 are IOL routers, the PCs VPCS.
+const RID = {PC1: nid(11), R1: nid(12), R2: nid(13), PC2: nid(14)};
+const routed = buildModel({name: 'routes', topology: {
+    nodes: Object.entries(RID).map(([name, id], k) => ({node_id: id, name, node_type: name.startsWith('R') ? 'iou' : 'vpcs',
+        x: k * 200, y: 0, properties: {}})),
+    links: [['PC1', 0, 'R1', 0], ['R1', 1, 'R2', 0], ['R2', 1, 'PC2', 0]].map(([a, pa, b, pb], k) => ({link_id: 'r' + k, nodes: [
+        {node_id: RID[a], adapter_number: 0, port_number: pa, label: {text: 'p' + pa}},
+        {node_id: RID[b], adapter_number: 0, port_number: pb, label: {text: 'p' + pb}},
+    ]})),
+}});
+const rif = (name, port, ip, extra = {}) => ({name, kind: 'physical', port: {adapter: 0, port}, admin: 'up', oper: 'up', ipv4: [ip], ...extra});
+const def = (via, extra = {}) => ({dst: 'default', via, ...extra});
+/** The working lab; `patch` changes the facts of some nodes before derive. */
+const routedLab = (patch = {}) => {
+    const nodes = {
+        [RID.PC1]: {status: 'started', interfaces: [rif('eth0', 0, '10.0.1.10/24')], routes: [def('10.0.1.1')]},
+        [RID.R1]: {status: 'started', interfaces: [rif('e0/0', 0, '10.0.1.1/24'), rif('e0/1', 1, '10.0.12.1/30')],
+            routes: [def('10.0.12.2')]},
+        [RID.R2]: {status: 'started', interfaces: [rif('e0/0', 0, '10.0.12.2/30'), rif('e0/1', 1, '10.0.2.1/24')],
+            routes: [{dst: '10.0.1.0/24', via: '10.0.12.1', proto: 'static'}]},
+        [RID.PC2]: {status: 'started', interfaces: [rif('eth0', 0, '10.0.2.10/24')], routes: [def('10.0.2.1')]},
+    };
+    Object.entries(patch).forEach(([name, fn]) => fn(nodes[RID[name]]));
+    return derive(routed, doc(nodes));
+};
+const routeOf = (der, name, k = 0) => der.l3.rt.byNode.get(RID[name])[k];
+const texts = der => der.l3.issues.map(i => i.text);
+const names = path => path.map(id => routed.nodes.get(id).name);
+
+check('Routes: a working lab has its next hops resolved and no route findings', () => {
+    const {fx, der} = routedLab();
+    assert.deepEqual([routeOf(der, 'PC1'), routeOf(der, 'R1'), routeOf(der, 'R2')].map(r => [r.status, r.to && routed.nodes.get(r.to.nodeId).name]),
+        [['ok', 'R1'], ['ok', 'R2'], ['ok', 'R1']]);
+    assert.equal(routeOf(der, 'PC1').toward, '10.0.1.0/24');
+    assert.deepEqual(texts(der), []);
+    const t = trace(routed, fx, der, RID.PC1, '10.0.2.10');
+    assert.equal(t.ok, true);
+    assert.deepEqual(names(t.path), ['PC1', 'R1', 'R2', 'PC2']);
+    assert.equal(t.src, '10.0.1.10');
+    const r = reach(routed, fx, der, RID.PC1);
+    assert.deepEqual([...r].map(([k, x]) => [k, x.kind]), [['10.0.1.0/24', 'direct'], ['10.0.2.0/24', 'ok'], ['10.0.12.0/30', 'ok']]);
+});
+
+check('Routes: a gateway nobody has, outside the subnets, the own address', () => {
+    const nohop = routedLab({PC1: f => { f.routes = [def('10.0.1.254')]; }}).der;
+    assert.equal(routeOf(nohop, 'PC1').status, 'nohop');
+    assert.equal(routeOf(nohop, 'PC1').toward, '10.0.1.0/24');
+    assert.match(texts(nohop).join('\n'), /PC1: маршрут по умолчанию через 10\.0\.1\.254 — адреса 10\.0\.1\.254 нет ни у одного устройства/);
+    const offnet = routedLab({PC1: f => { f.routes = [def('10.0.2.1')]; }}).der;
+    assert.equal(routeOf(offnet, 'PC1').status, 'offnet');
+    assert.match(texts(offnet).join('\n'), /шлюз 10\.0\.2\.1 не входит ни в одну подсеть PC1/);
+    const self = routedLab({PC1: f => { f.routes = [def('10.0.1.10')]; }}).der;
+    assert.equal(routeOf(self, 'PC1').status, 'self');
+});
+
+check('Routes: a node without facts makes a missing next hop a warning, not an error', () => {
+    const {der} = routedLab({PC1: f => { f.routes = [def('10.0.1.254')]; }, PC2: f => { delete f.interfaces; }});
+    assert.equal(routeOf(der, 'PC1').sev, 'warn');
+    assert.match(texts(der).join('\n'), /не найден среди собранных адресов/);
+});
+
+check('Routes: a host without a default route, an empty and an uncollected table', () => {
+    const none = routedLab({PC1: f => { f.routes = []; }}).der;
+    assert.match(texts(none).join('\n'), /PC1: нет шлюза по умолчанию/);
+    const unknown = routedLab({PC1: f => { delete f.routes; }}).der;
+    assert.doesNotMatch(texts(unknown).join('\n'), /нет шлюза/);
+    // Not collected: the gateway of the interface stands for the default route.
+    const gw = routedLab({PC1: f => { delete f.routes; f.interfaces[0].gateway = '10.0.1.1'; }}).der;
+    assert.deepEqual([routeOf(gw, 'PC1').status, routeOf(gw, 'PC1').from], ['ok', 'gateway']);
+});
+
+check('Routes: several default routes — the lower metric wins on Linux, IOS shares an equal one', () => {
+    const linux = routedLab({PC1: f => {
+        f.interfaces.push(rif('eth1', 1, '10.0.9.10/24'));
+        f.routes = [def('10.0.9.1', {metric: 200}), def('10.0.1.1', {metric: 100})];
+    }}).der;
+    // The backup route loses on its metric; its own problem (nobody has 10.0.9.1) stays in its reason.
+    assert.deepEqual([routeOf(linux, 'PC1', 0).status, routeOf(linux, 'PC1', 1).status], ['unused', 'ok']);
+    assert.match(routeOf(linux, 'PC1', 0).why, /metric 200 > 100 — резервный; адреса 10\.0\.9\.1 нет/);
+    const tie = routedLab({PC1: f => { f.routes = [def('10.0.1.1'), def('10.0.1.1', {metric: 0, dev: 'eth0'})]; }}).der;
+    assert.deepEqual([routeOf(tie, 'PC1', 0).status, routeOf(tie, 'PC1', 1).status], ['ok', 'unused']);
+    assert.match(texts(tie).join('\n'), /PC1: 2 маршрута по умолчанию .* работает только через 10\.0\.1\.1/);
+    const ios = routedLab({R2: f => {
+        f.interfaces.push(rif('e0/2', 2, '10.0.23.1/30'));
+        f.routes.push(def('10.0.12.1'), def('10.0.12.1', {metric: 250}));
+    }}).der;
+    assert.deepEqual([1, 2].map(k => routeOf(ios, 'R2', k).status), ['ok', 'unused']);
+    assert.match(routeOf(ios, 'R2', 2).why, /AD 250 > 1/);
+});
+
+check('Routes: a default route through a down interface is not installed; a loop of defaults is found', () => {
+    const down = routedLab({PC1: f => { f.interfaces[0].admin = 'down'; }}).der;
+    assert.equal(routeOf(down, 'PC1').status, 'down');
+    const loop = routedLab({R2: f => { f.routes.push(def('10.0.12.1')); }});
+    assert.equal(routeOf(loop.der, 'R1').loop, true);
+    assert.match(texts(loop.der).join('\n'), /Петля маршрутов по умолчанию: R1 → R2 → R1/);
+    const t = trace(routed, loop.fx, loop.der, RID.PC1, '192.0.2.1');
+    assert.equal(t.ok, false);
+    assert.match(t.fail.text, /петля: PC1 → R1 → R2 → R1/);
+});
+
+check('Routes: the way there works, the way back does not (no route back on R2)', () => {
+    const {fx, der} = routedLab({R2: f => { f.routes = []; }});
+    const r = reach(routed, fx, der, RID.PC1).get('10.0.2.0/24');
+    assert.equal(r.kind, 'oneway');
+    assert.match(r.back.fail.text, /у R2 нет маршрута до 10\.0\.1\.10/);
+});
+
+check('Routes: a next hop in another L2 domain of the same subnet', () => {
+    // SW1 puts PC1 and R1 in different VLANs of one subnet.
+    const m = buildModel({name: 'l2', topology: {
+        nodes: [[PC1, 'PC1', 'vpcs'], [SW1, 'SW1', 'qemu'], [SW2, 'R1', 'iou']].map(([id, name, type], k) => ({node_id: id, name, node_type: type, x: k * 200, y: 0, properties: {}})),
+        links: [[PC1, 0, SW1, 1], [SW1, 2, SW2, 0]].map(([a, pa, b, pb], k) => ({link_id: 'v' + k, nodes: [
+            {node_id: a, adapter_number: 0, port_number: pa, label: {text: 'p'}}, {node_id: b, adapter_number: 0, port_number: pb, label: {text: 'p'}}]})),
+    }});
+    const der = derive(m, doc({
+        [PC1]: {status: 'started', interfaces: [rif('eth0', 0, '10.0.1.10/24')], routes: [def('10.0.1.1')]},
+        [SW1]: {status: 'started', interfaces: [ifc('e1', 1, {switchport: {mode: 'access', vlan: 10}, mirror: true}), ifc('e2', 2, {switchport: {mode: 'access', vlan: 20}, mirror: true})]},
+        [SW2]: {status: 'started', interfaces: [rif('e0/0', 0, '10.0.1.1/24')]},
+    })).der;
+    const r = der.l3.rt.byNode.get(PC1)[0];
+    assert.equal(r.status, 'l2');
+    assert.equal(r.sev, 'bad');
 });
 
 if (failures.length) {

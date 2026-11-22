@@ -26,7 +26,7 @@ import {svgEl as el, store} from 'mod_gns3lab/dom';
 import {clamp, isHost} from 'mod_gns3lab/model';
 import {factsStatus, layerHelp, layerIssues} from 'mod_gns3lab/canvasfacts';
 import {PILL_H, canvasL2, linkDirections} from 'mod_gns3lab/canvasmodel';
-import {linkOfIf, portStp, stpBlocks, stpRoot, stpShort} from 'mod_gns3lab/facts';
+import {linkOfIf, portStp, reach, stpBlocks, stpRoot, stpShort} from 'mod_gns3lab/facts';
 
 export const STRING_KEYS = [
     'ui_canvas_title', 'ui_canvas_l4', 'ui_canvas_duplex',
@@ -44,8 +44,17 @@ export const STRING_KEYS = [
     'ui_canvas_guests', 'ui_canvas_type', 'ui_canvas_all_vlans', 'ui_canvas_disabled',
     'ui_canvas_no_l2', 'ui_canvas_no_layer_data', 'ui_canvas_directions', 'ui_canvas_issues',
     'ui_canvas_related', 'ui_canvas_members', 'ui_canvas_no_objects', 'ui_canvas_no_issues',
-    'ui_canvas_no_check', 'ui_canvas_inspect_note',
+    'ui_canvas_no_check', 'ui_canvas_inspect_note', 'ui_canvas_routes', 'ui_canvas_route_dst', 'ui_canvas_route_via',
+    'ui_canvas_route_state', 'ui_canvas_route_ok', 'ui_canvas_route_ecmp', 'ui_canvas_route_default', 'ui_canvas_reach',
+    'ui_canvas_reach_there', 'ui_canvas_reach_back', 'ui_canvas_reach_direct', 'ui_canvas_reach_ok', 'ui_canvas_reach_oneway',
+    'ui_canvas_reach_fail', 'ui_canvas_reach_unknown', 'ui_canvas_route_foot',
 ];
+
+/** Short name of a route on its arrow: 0/0 for the default route, the network otherwise. */
+const routeName = r => r.def ? '0/0' : r.dst;
+
+/** Class of a route arrow by its state: a loop or an error is bad, a doubt a warning, a backup unused. */
+const routeClass = r => r.loop || r.sev === 'bad' ? 'bad' : r.sev === 'warn' ? 'warn' : r.status === 'unused' ? 'unused' : 'ok';
 
 /** Radius of a port dot on L1, in screen pixels. */
 export const PORT_DOT = 4.5;
@@ -135,6 +144,7 @@ export class CanvasView {
         this.l2 = this.stage.layer === 'l2' && this.stage.der ? canvasL2(this.stage) : null;
         this.nodeLayer = null;
         this.subnets = (this.stage.der?.l3.subnets || []).map(x => ({...x, cx: x.x, cy: x.y}));
+        this.routeArrows = [];
         this.leads = this.stage.L.leads;
     }
 
@@ -314,8 +324,88 @@ export class CanvasView {
         }
     }
 
+    /**
+     * Static and default routes on L3: an arrow from the node to its next hop, bent to the left of its way so that the
+     * routes of two neighbours to each other part. A next hop that is not on the scheme ends in a short stub towards
+     * the subnet of the route with "?" (nobody has the address) or "×" (the route does not work at all).
+     * Routes of one node with the same end and state share one arrow.
+     */
+    renderRoutes() {
+        const s = this.stage, D = s.der, k = s.view.k;
+        this.routeArrows = [];
+        if (!D || !D.l3.rt) return;
+        const shown = id => { const n = s.model.nodes.get(id); return n && !['hidden', 'silhouette'].includes(n.state) ? n : null; };
+        const groups = new Map();
+        D.l3.rt.routes.forEach(r => {
+            if (!shown(r.nodeId)) return;
+            const to = r.to && shown(r.to.nodeId) ? r.to.nodeId : null, cls = routeClass(r);
+            const key = [r.nodeId, to || 'stub|' + (r.toward || ''), cls].join(' ');
+            if (!groups.has(key)) groups.set(key, {from: r.nodeId, to, toward: r.toward, cls, list: []});
+            groups.get(key).list.push(r);
+        });
+        const pairs = new Map();
+        groups.forEach(gr => {
+            const S = s.model.nodes.get(gr.from), lane = gr.from + '>' + (gr.to || 'stub|' + gr.toward);
+            const index = pairs.get(lane) || 0;
+            pairs.set(lane, index + 1);
+            const names = gr.list.map(routeName), label = names.slice(0, 2).join(', ') + (names.length > 2 ? ' +' + (names.length - 2) : '');
+            const def = gr.list.some(r => r.def);
+            const g = el('g', {class: `route-arrow dimmable ${gr.cls}${def ? ' default' : ''}${gr.list.some(r => r.ecmp) ? ' ecmp' : ''}`,
+                'data-route-node': gr.from, 'data-route-to': gr.to || ''}, s.L.l3);
+            el('title', {}, g).textContent = gr.list.map(r => `${S.name} → ${r.def ? s.s('ui_canvas_route_default') : r.dst} via ${r.via}`
+                + (r.why ? ' — ' + r.why : r.ecmp ? ' — ' + s.s('ui_canvas_route_ecmp') : '')).join('\n');
+            let a, c, b, end = null;
+            if (gr.to) {
+                const T = s.model.nodes.get(gr.to), dx = T.cx - S.cx, dy = T.cy - S.cy, len = Math.hypot(dx, dy) || 1;
+                const ux = dx / len, uy = dy / len, bend = Math.min(46, len * .2) + index * 16;
+                c = {x: (S.cx + T.cx) / 2 + uy * bend, y: (S.cy + T.cy) / 2 - ux * bend};
+                const from = this.toward(S, c, 30), to = this.toward(T, c, 34);
+                a = from; b = to;
+            } else {
+                const x = gr.toward && this.subnets.find(x => x.key === gr.toward);
+                let dx = x ? x.x - S.cx : 0, dy = x ? x.y - S.cy : -1;
+                const len = Math.hypot(dx, dy) || 1;
+                dx /= len; dy /= len;
+                // Off the line to the subnet, so that the stub does not hide it; several stubs fan out.
+                const turn = (gr.toward ? .5 : 0) + index * .35, ux = dx * Math.cos(turn) + dy * Math.sin(turn), uy = dy * Math.cos(turn) - dx * Math.sin(turn);
+                a = {x: S.cx + ux * 30, y: S.cy + uy * 30}; b = {x: S.cx + ux * 86, y: S.cy + uy * 86};
+                c = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+                end = gr.list.some(r => r.status === 'nohop') ? '?' : '×';
+            }
+            el('path', {class: 'stroke', d: `M${a.x} ${a.y} Q${c.x} ${c.y} ${b.x} ${b.y}`}, g);
+            el('path', {class: 'hit', d: `M${a.x} ${a.y} Q${c.x} ${c.y} ${b.x} ${b.y}`}, g);
+            if (end) {
+                const mark = el('g', {class: 'route-end', transform: `translate(${b.x} ${b.y})`}, g);
+                el('circle', {r: 8}, mark);
+                el('text', {y: 1}, mark).textContent = end;
+            } else {
+                const ang = Math.atan2(b.y - c.y, b.x - c.x) * 180 / Math.PI;
+                el('path', {class: 'head', d: 'M0 0 L-10 -5 L-10 5 Z', transform: `translate(${b.x} ${b.y}) rotate(${ang})`}, g);
+            }
+            // The label sits on the bend of the curve, where the quadratic Bézier is at t = 0.5.
+            const mx = (a.x + 2 * c.x + b.x) / 4, my = (a.y + 2 * c.y + b.y) / 4;
+            const group = el('g', {class: 'auto-label', 'data-priority': 3}, g);
+            el('text', {x: mx, y: my - 4 / k, class: 'route-label'}, group).textContent = label;
+            this.routeArrows.push({g, from: gr.from, to: gr.to, list: gr.list});
+        });
+    }
+
+    /**
+     * The point at a distance from the centre of a node towards another point.
+     *
+     * @param {{cx: number, cy: number}} n node
+     * @param {{x: number, y: number}} p point
+     * @param {number} d distance
+     * @returns {{x: number, y: number}}
+     */
+    toward(n, p, d) {
+        const dx = p.x - n.cx, dy = p.y - n.cy, len = Math.hypot(dx, dy) || 1;
+        return {x: n.cx + dx / len * d, y: n.cy + dy / len * d};
+    }
+
     renderL3() {
         const s = this.stage;
+        this.renderRoutes();
         this.subnets.forEach((x, index) => {
             x.edges = [];
             // Each subnet has its own colour, as each VLAN on L2: the pill, its lines and its address labels.
@@ -621,6 +711,7 @@ export class CanvasView {
     select() {
         const s = this.stage, sel = s.layer === 'l4' ? null : s.sel, D = s.der;
         s.svg.classList.toggle('has-sel', !!sel);
+        this.markReach(null);
         s.vp.querySelectorAll('.on,.sel,.connection-related,.connection-primary,.connection-dim').forEach(e => e.classList.remove('on', 'sel', 'connection-related', 'connection-primary', 'connection-dim'));
         const mark = (attr, id, primary = false) => s.svg.querySelectorAll(`[${attr}="${CSS.escape(String(id))}"]`).forEach(e => e.classList.add(...(primary ? ['on', 'sel'] : ['on'])));
         const nodes = new Set(), links = new Set(), subnets = new Set(), domains = new Set();
@@ -628,7 +719,10 @@ export class CanvasView {
         if (!sel) { this.scheduleLabels(); return; }
         if (sel.kind === 'node') {
             nodes.add(sel.id); mark('data-node', sel.id, true);
-            if (s.layer === 'l3' && D) D.l3.subnets.forEach(x => { if (x.members.some(m => m.nodeId === sel.id)) subnets.add(x.key); });
+            if (s.layer === 'l3' && D) {
+                D.l3.subnets.forEach(x => { if (x.members.some(m => m.nodeId === sel.id)) subnets.add(x.key); });
+                this.markReach(sel.id);
+            }
             else if (s.layer === 'l2' && this.l2) {
                 this.l2.virtuals.forEach(v => { if (v.orig.id === sel.id && v.domain) domains.add(v.domain); });
                 D.l2.domains.forEach(d => { if (d.nodes.has(sel.id)) domains.add(d); });
@@ -694,14 +788,59 @@ export class CanvasView {
             const l = s.model.links.find(l => l.id === id);
             if (l) { nodes.add(l.a.nodeId); nodes.add(l.b.nodeId); }
         });
+        // The routes of a selected node and those that lead to it, with their next hops.
+        if (sel.kind === 'node') (this.routeArrows || []).forEach(r => {
+            if (r.from !== sel.id && r.to !== sel.id) return;
+            r.g.classList.add('on');
+            nodes.add(r.from);
+            if (r.to) nodes.add(r.to);
+        });
         nodes.forEach(id => mark('data-node', id));
         // Never highlight other VLANs of a related chassis.
         if (this.l2 && sel.kind === 'node') this.l2.virtuals.forEach(v => { if (v.orig.id === sel.id) mark('data-virtual', v.id, true); });
-        s.vp.querySelectorAll('.node,.link,.l2-virtual,.l2-chassis,.subnet-object,.subnet-edge,[data-subnet].auto-label').forEach(g => {
+        s.vp.querySelectorAll('.node,.link,.l2-virtual,.l2-chassis,.subnet-object,.subnet-edge,[data-subnet].auto-label,.route-arrow').forEach(g => {
             g.classList.add(g.classList.contains('on') ? 'connection-related' : 'connection-dim');
             if (g.classList.contains('sel')) g.classList.add('connection-primary');
         });
         this.view();
+    }
+
+    /**
+     * Paints the subnet pills by what the selected node reaches (facts.js reach): connected, there and back, only there,
+     * not at all or not known. Null clears it.
+     *
+     * @param {string|null} id node
+     */
+    markReach(id) {
+        const s = this.stage, kinds = ['direct', 'ok', 'oneway', 'fail', 'unknown'];
+        this.subnets.forEach(x => {
+            if (!x.g) return;
+            kinds.forEach(kind => x.g.classList.remove('reach-' + kind));
+            const old = x.g.querySelector(':scope > title.reach');
+            if (old) old.remove();
+        });
+        if (!id || !s.der || !s.fx) return;
+        const map = reach(s.model, s.fx, s.der, id);
+        this.subnets.forEach(x => {
+            const r = map.get(x.key);
+            if (!x.g || !r) return;
+            x.g.classList.add('reach-' + r.kind);
+            el('title', {class: 'reach'}, x.g).textContent = this.reachText(r);
+        });
+    }
+
+    /**
+     * One line of the reach of a subnet: its kind, the way there and back, or where it ends.
+     *
+     * @param {object} r see facts.js reach
+     * @returns {string}
+     */
+    reachText(r) {
+        const s = this.stage, name = id => s.model.nodes.get(id)?.name || '?';
+        const way = t => t.path.map(name).join(' → ') + (t.fail ? ' ✕ ' + t.fail.text : '');
+        const text = s.s('ui_canvas_reach_' + r.kind);
+        return [text, r.there && s.s('ui_canvas_reach_there') + ': ' + way(r.there), r.back && s.s('ui_canvas_reach_back') + ': ' + way(r.back)]
+            .filter(Boolean).join('\n');
     }
 
     scheduleLabels() {

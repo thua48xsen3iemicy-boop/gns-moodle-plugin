@@ -14,8 +14,8 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Device facts of a lab and the layers derived from them: L1 physical, L2 VLAN, L3 IP, OSPF. Also the MAC table of a
- * switch, for display only.
+ * Device facts of a lab and the layers derived from them: L1 physical, L2 VLAN, L3 IP with the static and default
+ * routes, OSPF. Also the MAC table of a switch, for display only.
  *
  * Pure functions without DOM access. The format of the facts and the rules of every layer are described in
  * docs/live-state.md. The texts of the findings are still Russian literals, as they were in the first viewer;
@@ -29,7 +29,7 @@
 // Straight port of the first viewer; these style rules stay relaxed until the finding texts move to lang strings.
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 
-import {natSort} from 'mod_gns3lab/model';
+import {isHost, natSort} from 'mod_gns3lab/model';
 
 const NODE_OFF = {stopped: "остановлен", suspended: "на паузе"};
 
@@ -58,6 +58,8 @@ function indexFacts(m, facts){
     const ifs = Array.isArray(f.interfaces) ? f.interfaces.filter(i => i && i.name) : null;
     const rec = { id: n.id, status: f.status || null, ifs, byName: new Map(), rid: f.router_id || null,
       adj: Array.isArray(f.adjacencies) ? f.adjacencies : [], vlans: Array.isArray(f.vlans) ? f.vlans : [],
+      // No `routes` means "not collected", which is not the same as an empty table (docs/live-state.md §3.3).
+      routes: Array.isArray(f.routes) ? f.routes.filter(r => r && typeof r === "object") : null,
       // The last collection failed: the facts beside it are the last known ones, not the current ones.
       err: f.error && typeof f.error === "object" ? f.error : null, at: f.collected_at || null,
       // No `mac_table` (or one without a list) means "not collected", which is not the same as an empty table.
@@ -408,7 +410,7 @@ function deriveL3(m, fx, l2){
     s.x = best ? best.x : x0; s.y = best ? best.y : y0;
     busy.push({ x: s.x, y: s.y, rx: 104, ry: 26 });
   });
-  return { subnets: list, nodes, issues };
+  return { subnets: list, nodes, issues, byIp };
 }
 
 /* маршрутизация: соседства из фактов + ожидаемые (OSPF на обоих концах одного L2-домена или кабеля) */
@@ -457,6 +459,212 @@ function missReason(h, l1){
   if (ca && cb && ca.key !== cb.key) return `адреса в разных подсетях: ${ca.ip}/${ca.pre} и ${cb.ip}/${cb.pre} — проверьте маски`;
   if (String(h.ia.ospf.area) !== String(h.ib.ospf.area)) return `разные area: ${h.ia.ospf.area} и ${h.ib.ospf.area}`;
   return "по собранным фактам причина не видна — проверьте таймеры hello/dead, аутентификацию и MTU";
+}
+
+/*
+ * Маршруты на L3 (docs/live-state.md §4, «Маршруты»): статические маршруты и маршрут по умолчанию — стрелка от узла к
+ * следующему шагу. Подключённые сети и маршруты без via (через интерфейс) не рисуются: их показывает сама подсеть.
+ * Нет `routes` (не собирались) — маршрут по умолчанию берётся из `gateway` интерфейсов.
+ * Маршрут, который устройство не установит (шлюз вне своих подсетей, свой адрес, выходной интерфейс не работает),
+ * в выборе не участвует. Из установленных к одной сети побеждает меньшая метрика (у IOS — административное
+ * расстояние, без метрики 1; у остальных без метрики 0); при равной IOS делит нагрузку (ECMP), другие берут первый.
+ */
+const DEFAULT_DST = "0.0.0.0/0";
+const NOT_INSTALLED = new Set(["self", "offnet", "down"]);
+export const routeInstalled = r => !NOT_INSTALLED.has(r.status);
+export const routeActive = r => routeInstalled(r) && r.status !== "unused";
+const dstName = r => r.def ? "по умолчанию" : `в ${r.dst}`;
+const ifUp = (fx, l1, f, i) => {
+  if (!i || i.admin === "down" || i.oper === "down") return false;
+  const p = portOf(f, i), e = p && l1.ends.get(f.id + "|" + p.adapter + "/" + p.port);
+  return !(e && e.down);
+};
+/* интерфейсы узла, в подсети которых адрес v: сначала dev маршрута, затем самая длинная маска */
+const connectedTo = (f, v, dev) => (f.ifs || []).filter(i => i.kind !== "loopback")
+  .flatMap(i => v4(i).filter(c => v >= c.net && v < c.net + c.size).map(c => ({ i, c })))
+  .sort((a, b) => (b.i.name === dev) - (a.i.name === dev) || b.c.pre - a.c.pre);
+const ownsIp = (f, v) => (f.ifs || []).some(i => v4(i).some(c => c.addr === v));
+
+function nodeRoutes(f){
+  const list = [];
+  (f.routes || []).forEach(r => {
+    const def = r.dst === "default" || r.dst === DEFAULT_DST, c = cidr(def ? DEFAULT_DST : r.dst);
+    if (!c || r.via == null || ip4(r.via) == null) return;
+    list.push({ dst: c.key, c, def: c.pre === 0, via: String(r.via), dev: r.dev || null, proto: r.proto || null,
+      metric: Number.isFinite(+r.metric) && r.metric !== null && r.metric !== "" ? +r.metric : null, from: "routes" });
+  });
+  if (!f.routes) (f.ifs || []).forEach(i => {
+    if (i.gateway == null || ip4(i.gateway) == null || list.some(r => r.via === String(i.gateway))) return;
+    list.push({ dst: DEFAULT_DST, c: cidr(DEFAULT_DST), def: true, via: String(i.gateway), dev: i.name, proto: "gateway", metric: null, from: "gateway" });
+  });
+  return list;
+}
+
+function deriveRoutes(m, fx, l1, l2, l3){
+  const routes = [], issues = [], byNode = new Map();
+  const partial = [...m.nodes.keys()].some(id => !fx.nodes.has(id) || !fx.nodes.get(id).ifs);
+  const nm = id => m.nodes.get(id).name;
+  const owners = v => l3.byIp.get(ipStr(v)) || [];
+  fx.nodes.forEach(f => {
+    if (!f.ifs) return;
+    const N = m.nodes.get(f.id), ios = N.type === "iou" || N.type === "dynamips", mine = [];
+    nodeRoutes(f).forEach((r, k) => {
+      const v = ip4(r.via), rec = { ...r, id: f.id + "|" + k, nodeId: f.id, order: k, to: null, toward: null, ifc: null, status: "ok", sev: null, why: "" };
+      mine.push(rec); routes.push(rec);
+      if (ownsIp(f, v)) { rec.status = "self"; rec.sev = "bad"; rec.why = `${r.via} — собственный адрес ${N.name}`; return; }
+      const hit = connectedTo(f, v, r.dev)[0];
+      if (!hit) { rec.status = "offnet"; rec.sev = "bad"; rec.why = `шлюз ${r.via} не входит ни в одну подсеть ${N.name}`; return; }
+      rec.ifc = hit.i; rec.toward = hit.c.key;
+      if (!ifUp(fx, l1, f, hit.i)) { rec.status = "down"; rec.sev = "warn"; rec.why = `интерфейс ${hit.i.name} выключен или без несущей — маршрут не действует`; return; }
+      const dom = l2.domFor(f.id, hit.i), all = owners(v).filter(mb => mb.nodeId !== f.id);
+      const mb = all.find(x => x.dom && x.dom === dom) || all[0];
+      if (!mb) {
+        rec.status = "nohop"; rec.sev = partial ? "warn" : "bad";
+        rec.why = partial ? `адрес ${r.via} не найден среди собранных адресов` : `адреса ${r.via} нет ни у одного устройства`;
+        return;
+      }
+      rec.to = { nodeId: mb.nodeId, iface: mb.iface };
+      if (mb.down) { rec.status = "hopdown"; rec.sev = "warn"; rec.why = `интерфейс шлюза ${nm(mb.nodeId)} ${mb.iface.name} выключен или без несущей`; return; }
+      if (dom && mb.dom && dom !== mb.dom) { rec.status = "l2"; rec.sev = "bad"; rec.why = `шлюз ${nm(mb.nodeId)} ${mb.iface.name} в той же подсети, но в другом L2-домене — кадры до него не дойдут`; }
+    });
+    // IOS resolves a next hop outside its subnets through its other routes (a recursive static route); Linux and the
+    // other hosts refuse such a route.
+    if (ios) mine.filter(r => r.status === "offnet").forEach(r => {
+      const v = ip4(r.via);
+      const via = mine.filter(o => o !== r && o.status === "ok" && v >= o.c.net && v < o.c.net + o.c.size).sort((a, b) => b.c.pre - a.c.pre)[0];
+      if (!via) return;
+      const mb = owners(v).find(x => x.nodeId !== f.id);
+      Object.assign(r, { status: "recursive", sev: null, ifc: via.ifc, toward: null, to: mb ? { nodeId: mb.nodeId, iface: mb.iface } : via.to,
+        why: `рекурсивно: ${r.via} — через ${via.via}` });
+    });
+    // Several installed routes to one network: the lower metric wins, a tie is ECMP on IOS and the first route elsewhere.
+    const groups = new Map();
+    mine.filter(routeInstalled).forEach(r => (groups.get(r.dst) || groups.set(r.dst, []).get(r.dst)).push(r));
+    groups.forEach(list => {
+      if (list.length < 2) return;
+      const metric = r => r.metric != null ? r.metric : ios ? 1 : 0, best = Math.min(...list.map(metric));
+      const top = list.filter(r => metric(r) === best);
+      list.forEach(r => {
+        if (metric(r) > best) {
+          r.why = `${ios ? "AD" : "metric"} ${metric(r)} > ${best} — резервный` + (r.why ? "; " + r.why : "");
+          r.status = "unused"; r.sev = null;
+        }
+      });
+      if (ios && top.length > 1) top.forEach(r => { r.ecmp = true; });
+      else top.slice(1).forEach(r => { r.status = "unused"; r.sev = null; r.why = `та же ${ios ? "AD" : "metric"}, работает маршрут через ${top[0].via}, он раньше в таблице`; });
+    });
+    byNode.set(f.id, mine);
+    const where = r => `${N.name}: маршрут ${dstName(r)} через ${r.via}`;
+    mine.filter(r => r.sev).forEach(r => issues.push({ sev: r.sev, text: `${where(r)} — ${r.why}.`, go: { kind: "node", id: f.id } }));
+    const defs = mine.filter(r => r.def);
+    if (defs.length > 1) {
+      const live = defs.filter(routeActive);
+      issues.push({ sev: "warn", go: { kind: "node", id: f.id }, text: `${N.name}: ${defs.length} маршрута по умолчанию (${defs.map(r => r.via).join(", ")}); `
+        + (!live.length ? "ни один не работает." : live.length > 1 ? `нагрузка делится между ${live.map(r => r.via).join(" и ")} (ECMP).` : `работает только через ${live[0].via}.`) });
+    }
+    if (isHost(N) && f.routes && !defs.length && f.ifs.some(i => i.kind !== "loopback" && v4(i).length))
+      issues.push({ sev: "warn", text: `${N.name}: нет шлюза по умолчанию — за пределы своих подсетей узел не выйдет.`, go: { kind: "node", id: f.id } });
+  });
+  // A loop of default routes: a packet to an unknown network goes round it until its TTL runs out.
+  const next = id => (byNode.get(id) || []).filter(r => r.def && routeActive(r) && r.to).map(r => r.to.nodeId);
+  const loops = new Set();
+  byNode.forEach((_, start) => {
+    const path = [start];
+    const walk = id => {
+      for (const n of next(id)) {
+        const at = path.indexOf(n);
+        if (at >= 0) {
+          const cyc = path.slice(at), key = [...cyc].sort().join("|");
+          if (!loops.has(key)) {
+            loops.add(key);
+            cyc.forEach((x, k) => (byNode.get(x) || []).forEach(r => { if (r.def && r.to && r.to.nodeId === cyc[(k + 1) % cyc.length]) r.loop = true; }));
+            issues.push({ sev: "bad", text: `Петля маршрутов по умолчанию: ${[...cyc, cyc[0]].map(nm).join(" → ")} — пакет в неизвестную сеть будет ходить по кругу.`, go: { kind: "node", id: cyc[0] } });
+          }
+        } else if (path.length < 32) { path.push(n); walk(n); path.pop(); }
+      }
+    };
+    walk(start);
+  });
+  return { routes, byNode, issues };
+}
+
+/**
+ * Follows a packet from a node to an address by the facts: on each node the connected subnet or the active route with
+ * the longest prefix, then the owner of the next hop. Hosts and routers alike forward.
+ *
+ * @param {object} m model from buildModel
+ * @param {object} fx index from derive
+ * @param {object} der derived layers
+ * @param {string} fromId node the packet starts at
+ * @param {string} dst destination address ("10.0.2.10")
+ * @returns {{ok: boolean, path: string[], hops: object[], src: string|null, fail: {nodeId: string, text: string, unknown: boolean}|null}}
+ *   path: node ids from the start to where it ended; hops: per step {nodeId, route|null, iface}; src: address the packet
+ *   leaves the start with.
+ */
+export function trace(m, fx, der, fromId, dst){
+  const v = ip4(dst), path = [fromId], hops = [];
+  const out = (ok, fail, src) => ({ ok, path, hops, src, fail });
+  const nm = id => (m.nodes.get(id) || { name: "?" }).name;
+  let at = fromId, src = null;
+  for (let ttl = 0; ttl < 32; ttl++) {
+    const f = fx.nodes.get(at);
+    if (!f || !f.ifs) return out(false, { nodeId: at, text: `о ${nm(at)} нет собранных фактов`, unknown: true }, src);
+    if (ownsIp(f, v)) return out(true, null, src);
+    // Connected subnets of working interfaces and the active routes, the longest prefix first; a connected subnet
+    // wins a tie.
+    const conn = connectedTo(f, v).filter(x => ifUp(fx, der.l1, f, x.i)).map(x => ({ pre: x.c.pre, conn: x }));
+    const rts = (der.l3.rt.byNode.get(at) || []).filter(r => routeActive(r) && v >= r.c.net && v < r.c.net + r.c.size).map(r => ({ pre: r.c.pre, r }));
+    const best = [...conn, ...rts].sort((a, b) => b.pre - a.pre || !!a.r - !!b.r)[0];
+    if (!best) {
+      const unknown = !f.routes && !f.ifs.some(i => i.gateway);
+      return out(false, { nodeId: at, unknown, text: unknown ? `маршруты ${nm(at)} не собраны` : `у ${nm(at)} нет маршрута до ${dst}` }, src);
+    }
+    const iface = best.conn ? best.conn.i : best.r.ifc;
+    if (at === fromId) src = (v4(iface)[0] || {}).ip || null;
+    hops.push({ nodeId: at, route: best.r || null, iface });
+    let to = null;
+    if (best.conn) {
+      const dom = der.l2.domFor(at, iface), mb = (der.l3.byIp.get(dst) || []).find(x => x.nodeId !== at && (!dom || !x.dom || x.dom === dom));
+      if (!mb) return out(false, { nodeId: at, unknown: false, text: `в подсети ${best.conn.c.key} адрес ${dst} не виден по L2` }, src);
+      if (mb.down) return out(false, { nodeId: at, unknown: false, text: `интерфейс ${nm(mb.nodeId)} ${mb.iface.name} выключен или без несущей` }, src);
+      to = mb.nodeId;
+    } else {
+      if (!best.r.to || best.r.status !== "ok" && best.r.status !== "recursive")
+        return out(false, { nodeId: at, unknown: best.r.status === "nohop" && best.r.sev === "warn", text: `${nm(at)}: маршрут ${dstName(best.r)} через ${best.r.via} — ${best.r.why}` }, src);
+      to = best.r.to.nodeId;
+    }
+    if (path.includes(to)) { path.push(to); return out(false, { nodeId: to, unknown: false, text: `петля: ${path.map(nm).join(" → ")}` }, src); }
+    path.push(to); at = to;
+  }
+  return out(false, { nodeId: at, unknown: false, text: "путь длиннее 32 шагов" }, src);
+}
+
+/**
+ * What a node reaches: per subnet of L3, connected, or a trace there and back. The trace goes to a member of the
+ * subnet whose routes are known, if there is one: a node without them could not say whether it answers.
+ *
+ * @param {object} m model from buildModel
+ * @param {object} fx index from derive
+ * @param {object} der derived layers
+ * @param {string} fromId node
+ * @returns {Map<string, {kind: string, there: object|null, back: object|null, target: object|null}>} subnet key: kind is
+ *   `direct` (a working interface in it), `ok` (there and back), `oneway` (there, not back), `fail` or `unknown`
+ */
+export function reach(m, fx, der, fromId){
+  const out = new Map();
+  der.l3.subnets.forEach(s => {
+    if (s.members.some(mb => mb.nodeId === fromId && !mb.down)) { out.set(s.key, { kind: "direct", there: null, back: null, target: null }); return; }
+    // The member that can answer: a working interface of a node whose routes are known (a table or a gateway).
+    const knows = mb => { const f = fx.nodes.get(mb.nodeId); return !!f && (!!f.routes || f.ifs.some(i => i.gateway)); };
+    const others = s.members.filter(mb => mb.nodeId !== fromId);
+    const target = others.find(mb => !mb.down && knows(mb)) || others.find(mb => !mb.down) || others[0];
+    if (!target) { out.set(s.key, { kind: "unknown", there: null, back: null, target: null }); return; }
+    const there = trace(m, fx, der, fromId, target.c.ip);
+    if (!there.ok) { out.set(s.key, { kind: there.fail && there.fail.unknown ? "unknown" : "fail", there, back: null, target }); return; }
+    const back = there.src ? trace(m, fx, der, target.nodeId, there.src) : null;
+    out.set(s.key, { kind: back && back.ok ? "ok" : back && back.fail && back.fail.unknown ? "unknown" : "oneway", there, back, target });
+  });
+  return out;
 }
 
 const MAC_RE = /^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i;
@@ -549,6 +757,8 @@ export const derive = (m, factsDoc) => {
   if (!fx) {
     return null;
   }
-  const l1 = deriveL1(m, fx), l2 = deriveL2(m, fx, l1);
-  return {fx, der: {l1, l2, l3: deriveL3(m, fx, l2), rt: deriveRT(m, fx, l1, l2)}};
+  const l1 = deriveL1(m, fx), l2 = deriveL2(m, fx, l1), l3 = deriveL3(m, fx, l2);
+  l3.rt = deriveRoutes(m, fx, l1, l2, l3);
+  l3.issues.push(...l3.rt.issues);
+  return {fx, der: {l1, l2, l3, rt: deriveRT(m, fx, l1, l2)}};
 };
