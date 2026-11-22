@@ -5132,6 +5132,29 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-edge.connection-related:not(.down){stroke:var(--net-color,var(--accent));stroke-opacity:1}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-related:not(.warn) rect{stroke:var(--net-color,var(--accent));stroke-width:1.2}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-primary rect{stroke-width:1.5}
+/* L3 routes (facts.js deriveRoutes): an arrow from a node to its next hop; a stub ends in "?" or "×". */
+.gns3lab-student.canvas-ui .route-arrow{cursor:pointer;--route:var(--k-route)}
+.gns3lab-student.canvas-ui .route-arrow.warn{--route:var(--k-amber)}
+.gns3lab-student.canvas-ui .route-arrow.bad{--route:var(--k-problem)}
+.gns3lab-student.canvas-ui .route-arrow.unused{--route:var(--k-unknown)}
+.gns3lab-student.canvas-ui .route-arrow .stroke{fill:none;stroke:var(--route);stroke-width:1.3;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .route-arrow.default .stroke{stroke-width:2.2}
+.gns3lab-student.canvas-ui .route-arrow.unused .stroke,
+.gns3lab-student.canvas-ui .route-arrow.warn .stroke{stroke-dasharray:6 4}
+.gns3lab-student.canvas-ui .route-arrow.bad .stroke{stroke-dasharray:3 3}
+.gns3lab-student.canvas-ui .route-arrow.ecmp .stroke{stroke-dasharray:none;stroke-width:2.6;stroke-opacity:.85}
+.gns3lab-student.canvas-ui .route-arrow .hit{fill:none;stroke:transparent;stroke-width:12;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .route-arrow .head{fill:var(--route);stroke:none}
+.gns3lab-student.canvas-ui .route-arrow .route-end circle{fill:var(--k-vbox);stroke:var(--route);stroke-width:1.4;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui .route-arrow .route-end text{fill:var(--route);font:700 10px var(--mono);text-anchor:middle;dominant-baseline:middle}
+.gns3lab-student.canvas-ui .route-label{font:600 7.5px var(--mono);font-size:calc(10px * var(--inv,1));fill:var(--route);text-anchor:middle;paint-order:stroke;stroke:var(--canvas);stroke-width:3px;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.gns3lab-student.canvas-ui [data-region="vp"] .route-arrow.connection-related .stroke{stroke-width:2.6}
+/* What the selected node reaches: the pills of the other subnets stay readable and take the colour of the answer. */
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object[class*="reach-"].connection-dim{opacity:.9}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.reach-ok rect{stroke:var(--k-reach);stroke-width:1.6}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.reach-oneway rect{stroke:var(--k-amber);stroke-width:1.6;stroke-dasharray:5 3}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.reach-fail rect{stroke:var(--k-problem);stroke-width:1.6;stroke-dasharray:3 3}
+.gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.reach-unknown rect{stroke:var(--k-unknown);stroke-dasharray:2 3}
 .gns3lab-student.canvas-ui .link.unknown .wire{stroke:var(--off);stroke-dasharray:3 6}
 .gns3lab-student.canvas-ui .link.unknown .pdot{fill:var(--off)}
 .gns3lab-student.canvas-ui .link.unknown .duplex-arrow{stroke:var(--off)}
@@ -5395,6 +5418,8 @@ from{transform:translateY(40%);opacity:.3}
  --k-vl20:light-dark(#a8700c,#e5b971);
  --k-vltrunk:light-dark(#4a5fc4,#98aaf5);
  --k-l3wire:light-dark(#2b7ab0,#73b5df);
+ --k-route:light-dark(#3b55b8,#9fb2ff);
+ --k-reach:light-dark(#178a52,#6fdca2);
  --k-ghost:light-dark(#a9bec6,#93b8c6);
  --k-subnet-bg:light-dark(#eaf4f9,#193e50);
  --k-subnet-fg:light-dark(#12323f,#e3f7fc);

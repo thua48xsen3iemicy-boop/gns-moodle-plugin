@@ -1128,6 +1128,13 @@ export class Stage {
             this.select({kind: 'node', id: n.id});
             return;
         }
+        const route = near('[data-route-node]');
+        if (route) {
+            // A route arrow belongs to its node: a tap selects the node, which lights its routes and what it reaches.
+            this.call('closeOverlays');
+            this.select({kind: 'node', id: route.getAttribute('data-route-node')});
+            return;
+        }
         const info = near('[data-subnet-info]');
         if (info) {
             // The "i" of a subnet pill opens its card; a tap elsewhere on the pill only selects the subnet.

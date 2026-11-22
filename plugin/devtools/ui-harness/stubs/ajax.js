@@ -134,6 +134,13 @@ define([], function() {
         doc.generated_at = new Date(generated * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
         doc.nodes = JSON.parse(JSON.stringify(demo.facts[facts.variant].nodes));
         facts.patches.forEach(p => {
+            if (p.name === null) {
+                // A patch of the node itself (its routes, say), not of one of its interfaces.
+                if (doc.nodes[p.nodeId]) {
+                    Object.assign(doc.nodes[p.nodeId], p.fields);
+                }
+                return;
+            }
             const iface = ((doc.nodes[p.nodeId] || {}).interfaces || []).find(i => i.name === p.name);
             if (iface) {
                 Object.assign(iface, p.fields);
@@ -719,6 +726,11 @@ define([], function() {
             // The deciding facts of an interface change (a student raised it): the next poll shows it.
             patch: (nodeId, name, fields) => {
                 facts.patches.push({nodeId, name, fields});
+                facts.rev += 1;
+            },
+            // Fields of the node itself change, e.g. its `routes` (docs/live-state.md §3.3).
+            patchNode: (nodeId, fields) => {
+                facts.patches.push({nodeId, name: null, fields});
                 facts.rev += 1;
             },
             fail: (id, code = 'unreachable') => {

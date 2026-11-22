@@ -21,7 +21,7 @@
  * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
-import {endIf, endState, macTable, stpText} from 'mod_gns3lab/facts';
+import {endIf, endState, macTable, reach, stpText} from 'mod_gns3lab/facts';
 import {fmtFilters} from 'mod_gns3lab/model';
 import {linkDirections} from 'mod_gns3lab/canvasmodel';
 
@@ -145,8 +145,23 @@ export const objectData = (s, selected, layer, panel = 'ports') => {
         data.heads = [t('interface'), 'IPV4', t('state')];
         data.rows = ints.filter(i => i.ipv4?.length || i.kind === 'physical').map(i => [i.name, cell(i, 'ipv4', (i.ipv4 || []).join(', ') || '—'), cell(i, 'oper', i.admin === 'down' ? 'shutdown' : i.oper || '?')]);
         s.canvas.subnets.filter(x => x.members.some(m => m.nodeId === n.id)).forEach(x => data.related.push({kind: 'subnet', id: x.key, label: x.key}));
-        const gateways = [...new Set(ints.map(i => i.gateway).filter(Boolean))];
-        if (gateways.length) data.sections.push({title: t('gateways'), heads: [t('address')], rows: gateways.map(g => [g])});
+        const routes = s.der?.l3.rt?.byNode.get(n.id) || [];
+        if (routes.length) {
+            data.sections.push({title: t('routes'), heads: [t('route_dst'), t('route_via'), t('route_state')],
+                rows: routes.map(r => Object.assign([r.def ? t('route_default') : r.dst, r.via + (r.dev ? ' · ' + r.dev : ''),
+                    r.why || (r.ecmp ? t('route_ecmp') : t('route_ok'))], {go: r.to ? {kind: 'node', id: r.to.nodeId} : null}))});
+        } else {
+            const gateways = [...new Set(ints.map(i => i.gateway).filter(Boolean))];
+            if (gateways.length) data.sections.push({title: t('gateways'), heads: [t('address')], rows: gateways.map(g => [g])});
+        }
+        if (s.der && s.fx && s.der.l3.subnets.length) {
+            const map = reach(s.model, s.fx, s.der, n.id), name = id => s.model.nodes.get(id)?.name || '?';
+            const way = x => x ? x.path.map(name).join(' → ') + (x.fail ? ' ✕ ' + x.fail.text : '') : '—';
+            data.sections.push({title: t('reach'), heads: [t('subnet'), t('reach_there'), t('reach_back')],
+                rows: [...map].map(([key, r]) => Object.assign([key, r.kind === 'direct' ? t('reach_direct') : way(r.there),
+                    r.kind === 'direct' ? '—' : r.back ? way(r.back) : '—'], {go: {kind: 'subnet', id: key}}))});
+        }
+        data.foot = t('route_foot');
     }
     return data;
 };
