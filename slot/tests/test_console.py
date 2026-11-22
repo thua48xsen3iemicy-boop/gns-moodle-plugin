@@ -109,3 +109,95 @@ def test_console_token_unset_keeps_api_token_only(mock_server, monkeypatch):
     assert websocket_token_ok("lab-slot, bearer.test-token")
     assert not websocket_token_ok("lab-slot, bearer.")
     assert not websocket_token_ok("lab-slot, bearer.console-token")
+
+
+def test_history_keeps_the_output_once_and_trims_at_a_line(monkeypatch):
+    from api.console import ConsoleHistory
+
+    monkeypatch.setenv("SLOT_CONSOLE_HISTORY", "16")
+    history, first, second = ConsoleHistory(), object(), object()
+    assert history.opened("p1", "n1", first) == b""
+    history.record("n1", first, b"line1\r\n")
+    assert history.opened("p1", "n1", second) == b"line1\r\n"
+    # GNS3 sends the output to every connection: only the oldest console records it.
+    history.record("n1", second, b"twice\r\n")
+    history.record("n1", first, b"line2\r\nline3\r\n")
+    # Over the limit the history starts at the next line, not in the middle of one.
+    assert bytes(history.nodes["n1"].data) == b"line2\r\nline3\r\n"
+    history.closed("n1", first)
+    history.record("n1", second, b"x\n")
+    history.record("n1", second, b"y\n")
+    assert bytes(history.nodes["n1"].data) == b"line3\r\nx\ny\n"
+    history.closed("n1", second)
+    # The history outlives the consoles and goes with another lab.
+    assert history.opened("p1", "n1", first) == b"line3\r\nx\ny\n"
+    assert history.opened("p2", "n2", second) == b""
+    assert "n1" not in history.nodes
+
+
+def test_history_off(monkeypatch):
+    from api.console import ConsoleHistory
+
+    monkeypatch.setenv("SLOT_CONSOLE_HISTORY", "0")
+    history, console = ConsoleHistory(), object()
+    history.opened("p1", "n1", console)
+    history.record("n1", console, b"text\n")
+    assert history.opened("p1", "n1", object()) == b""
+
+
+@pytest.fixture
+def chatty_port():
+    """A telnet console: the first connection gets the boot log, every connection gets its input echoed."""
+    server = socket.create_server(("127.0.0.1", 0))
+    server.settimeout(5)
+    conns = []
+
+    def serve():
+        greeting = b"boot log\r\nR1> "
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            conns.append(conn)
+            conn.sendall(greeting)
+            greeting = b""  # GNS3 does not repeat old output to a new connection
+            threading.Thread(target=echo, args=(conn,), daemon=True).start()
+
+    def echo(conn):
+        try:
+            while data := conn.recv(1024):
+                conn.sendall(data)
+        except OSError:
+            pass
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    yield server.getsockname()[1]
+    server.close()
+    for c in conns:
+        c.close()
+    thread.join(timeout=2)
+
+
+def test_a_new_console_gets_the_history_only_when_it_asks(mock_server, monkeypatch, chatty_port):
+    monkeypatch.setenv("SLOT_CONSOLE_TOKEN", "console-token")
+    client, projects, nodes = mock_server
+    pid, nid = add_node(nodes, projects, chatty_port)
+    protocols = ["lab-slot.2", "lab-slot", "bearer.console-token"]
+
+    with client.websocket_connect(f"/v1/console/{pid}/{nid}", subprotocols=protocols) as ws:
+        out = b""
+        while not out.endswith(b"R1> "):
+            out += ws.receive_bytes()
+        assert out == b"boot log\r\nR1> "
+        with client.websocket_connect(f"/v1/console/{pid}/{nid}?history=1", subprotocols=protocols) as observer:
+            assert observer.receive_bytes() == b"boot log\r\nR1> "
+    # Without ?history=1 nothing old is sent: the first output is the echo of the input.
+    with client.websocket_connect(f"/v1/console/{pid}/{nid}", subprotocols=protocols) as ws:
+        ws.send_bytes(b"x")
+        assert ws.receive_bytes() == b"x"
+    # The history outlives the consoles and has the echo too.
+    with client.websocket_connect(f"/v1/console/{pid}/{nid}?history=1", subprotocols=protocols) as ws:
+        assert ws.receive_bytes() == b"boot log\r\nR1> x"
+    assert client.app.state.console_history.nodes[nid].writers == []

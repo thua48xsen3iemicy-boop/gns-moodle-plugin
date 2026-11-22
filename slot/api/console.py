@@ -5,9 +5,13 @@ vnc: QEMU screen, the raw RFB stream is passed through untouched.
 
 Subprotocols: "lab-slot" takes every frame as keyboard input. "lab-slot.2" (telnet only, CONTRACTS.md §6.1) takes binary
 frames as input and text frames as control JSON: `{"resize": {"cols", "rows"}}` sets the window size of a Linux guest.
+
+History (telnet only, CONTRACTS.md §6.2): the slot keeps the tail of each node's output and replays it to a new console that
+asks for it with `?history=1`, so a teacher who opens the console of a student sees what was printed before.
 """
 import asyncio
 import json
+import os
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -29,6 +33,72 @@ def window_sizes(app):
     if sizes is None:
         sizes = app.state.window_sizes = WindowSizes()
     return sizes
+
+
+def history_limit():
+    """Bytes of output kept per node; 0 turns the history off."""
+    try:
+        return max(0, int(os.environ.get("SLOT_CONSOLE_HISTORY", str(64 * 1024))))
+    except ValueError:
+        return 64 * 1024
+
+
+# A trimmed history starts at the beginning of a line when a newline is this close to the cut: a replay that starts in the
+# middle of an escape sequence or a UTF-8 character would print garbage.
+LINE_SEARCH = 4096
+
+
+class _NodeHistory:
+    __slots__ = ("pid", "data", "writers")
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.data = bytearray()
+        self.writers = []  # open consoles of the node, oldest first; only the oldest records
+
+
+class ConsoleHistory:
+    """The tail of the output of each node's text console.
+
+    Every console of a node opens its own telnet connection and GNS3 sends the output to all of them, so only the oldest
+    open console records it: the output is kept once. Output printed while no console is open is not seen by the slot.
+    """
+
+    def __init__(self):
+        self.nodes = {}
+
+    def opened(self, pid, node_id, console):
+        """Registers a console and returns the history to replay to it (taken before it records anything)."""
+        for other in [n for n, e in self.nodes.items() if e.pid != pid]:
+            del self.nodes[other]  # another lab runs in the slot now
+        entry = self.nodes.get(node_id)
+        if entry is None:
+            entry = self.nodes[node_id] = _NodeHistory(pid)
+        entry.writers.append(console)
+        return bytes(entry.data)
+
+    def record(self, node_id, console, data):
+        entry = self.nodes.get(node_id)
+        if entry is None or not entry.writers or entry.writers[0] is not console:
+            return
+        limit = history_limit()
+        entry.data += data
+        excess = len(entry.data) - limit
+        if excess > 0:
+            cut = entry.data.find(b"\n", excess, excess + LINE_SEARCH)
+            del entry.data[:excess if cut < 0 else cut + 1]
+
+    def closed(self, node_id, console):
+        entry = self.nodes.get(node_id)
+        if entry is not None and console in entry.writers:
+            entry.writers.remove(console)  # the history stays for the next console
+
+
+def console_history(app):
+    history = getattr(app.state, "console_history", None)
+    if history is None:
+        history = app.state.console_history = ConsoleHistory()
+    return history
 
 
 class TelnetStripper:
@@ -152,6 +222,9 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
         await bridge_vnc(websocket, reader, writer)
         return
     stripper = TelnetStripper()
+    history = console_history(websocket.app)
+    me = object()  # this console in the history of the node
+    past = history.opened(str(project_id), str(node_id), me)
     # Only a QEMU node can have a guest agent; whether it has one and runs Linux is asked when a size comes.
     lifecycle = getattr(websocket.app.state, "lifecycle", None)
     sizes = None
@@ -170,6 +243,7 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
                 writer.write(reply)
                 await writer.drain()
             if text:
+                history.record(str(node_id), me, text)
                 await websocket.send_bytes(text)
 
     async def to_telnet():
@@ -191,8 +265,11 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
             writer.write(data.replace(b"\xff", b"\xff\xff"))
             await writer.drain()
 
-    tasks = [asyncio.create_task(to_browser()), asyncio.create_task(to_telnet())]
+    tasks = []
     try:
+        if past and websocket.query_params.get("history") == "1":
+            await websocket.send_bytes(past)  # before the live output, which is read only after this
+        tasks = [asyncio.create_task(to_browser()), asyncio.create_task(to_telnet())]
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
@@ -202,6 +279,10 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
     except (OSError, RuntimeError, WebSocketDisconnect):
         pass
     finally:
+        for t in tasks:
+            t.cancel()  # also when the handler itself is cancelled
+        await asyncio.gather(*tasks, return_exceptions=True)
+        history.closed(str(node_id), me)
         if sizes is not None:
             sizes.closed(str(node_id))
         writer.close()
