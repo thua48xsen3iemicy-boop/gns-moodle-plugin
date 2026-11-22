@@ -5155,6 +5155,9 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui [data-region="vp"] .subnet-object.connection-primary rect{stroke-width:1.5}
 /* L3 routes (facts.js deriveRoutes): an arrow from a node to its next hop; a stub ends in "?" or "×". */
 .gns3lab-student.canvas-ui .route-arrow{cursor:pointer;--route:var(--k-route)}
+/* Routes from the "Addresses" level of detail on: further out the subnets alone, and the routes of a selected node. */
+.gns3lab-student.canvas-ui [data-lod="0"] .route-arrow:not(.on),
+.gns3lab-student.canvas-ui [data-lod="1"] .route-arrow:not(.on){display:none}
 .gns3lab-student.canvas-ui .route-arrow.warn{--route:var(--k-amber)}
 .gns3lab-student.canvas-ui .route-arrow.bad{--route:var(--k-problem)}
 .gns3lab-student.canvas-ui .route-arrow.unused{--route:var(--k-unknown)}

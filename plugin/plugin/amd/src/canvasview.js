@@ -56,7 +56,7 @@ export const STRING_KEYS = [
  * @param {object} r route of facts.js
  * @returns {string}
  */
-const routeName = r => r.def ? '0/0' : r.dst;
+const routeName = r => r.dst;
 
 /**
  * Class of a route arrow by its state: a loop or an error is bad, a doubt a warning, a backup unused.
