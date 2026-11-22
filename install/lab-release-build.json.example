@@ -61,7 +61,7 @@
     }
   },
   "compatibility": {
-    "components": {"manager": "0.34.0", "slot": "0.30.0", "agent": "1.4.1"},
+    "components": {"manager": "0.35.0", "slot": "0.30.0", "agent": "1.4.1"},
     "slot_state": "REPLACE_WITH_MAINTAINER_DECLARATION",
     "agent_state": "REPLACE_WITH_MAINTAINER_DECLARATION",
     "rollback": "not_assessed"

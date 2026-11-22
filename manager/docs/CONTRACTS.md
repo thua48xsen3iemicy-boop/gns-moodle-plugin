@@ -213,6 +213,7 @@ Moodle (плагин) ──§2──▶ Менеджер ──§4──▶ Lab
 
 🆕 `GET /api/v1/maintenance` — режим обслуживания (§2.11). Состояние лабы — `/sessions/{id}/state` (§2.7, ✅ менеджер 0.8.0). 🆕 Автопроверки — `/sessions/{id}/checks` (§2.9),
 вместе с возможностью `checks`. 🆕 Прогноз оценки для преподавателя — `POST /api/v1/forecasts` (§2.9a), возможность `forecast`.
+🆕 Живые сессии сайта для администратора — `GET /api/v1/live-sessions` (§2.13), возможность `live-sessions`.
 
 ### 2.6. ✅ Лабы из Moodle: образы, определение, проверка
 
@@ -948,6 +949,33 @@ Wipe отдельной ноды — другой механизм: он идё�
 нет другого приёмника; `409 iso_not_supported` — слот сессии не объявляет `iso-mount` (нет `xorriso`); `409 iso_in_progress` —
 слот выполняет другую операцию (в том числе прошлую сборку), повторить позже; `404 iso_not_found` — нет такой операции у этой
 сессии; `502`/`503 slot_unavailable` — слот не принял команду; `503 maintenance` в фазах `draining` и `active` (§2.11).
+
+### 2.13. 🆕 Живые сессии сайта: `GET /api/v1/live-sessions` (менеджер 0.35.0)
+
+Возможность `live-sessions` в `info.features`. Страница администратора сайта «Занятые слоты»: кто держит какой слот и
+какая у него лаба. Менеджер знает только `user_id`; логин, имя, курс и активность плагин берёт из своей базы. Права
+(администратор сайта) проверяет плагин.
+
+```json
+{"schema": "gns3lab.live_sessions/1",
+ "slots": {"total": 5, "free": 2, "unavailable": 1},
+ "sessions": [
+   {"schema": "gns3lab.session/1", "session_id": "s-3f9a1c0d2b4e5f60", "lab_ref": null, "lab_def": "sha256:…",
+    "status": "running", "stage": "ready", "status_message": "…", "error": null,
+    "started_at": "2026-11-22T09:10:00Z", "expires_at": "2026-11-22T10:40:00Z", "slot_vmid": 9012,
+    "user_id": 42, "instance_id": 7, "course_id": 3, "library_lab_id": null, "created_at": "2026-11-22T09:08:41Z"}
+ ]}
+```
+
+| Поле | Смысл |
+|---|---|
+| `slots.total` | слоты из `slots.json`; слоты общие для всех сайтов менеджера, поэтому только счётчики |
+| `slots.free` | из них свободны (`free`) |
+| `slots.unavailable` | выведены из работы: `failed` или `maintenance` (их показывает `lab-manager-admin slots`) |
+| `sessions` | живые сессии **этого** сайта (`status` не `stopped`/`failed`), сначала со слотом по возрастанию `slot_vmid`, затем в очереди по `created_at`. Поля — как у списка наблюдателя (§2.4: §2.3 без `topology`/`nodes`/`features`, с `slot_vmid`, `mode`, `maintenance`), плюс `user_id`, `instance_id` (`null` у авторского запуска), `course_id` (`null`, если не передан), `library_lab_id` (у авторского запуска, иначе `null`), `created_at` — когда сессия создана (`started_at` — когда лаба стала `running`) |
+
+Слоты, занятые другими сайтами, видны только как остаток: `total − free − unavailable` минус слоты сессий этого сайта.
+Остановить сессию — обычный `POST /sessions/{id}/stop` (§2.4).
 
 ### 2.5. Коды ошибок
 
@@ -1829,6 +1857,7 @@ node_id без самого источника, `timeout` — строгий int
 | `extra_disks` | менеджер | 🆕 (0.22.0) поле ноды `disks` в определении лабы, `extra_disks` образов и `limits.max_disk_gb` (§2.1, §2.6) |
 | `extra-disks` | слот | 🆕 (0.18.0) `NodeSpec.disks`: дополнительные пустые диски QEMU-узла (§4.2). Только при годном `blank.qcow2` в `/opt/gns3/images/QEMU`; менеджер и слот выпускаются вместе |
 | `uplink` | слот; менеджер | 🆕 `NodeSpec.uplink_port`: узел «Интернет», его внешний порт получает `SLOT_UPLINK_MAC` и подключается к `eth1` слота через облако GNS3 (§4.2). Только при заданном `SLOT_UPLINK_MAC` и наличии `eth1`; лаба с `uplink_port` выбирает только такие слоты. Менеджер не опрашивает слот (свободный слот — выключенный LXC): возможность записывает администратор в `slots.json` (`"features": ["uplink"]`, `lab-provision secrets` делает это при заданном `INET_BRIDGE`); сам слот в любом случае отклонит такую лабу `422` |
+| `live-sessions` | менеджер | 🆕 (0.35.0) `GET /api/v1/live-sessions` — живые сессии сайта и счётчики слотов для страницы администратора (§2.13) |
 | `forecast` | менеджер | 🆕 (0.33.0) `POST /api/v1/forecasts` — прогноз оценки по фактам для преподавателя (§2.9a) |
 | `check-scripts` | менеджер | 🆕 (0.31.0) поле `scripts` в `gns3lab.checks/1` и `result.scripts`, `result.nonce` прогона (§2.9). Плагин показывает поле скриптов в редакторе лабы только при ней |
 | `exec-shell` | слот | 🆕 (0.27.0) `qga/exec`: PowerShell у Windows-гостя, поле `shell` со сверкой, вывод не больше 64 КиБ (§4.2). Без неё скрипты с `shell: "powershell"` — `skipped` с `unsupported_os` |
