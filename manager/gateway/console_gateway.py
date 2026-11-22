@@ -23,6 +23,8 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
             а двоичный кадр браузера {"cols": N, "rows": M} — текстовым кадром {"resize": {"cols": N, "rows": M}};
             негодный размер отбрасывается. Слоту "lab-slot" ввод уходит текстом, двоичные кадры отбрасываются;
           · режим наблюдателя: вывод идёт, ввод отбрасывается;
+          · `?history=1` от браузера (новый терминал) уходит слоту: тот первым кадром отдаёт хвост прежнего вывода
+            ноды (CONTRACTS.md §6.2); наблюдателю тоже;
       - `vnc` (экран QEMU, в браузере noVNC): по соединению идёт сырой RFB. Двоичные кадры идут в обе стороны
         без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателя у экрана нет
         (его видит только владелец сессии): билет с `console: "vnc"` и `readonly: true` не выдаётся (400);
@@ -48,7 +50,7 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
 `console` необязательно: "telnet" (по умолчанию) или "vnc"; любое другое значение, как и "vnc" вместе
 с "readonly": true, — 400.
 
-Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>
+Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>[&history=1]
 """
 import asyncio
 import base64
@@ -230,6 +232,8 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
     slot = g["slot"]
     vnc = g["console"] == "vnc"
     url = f"{SLOT_SCHEME}://{slot}:{SLOT_PORT}/v1/console/{g['project_id']}/{node_id}"
+    if not vnc and request.query.get("history") == "1":
+        url += "?history=1"  # a new terminal asks for the tail of the output (CONTRACTS.md §6.2)
     up = None
     try:
         try:

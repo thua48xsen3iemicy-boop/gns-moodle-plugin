@@ -17,7 +17,7 @@ P, N1, N2, OFF, VNC = ("11111111-1111-4111-8111-111111111111", "22222222-2222-42
 V2 = "99999999-9999-4999-8999-999999999999"              # нода нового слота: он выбирает lab-slot.2
 
 # --- поддельный Slot: /v1/console/{project_id}/{node_id}, токен в субпротоколе, вывод уже без telnet-команд
-seen, seen_vnc, seen2, paths, offered = [], [], [], [], []
+seen, seen_vnc, seen2, paths, offered, queries = [], [], [], [], [], []
 BANNER = b"RFB 003.008\n\xff\x00\xfe"                        # начало потока RFB: 0xFF и 0x00 в данных
 BIG = bytes(range(256)) * (2 * 4096)                      # 2 МиБ: больше, чем разрешено telnet-консоли от слота
 async def vnc_cons(ws):
@@ -30,7 +30,7 @@ async def vnc_cons(ws):
             await ws.send_bytes(BIG if m.data == b"big" else b"ack:" + m.data)
     return ws
 async def cons(r):
-    paths.append(r.path)
+    paths.append(r.path); queries.append(r.query_string)
     protocols = [x.strip() for x in r.headers.get("Sec-WebSocket-Protocol", "").split(",")]
     offered.append(protocols)
     if "lab-slot" not in protocols or "bearer.console-secret" not in protocols or r.match_info["n"] == OFF:
@@ -189,11 +189,19 @@ async def main():
         await asyncio.sleep(0.3); await ws.close(); await asyncio.sleep(0.2)
         assert seen2 == [], seen2
         print("lab-slot.2: input as binary, window size as resize, bad sizes dropped, observer silent OK")
+        # история: ?history=1 нового терминала доходит до слота, у наблюдателя тоже; иначе и у vnc — нет
+        for ro, q, want in ((False, "&history=1", "history=1"), (True, "&history=1", "history=1"),
+                            (False, "", ""), (False, "&history=yes", "")):
+            _, t = await ticket(ro, nodes=(V2,))
+            ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{V2}?ticket={t}{q}", headers=moodle)
+            await prompt(ws); await ws.close()
+            assert queries[-1] == want, (ro, q, queries[-1])
+        print("history flag passed to the slot OK")
         # vnc: двоичные кадры в обе стороны без изменений
         seen_vnc.clear(); _, t = await ticket(False, console="vnc")
-        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}", headers=moodle)
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}&history=1", headers=moodle)
         m = await ws.receive(); assert m.type == WSMsgType.BINARY and m.data == BANNER, m
-        assert paths[-1] == f"/v1/console/{P}/{VNC}", paths
+        assert paths[-1] == f"/v1/console/{P}/{VNC}" and queries[-1] == "", (paths, queries)
         rfb = bytes([0, 0, 0, 0xFF, 4, 0, 0, 0]) + bytes(range(256))   # SetEncodings-подобный кадр с 0x00 и 0xFF
         await ws.send_bytes(rfb)
         m = await ws.receive(); assert m.type == WSMsgType.BINARY and m.data == b"ack:" + rfb, m
