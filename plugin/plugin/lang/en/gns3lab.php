@@ -25,7 +25,6 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['backtoactivity'] = 'Back to the activity page';
-$string['backtolibrary'] = 'Back to the lab library';
 $string['cachedef_activitysessions'] = 'Sessions of the students of a lab for the course page of a teacher';
 $string['cachedef_facts'] = 'Facts snapshots of running labs from the lab manager';
 $string['cachedef_info'] = 'What the lab manager accepts and offers (GET /api/v1/info)';
