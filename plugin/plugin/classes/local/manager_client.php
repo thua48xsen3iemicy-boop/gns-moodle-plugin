@@ -401,10 +401,38 @@ class manager_client {
      * Asks the manager to stop a session.
      *
      * @param string $sessionid session id
+     * @param int $requestedby Moodle id of who stops another user's lab (journal of the manager), 0 for the owner
      * @return \stdClass session, normally with status "stopping"
      */
-    public function stop_session(string $sessionid): \stdClass {
-        return $this->expect_session($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/stop'));
+    public function stop_session(string $sessionid, int $requestedby = 0): \stdClass {
+        $body = $requestedby > 0 ? ['requested_by_user_id' => $requestedby] : null;
+        return $this->expect_session($this->request('POST', '/api/v1/sessions/' . rawurlencode($sessionid) . '/stop', $body));
+    }
+
+    /**
+     * Live sessions of the whole site and counts of the slots, for the administrator's page (CONTRACTS §2.13).
+     * Only with the `live-sessions` feature.
+     *
+     * @return \stdClass {slots: {total, free, unavailable}, sessions: sessions with user_id, instance_id, course_id,
+     *     library_lab_id, created_at}
+     */
+    public function list_live_sessions(): \stdClass {
+        $data = $this->expect_object($this->request('GET', '/api/v1/live-sessions'));
+        if (!isset($data->slots) || !is_object($data->slots) || !is_array($data->sessions ?? null)) {
+            throw new manager_exception('badresponse', 200, 'live sessions without slots or sessions');
+        }
+        foreach (['total', 'free', 'unavailable'] as $count) {
+            if (!is_int($data->slots->{$count} ?? null)) {
+                throw new manager_exception('badresponse', 200, "live sessions without slots.{$count}");
+            }
+        }
+        $data->sessions = array_map(fn($s) => $this->expect_session($s), $data->sessions);
+        foreach ($data->sessions as $session) {
+            if (!is_int($session->user_id ?? null)) {
+                throw new manager_exception('badresponse', 200, 'live session without user_id');
+            }
+        }
+        return $data;
     }
 
     /**
