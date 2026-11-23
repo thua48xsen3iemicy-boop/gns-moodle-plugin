@@ -4616,11 +4616,43 @@ body.gns3lab-fullscreen {
 .gns3lab-editor .ed-capture-dialog input[type="text"],
 .gns3lab-editor .ed-capture-dialog textarea { width: 100%; margin: .4rem 0; color: inherit; background: var(--bg); }
 .gns3lab-editor .ed-capture-dialog textarea { min-height: 9rem; resize: vertical; }
-.gns3lab-editor .ed-prompt-dialog { width: min(95vw, 56rem); }
-.gns3lab-editor .ed-prompt-dialog label { display: block; margin: .5rem 0; }
-.gns3lab-editor .ed-prompt-dialog textarea { min-height: 4rem; }
-.gns3lab-editor .ed-prompt-dialog textarea[data-prompt-text] { min-height: 14rem; }
+/* The prompt for a neural network and the review of its answer: a large window, the answer beside its parse. */
+.gns3lab-editor .ed-prompt-open { display: flex; flex-wrap: wrap; gap: 6px; }
+.gns3lab-editor .ed-prompt-dialog { width: min(96vw, 1280px); height: min(92vh, 960px); max-width: none; max-height: none;
+  padding: 0; overflow: hidden; }
+.gns3lab-editor .ed-prompt-dialog[open] { display: flex; flex-direction: column; }
+.gns3lab-editor .ed-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
+.gns3lab-editor .ed-prompt-tabs { display: flex; gap: .25rem; flex-wrap: wrap; }
+.gns3lab-editor .ed-prompt-tabs [role="tab"] { border: 1px solid var(--line); border-radius: .4rem; padding: .3rem .8rem;
+  background: transparent; color: inherit; font-weight: 600; }
+.gns3lab-editor .ed-prompt-tabs [aria-selected="true"] { background: var(--line); }
+.gns3lab-editor .ed-prompt-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: .5rem; padding: .8rem .9rem; }
+.gns3lab-editor .ed-prompt-pane[hidden] { display: none; }
+.gns3lab-editor .ed-prompt-pane label { display: flex; flex-direction: column; gap: .25rem; margin: 0; font-weight: 600; }
+.gns3lab-editor .ed-prompt-pane label.grow { flex: 1; min-height: 0; }
+.gns3lab-editor .ed-prompt-pane textarea { width: 100%; color: inherit; background: var(--bg); border: 1px solid var(--line);
+  border-radius: .4rem; padding: .5rem; font-weight: 400; resize: vertical; }
+.gns3lab-editor .ed-prompt-pane label.grow textarea { flex: 1; min-height: 12rem; resize: none; }
+.gns3lab-editor .ed-prompt-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: .9rem; }
+.gns3lab-editor .ed-ans-review { min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: .4rem; padding: .6rem; }
+.gns3lab-editor .ed-ans-review h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.gns3lab-editor .ed-ans-script { border: 1px solid var(--line); border-radius: .4rem; padding: .5rem .6rem; margin: 0 0 .6rem; }
+.gns3lab-editor .ed-ans-script.bad { border-color: var(--bad); }
+.gns3lab-editor .ed-ans-script header { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+.gns3lab-editor .ed-ans-meta { display: flex; flex-wrap: wrap; gap: .3rem; margin: .3rem 0; font-size: .85rem; }
+.gns3lab-editor .ed-ans-meta span { border: 1px solid var(--line); border-radius: 1rem; padding: 0 .5rem; }
+.gns3lab-editor .ed-ans-script pre { margin: .3rem 0; padding: .4rem .5rem; max-height: 16rem; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; border-radius: .3rem; background: var(--line); }
+.gns3lab-editor .ed-ans-expect { margin: .2rem 0; padding-left: 1.1rem; font-size: .9rem; }
+.gns3lab-editor .ed-ans-problems { margin: .3rem 0; padding-left: 1.1rem; color: var(--bad); }
 .gns3lab-editor .ed-prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.gns3lab-editor .ed-prompt-dialog .gbtn { width: auto; flex: 0 0 auto; margin: 0; }
+@media (max-width: 760px) {
+  .gns3lab-editor .ed-prompt-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
+  .gns3lab-editor .ed-prompt-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(10rem, 1fr) minmax(0, 1.4fr); }
+}
 .gns3lab-editor .ed-icons { display: flex; flex-wrap: wrap; gap: 4px; }
 .gns3lab-editor .ed-icon {
     width: 34px; height: 34px; padding: 3px; border: 1px solid var(--line); border-radius: 6px;

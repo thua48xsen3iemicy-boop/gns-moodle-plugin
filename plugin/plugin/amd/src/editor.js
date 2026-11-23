@@ -194,9 +194,9 @@ export const init = (prefix) => {
     }
   };
   /* a lab with segments or checks is lab/2; the checks are kept even when this manager does not take them */
-  const definition = () => JSON.stringify(Object.assign(st.lab.segments.length || st.lab.checks
+  const definition = (checks = st.lab.checks) => JSON.stringify(Object.assign(st.lab.segments.length || checks
     ? Object.assign({format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments},
-      st.lab.checks ? {checks: st.lab.checks} : {})
+      checks ? {checks} : {})
     : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links},
   st.lab.annotations.length ? {annotations: st.lab.annotations} : {}));
 
@@ -1018,8 +1018,11 @@ export const init = (prefix) => {
       <p class="muted">${esc(str(withScripts ? "ed_scripts_help" : "ed_scripts_kept"))}</p>${items}
       ${withScripts ? `<button type="button" class="btn btn-sm btn-outline-primary" data-act="addscript">${
         esc(str("ed_script_add"))}</button>` : ""}
-      ${withScripts && D.checksprompt ? `<button type="button" class="btn btn-sm btn-outline-secondary"
-        data-act="checksprompt">${esc(str("ed_script_prompt"))}</button>` : ""}`;
+      ${withScripts && D.checksprompt ? `<div class="ed-prompt-open">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-act="checksprompt">${
+          esc(str("ed_script_prompt"))}</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-act="checksanswer">${
+          esc(str("ed_script_prompt_paste"))}</button></div>` : ""}`;
   };
 
   /* The prompt for a neural network (docs/autochecks/README.md §7.8): the text of prompts/checks.<lang>.md with the lab,
@@ -1067,66 +1070,211 @@ export const init = (prefix) => {
       }
     }
   };
-  const openPrompt = () => {
+  /* problems of a candidate answer the editor sees without the manager: devices, ids, needs */
+  const localProblems = list => {
+    const allowed = new Set(scriptNodes().map(n => n.name));
+    const names = new Set(st.lab.nodes.map(n => n.name));
+    const seen = new Set();
+    return list.map(sc => {
+      const out = [];
+      if (sc.node && !names.has(sc.node)) {
+        out.push(str("ed_script_prompt_unknownnode", sc.node));
+      } else if (sc.node && !allowed.has(sc.node)) {
+        out.push(str("ed_script_prompt_noscripts", sc.node));
+      }
+      if (seen.has(sc.id)) {
+        out.push(str("ed_script_prompt_dupid", sc.id));
+      }
+      (Array.isArray(sc.needs) ? sc.needs : []).filter(x => !seen.has(x))
+        .forEach(x => out.push(str("ed_script_prompt_badneeds", x)));
+      seen.add(sc.id);
+      return out;
+    });
+  };
+  /* one script of an answer as a card: what it checks, where, the code and the conditions */
+  const answerCard = (sc, i, problems) => {
+    const e = sc.expect && typeof sc.expect === "object" ? sc.expect : {};
+    const meta = [sc.node, sc.shell || str("ed_script_shell_auto"), sc.group || "host",
+      str("chk_class_" + (CLASSES_OK.includes(sc.class) ? sc.class : "major")),
+      str("ed_script_prompt_seconds", sc.timeout || 20)];
+    if (Array.isArray(sc.needs) && sc.needs.length) {
+      meta.push(str("ed_script_prompt_needs", sc.needs.join(", ")));
+    }
+    const conds = [];
+    if (e.exit !== undefined) {
+      conds.push(`${str("ed_script_exit")}: ${e.exit}`);
+    }
+    if (e.match !== undefined) {
+      conds.push(`${str("ed_script_match")}: ${e.match}`);
+    }
+    (e.contains || []).forEach(x => conds.push(`${str("ed_script_contains")}: ${x}`));
+    (e.not_contains || []).forEach(x => conds.push(`${str("ed_script_notcontains")}: ${x}`));
+    if (!conds.length) {
+      conds.push(str("ed_script_prompt_noexpect"));
+    }
+    return `<article class="ed-ans-script${problems.length ? " bad" : ""}" data-answer-script="${i}">
+      <header><b>${esc(sc.title || str("ed_script_untitled"))}</b> <code>${esc(sc.id || "")}</code></header>
+      <div class="ed-ans-meta">${meta.map(x => `<span>${esc(x)}</span>`).join("")}</div>
+      <pre class="mono">${esc(sc.run || "")}</pre>
+      <ul class="ed-ans-expect">${conds.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      ${problems.length ? `<ul class="ed-ans-problems" role="alert">${problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    </article>`;
+  };
+  const CLASSES_OK = ["critical", "major", "minor", "note"];
+  /* the window of the prompt (tab 1) and of the answer (tab 2); the task and the answer stay for the next opening */
+  const openPrompt = tab => {
     const dialog = document.createElement("dialog");
-    dialog.className = "ed-capture-dialog ed-prompt-dialog";
-    dialog.innerHTML = `<form method="dialog"><h2>${esc(str("ed_script_prompt"))}</h2>
-      <p class="muted">${esc(str("ed_script_prompt_help"))}</p>
-      <label>${esc(str("ed_script_prompt_task"))}<textarea data-prompt-task rows="3"
-        placeholder="${esc(str("ed_script_prompt_task_placeholder"))}"></textarea></label>
-      <label>${esc(str("ed_script_prompt_text"))}<textarea data-prompt-text class="mono" rows="12" readonly
-        spellcheck="false"></textarea></label>
-      <div class="ed-prompt-actions"><button class="gbtn primary" type="button" data-prompt-copy>${
-        esc(str("ed_script_prompt_copy"))}</button><span data-prompt-copied role="status"></span></div>
-      <label>${esc(str("ed_script_prompt_answer"))}<textarea data-prompt-answer class="mono" rows="6" spellcheck="false"
-        placeholder="${esc(str("ed_script_prompt_answer_placeholder"))}"></textarea></label>
-      <p class="ed-error" data-prompt-error role="alert" hidden></p>
-      <div class="ed-prompt-actions"><button class="gbtn primary" type="button" data-prompt-apply>${
-        esc(str("ed_script_prompt_apply"))}</button>
-      <button class="gbtn" type="button" data-cancel>${esc(str("ed_script_prompt_close"))}</button></div></form>`;
-    const task = dialog.querySelector("[data-prompt-task]");
-    const text = dialog.querySelector("[data-prompt-text]");
-    const status = dialog.querySelector("[data-prompt-copied]");
-    const error = dialog.querySelector("[data-prompt-error]");
+    dialog.className = "ed-prompt-dialog";
+    dialog.setAttribute("aria-label", str("ed_script_prompt"));
+    dialog.innerHTML = `<div class="ed-prompt-head">
+        <div class="ed-prompt-tabs" role="tablist">
+          <button type="button" role="tab" data-prompt-tab="prompt">${esc(str("ed_script_prompt_tab_prompt"))}</button>
+          <button type="button" role="tab" data-prompt-tab="answer">${esc(str("ed_script_prompt_tab_answer"))}</button>
+        </div>
+        <button type="button" class="gbtn" data-cancel>${esc(str("ed_script_prompt_close"))}</button>
+      </div>
+      <section class="ed-prompt-pane" data-pane="prompt">
+        <p class="muted">${esc(str("ed_script_prompt_help"))}</p>
+        <label>${esc(str("ed_script_prompt_task"))}<textarea data-prompt-task rows="3"
+          placeholder="${esc(str("ed_script_prompt_task_placeholder"))}"></textarea></label>
+        <label class="grow">${esc(str("ed_script_prompt_text"))}<textarea data-prompt-text class="mono" readonly
+          spellcheck="false"></textarea></label>
+        <div class="ed-prompt-actions"><button class="gbtn primary" type="button" data-prompt-copy>${
+          esc(str("ed_script_prompt_copy"))}</button><span data-prompt-copied role="status"></span>
+          <button class="gbtn" type="button" data-prompt-tab="answer">${esc(str("ed_script_prompt_next"))}</button></div>
+      </section>
+      <section class="ed-prompt-pane" data-pane="answer" hidden>
+        <div class="ed-prompt-split">
+          <label class="grow">${esc(str("ed_script_prompt_answer"))}<textarea data-prompt-answer class="mono"
+            spellcheck="false" placeholder="${esc(str("ed_script_prompt_answer_placeholder"))}"></textarea></label>
+          <div class="ed-ans-review"><h3>${esc(str("ed_script_prompt_review"))}</h3>
+            <p data-answer-status role="status"></p><div data-answer-list></div></div>
+        </div>
+        <div class="ed-prompt-actions">
+          <button class="gbtn" type="button" data-prompt-validate disabled>${esc(str("ed_script_prompt_validate"))}</button>
+          <button class="gbtn primary" type="button" data-prompt-apply disabled>${esc(str("ed_script_prompt_apply"))}</button>
+          <span data-prompt-checked role="status"></span>
+        </div>
+      </section>`;
+    const $d = sel => dialog.querySelector(sel);
+    const task = $d("[data-prompt-task]"), text = $d("[data-prompt-text]"), answer = $d("[data-prompt-answer]");
+    const status = $d("[data-answer-status]"), checked = $d("[data-prompt-checked]");
+    let parsed = null, managerProblems = null;
+    const show = name => {
+      dialog.querySelectorAll("[data-pane]").forEach(p => {
+        p.hidden = p.dataset.pane !== name;
+      });
+      dialog.querySelectorAll('[role="tab"]').forEach(b => b.setAttribute("aria-selected", String(b.dataset.promptTab === name)));
+      (name === "answer" ? answer : task).focus();
+    };
     const fill = () => {
       text.value = promptText(task.value.trim());
-      status.textContent = "";
+      $d("[data-prompt-copied]").textContent = "";
     };
-    task.addEventListener("input", fill);
+    /* the parse of the answer and the problems of each script: ours at once, the manager's after "Check" */
+    const review = () => {
+      const raw = answer.value.trim();
+      parsed = null;
+      if (!raw) {
+        status.textContent = str("ed_script_prompt_empty");
+        $d("[data-answer-list]").innerHTML = "";
+      } else {
+        try {
+          parsed = answerScripts(raw);
+        } catch (e) {
+          status.textContent = str("ed_script_prompt_badanswer");
+          $d("[data-answer-list]").innerHTML = "";
+        }
+      }
+      if (parsed) {
+        const local = localProblems(parsed);
+        const other = [];
+        (managerProblems || []).forEach(p => {
+          const m = /^checks\.scripts\[(\d+)\](?:\.(.+))?$/.exec(p.path || "");
+          /* a device of a script the lab lacks: the editor has said so in its own words */
+          if (m && m[2] === "node" && p.code === "unknown_node" && parsed[+m[1]]) {
+            return;
+          }
+          const line = `${m && m[2] ? m[2] + ": " : (m ? "" : (p.path || "") + ": ")}${S["problem_" + p.code] || p.code}${
+            p.message ? " (" + p.message + ")" : ""}`;
+          if (m && local[+m[1]]) {
+            local[+m[1]].push(line);
+          } else {
+            other.push(line);
+          }
+        });
+        status.textContent = str("ed_script_prompt_count", parsed.length);
+        $d("[data-answer-list]").innerHTML = (other.length ? `<ul class="ed-ans-problems" role="alert">${
+          other.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "") + parsed.map((sc, i) => answerCard(sc, i, local[i])).join("");
+      }
+      $d("[data-prompt-validate]").disabled = !parsed;
+      $d("[data-prompt-apply]").disabled = !parsed;
+    };
+    task.value = st.promptTask || "";
+    answer.value = st.promptAnswer || "";
+    task.addEventListener("input", () => {
+      st.promptTask = task.value;
+      fill();
+    });
+    answer.addEventListener("input", () => {
+      st.promptAnswer = answer.value;
+      managerProblems = null;
+      checked.textContent = "";
+      review();
+    });
     fill();
-    dialog.querySelector("[data-prompt-copy]").onclick = () => copyText(text)
+    review();
+    dialog.querySelectorAll("[data-prompt-tab]").forEach(b => {
+      b.onclick = () => show(b.dataset.promptTab);
+    });
+    $d("[data-prompt-copy]").onclick = () => copyText(text)
       .then(() => {
-        status.textContent = str("ed_script_prompt_copied");
+        $d("[data-prompt-copied]").textContent = str("ed_script_prompt_copied");
       })
       .catch(() => {
-        status.textContent = str("ed_script_prompt_nocopy");
+        $d("[data-prompt-copied]").textContent = str("ed_script_prompt_nocopy");
       });
-    dialog.querySelector("[data-prompt-apply]").onclick = () => {
-      let list;
-      try {
-        list = answerScripts(dialog.querySelector("[data-prompt-answer]").value);
-      } catch (e) {
-        error.textContent = str("ed_script_prompt_badanswer");
-        error.hidden = false;
+    const candidate = () => {
+      const checks = Object.assign({format: CHECKS_FORMAT}, st.lab.checks || {});
+      if (parsed.length) {
+        checks.scripts = parsed;
+      } else {
+        delete checks.scripts;
+      }
+      return checks;
+    };
+    /* the manager checks the lab with these scripts, the lab itself stays as it is */
+    $d("[data-prompt-validate]").onclick = async() => {
+      if (!parsed) {
         return;
       }
+      checked.textContent = str("ed_script_prompt_validating");
+      try {
+        const r = await call("mod_gns3lab_validate_lab", {labid: D.labid, definition: definition(candidate())});
+        managerProblems = r.problems || [];
+        checked.textContent = managerProblems.length ? str("ed_script_prompt_invalid", managerProblems.length)
+          : str("ed_script_prompt_valid");
+        review();
+      } catch (err) {
+        checked.textContent = str("ed_script_prompt_nocheck", err && err.message ? err.message : String(err));
+      }
+    };
+    $d("[data-prompt-apply]").onclick = () => {
+      if (!parsed) {
+        return;
+      }
+      const checks = candidate();
       change(() => {
-        const checks = st.lab.checks || (st.lab.checks = {format: CHECKS_FORMAT});
-        if (list.length) {
-          checks.scripts = list;
-        } else {
-          delete checks.scripts;
-          if (Object.keys(checks).length === 1) {
-            st.lab.checks = null;
-          }
-        }
+        st.lab.checks = Object.keys(checks).length > 1 ? checks : null;
       });
+      st.promptAnswer = "";
       dialog.close();
     };
-    dialog.querySelector("[data-cancel]").onclick = () => dialog.close();
+    $d("[data-cancel]").onclick = () => dialog.close();
     dialog.addEventListener("close", () => dialog.remove());
     root.append(dialog);
     dialog.showModal();
+    show(tab === "answer" ? "answer" : "prompt");
   };
 
   /* the `checks` document of the lab (docs/autochecks/README.md §4) as JSON; the lab manager checks it on "Check" */
@@ -1988,8 +2136,8 @@ export const init = (prefix) => {
           }
         });
       }
-    } else if (name === "checksprompt" && withScripts && D.checksprompt) {
-      openPrompt();
+    } else if ((name === "checksprompt" || name === "checksanswer") && withScripts && D.checksprompt) {
+      openPrompt(name === "checksanswer" ? "answer" : "prompt");
     } else if (name === "addscript" && withScripts) {
       addScript();
     } else if (name === "delscript" && withScripts) {

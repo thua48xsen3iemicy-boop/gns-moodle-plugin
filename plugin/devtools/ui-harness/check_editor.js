@@ -479,7 +479,7 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await page.locator('fieldset.ed-script').nth(1).locator('[data-act="delscript"]').click();
         await until(async() => (await page.locator('fieldset.ed-script').count()) === 1);
 
-        // The prompt for a neural network (§7.8): the lab, its scripts and the task go in; the answer replaces the scripts.
+        // The prompt for a neural network (§7.8): a large window, the prompt on one tab, the answer and its review on the other.
         await page.locator('[data-act="checksprompt"]').click();
         const dialog = page.locator('dialog.ed-prompt-dialog');
         await until(async() => (await dialog.count()) === 1);
@@ -489,12 +489,37 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
             && /"name": "PC2"/.test(prompt) && /"scripts": true/.test(prompt) && /"id": "s1"/.test(prompt)
             && /на PC2 работает nginx/.test(prompt) && !/\[\[(LAB|CHECKS|TASK)\]\]/.test(prompt) && !/<!--/.test(prompt),
             prompt.slice(0, 200));
-        await dialog.locator('[data-prompt-answer]').fill('вот: {"scripts": 1}');
-        await dialog.locator('[data-prompt-apply]').click();
-        check('an answer without scripts is refused', /не JSON со списком скриптов/.test(
-            await dialog.locator('[data-prompt-error]').innerText()) && (await dialog.count()) === 1);
-        await dialog.locator('[data-prompt-answer]').fill('Готово:\n```json\n{"scripts": [{"id": "web", "title": "nginx",'
-            + ' "node": "PC2", "shell": "sh", "run": "systemctl is-active nginx", "expect": {"match": "^active$"}}]}\n```');
+        const box = await dialog.boundingBox();
+        const view = page.viewportSize();
+        check('the window takes most of the screen', box && box.width > view.width * 0.8 && box.height > view.height * 0.6,
+            JSON.stringify(box));
+        await dialog.locator('[data-prompt-tab="answer"]').first().click();
+        const answerArea = dialog.locator('[data-prompt-answer]');
+        await answerArea.fill('вот: {"scripts": 1}');
+        check('an answer without scripts is refused',
+            /не JSON со списком скриптов/.test(await dialog.locator('[data-answer-status]').innerText())
+            && await dialog.locator('[data-prompt-apply]').isDisabled());
+        await answerArea.fill('Готово:\n```json\n{"scripts": [{"id": "web", "title": "nginx", "node": "PC2", "shell": "sh",'
+            + ' "run": "systemctl is-active nginx", "expect": {"match": "^active$"}},'
+            + ' {"id": "far", "title": "Далёкий", "node": "PC9", "run": "true", "needs": ["nope"]}]}\n```');
+        const cards = dialog.locator('[data-answer-script]');
+        check('each script of the answer is a card with its code and conditions', (await cards.count()) === 2
+            && /systemctl is-active nginx/.test(await cards.nth(0).locator('pre').innerText())
+            && /\^active\$/.test(await cards.nth(0).innerText()), await dialog.locator('[data-answer-list]').innerText());
+        check('...and the editor tells at once what is wrong', /нет устройства PC9/.test(await cards.nth(1).innerText())
+            && /needs nope/.test(await cards.nth(1).innerText()), await cards.nth(1).innerText());
+        await dialog.locator('[data-prompt-validate]').click();
+        await until(async() => /Ошибок у менеджера: 1/.test(await dialog.locator('[data-prompt-checked]').innerText()));
+        check('the lab manager checks the answer before it goes into the lab',
+            (await cards.nth(1).innerText()).match(/PC9/g).length === 2 && (await doc()).scripts[0].id === 's1',
+            await cards.nth(1).innerText());
+        await page.screenshot({path: path.join(SHOTS, 'editor-prompt-answer.png')});
+        await dialog.locator('[data-cancel]').click();
+        await page.locator('[data-act="checksanswer"]').click();
+        await until(async() => (await dialog.count()) === 1);
+        check('the answer is kept for the next opening, on its own tab',
+            /"id": "far"/.test(await answerArea.inputValue()) && await dialog.locator('[data-pane="answer"]').isVisible());
+        await answerArea.fill('[{"id": "web", "title": "nginx", "node": "PC2", "shell": "sh", "run": "systemctl is-active nginx"}]');
         await dialog.locator('[data-prompt-apply]').click();
         const answered = await until(async() => {
             const d = await doc();
@@ -502,7 +527,6 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
             return closed && d && d.scripts && d.scripts[0].id === 'web' && d;
         });
         check('the answer replaces the scripts of the lab', !!answered && answered.scripts.length === 1
-            && (await page.locator('dialog.ed-prompt-dialog').count()) === 0
             && (await page.locator('fieldset.ed-script legend').innerText()) === 'nginx', JSON.stringify(answered));
         await page.locator('[data-act="delscript"]').click();
         await until(async() => (await page.locator('[data-checks]').inputValue()) === '');
