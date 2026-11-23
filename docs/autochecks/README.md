@@ -598,7 +598,7 @@ netplan/networkd/NetworkManager пока `supported: false`); `hostname` в `win
 - [ ] Проверка «на эталоне» в авторском запуске (`CONTRACTS.md` §2.8).
 - [x] ~~Связи между скриптами (§7.7): `needs`, значения `{{id.имя}}`~~ — менеджер 0.36.0; плагин — см. ниже.
 - [x] ~~Плагин: поле «Выполнять после» в редакторе, `needs_failed`, `blocked_by` и `captures` в отчёте преподавателю~~ —
-  плагин 0.44.0 (`plugin/docs/autochecks.md` §10; `amd/build` собран ui-harness, перед выпуском пересобрать `grunt amd`).
+  плагин 0.45.0 (`plugin/docs/autochecks.md` §10; `amd/build` собран ui-harness, перед выпуском пересобрать `grunt amd`).
 - [ ] Стенд (владелец): связанные скрипты — `manager/README.md` 0.36.0 и `plugin/docs/autochecks.md` §10.
 - [ ] Решить: скрипт с несколькими находками (каждая строка `FAIL: …` — находка) и флаг «оценивать только скрипты»
   (аналог `ONLY_EXTRA` autochck) — предложены 2026-11-23, не утверждены.
