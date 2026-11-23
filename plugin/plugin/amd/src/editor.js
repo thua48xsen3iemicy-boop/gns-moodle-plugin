@@ -1017,7 +1017,116 @@ export const init = (prefix) => {
     return `<h3>${esc(str("ed_scripts"))}</h3>
       <p class="muted">${esc(str(withScripts ? "ed_scripts_help" : "ed_scripts_kept"))}</p>${items}
       ${withScripts ? `<button type="button" class="btn btn-sm btn-outline-primary" data-act="addscript">${
-        esc(str("ed_script_add"))}</button>` : ""}`;
+        esc(str("ed_script_add"))}</button>` : ""}
+      ${withScripts && D.checksprompt ? `<button type="button" class="btn btn-sm btn-outline-secondary"
+        data-act="checksprompt">${esc(str("ed_script_prompt"))}</button>` : ""}`;
+  };
+
+  /* The prompt for a neural network (docs/autochecks/README.md §7.8): the text of prompts/checks.<lang>.md with the lab,
+     its scripts and the teacher's task in it. The answer replaces the scripts of the lab; the manager checks them. */
+  const promptLab = () => {
+    const allowed = new Set(scriptNodes().map(n => n.name));
+    const byName = new Map(st.lab.nodes.map(n => [n.name, n]));
+    const end = e => `${e.node} ${byName.has(e.node) ? portName(byName.get(e.node), e.adapter, e.port) : ""}`.trim();
+    const lab = {
+      nodes: st.lab.nodes.map(n => {
+        const img = imageOf(n) || {};
+        return {name: n.name, image: img.title || n.image, kind: img.kind || "", category: img.category || "",
+          scripts: allowed.has(n.name)};
+      }),
+      links: st.lab.links.map(l => [end(l.a), end(l.b)]),
+    };
+    if (st.lab.segments.length) {
+      lab.segments = st.lab.segments;
+    }
+    return JSON.stringify(lab, null, 2);
+  };
+  const promptText = task => {
+    const list = st.lab.checks && Array.isArray(st.lab.checks.scripts) ? st.lab.checks.scripts : [];
+    const checks = list.length ? JSON.stringify({scripts: list}, null, 2) : str("ed_script_prompt_nochecks");
+    return String(D.checksprompt).replace("[[LAB]]", () => promptLab()).replace("[[CHECKS]]", () => checks)
+      .replace("[[TASK]]", () => task || str("ed_script_prompt_notask"));
+  };
+  /* the scripts of an answer: {"scripts": [...]} or a bare list, also inside a ```json block */
+  const answerScripts = raw => {
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const value = JSON.parse((fenced ? fenced[1] : raw).trim());
+    const list = Array.isArray(value) ? value : value && Array.isArray(value.scripts) ? value.scripts : null;
+    if (!list || !list.every(x => x && typeof x === "object" && !Array.isArray(x))) {
+      throw new Error("not a list of scripts");
+    }
+    return list;
+  };
+  const copyText = async area => {
+    try {
+      await navigator.clipboard.writeText(area.value);
+    } catch (e) {
+      area.select(); // no clipboard API (http, an old browser): the selection and the older command
+      if (!document.execCommand("copy")) {
+        throw e;
+      }
+    }
+  };
+  const openPrompt = () => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "ed-capture-dialog ed-prompt-dialog";
+    dialog.innerHTML = `<form method="dialog"><h2>${esc(str("ed_script_prompt"))}</h2>
+      <p class="muted">${esc(str("ed_script_prompt_help"))}</p>
+      <label>${esc(str("ed_script_prompt_task"))}<textarea data-prompt-task rows="3"
+        placeholder="${esc(str("ed_script_prompt_task_placeholder"))}"></textarea></label>
+      <label>${esc(str("ed_script_prompt_text"))}<textarea data-prompt-text class="mono" rows="12" readonly
+        spellcheck="false"></textarea></label>
+      <div class="ed-prompt-actions"><button class="gbtn primary" type="button" data-prompt-copy>${
+        esc(str("ed_script_prompt_copy"))}</button><span data-prompt-copied role="status"></span></div>
+      <label>${esc(str("ed_script_prompt_answer"))}<textarea data-prompt-answer class="mono" rows="6" spellcheck="false"
+        placeholder="${esc(str("ed_script_prompt_answer_placeholder"))}"></textarea></label>
+      <p class="ed-error" data-prompt-error role="alert" hidden></p>
+      <div class="ed-prompt-actions"><button class="gbtn primary" type="button" data-prompt-apply>${
+        esc(str("ed_script_prompt_apply"))}</button>
+      <button class="gbtn" type="button" data-cancel>${esc(str("ed_script_prompt_close"))}</button></div></form>`;
+    const task = dialog.querySelector("[data-prompt-task]");
+    const text = dialog.querySelector("[data-prompt-text]");
+    const status = dialog.querySelector("[data-prompt-copied]");
+    const error = dialog.querySelector("[data-prompt-error]");
+    const fill = () => {
+      text.value = promptText(task.value.trim());
+      status.textContent = "";
+    };
+    task.addEventListener("input", fill);
+    fill();
+    dialog.querySelector("[data-prompt-copy]").onclick = () => copyText(text)
+      .then(() => {
+        status.textContent = str("ed_script_prompt_copied");
+      })
+      .catch(() => {
+        status.textContent = str("ed_script_prompt_nocopy");
+      });
+    dialog.querySelector("[data-prompt-apply]").onclick = () => {
+      let list;
+      try {
+        list = answerScripts(dialog.querySelector("[data-prompt-answer]").value);
+      } catch (e) {
+        error.textContent = str("ed_script_prompt_badanswer");
+        error.hidden = false;
+        return;
+      }
+      change(() => {
+        const checks = st.lab.checks || (st.lab.checks = {format: CHECKS_FORMAT});
+        if (list.length) {
+          checks.scripts = list;
+        } else {
+          delete checks.scripts;
+          if (Object.keys(checks).length === 1) {
+            st.lab.checks = null;
+          }
+        }
+      });
+      dialog.close();
+    };
+    dialog.querySelector("[data-cancel]").onclick = () => dialog.close();
+    dialog.addEventListener("close", () => dialog.remove());
+    root.append(dialog);
+    dialog.showModal();
   };
 
   /* the `checks` document of the lab (docs/autochecks/README.md §4) as JSON; the lab manager checks it on "Check" */
@@ -1879,6 +1988,8 @@ export const init = (prefix) => {
           }
         });
       }
+    } else if (name === "checksprompt" && withScripts && D.checksprompt) {
+      openPrompt();
     } else if (name === "addscript" && withScripts) {
       addScript();
     } else if (name === "delscript" && withScripts) {

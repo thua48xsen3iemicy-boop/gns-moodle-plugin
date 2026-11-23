@@ -4616,6 +4616,11 @@ body.gns3lab-fullscreen {
 .gns3lab-editor .ed-capture-dialog input[type="text"],
 .gns3lab-editor .ed-capture-dialog textarea { width: 100%; margin: .4rem 0; color: inherit; background: var(--bg); }
 .gns3lab-editor .ed-capture-dialog textarea { min-height: 9rem; resize: vertical; }
+.gns3lab-editor .ed-prompt-dialog { width: min(95vw, 56rem); }
+.gns3lab-editor .ed-prompt-dialog label { display: block; margin: .5rem 0; }
+.gns3lab-editor .ed-prompt-dialog textarea { min-height: 4rem; }
+.gns3lab-editor .ed-prompt-dialog textarea[data-prompt-text] { min-height: 14rem; }
+.gns3lab-editor .ed-prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .gns3lab-editor .ed-icons { display: flex; flex-wrap: wrap; gap: 4px; }
 .gns3lab-editor .ed-icon {
     width: 34px; height: 34px; padding: 3px; border: 1px solid var(--line); border-radius: 6px;

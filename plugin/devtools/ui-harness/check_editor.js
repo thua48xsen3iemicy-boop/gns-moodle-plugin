@@ -478,6 +478,32 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         check('an empty needs leaves the field out', !('needs' in (await doc()).scripts[1]));
         await page.locator('fieldset.ed-script').nth(1).locator('[data-act="delscript"]').click();
         await until(async() => (await page.locator('fieldset.ed-script').count()) === 1);
+
+        // The prompt for a neural network (§7.8): the lab, its scripts and the task go in; the answer replaces the scripts.
+        await page.locator('[data-act="checksprompt"]').click();
+        const dialog = page.locator('dialog.ed-prompt-dialog');
+        await until(async() => (await dialog.count()) === 1);
+        await dialog.locator('[data-prompt-task]').fill('на PC2 работает nginx');
+        const prompt = await dialog.locator('[data-prompt-text]').inputValue();
+        check('the prompt carries the lab, its scripts and the task', /Ты помогаешь преподавателю/.test(prompt)
+            && /"name": "PC2"/.test(prompt) && /"scripts": true/.test(prompt) && /"id": "s1"/.test(prompt)
+            && /на PC2 работает nginx/.test(prompt) && !/\[\[(LAB|CHECKS|TASK)\]\]/.test(prompt) && !/<!--/.test(prompt),
+            prompt.slice(0, 200));
+        await dialog.locator('[data-prompt-answer]').fill('вот: {"scripts": 1}');
+        await dialog.locator('[data-prompt-apply]').click();
+        check('an answer without scripts is refused', /не JSON со списком скриптов/.test(
+            await dialog.locator('[data-prompt-error]').innerText()) && (await dialog.count()) === 1);
+        await dialog.locator('[data-prompt-answer]').fill('Готово:\n```json\n{"scripts": [{"id": "web", "title": "nginx",'
+            + ' "node": "PC2", "shell": "sh", "run": "systemctl is-active nginx", "expect": {"match": "^active$"}}]}\n```');
+        await dialog.locator('[data-prompt-apply]').click();
+        const answered = await until(async() => {
+            const d = await doc();
+            const closed = (await page.locator('dialog.ed-prompt-dialog').count()) === 0;
+            return closed && d && d.scripts && d.scripts[0].id === 'web' && d;
+        });
+        check('the answer replaces the scripts of the lab', !!answered && answered.scripts.length === 1
+            && (await page.locator('dialog.ed-prompt-dialog').count()) === 0
+            && (await page.locator('fieldset.ed-script legend').innerText()) === 'nginx', JSON.stringify(answered));
         await page.locator('[data-act="delscript"]').click();
         await until(async() => (await page.locator('[data-checks]').inputValue()) === '');
         check('deleting the last script leaves no document', (await page.locator('[data-checks]').inputValue()) === ''

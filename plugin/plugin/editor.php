@@ -133,6 +133,7 @@ $data = [
     'labchecks' => $labchecks,
     'labscripts' => $labscripts,
     'labscriptneeds' => $labscriptneeds,
+    'checksprompt' => $labscripts ? \mod_gns3lab\local\checks_prompt::text(current_language()) : '',
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];
