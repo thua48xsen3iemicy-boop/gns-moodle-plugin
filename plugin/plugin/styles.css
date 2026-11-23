@@ -5834,6 +5834,7 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-editor .ed-script{display:flex;flex-direction:column;gap:6px;margin:0 0 10px;padding:8px;border:1px solid var(--line);border-radius:6px}
 .gns3lab-editor .ed-script legend{float:none;width:auto;margin:0;padding:0 4px;font-size:13px;font-weight:600}
 .gns3lab-editor .ed-script .btn{align-self:flex-start}
+.gns3lab-editor .ed-need{display:inline-flex;align-items:center;gap:4px;margin:0 12px 0 0;font-size:13px}
 /* The tab bar of the console panel with the button that hides the panel; tabs are dragged to a new place. */
 .gns3lab-student .dockhead{display:flex;align-items:stretch;flex:none;background:var(--panel);border-bottom:1px solid var(--line)}
 .gns3lab-student .dockhead .tabs{flex:1;min-width:0;border-bottom:0}

@@ -484,6 +484,8 @@ class check_runs {
                 'stderr' => is_string($s->stderr ?? null) ? \core_text::substr($s->stderr, 0, 2048) : '',
                 'truncated' => ($s->truncated ?? false) === true,
                 'durationms' => is_int($s->duration_ms ?? null) ? $s->duration_ms : -1,
+                'blockedby' => self::token($s->blocked_by ?? ''),
+                'captures' => self::export_captures($s->captures ?? null),
             ];
         }
         return $out;
@@ -522,13 +524,18 @@ class check_runs {
                 'id' => new external_value(PARAM_ALPHANUMEXT, 'Id of the script in the lab'),
                 'node' => new external_value(PARAM_TEXT, 'Node it ran on'),
                 'status' => new external_value(PARAM_ALPHA, 'pass, fail or skipped'),
-                'reason' => new external_value(PARAM_ALPHANUMEXT, 'exit, mismatch, timeout, node_stopped, collect_failed, unsupported_os or empty'),
+                'reason' => new external_value(PARAM_ALPHANUMEXT, 'exit, mismatch, timeout, node_stopped, collect_failed, unsupported_os, needs_failed or empty'),
                 'hasexit' => new external_value(PARAM_BOOL, 'The script ran and has an exit code'),
                 'exitcode' => new external_value(PARAM_INT, 'Exit code, 0 without hasexit'),
                 'stdout' => new external_value(PARAM_RAW, 'Start of the output'),
                 'stderr' => new external_value(PARAM_RAW, 'Start of the error output'),
                 'truncated' => new external_value(PARAM_BOOL, 'The output was cut'),
                 'durationms' => new external_value(PARAM_INT, 'How long it ran, ms; -1 if it did not run'),
+                'blockedby' => new external_value(PARAM_ALPHANUMEXT, 'Id of the earlier script that did not pass, so this one did not run; empty otherwise'),
+                'captures' => new external_multiple_structure(new external_single_structure([
+                    'name' => new external_value(PARAM_ALPHANUMEXT, 'Named group of the expression'),
+                    'value' => new external_value(PARAM_RAW, 'Value the later scripts take'),
+                ]), 'Values a passed script captured for the later ones'),
             ]), 'The teacher\'s scripts of the run with their output, for a teacher only; empty for a student'),
         ];
     }
@@ -573,6 +580,22 @@ class check_runs {
 
         require_once($CFG->dirroot . '/mod/gns3lab/lib.php');
         gns3lab_update_grades($instance, $userid);
+    }
+
+    /**
+     * The values a passed script captured for the later ones (CONTRACTS 2.9 `captures`), as name-value rows.
+     *
+     * @param mixed $captures `captures` of a script of the run
+     * @return array
+     */
+    protected static function export_captures(mixed $captures): array {
+        $out = [];
+        foreach ($captures instanceof \stdClass ? get_object_vars($captures) : [] as $name => $value) {
+            if (is_string($value) && count($out) < 20) {
+                $out[] = ['name' => self::token((string) $name), 'value' => \core_text::substr($value, 0, 256)];
+            }
+        }
+        return $out;
     }
 
     /**

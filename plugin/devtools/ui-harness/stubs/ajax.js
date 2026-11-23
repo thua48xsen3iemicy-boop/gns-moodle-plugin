@@ -490,11 +490,14 @@ define([], function() {
                 // The teacher's scripts with their output, to a teacher only (get_check_run, CONTRACTS §2.9).
                 scripts: detailed && (cfg.checkteacher || cfg.observer) ? [
                     {id: 'web', node: 'PC1', status: 'pass', reason: '', hasexit: true, exitcode: 0,
-                        stdout: 'active\n200', stderr: '', truncated: false, durationms: 412},
+                        stdout: 'active\n200', stderr: '', truncated: false, durationms: 412, blockedby: '',
+                        captures: [{name: 'state', value: 'active'}]},
                     {id: 'ping', node: 'PC2', status: 'fail', reason: 'exit', hasexit: true, exitcode: 1, stdout: '',
                         stderr: 'connect: Network is unreachable', truncated: true, durationms: 37},
                     {id: 'win', node: 'R1', status: 'skipped', reason: 'unsupported_os', hasexit: false, exitcode: 0,
                         stdout: '', stderr: '', truncated: false, durationms: -1},
+                    {id: 'site', node: 'PC2', status: 'skipped', reason: 'needs_failed', hasexit: false, exitcode: 0,
+                        stdout: '', stderr: '', truncated: false, durationms: -1, blockedby: 'ping', captures: []},
                 ] : []};
         },
         mod_gns3lab_get_course_overview: courseOverview,

@@ -188,8 +188,10 @@ class fake_manager {
                 ],
                 'scripts' => [
                     ['id' => 'web', 'node' => 'PC1', 'status' => 'pass', 'exit_code' => 0, 'stdout' => "active\n200",
-                        'stderr' => '', 'truncated' => false, 'duration_ms' => 412],
+                        'stderr' => '', 'truncated' => false, 'duration_ms' => 412, 'captures' => ['state' => 'active']],
                     ['id' => 'ping', 'node' => 'PC2', 'status' => 'skipped', 'reason' => 'collect_failed',
+                        'exit_code' => null, 'stdout' => '', 'stderr' => '', 'truncated' => false, 'duration_ms' => null],
+                    ['id' => 'site', 'node' => 'PC2', 'status' => 'skipped', 'reason' => 'collect_failed', 'blocked_by' => 'ping',
                         'exit_code' => null, 'stdout' => '', 'stderr' => '', 'truncated' => false, 'duration_ms' => null],
                 ],
                 'nonce' => '3f9a1c0d2b4e5f60',
