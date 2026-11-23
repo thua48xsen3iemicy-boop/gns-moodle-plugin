@@ -645,6 +645,13 @@ define([], function() {
     const SUBNET = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
     const problemsOf = def => {
         const problems = [], warnings = [];
+        // The lab manager checks the teacher's scripts too (CONTRACTS §2.9): here only that the device exists.
+        const names = new Set((def.nodes || []).map(n => n.name));
+        ((def.checks || {}).scripts || []).forEach((sc, i) => {
+            if (!names.has(sc.node)) {
+                problems.push({path: `checks.scripts[${i}].node`, code: 'unknown_node', message: String(sc.node)});
+            }
+        });
         (def.segments || []).forEach((g, i) => {
             const m = SUBNET.exec((g.subnet || {}).fixed || '');
             if (!m || +m[5] < 8 || +m[5] > 30) {

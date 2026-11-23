@@ -12,6 +12,9 @@ const Mustache = require('mustache');
 
 const plugin = path.resolve(__dirname, '../../plugin');
 const src = path.join(plugin, 'amd/src');
+// The prompt for a neural network as editor.php gives it (classes/local/checks_prompt.php): without the leading comments.
+const checksPrompt = lang => fs.readFileSync(path.join(plugin, `prompts/checks.${lang}.md`), 'utf8')
+    .replace(/^(?:<!--[\s\S]*?-->\s*)+/, '').trim();
 const dist = path.join(__dirname, 'dist');
 const THIRD_PARTY = new Set(['xterm', 'xterm-addon-fit']);
 
@@ -321,7 +324,8 @@ for (const lang of ['en', 'ru']) {
         shell(lang, '', editorPage(lang, EDITOR_LAB, true, {labchecks: true}), 'live', '', EDITOR_INIT));
     // A manager that also runs the teacher's scripts (labscripts, `check-scripts`) and links them (`check-script-needs`).
     fs.writeFileSync(path.join(dist, `editor.${lang}.scripts.html`), shell(lang, '',
-        editorPage(lang, EDITOR_LAB, true, {labchecks: true, labscripts: true, labscriptneeds: true}), 'live', '', EDITOR_INIT));
+        editorPage(lang, EDITOR_LAB, true, {labchecks: true, labscripts: true, labscriptneeds: true,
+            checksprompt: checksPrompt(lang)}), 'live', '', EDITOR_INIT));
 }
 
 // Authoring uses the real mock manager through the local server's Moodle stand-in.
