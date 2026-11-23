@@ -56,6 +56,9 @@ Claude Code читает этот файл через `CLAUDE.md`. Во всех
   обнови явный перечень `SOURCE_FILES` в `install/lab-release.py`: сборщик выпусков отклоняет дерево с файлом не из
   перечня. Поднял версию компонента — обнови `compatibility.components` в `install/lab-release-build.json.example`.
   Расхождение ловят тесты `install/tests` (`test_allowlist_matches_delivered_trees`); запускай их в таких изменениях.
+- Формат автопроверок (`checks`, `scripts` в `manager/docs/CONTRACTS.md` §2.9) пересказан в промпте для нейросети
+  `plugin/plugin/prompts/checks.*.md`. Меняешь формат — поправь текст промпта во всех языках и его первую строку
+  `gns3lab-format`; расхождение ловит `manager/tests/test_checks_prompt.py`.
 - Не коммить секреты, `.env`, ключи, сертификаты, дампы БД.
 - Зависимости Python проверены на 3.12; версии закреплены в `constraints-tested.txt`.
   Новую зависимость добавляй только при необходимости и тоже закрепляй там.
