@@ -377,9 +377,11 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         # resume: the next session continues the project; checks: CONTRACTS 2.9
         # iso: POST /sessions/{id}/iso (CONTRACTS 2.12); a session says whether its lab has a source and a target
         # check-scripts: the teacher's scripts in `checks` and `result.scripts` of a run (CONTRACTS 2.9)
+        # check-script-needs: a script waits for earlier ones and takes their values: `needs`, {{id.group}} (2.9)
         # forecast: POST /forecasts, the teacher's mark from the facts alone (CONTRACTS 2.9a)
         # live-sessions: GET /live-sessions, every live session of the site for its administrator (CONTRACTS 2.13)
-        features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "forecast", "purge",
+        features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "check-script-needs", "forecast",
+                    "purge",
                     "maintenance", "iso", "live-sessions"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
