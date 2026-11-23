@@ -664,7 +664,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -1213,13 +1213,16 @@ def check_findings(m, s, grading):
 
 
 def check_scripts(nodes):
-    """Teacher's scripts of a run (CONTRACTS §2.9 `result.scripts`): one passed, one failed, as the demo of the report."""
+    """Teacher's scripts of a run (CONTRACTS §2.9 `result.scripts`): one passed and passes a value on, one failed, one
+    waited for the failed one (`needs`), as the demo of the report."""
     a, b = nodes[0], nodes[1 % len(nodes)]
     return [
         {"id": "web", "node": a, "status": "pass", "exit_code": 0, "stdout": "active\n200", "stderr": "",
-         "truncated": False, "duration_ms": 412},
+         "truncated": False, "duration_ms": 412, "captures": {"state": "active"}},
         {"id": "ping", "node": b, "status": "fail", "reason": "exit", "exit_code": 1, "stdout": "",
          "stderr": "connect: Network is unreachable", "truncated": False, "duration_ms": 37},
+        {"id": "site", "node": b, "status": "skipped", "reason": "needs_failed", "blocked_by": "ping", "exit_code": None,
+         "stdout": "", "stderr": "", "truncated": False, "duration_ms": None},
     ]
 
 

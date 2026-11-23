@@ -35,7 +35,7 @@ const DATA_GAPS = ['no_collector', 'collect_failed', 'unsupported_os', 'port_unk
 
 /** What a teacher's script did (CONTRACTS §2.9 `result.scripts`): its status and why. */
 const SCRIPT_STATUSES = ['pass', 'fail', 'skipped'];
-const SCRIPT_REASONS = ['exit', 'mismatch', 'timeout', 'node_stopped', 'collect_failed', 'unsupported_os'];
+const SCRIPT_REASONS = ['exit', 'mismatch', 'timeout', 'node_stopped', 'collect_failed', 'unsupported_os', 'needs_failed'];
 
 /** Language strings of the panel. */
 export const STRING_KEYS = [
@@ -49,7 +49,7 @@ export const STRING_KEYS = [
     ...CLASSES.map(c => 'chk_n_' + c),
     ...DATA_GAPS.map(r => 'chk_gap_' + r),
     'chk_scripts', 'chk_script_exit', 'chk_script_ms', 'chk_script_output', 'chk_script_stderr', 'chk_script_truncated',
-    'chk_script_nooutput',
+    'chk_script_nooutput', 'chk_script_blockedby', 'chk_script_captures',
     ...SCRIPT_STATUSES.map(st => 'chk_script_' + st),
     ...SCRIPT_REASONS.map(r => 'chk_script_reason_' + r),
 ];
@@ -478,6 +478,9 @@ export class Checks {
             if (sc.reason) {
                 facts.push(this.strings['chk_script_reason_' + sc.reason] || sc.reason);
             }
+            if (sc.blockedby) {
+                facts.push(fill(this.strings.chk_script_blockedby, sc.blockedby));
+            }
             if (sc.hasexit) {
                 facts.push(fill(this.strings.chk_script_exit, sc.exitcode));
             }
@@ -499,6 +502,10 @@ export class Checks {
             }
             if (sc.truncated) {
                 hel('small', 'chk-note', out).textContent = this.strings.chk_script_truncated;
+            }
+            if ((sc.captures || []).length) {
+                hel('p', 'chk-note', out).textContent = this.strings.chk_script_captures;
+                hel('pre', '', out).textContent = sc.captures.map(c => c.name + ' = ' + c.value).join('\n');
             }
         });
     }

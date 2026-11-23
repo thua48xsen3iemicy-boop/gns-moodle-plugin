@@ -454,6 +454,30 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await field('title').focus();
         check('a time limit over 60 s is refused on the spot',
             /от 1 до 60/.test(await page.locator('[data-region="fielderror"]').innerText()));
+        // A script waits for the scripts above it (check-script-needs, §7.7).
+        check('the first script waits for nobody', (await field('needs').count()) === 0);
+        await page.locator('[data-act="addscript"]').click();
+        await until(async() => (await page.locator('fieldset.ed-script').count()) === 2);
+        const second = page.locator('fieldset.ed-script').nth(1);
+        check('the second script may wait for the first',
+            (await second.locator('[data-sfield="needs"]').count()) === 1
+            && (await second.locator('[data-sfield="needs"]').getAttribute('value')) === 's1');
+        check('...and the expression says how to pass a value on', /\{\{id\.имя\}\}/.test(await second.innerText()));
+        await second.locator('[data-sfield="needs"]').check();
+        const linked = await until(async() => {
+            const d = await doc();
+            return d && d.scripts[1] && d.scripts[1].needs && d;
+        });
+        check('a ticked box goes into needs', JSON.stringify(linked && linked.scripts[1].needs) === '["s1"]',
+            JSON.stringify(linked));
+        await page.locator('fieldset.ed-script').nth(1).locator('[data-sfield="needs"]').uncheck();
+        await until(async() => {
+            const d = await doc();
+            return d && d.scripts[1] && !d.scripts[1].needs;
+        });
+        check('an empty needs leaves the field out', !('needs' in (await doc()).scripts[1]));
+        await page.locator('fieldset.ed-script').nth(1).locator('[data-act="delscript"]').click();
+        await until(async() => (await page.locator('fieldset.ed-script').count()) === 1);
         await page.locator('[data-act="delscript"]').click();
         await until(async() => (await page.locator('[data-checks]').inputValue()) === '');
         check('deleting the last script leaves no document', (await page.locator('[data-checks]').inputValue()) === ''

@@ -83,6 +83,8 @@ export const init = (prefix) => {
   const CHECKS_FORMAT = "gns3lab.checks/1";
   /* the manager also runs the teacher's scripts in the guests (CONTRACTS §2.9 `scripts`, `check-scripts`) */
   const withScripts = withChecks && !!D.labscripts;
+  /* a script may wait for earlier ones and take their values (CONTRACTS §2.9, `check-script-needs`) */
+  const withNeeds = withScripts && !!D.labscriptneeds;
   const SCRIPT_SHELLS = ["sh", "powershell", "routeros"];
   const SCRIPT_GROUPS = ["host", "l1", "l2", "addressing", "gateways", "routing"];
   const SCRIPT_CLASSES = ["major", "critical", "minor", "note"];
@@ -965,6 +967,20 @@ export const init = (prefix) => {
     const area = (name, value, rows, extra) => `<textarea class="form-control form-control-sm mono" data-sfield="${name}"
       rows="${rows}" spellcheck="false"${extra || ""}${off}>${esc(value)}</textarea>`;
     const nodes = scriptNodes();
+    /* the scripts above this one, as boxes: a script waits only for earlier ones */
+    const needsField = (sc, i) => {
+      const own = Array.isArray(sc.needs) ? sc.needs : [];
+      const earlier = list.slice(0, i).map(x => x.id).filter(Boolean);
+      const ids = earlier.concat(own.filter(x => !earlier.includes(x)));
+      if (!ids.length || (!withNeeds && !own.length)) {
+        return "";
+      }
+      const offNeeds = withNeeds ? "" : " disabled";
+      const boxes = ids.map(id => `<label class="ed-need"><input type="checkbox" data-sfield="needs" value="${esc(id)}"${
+        own.includes(id) ? " checked" : ""}${offNeeds}> ${esc(id)}</label>`).join(" ");
+      return `<div class="ed-field"><span>${esc(str("ed_script_needs"))}</span><div>${boxes}</div>
+        <small>${esc(str("ed_script_needs_help"))}</small></div>`;
+    };
     const items = list.map((sc, i) => {
       const e = sc.expect || {};
       const nodeOpts = (sc.node && !nodes.some(n => n.name === sc.node) ? opt(sc.node, sc.node, sc.node) : "")
@@ -985,7 +1001,7 @@ export const init = (prefix) => {
         ${field(str("ed_script_timeout"), input("timeout", sc.timeout, ' inputmode="numeric" placeholder="20"'))}
         ${field(str("ed_script_exit"), input("exit", e.exit, ' inputmode="numeric"'), str("ed_script_expect_help"))}
         ${field(str("ed_script_match"), input("match", e.match, ' maxlength="500" spellcheck="false"'),
-          str("ed_script_match_help"))}
+          str("ed_script_match_help") + (withNeeds ? " " + str("ed_script_capture_help") : ""))}
         ${field(str("ed_script_contains"), area("contains", (e.contains || []).join("\n"), 2))}
         ${field(str("ed_script_notcontains"), area("not_contains", (e.not_contains || []).join("\n"), 2),
           str("ed_script_lines_help"))}
@@ -993,6 +1009,7 @@ export const init = (prefix) => {
           groupOpts}</select>`)}
         ${field(str("ed_script_class"), `<select class="form-select form-select-sm" data-sfield="class"${off}>${
           classOpts}</select>`)}
+        ${needsField(sc, i)}
         ${withScripts ? `<button type="button" class="btn btn-sm btn-outline-danger" data-act="delscript"
           data-script="${i}">${esc(str("ed_script_delete"))}</button>` : ""}
       </fieldset>`;
@@ -1460,6 +1477,12 @@ export const init = (prefix) => {
       edit = sc => setOrDrop(sc.expect, f, lines.length ? lines : null);
     } else if (f === "match") {
       edit = sc => setOrDrop(sc.expect, f, raw === "" ? null : raw);
+    } else if (f === "needs") {
+      if (!withNeeds) {
+        return;
+      }
+      const ids = Array.from(box.querySelectorAll('[data-sfield="needs"]:checked'), x => x.value);
+      edit = sc => setOrDrop(sc, f, ids.length ? ids : null);
     } else if (f === "run") {
       edit = sc => setOrDrop(sc, f, raw.trim() === "" ? null : raw);
     } else if (f in DEFAULTS) {

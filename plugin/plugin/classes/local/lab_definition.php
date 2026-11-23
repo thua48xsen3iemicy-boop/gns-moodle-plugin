@@ -608,6 +608,11 @@ class lab_definition {
                 // The lab page keeps the clipboard out of the console of this node (consoles.js).
                 $nodes[count($nodes) - 1][self::NOPASTE] = true;
             }
+            if ($uplink !== null) {
+                // The node with the external port is the provider of the lab (ISP): the reach of the scheme does not
+                // ask it for a way back to the networks of its client (facts.js reach).
+                $nodes[count($nodes) - 1]['uplink'] = true;
+            }
             if (!empty($node[self::ICON])) {
                 // The lab pages draw this icon, the category of the node still comes from its image (model.js).
                 $nodes[count($nodes) - 1][self::ICON] = $node[self::ICON];

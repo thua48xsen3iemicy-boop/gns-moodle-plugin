@@ -38,6 +38,11 @@ final class lab_definition_test extends \basic_testcase {
         $topology = lab_definition::to_topology($def, [$image]);
         $ports = $topology->topology->nodes[0]['ports'];
         $this->assertSame([1, 2], array_column($ports, 'adapter_number'));
+        // The lab page knows the provider of the lab by this mark (facts.js reach).
+        $this->assertTrue($topology->topology->nodes[0]['uplink']);
+        $plain = lab_definition::to_topology(lab_definition::from_json(json_encode(['nodes' => [['name' => 'PC1',
+            'image' => 'debian12', 'x' => 0, 'y' => 0]], 'links' => []]), 'Plain'), []);
+        $this->assertArrayNotHasKey('uplink', $plain->topology->nodes[0]);
     }
 
     public function test_keeps_random_interface_names_only_when_ticked(): void {

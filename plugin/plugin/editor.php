@@ -44,6 +44,7 @@ $canpublish = false;
 $constructor = false;
 $labchecks = false;
 $labscripts = false;
+$labscriptneeds = false;
 $imagecapture = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
@@ -57,6 +58,7 @@ if (!manager_client::is_configured()) {
         $constructor = $client->supports_lab_constructor();
         $labchecks = $constructor && $client->has_feature('checks');
         $labscripts = $labchecks && $client->has_feature('check-scripts');
+        $labscriptneeds = $labscripts && $client->has_feature('check-script-needs');
         $imagecapture = $client->has_feature('image_capture');
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
@@ -101,6 +103,7 @@ $codes = [
     'gateway_not_router', 'unsupported_image', 'subnet_too_small', 'bad_subnet', 'vlan_out_of_range',
     'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment', 'gateway_port_conflict',
     'unknown_rule', 'group_overlap', 'bad_range', 'script_node_unsupported', 'shell_mismatch', 'bad_regex',
+    'unknown_reference',
 ];
 $warningcodes = ['gateway_not_configured', 'switch_not_configured', 'hostname_not_set'];
 foreach ($keys as $key) {
@@ -129,6 +132,7 @@ $data = [
     'labconstructor' => $constructor,
     'labchecks' => $labchecks,
     'labscripts' => $labscripts,
+    'labscriptneeds' => $labscriptneeds,
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];

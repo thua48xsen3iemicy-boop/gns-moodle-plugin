@@ -187,6 +187,105 @@ def test_only_the_first_64_kib_are_compared():
     assert results[0]["reason"] == "mismatch" and results[0]["truncated"] is True
 
 
+# ---------------------------------------------------------------------- scripts that lean on earlier ones
+
+SITES = {"id": "sites", "title": "Сайты отвечают на R1", "node": "PC1",
+         "run": "curl -s http://shop.lab/", "expect": {"exit": 0, "match": "^(?P<path>/\\S+)\\n/$"}}
+FILE = {"id": "file", "title": "Файл сайта на PC2", "node": "PC2", "run": "test -f {{sites.path}} && cat -- {{sites.path}}",
+        "expect": {"exit": 0, "contains": ["{{sites.path}}"]}}
+
+
+def test_a_value_of_an_earlier_script_and_needs_are_checked():
+    norm, problems = define(SITES, FILE, {**NGINX, "id": "after", "needs": ["sites", "file"]})
+    assert problems == []
+    assert norm["scripts"][1]["shell"] == "sh"  # The value is quoted for the guest's shell: the definition says it
+    assert norm["scripts"][2]["needs"] == ["sites", "file"] and "needs" not in norm["scripts"][0]
+    assert scripts_mod.needs_of(norm["scripts"][1]) == ["sites"]
+
+
+@pytest.mark.parametrize("scripts, expected", [
+    ([FILE, SITES], ("checks.scripts[0].run", "unknown_reference")),  # Only an earlier script
+    ([SITES, {**FILE, "run": "cat {{sites.root}}"}], ("checks.scripts[1].run", "unknown_reference")),
+    ([SITES, {**FILE, "run": "true", "expect": {"contains": ["{{site.path}}"]}}],
+     ("checks.scripts[1].expect.contains", "unknown_reference")),
+    ([SITES, {**FILE, "run": "true", "expect": {"match": "^{{sites.x}}$"}}],
+     ("checks.scripts[1].expect.match", "unknown_reference")),
+    ([SITES, {**FILE, "node": "R1"}], ("checks.scripts[1].shell", "required")),  # Family unknown: say the shell
+    ([SITES, {**FILE, "run": "{{sites.path}}" * 8}], ("checks.scripts[1].run", "out_of_range")),
+    ([SITES, {**NGINX, "needs": ["nginx"]}], ("checks.scripts[1].needs", "unknown_reference")),
+    ([SITES, {**NGINX, "needs": ["sites", "sites"]}], ("checks.scripts[1].needs", "bad_type")),
+    ([SITES, {**NGINX, "needs": []}], ("checks.scripts[1].needs", "bad_type")),
+])
+def test_bad_references(scripts, expected):
+    norm, problems = define(*scripts)
+    assert expected in codes(problems) and norm is None
+
+
+def test_references_need_no_shell_outside_run_or_with_one_given():
+    assert define(SITES, {**FILE, "node": "R1", "shell": "powershell"})[1] == []
+    assert define(SITES, {**FILE, "node": "R1", "run": "true"})[1] == []
+    assert define(SITES, {**FILE, "run": "echo {{x.y z}} {{.Name}}"})[1] == []  # Not a reference: left as text
+
+
+def test_a_captured_value_goes_on_quoted():
+    scripts = scripts_of(SITES, FILE)
+    path = "/srv/it's/$HOME/index.html"
+    results, calls = run(scripts, {"n-PC1": {"exit_code": 0, "stdout": path + "\n/\n", "stderr": ""},
+                                   "n-PC2": {"exit_code": 0, "stdout": path, "stderr": ""}})
+    quoted = "'/srv/it'\\''s/$HOME/index.html'"
+    assert calls[1][1] == f"test -f {quoted} && cat -- {quoted}"
+    assert [r["status"] for r in results] == ["pass", "pass"]
+    assert results[0]["captures"] == {"path": path} and "captures" not in results[1]
+
+
+def test_quoting_for_each_shell():
+    value = "a'b\u2019c\"d$e\\f"
+    assert scripts_mod.quote_sh(value) == "'a'\\''b\u2019c\"d$e\\f'"
+    assert scripts_mod.quote_powershell(value) == "'a''b\u2019\u2019c\"d$e\\f'"
+    assert scripts_mod.quote_routeros(value) == '"a\'b\u2019c\\"d\\$e\\\\f"'
+    scripts = scripts_of(SITES, {**FILE, "node": "CHR", "run": ":put [/file get {{sites.path}} size]"})
+    _, calls = run(scripts, {"n-PC1": {"exit_code": 0, "stdout": "/a$b\n/", "stderr": ""},
+                             "n-CHR": {"exit_code": 0, "stdout": "/a$b", "stderr": ""}})
+    assert calls[1][1] == ':put [/file get "/a\\$b" size]' and calls[1][3] == "routeros"
+
+
+def test_a_value_that_cannot_go_on_is_a_mismatch():
+    scripts = scripts_of({**SITES, "expect": {"match": "^(?P<path>/.*)$"}}, FILE)
+    for stdout in ("/" + "x" * 256, "/a\tb"):
+        results, calls = run(scripts, {"n-PC1": {"exit_code": 0, "stdout": stdout, "stderr": ""}})
+        assert results[0]["reason"] == "mismatch" and "captures" not in results[0]
+        assert (results[1]["status"], results[1]["reason"], results[1]["blocked_by"]) == ("skipped", "needs_failed",
+                                                                                          "sites")
+        assert len(calls) == 1
+    alone = scripts_of({**SITES, "expect": {"match": "^(?P<path>/.*)$"}})
+    results, _ = run(alone, {"n-PC1": {"exit_code": 0, "stdout": "/" + "x" * 300, "stderr": ""}})
+    assert results[0]["status"] == "pass"  # Nobody takes the value: its length does not matter
+    assert len(results[0]["captures"]["path"]) == 256
+
+
+def test_needs_hold_a_script_back():
+    scripts = scripts_of(SITES, {**NGINX, "node": "PC2", "needs": ["sites"]}, {**NGINX, "id": "free", "node": "PC2"})
+    answers = {"n-PC1": {"exit_code": 1, "stdout": "", "stderr": ""},
+               "n-PC2": {"exit_code": 0, "stdout": "active\n200", "stderr": ""}}
+    results, calls = run(scripts, answers)
+    assert [(r["status"], r.get("reason"), r.get("blocked_by")) for r in results] == [
+        ("fail", "exit", None), ("skipped", "needs_failed", "sites"), ("pass", None, None)]
+    assert [c[0] for c in calls] == ["n-PC1", "n-PC2"]
+    results, _ = run(scripts, {**answers, "n-PC1": "unavailable"})
+    assert results[1]["reason"] == "collect_failed" and results[1]["blocked_by"] == "sites"
+
+
+def test_a_held_back_script_is_no_finding():
+    scripts = scripts_of(SITES, {**NGINX, "needs": ["sites"]})
+    held = {**result("nginx", "PC1", "skipped", "needs_failed"), "blocked_by": "sites"}
+    out = graded(scripts, [result("sites", "PC1", "fail", "exit"), held])
+    assert [f["script_id"] for f in out["findings"]] == ["sites"] and out["mark"] == 4
+    assert out["outcome"] == "graded"
+    transient = {**result("nginx", "PC1", "skipped", "collect_failed"), "blocked_by": "sites"}
+    out = graded(scripts, [result("sites", "PC1", "skipped", "collect_failed"), transient])
+    assert out["outcome"] == "incomplete"
+
+
 # ---------------------------------------------------------------------- the grade
 
 def graded(scripts, results, focus=None, overrides=None, findings=()):
@@ -263,7 +362,7 @@ def test_the_library_of_snippets_passes_the_manager():
     assert len({s["id"] for s in norm["scripts"]}) == len(items)
     assert sum(s["timeout"] for s in norm["scripts"]) <= scripts_mod.MAX_TOTAL_TIMEOUT
     nginx = next(s for s in norm["scripts"] if s["id"] == "nginx")
-    assert scripts_mod.judge(nginx, "ab" * 8, {"exit_code": 0, "stdout": "active\r\n200\r\n"}) == (None, False)
+    assert scripts_mod.judge(nginx, "ab" * 8, {"exit_code": 0, "stdout": "active\r\n200\r\n"})[:2] == (None, False)
     assert scripts_mod.judge(nginx, "ab" * 8, {"exit_code": 3, "stdout": "inactive\n000"})[0] == "exit"
     ssh = next(s for s in norm["scripts"] if s["id"] == "ssh-key")
     assert scripts_mod.judge(ssh, "ab" * 8, {"exit_code": 0, "stdout": "ab" * 8})[0] is None

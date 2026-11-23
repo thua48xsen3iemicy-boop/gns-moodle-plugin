@@ -442,6 +442,8 @@ class LabPage {
         const nopaste = new Set(((ref && ref.nodes) || []).filter(n => n && n.nopaste === true).map(n => n.name));
         // So is the icon a teacher chose in the lab editor.
         const icons = new Map(((ref && ref.nodes) || []).filter(n => n && n.icon).map(n => [n.name, n.icon]));
+        // And the provider of the lab, the node with the external port (lab_definition::to_topology).
+        const uplinks = new Set(((ref && ref.nodes) || []).filter(n => n && n.uplink === true).map(n => n.name));
         // The live topology has no properties: the disk image that tells a MikroTik node is in the reference only, and
         // the manager names the guest only for images of its catalog. Without it the node would get the Cisco snippets.
         const guests = new Map(((ref && ref.nodes) || []).filter(n => n && guestOf(n)).map(n => [n.name, guestOf(n)]));
@@ -450,6 +452,7 @@ class LabPage {
             delete n.status;
             delete n.nopaste;
             delete n.icon;
+            delete n.uplink;
             if (types.get(n.node_id)) {
                 n.console_type = types.get(n.node_id);
             }
@@ -458,6 +461,9 @@ class LabPage {
             }
             if (icons.has(n.name)) {
                 n.icon = icons.get(n.name);
+            }
+            if (uplinks.has(n.name)) {
+                n.uplink = true;
             }
             if (!n.guest && guests.has(n.name)) {
                 n.guest = guests.get(n.name);

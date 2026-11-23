@@ -300,7 +300,9 @@ final class checks_test extends \advanced_testcase {
             $run['rules']
         );
         // The output of the teacher's scripts is for the teacher.
-        $this->assertSame(['web', 'ping'], array_column($run['scripts'], 'id'));
+        $this->assertSame(['web', 'ping', 'site'], array_column($run['scripts'], 'id'));
+        $this->assertSame([['name' => 'state', 'value' => 'active']], $run['scripts'][0]['captures']);
+        $this->assertSame(['', 'ping'], [$run['scripts'][0]['blockedby'], $run['scripts'][2]['blockedby']]);
         $this->assertSame(['status' => 'pass', 'hasexit' => true, 'exitcode' => 0, 'stdout' => "active\n200"], [
             'status' => $run['scripts'][0]['status'], 'hasexit' => $run['scripts'][0]['hasexit'],
             'exitcode' => $run['scripts'][0]['exitcode'], 'stdout' => $run['scripts'][0]['stdout'],

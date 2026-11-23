@@ -8,7 +8,8 @@
  *   in its subnet 10.0.13.0/30. R1 has no route back: PC1 reaches 10.2.20.0/24 there and back, 192.168.122.0/24 only one way.
  *   The arrows show from the "Addresses" level of detail on (further out only those of a selected node), go from their
  *   node to the next hop, the broken one ends in "?", the findings name it, a tap on an arrow
- *   selects its node and paints the subnet pills by what it reaches; the card of the node lists its routes and reach.
+ *   selects its node and paints the subnet pills by what it reaches (the NAT cloud, a provider, paints none); the card
+ *   of the node lists its routes and reach.
  *
  *   cd plugin/devtools/ui-harness && npm install && node check_routes.js [--min]
  *
@@ -69,6 +70,7 @@ async function scenario(browser, theme) {
         }
     });
     await page.goto(`${BASE}/index.ru.html?fast${MIN ? '&min' : ''}`);
+    await page.waitForFunction(() => window.__stub && window.__stub.facts);
     await page.evaluate(pre => {
         const f = window.__stub.facts;
         f.patchNode(pre + '03', {routes: [{dst: 'default', via: '10.0.12.1', proto: 'static'},
@@ -106,10 +108,37 @@ async function scenario(browser, theme) {
     check('...but the routes of a selected node and those to it do', selected.includes('03') && selected.every(id => ['03', '04', '07', '08'].includes(id)),
         JSON.stringify(selected));
     await page.evaluate(() => window.canvasStage.select(null));
+    await sleep(200);
+    // Far out L3 is the subnet pills alone: the addresses of a subnet show when its pill is selected.
+    const shownAddresses = () => page.locator('[data-subnet].auto-label').evaluateAll(gs => gs
+        .filter(g => getComputedStyle(g).display !== 'none').map(g => g.dataset.subnet));
+    check('further out no address label of a subnet shows', (await shownAddresses()).length === 0, JSON.stringify(await shownAddresses()));
+    // The subnet of the cable R2–R3: its members and the routes from them or to them.
+    const net = await page.evaluate(pre => {
+        const x = window.canvasStage.der.l3.subnets.find(x => [pre + '03', pre + '04'].every(id => x.members.some(m => m.nodeId === id)));
+        return x && {key: x.key, members: x.members.map(m => m.nodeId.slice(-2))};
+    }, PRE);
+    check('the demo has a subnet on the cable R2–R3', !!net, JSON.stringify(net));
+    await page.locator(`.subnet-object[data-subnet="${net.key}"] rect`).click();
+    await sleep(300);
+    const picked = await page.evaluate(() => window.canvasStage.sel);
+    check('a tap on a subnet pill selects the subnet', picked?.kind === 'subnet' && picked.id === net.key, JSON.stringify(picked));
+    const addresses = await shownAddresses();
+    check('...and shows the addresses of its members alone', addresses.length === net.members.length && addresses.every(k => k === net.key),
+        JSON.stringify(addresses));
+    check('...but far out no route arrow of its nodes', (await shownArrows()).length === 0, JSON.stringify(await shownArrows()));
     await zoomTo(page, 1.7);
     await sleep(500);
+    const related = await page.locator('.route-arrow').evaluateAll(gs => gs.map(g => ({from: g.dataset.routeNode.slice(-2),
+        to: (g.dataset.routeTo || '').slice(-2), related: g.classList.contains('connection-related'), shown: getComputedStyle(g).display !== 'none'})));
+    const touches = a => net.members.includes(a.from) || net.members.includes(a.to);
+    check('closer in the pill lights every route from or to its nodes and dims the rest',
+        related.some(touches) && related.every(a => a.shown && a.related === touches(a)), JSON.stringify(related));
+    await page.evaluate(() => window.canvasStage.select(null));
+    await sleep(200);
     const near = await page.evaluate(() => window.canvasStage.svg.dataset.lod);
     check('closer in (level 2, "Addresses") every arrow shows', Number(near) >= 2 && (await shownArrows()).length === 7, `lod ${near}`);
+    check('...and the addresses of every subnet', (await shownAddresses()).length > net.members.length);
     await page.locator('[data-region="zoomFit"]').click();
     await sleep(500);
     // The tap below hits PC1's arrow: in at the "Addresses" level, with PC1 in the middle.
@@ -157,6 +186,20 @@ async function scenario(browser, theme) {
     check('the pill tells where the way back ends', /у R1 нет маршрута до 10\.1\.10\.11/.test(title), title);
     const opacity = await page.locator('.subnet-object[data-subnet="10.2.20.0/24"]').evaluate(g => +getComputedStyle(g).opacity);
     check('a reached subnet is not dimmed by the selection', opacity > .8, String(opacity));
+
+    // NAT1 is a GNS3 NAT cloud: a provider. Selected, it paints no reach, its card has none.
+    await page.evaluate(id => {
+        const s = window.canvasStage;
+        s.select({kind: 'node', id});
+        s.call('details', s.sel);
+    }, PRE + '01');
+    await page.locator('[data-card-layer="l3"]').click();
+    await sleep(300);
+    const painted = await page.locator('.subnet-object').evaluateAll(gs => gs.filter(g => [...g.classList].some(c => c.startsWith('reach-'))).length);
+    const natCard = await page.locator('.object-card').innerText();
+    check('the provider (NAT1) paints no reach and its card says why', painted === 0 && !/Достижимость/.test(natCard)
+        && /Провайдер не знает сетей за клиентом/.test(natCard), `${painted} painted`);
+    await page.locator('.object-card [data-act="close"]').click();
 
     // The card of R3 on L3: its routes and its reach.
     await page.evaluate(id => {

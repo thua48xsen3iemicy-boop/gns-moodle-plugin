@@ -22,7 +22,7 @@
  */
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 import {endIf, endState, macTable, reach, stpText} from 'mod_gns3lab/facts';
-import {fmtFilters} from 'mod_gns3lab/model';
+import {fmtFilters, isProvider} from 'mod_gns3lab/model';
 import {linkDirections} from 'mod_gns3lab/canvasmodel';
 
 export const groupOpen = (s, n, layer) => !s.reveal || !!s.reveal.groups.get(n.id)?.has(layer);
@@ -157,11 +157,12 @@ export const objectData = (s, selected, layer, panel = 'ports') => {
         if (s.der && s.fx && s.der.l3.subnets.length) {
             const map = reach(s.model, s.fx, s.der, n.id), name = id => s.model.nodes.get(id)?.name || '?';
             const way = x => x ? x.path.map(name).join(' → ') + (x.fail ? ' ✕ ' + x.fail.text : '') : '—';
-            data.sections.push({title: t('reach'), heads: [t('subnet'), t('reach_there'), t('reach_back')],
+            const nat = r => r.nat ? ' (' + t('reach_nat').replace('{$a}', name(r.nat.nodeId) + ' ' + r.nat.ip) + ')' : '';
+            if (map.size) data.sections.push({title: t('reach'), heads: [t('subnet'), t('reach_there'), t('reach_back')],
                 rows: [...map].map(([key, r]) => Object.assign([key, r.kind === 'direct' ? t('reach_direct') : way(r.there),
-                    r.kind === 'direct' ? '—' : r.back ? way(r.back) : '—'], {go: {kind: 'subnet', id: key}}))});
+                    r.kind === 'direct' ? '—' : r.back ? way(r.back) + nat(r) : '—'], {go: {kind: 'subnet', id: key}}))});
         }
-        data.foot = t('route_foot');
+        data.foot = isProvider(n) ? t('reach_provider') : t('route_foot');
     }
     return data;
 };

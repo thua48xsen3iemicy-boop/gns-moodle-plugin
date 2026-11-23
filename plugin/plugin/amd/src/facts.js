@@ -29,7 +29,7 @@
 // Straight port of the first viewer; these style rules stay relaxed until the finding texts move to lang strings.
 /* eslint-disable curly, max-len, jsdoc/require-jsdoc, no-eq-null */
 
-import {isHost, natSort} from 'mod_gns3lab/model';
+import {isHost, isProvider, natSort} from 'mod_gns3lab/model';
 
 const NODE_OFF = {stopped: "остановлен", suspended: "на паузе"};
 
@@ -562,7 +562,7 @@ function deriveRoutes(m, fx, l1, l2, l3){
       issues.push({ sev: "warn", go: { kind: "node", id: f.id }, text: `${N.name}: ${defs.length} маршрута по умолчанию (${defs.map(r => r.via).join(", ")}); `
         + (!live.length ? "ни один не работает." : live.length > 1 ? `нагрузка делится между ${live.map(r => r.via).join(" и ")} (ECMP).` : `работает только через ${live[0].via}.`) });
     }
-    if (isHost(N) && f.routes && !defs.length && f.ifs.some(i => i.kind !== "loopback" && v4(i).length))
+    if (isHost(N) && !isProvider(N) && f.routes && !defs.length && f.ifs.some(i => i.kind !== "loopback" && v4(i).length))
       issues.push({ sev: "warn", text: `${N.name}: нет шлюза по умолчанию — за пределы своих подсетей узел не выйдет.`, go: { kind: "node", id: f.id } });
   });
   // A loop of default routes: a packet to an unknown network goes round it until its TTL runs out.
@@ -648,11 +648,15 @@ export function trace(m, fx, der, fromId, dst){
  * @param {object} fx index from derive
  * @param {object} der derived layers
  * @param {string} fromId node
- * @returns {Map<string, {kind: string, there: object|null, back: object|null, target: object|null}>} subnet key: kind is
- *   `direct` (a working interface in it), `ok` (there and back), `oneway` (there, not back), `fail` or `unknown`
+ * @returns {Map<string, {kind: string, there: object|null, back: object|null, target: object|null, nat: object|null}>} subnet
+ *   key: kind is `direct` (a working interface in it), `ok` (there and back), `oneway` (there, not back), `fail` or
+ *   `unknown`; nat is {nodeId, ip} when the target is the provider (isProvider): the way back goes to the address of the
+ *   border router it got the packet from, not to the start. Empty for a provider itself.
  */
 export function reach(m, fx, der, fromId){
   const out = new Map();
+  // The provider does not care what its client reaches, and the networks of the client are not its business.
+  if (isProvider(m.nodes.get(fromId))) return out;
   der.l3.subnets.forEach(s => {
     if (s.members.some(mb => mb.nodeId === fromId && !mb.down)) { out.set(s.key, { kind: "direct", there: null, back: null, target: null }); return; }
     // The member that can answer: a working interface of a node whose routes are known (a table or a gateway).
@@ -662,8 +666,13 @@ export function reach(m, fx, der, fromId){
     if (!target) { out.set(s.key, { kind: "unknown", there: null, back: null, target: null }); return; }
     const there = trace(m, fx, der, fromId, target.c.ip);
     if (!there.ok) { out.set(s.key, { kind: there.fail && there.fail.unknown ? "unknown" : "fail", there, back: null, target }); return; }
-    const back = there.src ? trace(m, fx, der, target.nodeId, there.src) : null;
-    out.set(s.key, { kind: back && back.ok ? "ok" : back && back.fail && back.fail.unknown ? "unknown" : "oneway", there, back, target });
+    // The provider has no routes to the networks of its client: it answers the address the packet came to it from,
+    // that of the border router in their common subnet (NAT on the border).
+    const last = there.hops[there.hops.length - 1], hop = last && (v4(last.iface)[0] || {}).ip;
+    const nat = isProvider(m.nodes.get(target.nodeId)) && last && last.nodeId !== fromId && hop ? { nodeId: last.nodeId, ip: hop } : null;
+    const to = nat ? nat.ip : there.src;
+    const back = to ? trace(m, fx, der, target.nodeId, to) : null;
+    out.set(s.key, { kind: back && back.ok ? "ok" : back && back.fail && back.fail.unknown ? "unknown" : "oneway", there, back, target, nat });
   });
   return out;
 }
