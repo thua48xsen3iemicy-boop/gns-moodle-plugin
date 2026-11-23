@@ -8,7 +8,8 @@
  *   in its subnet 10.0.13.0/30. R1 has no route back: PC1 reaches 10.2.20.0/24 there and back, 192.168.122.0/24 only one way.
  *   The arrows show from the "Addresses" level of detail on (further out only those of a selected node), go from their
  *   node to the next hop, the broken one ends in "?", the findings name it, a tap on an arrow
- *   selects its node and paints the subnet pills by what it reaches; the card of the node lists its routes and reach.
+ *   selects its node and paints the subnet pills by what it reaches (the NAT cloud, a provider, paints none); the card
+ *   of the node lists its routes and reach.
  *
  *   cd plugin/devtools/ui-harness && npm install && node check_routes.js [--min]
  *
@@ -69,6 +70,7 @@ async function scenario(browser, theme) {
         }
     });
     await page.goto(`${BASE}/index.ru.html?fast${MIN ? '&min' : ''}`);
+    await page.waitForFunction(() => window.__stub && window.__stub.facts);
     await page.evaluate(pre => {
         const f = window.__stub.facts;
         f.patchNode(pre + '03', {routes: [{dst: 'default', via: '10.0.12.1', proto: 'static'},
@@ -157,6 +159,20 @@ async function scenario(browser, theme) {
     check('the pill tells where the way back ends', /у R1 нет маршрута до 10\.1\.10\.11/.test(title), title);
     const opacity = await page.locator('.subnet-object[data-subnet="10.2.20.0/24"]').evaluate(g => +getComputedStyle(g).opacity);
     check('a reached subnet is not dimmed by the selection', opacity > .8, String(opacity));
+
+    // NAT1 is a GNS3 NAT cloud: a provider. Selected, it paints no reach, its card has none.
+    await page.evaluate(id => {
+        const s = window.canvasStage;
+        s.select({kind: 'node', id});
+        s.call('details', s.sel);
+    }, PRE + '01');
+    await page.locator('[data-card-layer="l3"]').click();
+    await sleep(300);
+    const painted = await page.locator('.subnet-object').evaluateAll(gs => gs.filter(g => [...g.classList].some(c => c.startsWith('reach-'))).length);
+    const natCard = await page.locator('.object-card').innerText();
+    check('the provider (NAT1) paints no reach and its card says why', painted === 0 && !/Достижимость/.test(natCard)
+        && /Провайдер не знает сетей за клиентом/.test(natCard), `${painted} painted`);
+    await page.locator('.object-card [data-act="close"]').click();
 
     // The card of R3 on L3: its routes and its reach.
     await page.evaluate(id => {
