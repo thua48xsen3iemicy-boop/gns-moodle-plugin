@@ -5157,7 +5157,12 @@ from{transform:translateY(40%);opacity:.3}
 .gns3lab-student.canvas-ui .route-arrow{cursor:pointer;--route:var(--k-route)}
 /* Routes from the "Addresses" level of detail on: further out the subnets alone, and the routes of a selected node. */
 .gns3lab-student.canvas-ui [data-lod="0"] .route-arrow:not(.on),
-.gns3lab-student.canvas-ui [data-lod="1"] .route-arrow:not(.on){display:none}
+.gns3lab-student.canvas-ui [data-lod="1"] .route-arrow:not(.on),
+.gns3lab-student.canvas-ui [data-lod="0"] .route-arrow.by-subnet,
+.gns3lab-student.canvas-ui [data-lod="1"] .route-arrow.by-subnet{display:none}
+/* Further out L3 shows the subnet pills alone: the addresses of a subnet appear when it or one of its nodes is selected. */
+.gns3lab-student.canvas-ui [data-lod="0"] [data-subnet].auto-label:not(.on),
+.gns3lab-student.canvas-ui [data-lod="1"] [data-subnet].auto-label:not(.on){display:none}
 .gns3lab-student.canvas-ui .route-arrow.warn{--route:var(--k-amber)}
 .gns3lab-student.canvas-ui .route-arrow.bad{--route:var(--k-problem)}
 .gns3lab-student.canvas-ui .route-arrow.unused{--route:var(--k-unknown)}

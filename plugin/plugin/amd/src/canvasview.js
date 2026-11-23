@@ -722,7 +722,7 @@ export class CanvasView {
         const s = this.stage, sel = s.layer === 'l4' ? null : s.sel, D = s.der;
         s.svg.classList.toggle('has-sel', !!sel);
         this.markReach(null);
-        s.vp.querySelectorAll('.on,.sel,.connection-related,.connection-primary,.connection-dim').forEach(e => e.classList.remove('on', 'sel', 'connection-related', 'connection-primary', 'connection-dim'));
+        s.vp.querySelectorAll('.on,.sel,.connection-related,.connection-primary,.connection-dim').forEach(e => e.classList.remove('on', 'sel', 'connection-related', 'connection-primary', 'connection-dim', 'by-subnet'));
         const mark = (attr, id, primary = false) => s.svg.querySelectorAll(`[${attr}="${CSS.escape(String(id))}"]`).forEach(e => e.classList.add(...(primary ? ['on', 'sel'] : ['on'])));
         const nodes = new Set(), links = new Set(), subnets = new Set(), domains = new Set();
         s.svg.dataset.connectionFocus = sel ? 'true' : 'false';
@@ -805,6 +805,14 @@ export class CanvasView {
             nodes.add(r.from);
             if (r.to) nodes.add(r.to);
         });
+        // The routes of the nodes of a selected subnet, from them and to them: shown from the "Addresses" level of detail on
+        // (by-subnet, styles.css), further out the pill shows the addresses of its members alone.
+        if (sel.kind === 'subnet' && s.layer === 'l3' && D) {
+            const subnet = D.l3.subnets.find(x => x.key === sel.id), members = new Set(subnet ? subnet.members.map(m => m.nodeId) : []);
+            (this.routeArrows || []).forEach(r => {
+                if (members.has(r.from) || (r.to && members.has(r.to))) r.g.classList.add('on', 'by-subnet');
+            });
+        }
         nodes.forEach(id => mark('data-node', id));
         // Never highlight other VLANs of a related chassis.
         if (this.l2 && sel.kind === 'node') this.l2.virtuals.forEach(v => { if (v.orig.id === sel.id) mark('data-virtual', v.id, true); });

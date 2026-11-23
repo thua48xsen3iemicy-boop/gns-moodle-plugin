@@ -69,6 +69,7 @@ async function scenario(browser, theme) {
         }
     });
     await page.goto(`${BASE}/index.ru.html?fast${MIN ? '&min' : ''}`);
+    await page.waitForFunction(() => window.__stub);
     await page.evaluate(pre => {
         const f = window.__stub.facts;
         f.patchNode(pre + '03', {routes: [{dst: 'default', via: '10.0.12.1', proto: 'static'},
@@ -106,10 +107,37 @@ async function scenario(browser, theme) {
     check('...but the routes of a selected node and those to it do', selected.includes('03') && selected.every(id => ['03', '04', '07', '08'].includes(id)),
         JSON.stringify(selected));
     await page.evaluate(() => window.canvasStage.select(null));
+    await sleep(200);
+    // Far out L3 is the subnet pills alone: the addresses of a subnet show when its pill is selected.
+    const shownAddresses = () => page.locator('[data-subnet].auto-label').evaluateAll(gs => gs
+        .filter(g => getComputedStyle(g).display !== 'none').map(g => g.dataset.subnet));
+    check('further out no address label of a subnet shows', (await shownAddresses()).length === 0, JSON.stringify(await shownAddresses()));
+    // The subnet of the cable R2–R3: its members and the routes from them or to them.
+    const net = await page.evaluate(pre => {
+        const x = window.canvasStage.der.l3.subnets.find(x => [pre + '03', pre + '04'].every(id => x.members.some(m => m.nodeId === id)));
+        return x && {key: x.key, members: x.members.map(m => m.nodeId.slice(-2))};
+    }, PRE);
+    check('the demo has a subnet on the cable R2–R3', !!net, JSON.stringify(net));
+    await page.locator(`.subnet-object[data-subnet="${net.key}"] rect`).click();
+    await sleep(300);
+    const picked = await page.evaluate(() => window.canvasStage.sel);
+    check('a tap on a subnet pill selects the subnet', picked?.kind === 'subnet' && picked.id === net.key, JSON.stringify(picked));
+    const addresses = await shownAddresses();
+    check('...and shows the addresses of its members alone', addresses.length === net.members.length && addresses.every(k => k === net.key),
+        JSON.stringify(addresses));
+    check('...but far out no route arrow of its nodes', (await shownArrows()).length === 0, JSON.stringify(await shownArrows()));
     await zoomTo(page, 1.7);
     await sleep(500);
+    const related = await page.locator('.route-arrow').evaluateAll(gs => gs.map(g => ({from: g.dataset.routeNode.slice(-2),
+        to: (g.dataset.routeTo || '').slice(-2), related: g.classList.contains('connection-related'), shown: getComputedStyle(g).display !== 'none'})));
+    const touches = a => net.members.includes(a.from) || net.members.includes(a.to);
+    check('closer in the pill lights every route from or to its nodes and dims the rest',
+        related.some(touches) && related.every(a => a.shown && a.related === touches(a)), JSON.stringify(related));
+    await page.evaluate(() => window.canvasStage.select(null));
+    await sleep(200);
     const near = await page.evaluate(() => window.canvasStage.svg.dataset.lod);
     check('closer in (level 2, "Addresses") every arrow shows', Number(near) >= 2 && (await shownArrows()).length === 7, `lod ${near}`);
+    check('...and the addresses of every subnet', (await shownAddresses()).length > net.members.length);
     await page.locator('[data-region="zoomFit"]').click();
     await sleep(500);
     // The tap below hits PC1's arrow: in at the "Addresses" level, with PC1 in the middle.
