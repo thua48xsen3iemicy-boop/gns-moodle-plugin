@@ -630,6 +630,7 @@ SOURCE_FILES = (
     'manager/tests/test_api.py',
     'manager/tests/test_check_runs.py',
     'manager/tests/test_check_scripts.py',
+    'manager/tests/test_checks_prompt.py',
     'manager/tests/test_checks.py',
     'manager/tests/test_config.py',
     'manager/tests/test_derived.py',

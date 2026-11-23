@@ -20,6 +20,8 @@ from . import segments as segments_mod
 from .netmodel import Model
 
 FORMAT = "gns3lab.checks/1"
+TOP_FIELDS = frozenset({"format", "focus", "persistence", "nodes", "addresses", "groups", "switches", "reachability",
+                        "rules", "network", "scripts"})
 CLASSES = ("critical", "major", "minor", "note")
 PROFILES = ("lenient", "standard", "strict")
 GROUPS = ("l1", "l2", "addressing", "gateways", "routing", "host")
@@ -131,6 +133,20 @@ def digest(checks: dict | None):
 # ---------------------------------------------------------------------- gns3lab.checks/1
 
 
+def prompt_fingerprint() -> dict:
+    """What the prompt for a neural network must know of the format (plugin/plugin/prompts/checks.*.md).
+
+    The prompt files carry a copy of it; tests/test_checks_prompt.py fails when the format moves on without them.
+    """
+    return {"format": FORMAT, "checks_fields": sorted(TOP_FIELDS), "script_fields": sorted(scripts_mod.FIELDS),
+            "expect_fields": sorted(scripts_mod.EXPECT_FIELDS), "shells": list(scripts_mod.SHELLS),
+            "groups": list(scripts_mod.GROUPS), "classes": list(scripts_mod.CLASSES),
+            "limits": {"scripts": scripts_mod.MAX_SCRIPTS, "run_bytes": scripts_mod.MAX_RUN_BYTES,
+                       "timeout": scripts_mod.MAX_TIMEOUT, "timeout_default": scripts_mod.DEFAULT_TIMEOUT,
+                       "timeout_total": scripts_mod.MAX_TOTAL_TIMEOUT, "pattern": scripts_mod.MAX_PATTERN,
+                       "strings": scripts_mod.MAX_STRINGS, "capture_bytes": scripts_mod.MAX_CAPTURE}}
+
+
 def check_definition(raw, node_names: set, prefix="checks", script_nodes: dict | None = None):
     """Validate and normalize a `gns3lab.checks/1` document. Returns (normalized, problems).
 
@@ -149,8 +165,7 @@ def check_definition(raw, node_names: set, prefix="checks", script_nodes: dict |
     if not isinstance(raw, dict):
         problem("", "bad_type", "object expected")
         return None, problems
-    keys(raw, {"format", "focus", "persistence", "nodes", "addresses", "groups", "switches", "reachability", "rules",
-               "network", "scripts"}, "")
+    keys(raw, TOP_FIELDS, "")
     out = {"format": FORMAT}
     if raw.get("format") != FORMAT:
         problem("format", "required" if "format" not in raw else "bad_type", FORMAT)
