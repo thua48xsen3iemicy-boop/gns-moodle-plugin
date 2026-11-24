@@ -2332,16 +2332,17 @@ body.gns3lab-fullscreen {
     font: 13px var(--display);
     pointer-events: none;
 }
-/* the tab at the top edge of a screen and its menu (Ctrl+Alt+Del, full screen): nothing else lies over the picture */
+/* the tab at the right edge of a screen and its menu (Ctrl+Alt+Del, full screen): nothing else lies over the picture,
+   and the top edge, where desktops keep their panel, stays free */
 .gns3lab-student .vnctools {
     position: absolute;
-    top: 0;
-    left: 50%;
+    top: 50%;
+    right: 0;
     z-index: 3;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    transform: translateX(-50%);
+    transform: translateY(-50%);
     pointer-events: none;
 }
 .gns3lab-student .vnctools > * {
@@ -2350,18 +2351,18 @@ body.gns3lab-fullscreen {
 .gns3lab-student .vnctab {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 14px;
+    width: 14px;
+    height: 44px;
     padding: 0;
     border: 1px solid var(--term-line);
-    border-top: 0;
-    border-radius: 0 0 8px 8px;
+    border-right: 0;
+    border-radius: 8px 0 0 8px;
     background: color-mix(in srgb,var(--term-bg) 85%,transparent);
     color: var(--term-fg);
     opacity: .55;
     cursor: pointer;
     touch-action: manipulation;
-    transition: opacity .15s, height .15s;
+    transition: opacity .15s, width .15s;
 }
 .gns3lab-student .vnctab svg {
     width: 12px;
@@ -2371,12 +2372,14 @@ body.gns3lab-fullscreen {
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
+    /* the chevron of the fold button points down: here it points left, to where the menu opens */
+    transform: rotate(90deg);
     transition: transform .15s;
 }
 .gns3lab-student .vnctab:hover,
 .gns3lab-student .vnctab:focus-visible,
 .gns3lab-student .vnctools.open .vnctab {
-    height: 18px;
+    width: 18px;
     opacity: 1;
 }
 .gns3lab-student .vnctab:focus-visible {
@@ -2384,17 +2387,19 @@ body.gns3lab-fullscreen {
     outline-offset: 1px;
 }
 .gns3lab-student .vnctools.open .vnctab svg {
-    transform: rotate(180deg);
+    transform: rotate(-90deg);
 }
 .gns3lab-student .vncmenu {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: 6px;
     padding: 6px;
     border: 1px solid var(--term-line);
-    border-top: 0;
-    border-radius: 0 0 10px 10px;
+    border-right: 0;
+    border-radius: 10px 0 0 10px;
     background: color-mix(in srgb,var(--term-bg) 94%,transparent);
-    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    box-shadow: -6px 0 18px rgba(0,0,0,.35);
 }
 .gns3lab-student .vncmenu[hidden] {
     display: none;
@@ -2403,8 +2408,8 @@ body.gns3lab-fullscreen {
     .gns3lab-student .vnctab,
     .gns3lab-student .vnctab:hover,
     .gns3lab-student .vnctools.open .vnctab {
-        width: 56px;
-        height: 22px;
+        width: 22px;
+        height: 56px;
     }
 }
 /* full screen: the screen alone on black, without the frame of the focus */

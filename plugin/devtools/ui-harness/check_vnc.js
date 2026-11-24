@@ -178,7 +178,7 @@ const openConsole = async(page, id) => {
         await page.keyboard.press('Escape');
         const got = await until(async() => {
             const s = await screenOf();
-            return s.counts.click >= 1 && s.keys >= 4 ? s : null;
+            return s.counts.click >= 1 && s.keys >= 5 ? s : null;
         });
         check('the click and the keys arrive at the RFB server', !!got, JSON.stringify(got && got.counts));
         if (got) {

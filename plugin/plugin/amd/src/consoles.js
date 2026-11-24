@@ -88,7 +88,7 @@ const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: '
  * One console: the terminal, its connection, the bar under it (snippets and font size).
  *
  * A node with a graphical console (console_type "vnc") gets a noVNC screen instead of the terminal, and instead of the
- * bar a tab at the top edge of the screen with Ctrl+Alt+Del and full screen. The views do not tell them apart: both
+ * bar a tab at the right edge of the screen with Ctrl+Alt+Del and full screen. The views do not tell them apart: both
  * have a host, a connection in `conn` and the same methods.
  */
 /**
@@ -395,7 +395,7 @@ class Con {
     }
 
     /**
-     * The tab at the top edge of a screen: it opens a small menu with Ctrl+Alt+Del and full screen. Nothing else lies
+     * The tab at the right edge of a screen (the top one is where desktops keep their panel): it opens a small menu with Ctrl+Alt+Del and full screen. Nothing else lies
      * over the picture, and the screen takes the whole tile.
      */
     buildScreenTab() {
