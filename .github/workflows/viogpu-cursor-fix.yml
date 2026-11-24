@@ -1,0 +1,53 @@
+# Builds and test-signs viogpudo, the VirtIO GPU display driver for Windows guests, from virtio-win PR #1715 (the
+# hardware cursor no longer shows the previous shape). See tools/viogpu-cursor-fix/README.md.
+name: viogpudo cursor fix
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Full commit hash of virtio-win/kvm-guest-drivers-windows to build (empty = the pinned head of PR 1715)
+        required: false
+        default: ''
+      hwcursor:
+        description: HWCursor that the INF writes on install (1 = hardware cursor on)
+        required: false
+        default: '1'
+  push:
+    paths:
+      - tools/viogpu-cursor-fix/**
+      - .github/workflows/viogpu-cursor-fix.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: tools/viogpu-cursor-fix
+          persist-credentials: false
+
+      - name: Build and test-sign viogpudo
+        shell: pwsh
+        env:
+          VIOGPU_REF: ${{ inputs.ref }}
+          VIOGPU_HWCURSOR: ${{ inputs.hwcursor }}
+        run: ./tools/viogpu-cursor-fix/build.ps1 -Out "$env:RUNNER_TEMP\viogpudo-package"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: viogpudo-win10-x64-test-signed
+          path: ${{ runner.temp }}/viogpudo-package
+          if-no-files-found: error
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: viogpudo-build-log
+          path: ${{ runner.temp }}/viogpu-build.log
+          if-no-files-found: ignore
