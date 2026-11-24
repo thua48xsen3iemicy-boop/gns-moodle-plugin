@@ -34,7 +34,7 @@ import {CISCO_TYPES, ConsoleConnection, KEYS, PORT_RE, THEME, loadXterm, note} f
 import {ConsoleWatch} from 'mod_gns3lab/consolewatch';
 import {SnipMenu} from 'mod_gns3lab/snipmenu';
 import {kindOf, notePrompt, snippetSet} from 'mod_gns3lab/snippets';
-import {VncConnection, loadNovnc} from 'mod_gns3lab/vnc';
+import {VncConnection, fullScreenSize, loadNovnc} from 'mod_gns3lab/vnc';
 import {svgEl as el, hel, store, fill} from 'mod_gns3lab/dom';
 import {clamp, esc} from 'mod_gns3lab/model';
 
@@ -43,6 +43,8 @@ const ICON_MAX = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4
 const ICON_MIN = '<svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg>';
 const ICON_FOLD = '<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>';
 const ICON_LIST = '<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>';
+const ICON_FULL = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
+const ICON_UNFULL = '<svg viewBox="0 0 16 16"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/></svg>';
 
 /**
  * Font sizes of the terminals, px. Each console has its own choice and it stays in the browser, per activity and node:
@@ -63,9 +65,6 @@ const TAB_EDGE = 28;
 
 /** Ctrl + wheel turns the size by one step after this much scrolling (a wheel notch is 100, a trackpad pinch is many small ones). */
 const FONT_WHEEL_STEP = 50;
-
-/** Longest text that Paste sends to a screen, characters: it goes out in one frame, and the gateway takes 64 KB at most. */
-const PASTE_MAX = 8192;
 
 /**
  * With pasting turned off for a node, input that arrives from the terminal in one piece longer than this many characters is
@@ -88,9 +87,9 @@ const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: '
 /**
  * One console: the terminal, its connection, the bar under it (snippets and font size).
  *
- * A node with a graphical console (console_type "vnc") gets a noVNC screen instead of the terminal, and a bar with
- * Ctrl+Alt+Del and Paste instead of snippets and font size. The views do not tell them apart: both have a host,
- * a connection in `conn` and the same methods.
+ * A node with a graphical console (console_type "vnc") gets a noVNC screen instead of the terminal, and instead of the
+ * bar a tab at the top edge of the screen with Ctrl+Alt+Del and full screen. The views do not tell them apart: both
+ * have a host, a connection in `conn` and the same methods.
  */
 /**
  * Whether a key press moves between the open consoles: Shift+Left or Shift+Right, with no other modifier.
@@ -129,8 +128,10 @@ class Con {
         this.host = hel('div', 'termhost' + (this.vnc ? ' vnchost' : ''));
         this.viewport = hel('div', 'termview' + (this.vnc ? ' vncview' : ''), this.host);
         this.wheelSum = 0;
+        // A screen in full screen: the size of the monitor it asks the node for.
+        this.full = null;
         if (this.vnc) {
-            this.buildScreenBar();
+            this.buildScreenTab();
         } else {
             this.buildBar();
             this.host.addEventListener('wheel', event => this.wheel(event), {capture: true, passive: false});
@@ -393,54 +394,138 @@ class Con {
         return true;
     }
 
-    /** The bar under a screen: Ctrl+Alt+Del and Paste. */
-    buildScreenBar() {
-        const o = this.owner, bar = hel('div', 'tbar vncbar', this.host);
-        bar.setAttribute('role', 'toolbar');
-        bar.setAttribute('aria-label', fill(o.s('consolevnclabel'), this.n.name));
-        const button = (text, label, action) => {
-            const b = hel('button', 'vncbtn', bar);
+    /**
+     * The tab at the top edge of a screen: it opens a small menu with Ctrl+Alt+Del and full screen. Nothing else lies
+     * over the picture, and the screen takes the whole tile.
+     */
+    buildScreenTab() {
+        const o = this.owner, tools = hel('div', 'vnctools', this.host);
+        const menu = hel('div', 'vncmenu', tools);
+        menu.setAttribute('role', 'toolbar');
+        menu.setAttribute('aria-label', fill(o.s('consolevnclabel'), this.n.name));
+        menu.hidden = true;
+        const tab = hel('button', 'vnctab', tools);
+        tab.type = 'button';
+        tab.innerHTML = ICON_FOLD;
+        tab.title = o.s('consolevnctools');
+        tab.setAttribute('aria-label', o.s('consolevnctools'));
+        tab.setAttribute('aria-expanded', 'false');
+        this.tools = {box: tools, menu, tab};
+        const button = (html, text, label, action) => {
+            const b = hel('button', 'vncbtn', menu);
             b.type = 'button';
-            b.textContent = text;
+            b.innerHTML = html;
+            hel('span', '', b).textContent = text;
             b.title = label;
             // The accessible name keeps the visible text in it; otherwise the tooltip is only a hint.
             if (label.includes(text)) b.setAttribute('aria-label', label);
-            // The screen keeps the keyboard focus while a button is pressed.
-            b.addEventListener('pointerdown', e => e.preventDefault());
-            b.addEventListener('click', action);
+            b.addEventListener('click', () => {
+                this.showTools(false);
+                action();
+            });
             return b;
         };
-        button('Ctrl+Alt+Del', o.s('consolevncctrlaltdel'), () => {
+        // The screen keeps the keyboard focus while the tab or a button is pressed.
+        tools.addEventListener('pointerdown', e => e.preventDefault());
+        tab.addEventListener('click', () => this.showTools(menu.hidden));
+        button('', 'Ctrl+Alt+Del', o.s('consolevncctrlaltdel'), () => {
             if (this.conn && this.conn.ctrlAltDel()) this.focus();
             else o.toast(fill(o.s('ui_not_connected'), this.n.name));
         });
-        // The only way of the clipboard to a screen; the lab may turn it off for the node.
-        if (!this.nopaste) button(o.s('consolevncpaste'), o.s('consolevncpastehint'), () => this.pasteText());
+        if (document.fullscreenEnabled) {
+            this.fullBtn = button(ICON_FULL, o.s('consolevncfullscreen'), o.s('consolevncfullscreenhint'), () => this.toggleFull());
+        }
+        menu.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.showTools(false);
+            this.focus();
+        });
+        // A press anywhere else closes the menu.
+        this.onOutside = e => {
+            if (!menu.hidden && !tools.contains(e.target)) this.showTools(false);
+        };
+        this.onFullChange = () => this.fullChanged();
+        document.addEventListener('pointerdown', this.onOutside, true);
+        document.addEventListener('fullscreenchange', this.onFullChange);
     }
 
-    /** Puts the text of the clipboard of the browser into the clipboard of the node. */
-    async pasteText() {
+    /**
+     * Opens or closes the menu of the tab.
+     *
+     * @param {boolean} open open it
+     */
+    showTools(open) {
+        const t = this.tools;
+        t.menu.hidden = !open;
+        t.tab.setAttribute('aria-expanded', String(open));
+        t.box.classList.toggle('open', open);
+    }
+
+    /** Puts the screen on the whole monitor, or takes it back into the page. */
+    toggleFull() {
+        if (document.fullscreenElement === this.host) {
+            document.exitFullscreen().catch(() => undefined);
+            return;
+        }
+        this.host.requestFullscreen({navigationUI: 'hide'}).then(() => this.focus(), () => {
+            this.owner.toast(this.owner.s('consolevncfullscreenfailed'));
+        });
+    }
+
+    /**
+     * Full screen began or ended (the button, Esc, F11, the console left the page). In full screen the node is asked
+     * for the size of the monitor in device pixels, at most 2K, so that the picture is shown pixel for pixel; when full
+     * screen ends, for the size it had before. A guest that does not follow such a request keeps its size, and noVNC
+     * scales the picture as before.
+     */
+    fullChanged() {
+        const full = document.fullscreenElement === this.host;
+        if (full === !!this.full) return;
         const o = this.owner;
-        if (!this.conn || this.conn.state !== 'open') {
-            o.toast(fill(o.s('ui_not_connected'), this.n.name));
-            return;
+        this.full = full ? (fullScreenSize(window.screen.width, window.screen.height, window.devicePixelRatio) || {}) : null;
+        this.host.classList.toggle('vncfull', full);
+        if (this.fullBtn) {
+            this.fullBtn.innerHTML = full ? ICON_UNFULL : ICON_FULL;
+            hel('span', '', this.fullBtn).textContent = o.s(full ? 'consolevncfullscreenexit' : 'consolevncfullscreen');
+            this.fullBtn.title = o.s(full ? 'consolevncfullscreenexit' : 'consolevncfullscreenhint');
+            this.fullBtn.setAttribute('aria-label', this.fullBtn.title);
         }
-        let text;
-        try {
-            text = await navigator.clipboard.readText();
-        } catch (e) {
-            // No permission, or a page that is not secure.
-            o.toast(o.s('consolevncpastefailed'));
-            return;
-        }
-        if (!text) {
-            o.toast(o.s('consolevncpasteempty'));
-        } else if (text.length > PASTE_MAX) {
-            o.toast(fill(o.s('consolevncpastelong'), PASTE_MAX));
-        } else if (this.conn.paste(text)) {
-            o.toast(o.s('consolevncpasted'));
-            this.focus();
-        }
+        // Keys that the system or the browser would take (Esc, Win, Alt+Tab) go to the node while the screen is full
+        // screen; holding Esc leaves it. Only Chromium has the Keyboard Lock API, elsewhere the keys stay as they are.
+        const keyboard = navigator.keyboard;
+        if (full && keyboard && keyboard.lock) keyboard.lock().catch(() => undefined);
+        else if (!full && keyboard && keyboard.unlock) keyboard.unlock();
+        if (!this.conn) return;
+        if (full && this.full.w) this.conn.fitTo(this.full);
+        else if (!full) this.conn.restoreSize();
+    }
+
+    /**
+     * Where the size of the screen of the node before full screen is kept until it is given back: in the browser, per
+     * activity and node, so that it survives a reload of the page in full screen.
+     *
+     * @returns {object} get(), set(size), clear()
+     */
+    screenSizes() {
+        const key = this.owner.cmid + '/' + this.n.id;
+        const all = () => {
+            const value = store.get('vncsizes', {});
+            return value && typeof value === 'object' ? value : {};
+        };
+        return {
+            get: () => {
+                const size = all()[key];
+                return size && size.w > 0 && size.h > 0 ? {w: size.w, h: size.h} : null;
+            },
+            set: size => store.set('vncsizes', {...all(), [key]: {w: size.w, h: size.h}}),
+            clear: () => {
+                const sizes = all();
+                delete sizes[key];
+                store.set('vncsizes', sizes);
+            },
+        };
     }
 
     /** The screen of a node with a graphical console, connected to the gateway. */
@@ -465,6 +550,7 @@ class Con {
         this.screen.addEventListener('pointerdown', () => this.activity('in'), true);
         this.conn = new VncConnection({
             api: o.api, cmid: o.cmid, userid: o.userid, nodeId: this.n.id, RFB: o.RFB, screen: this.screen, strings: o.strings,
+            sizes: this.screenSizes(),
             nodeStatus: () => o.nodeStatus(this.n.id),
             onState: state => this.setState(state),
             onNote: text => {
@@ -472,6 +558,7 @@ class Con {
                 this.vnote.hidden = !text;
             },
         });
+        if (this.full && this.full.w) this.conn.fitTo(this.full);
         this.conn.connect();
     }
 
@@ -707,6 +794,13 @@ class Con {
     dispose() {
         this.owner.snip.closeFor(this);
         this.ro.disconnect();
+        if (this.onOutside) document.removeEventListener('pointerdown', this.onOutside, true);
+        if (this.onFullChange) document.removeEventListener('fullscreenchange', this.onFullChange);
+        if (this.full) {
+            // The node gets its own size back now; the listener of full screen is gone already.
+            if (this.conn) this.conn.restoreSize();
+            if (document.fullscreenElement === this.host) document.exitFullscreen().catch(() => undefined);
+        }
         clearTimeout(this.flowT);
         if (this.conn) this.conn.close();
         if (this.watch) this.watch.dispose();

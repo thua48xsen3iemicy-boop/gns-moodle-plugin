@@ -136,7 +136,8 @@ curl -X POST localhost:8090/mock/nodes/6b1f3c2e-4a7d-4e5b-9c10-000000000002/star
 ```
 
 Нода с `console_type: vnc` (PVE1) открывается экраном noVNC: цветные полосы и буквы VNC; клавиша рисует цветной квадрат
-внизу, мышь — жёлтый маркер, щелчок — красный квадрат. Что дошло до экрана — `curl localhost:8090/mock/vnc/<node_id>`.
+внизу, мышь — жёлтый маркер, щелчок — красный квадрат; «Во весь экран» меняет размер экрана, как QEMU с virtio-gpu
+(SetDesktopSize, ExtendedDesktopSize). Что дошло до экрана — `curl localhost:8090/mock/vnc/<node_id>`.
 Шлюзу менеджера для этого нужна поддержка `vnc` (`console: "vnc"` в `/internal/tickets`, CONTRACTS §6); без неё —
 `ui-harness` (`ui-harness/README.md`, раздел про noVNC).
 

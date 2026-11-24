@@ -25,6 +25,10 @@
  *
  * noVNC is loaded on demand, when the first graphical console opens.
  *
+ * Full screen (docs/SPEC.md §5.4): the page may ask the node for a screen size of its own (SetDesktopSize, the
+ * ExtendedDesktopSize extension of RFB). QEMU passes it to the display adapter as a new preferred mode, and the guest
+ * switches to it if it follows such changes. When full screen ends, the node is asked for the size it had before.
+ *
  * @module     mod_gns3lab/vnc
  * @copyright  2026 mod_gns3lab contributors
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -39,10 +43,37 @@ import {BACKOFF, CLOSE_UNAVAILABLE, CLOSE_UPSTREAM, STABLE_AFTER, consoleUrl} fr
  * (mod_gns3lab/console STRING_KEYS).
  */
 export const STRING_KEYS = [
-    'consolevncobserver', 'consolevnccreds', 'consolevnclabel', 'consolevncctrlaltdel', 'consolevncpaste',
-    'consolevncpasted', 'consolevncpasteempty', 'consolevncpastefailed', 'consolevncpastehint', 'consolevncpastelong',
+    'consolevncobserver', 'consolevnccreds', 'consolevnclabel', 'consolevncctrlaltdel', 'consolevnctools',
+    'consolevncfullscreen', 'consolevncfullscreenexit', 'consolevncfullscreenhint', 'consolevncfullscreenfailed',
     'ui_screen_fail',
 ];
+
+/** The largest screen a node is asked for in full screen (2K): a bigger monitor gets it scaled up. */
+export const MAX_SCREEN = {w: 2560, h: 1440};
+
+/** How long after connecting the page waits for the server to say whether it can change the screen size. */
+const RESIZE_WAIT = 5000;
+
+/**
+ * The size of the screen to ask a node for in full screen: the monitor in device pixels (so that a picture of that
+ * size is shown pixel for pixel, also with the scaling of the operating system), at most MAX_SCREEN, same proportions.
+ *
+ * @param {number} width width of the monitor in CSS pixels
+ * @param {number} height height of the monitor in CSS pixels
+ * @param {number} ratio device pixels per CSS pixel
+ * @returns {{w: number, h: number}|null} null for a size that makes no sense
+ */
+export const fullScreenSize = (width, height, ratio) => {
+    let w = Math.round(width * (ratio || 1)), h = Math.round(height * (ratio || 1));
+    if (!(w > 0 && h > 0)) {
+        return null;
+    }
+    const k = Math.min(1, MAX_SCREEN.w / w, MAX_SCREEN.h / h);
+    // Even sizes: some guests round odd modes and would leave a stripe. The epsilon keeps 3440 * (2560 / 3440) at 2560.
+    w = Math.floor(w * k / 2 + 1e-9) * 2;
+    h = Math.floor(h * k / 2 + 1e-9) * 2;
+    return w >= 640 && h >= 400 ? {w, h} : null;
+};
 
 let novncPromise = null;
 
@@ -84,8 +115,10 @@ export class VncConnection {
      * @param {Function} options.onState called with the new state name
      * @param {Function} options.onNote called with a message to show over the screen, an empty string clears it
      * @param {Function} [options.api] the transport of web service calls, Ajax.call by default
+     * @param {object} [options.sizes] where the size of the screen before full screen is kept: get(), set(size), clear()
      */
-    constructor({cmid, userid, nodeId, RFB, screen, strings, nodeStatus, onState, onNote, api = requests => Ajax.call(requests)}) {
+    constructor({cmid, userid, nodeId, RFB, screen, strings, nodeStatus, onState, onNote, api = requests => Ajax.call(requests),
+            sizes = null}) {
         this.api = api;
         this.cmid = cmid;
         this.userid = userid;
@@ -102,6 +135,10 @@ export class VncConnection {
         this.link = null;
         this.connectedAt = 0;
         this.fatal = '';
+        // The size the node is asked for while the screen is full screen, null: the node keeps its own.
+        this.wanted = null;
+        this.sizes = sizes || {get: () => null, set: () => undefined, clear: () => undefined};
+        this.sizeTimer = null;
     }
 
     /**
@@ -221,6 +258,99 @@ export class VncConnection {
         this.connectedAt = Date.now();
         this.onNote('');
         this.setState('open');
+        // In full screen the node gets the wanted size again; otherwise a size left from a full screen that ended
+        // without a connection (or with a reload of the page) is given back.
+        if (this.wanted || this.sizes.get()) {
+            this.applySize();
+        }
+    }
+
+    /**
+     * Whether the server said it can change the size of the screen. noVNC 1.7.0 keeps it in a private field set by the
+     * first ExtendedDesktopSize rectangle; it has no public API for a size other than that of its element.
+     *
+     * @param {object} rfb RFB object
+     * @returns {boolean}
+     */
+    static resizable(rfb) {
+        return !!(rfb && rfb._supportsSetDesktopSize && rfb._sock);
+    }
+
+    /**
+     * The size of the screen of the node now.
+     *
+     * @returns {{w: number, h: number}|null} null: not connected yet
+     */
+    remoteSize() {
+        const rfb = this.state === 'open' && this.link ? this.link.rfb : null;
+        return rfb && rfb._fbWidth > 0 && rfb._fbHeight > 0 ? {w: rfb._fbWidth, h: rfb._fbHeight} : null;
+    }
+
+    /**
+     * Sends SetDesktopSize: one screen of this size, with the id and flags the server gave for its screen.
+     *
+     * @param {{w: number, h: number}} size size
+     * @returns {boolean} false: not connected, or the server cannot change the size
+     */
+    sendSize(size) {
+        const rfb = this.state === 'open' && this.link ? this.link.rfb : null;
+        if (!VncConnection.resizable(rfb) || !this.RFB.messages || !this.RFB.messages.setDesktopSize) {
+            return false;
+        }
+        if (rfb._fbWidth !== size.w || rfb._fbHeight !== size.h) {
+            this.RFB.messages.setDesktopSize(rfb._sock, size.w, size.h, rfb._screenID, rfb._screenFlags);
+        }
+        return true;
+    }
+
+    /**
+     * Asks the node for the wanted size, or, out of full screen, for the size it had before full screen. Right after
+     * connecting it waits a little for the server to say it can. The size before full screen is remembered once, in
+     * the browser: it survives a reconnection and a reload of the page.
+     */
+    applySize() {
+        clearTimeout(this.sizeTimer);
+        const started = Date.now();
+        const attempt = () => {
+            if (this.state !== 'open' || !this.link) {
+                return;
+            }
+            if (!VncConnection.resizable(this.link.rfb)) {
+                if (Date.now() - started < RESIZE_WAIT) {
+                    this.sizeTimer = setTimeout(attempt, 100);
+                }
+                return;
+            }
+            const before = this.sizes.get();
+            if (this.wanted) {
+                const now = this.remoteSize();
+                if (now && !before && (now.w !== this.wanted.w || now.h !== this.wanted.h)) {
+                    this.sizes.set(now);
+                }
+                this.sendSize(this.wanted);
+            } else if (before && this.sendSize(before)) {
+                this.sizes.clear();
+            }
+        };
+        attempt();
+    }
+
+    /**
+     * Full screen began: the node is asked for this size, also after a reconnection.
+     *
+     * @param {{w: number, h: number}} size size from fullScreenSize()
+     */
+    fitTo(size) {
+        this.wanted = size;
+        this.applySize();
+    }
+
+    /**
+     * Full screen ended: the node is asked for the size it had before, once (or when it is connected again).
+     */
+    restoreSize() {
+        this.wanted = null;
+        this.applySize();
     }
 
     /**
@@ -342,21 +472,6 @@ export class VncConnection {
     }
 
     /**
-     * Puts text into the clipboard of the node. The node has to paste it itself (Ctrl+V), and only a guest with a
-     * clipboard agent receives it at all.
-     *
-     * @param {string} text text
-     * @returns {boolean} false: the screen is not connected
-     */
-    paste(text) {
-        if (this.state !== 'open' || !this.link) {
-            return false;
-        }
-        this.link.rfb.clipboardPasteFrom(text);
-        return true;
-    }
-
-    /**
      * Moves the keyboard focus to the screen.
      */
     focus() {
@@ -371,6 +486,7 @@ export class VncConnection {
     close() {
         this.setState('closed');
         clearTimeout(this.timer);
+        clearTimeout(this.sizeTimer);
         const link = this.link;
         this.link = null;
         if (link) {

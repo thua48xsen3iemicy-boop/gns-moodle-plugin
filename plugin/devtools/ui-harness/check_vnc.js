@@ -131,7 +131,8 @@ const openConsole = async(page, id) => {
         }
 
         // ---- the owner of the lab, desktop
-        const context = await browser.newContext({viewport: {width: 1440, height: 860}, permissions: ['clipboard-read', 'clipboard-write']});
+        // A monitor of 1536x864 CSS pixels at 125 %: 1920x1080 device pixels, what full screen asks the node for.
+        const context = await browser.newContext({viewport: {width: 1440, height: 860}, screen: {width: 1536, height: 864}, deviceScaleFactor: 1.25});
         const page = await context.newPage();
         const problems = [];
         page.on('pageerror', e => problems.push('pageerror: ' + e.message));
@@ -146,9 +147,13 @@ const openConsole = async(page, id) => {
 
         const canvas = page.locator('.vncscreen canvas');
         check('a canvas of noVNC appears in the console panel', !!(await until(async() => (await canvas.count()) === 1)));
-        check('no terminal, snippets or font size for a screen',
-            (await page.locator('.vncview .xterm, .tbar .snipbtn, .tbar .tfont').count()) === 0
-            && (await page.locator('.vncbar').count()) === 1);
+        check('no terminal, snippets, font size or bar for a screen: a tab at its top edge instead',
+            (await page.locator('.vncview .xterm, .tbar').count()) === 0
+            && (await page.locator('.vnctools .vnctab').count()) === 1 && await page.locator('.vncmenu').isHidden());
+        check('the screen takes the whole tile', await page.locator('.vnchost').evaluate(host => {
+            const view = host.querySelector('.vncview').getBoundingClientRect(), r = host.getBoundingClientRect();
+            return Math.abs(view.height - r.height) < 1 && Math.abs(view.width - r.width) < 1;
+        }));
         const drawn = await until(async() => {
             const bar = await pixel(page, 60, 30);
             return near(bar, [235, 235, 16]) ? bar : null;
@@ -189,7 +194,14 @@ const openConsole = async(page, id) => {
         check('the answer of the server (red square at the click) is drawn back', !!painted);
         check('Escape of the screen did not go to the page (the screen is still there)', (await canvas.count()) === 1);
 
-        // ---- the buttons of the bar
+        // ---- the menu of the tab
+        const tab = page.getByRole('button', {name: 'Screen controls'});
+        await tab.click();
+        check('the tab opens the menu: Ctrl+Alt+Del and Full screen, no Paste',
+            await page.locator('.vncmenu').isVisible() && (await tab.getAttribute('aria-expanded')) === 'true'
+            && (await page.locator('.vncmenu .vncbtn').count()) === 2
+            && (await page.getByRole('button', {name: 'Paste'}).count()) === 0);
+        await page.screenshot({path: path.join(SHOTS, '2-panel-menu.png')});
         const before = (await screenOf()).events.length;
         await page.getByRole('button', {name: 'Send Ctrl+Alt+Del to the device'}).click();
         const cad = await until(async() => {
@@ -197,11 +209,50 @@ const openConsole = async(page, id) => {
             return downs.join() === [0xffe3, 0xffe9, 0xffff].join() ? downs : null;
         });
         check('Ctrl+Alt+Del sends Control_L, Alt_L, Delete', !!cad);
-        await page.evaluate(() => navigator.clipboard.writeText('text from the clipboard'));
-        await page.getByRole('button', {name: 'Paste', exact: true}).click();
-        const cut = await until(async() => (await screenOf()).events.find(e => e.type === 'cut'));
-        check('Paste sends the clipboard text as ClientCutText', !!cut && cut.text === 'text from the clipboard', JSON.stringify(cut));
-        await page.screenshot({path: path.join(SHOTS, '2-panel-after-input.png')});
+        check('a button closes the menu', await page.locator('.vncmenu').isHidden() && (await tab.getAttribute('aria-expanded')) === 'false');
+        await tab.click();
+        await page.mouse.click(5, 5);
+        check('a press elsewhere closes the menu', await page.locator('.vncmenu').isHidden());
+
+        // ---- full screen: the node is asked for the monitor in device pixels, and for its own size afterwards
+        const capped = await page.evaluate(() => new Promise(resolve => {
+            window.require(['mod_gns3lab/vnc'], m => resolve([
+                m.fullScreenSize(3840, 2160, 1), m.fullScreenSize(1536, 864, 1.25), m.fullScreenSize(3440, 1440, 1),
+                m.fullScreenSize(1366, 768, 1), m.fullScreenSize(0, 0, 1),
+            ]));
+        }));
+        check('the size for full screen: device pixels, at most 2560x1440, same proportions',
+            JSON.stringify(capped) === JSON.stringify([{w: 2560, h: 1440}, {w: 1920, h: 1080}, {w: 2560, h: 1070}, {w: 1366, h: 768}, null]),
+            JSON.stringify(capped));
+        await tab.click();
+        await page.getByRole('button', {name: /^Full screen/}).click();
+        const full = await until(async() => page.evaluate(() => !!document.fullscreenElement
+            && document.fullscreenElement.classList.contains('vnchost') && document.fullscreenElement.classList.contains('vncfull')));
+        check('Full screen puts the screen on the whole monitor', !!full);
+        const resized = await until(async() => {
+            const s = await screenOf();
+            return s.size.join() === '1920,1080' ? s : null;
+        });
+        check('in full screen the node is asked for 1920x1080 and its screen gets that size', !!resized,
+            JSON.stringify(resized ? resized.events.filter(e => e.type === 'resize') : (await screenOf()).size));
+        check('noVNC shows the new size (canvas 1920x1080)', !!(await until(async() =>
+            (await canvas.evaluate(c => c.width === 1920 && c.height === 1080)))));
+        check('the size before full screen is kept in the browser (320x200)',
+            (await page.evaluate(() => localStorage.getItem('gns3lab.vncsizes'))).includes('{"w":320,"h":200}'));
+        await tab.click();
+        check('the menu now offers to leave full screen',
+            (await page.getByRole('button', {name: 'Exit full screen'}).count()) === 1);
+        await page.screenshot({path: path.join(SHOTS, '2-fullscreen.png')});
+        await page.getByRole('button', {name: 'Exit full screen'}).click();
+        const restored = await until(async() => {
+            const s = await screenOf();
+            return s.size.join() === '320,200' && !(await page.evaluate(() => document.fullscreenElement)) ? s : null;
+        });
+        check('leaving full screen gives the node back its size (320x200)', !!restored,
+            JSON.stringify((await screenOf()).events.filter(e => e.type === 'resize')));
+        check('and forgets the kept size', !(await page.evaluate(() => localStorage.getItem('gns3lab.vncsizes'))).includes('320'));
+        check('the picture of the old size is drawn again',
+            !!(await until(async() => near(await pixel(page, 60, 30), [235, 235, 16]) && (await canvas.evaluate(c => c.width === 320)))));
 
         // ---- the arrangements keep the connection
         const tickets = await page.evaluate(() => window.__stub.tickets);
@@ -260,7 +311,7 @@ const openConsole = async(page, id) => {
         await openConsole(page, R1);
         const term = await until(async() => (await page.locator('.xterm').count()) === 1 && /R1 console/.test(await page.locator('.xterm-rows').innerText()));
         check('a text console of the same page is a terminal with snippets and font size',
-            !!term && (await page.locator('.tbar .tfont').count()) === 1 && (await page.locator('.vncbar').count()) === 0);
+            !!term && (await page.locator('.tbar .tfont').count()) === 1 && (await page.locator('.vnctools').count()) === 0);
         await context.close();
 
         // ---- the teacher: no screen
