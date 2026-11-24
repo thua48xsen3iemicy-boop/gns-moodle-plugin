@@ -5,7 +5,7 @@
  *   clipboard or dragged text → the terminal of the lab page → fake gateway of server.js (it echoes what it gets).
  *
  * On a marked node (SW1), a paste (Ctrl+V, the paste event), a drop and input that arrives in one long piece do not
- * reach the device, typing and the snippets do; a marked screen has no Paste button. An unmarked node of the same lab
+ * reach the device, typing and the snippets do; no screen has a Paste button. An unmarked node of the same lab
  * (R1) and a lab without marks take a paste.
  * It starts the fake gateway itself and drives the page with Playwright.
  *
@@ -218,14 +218,16 @@ async function labPage(browser, name, problems, nodeName = 'SW1') {
         check('a snippet still goes to the device', await shows(page, 'IP-Address'));
         await page.context().close();
 
-        // A screen has no Paste button.
+        // A screen has no Paste button, marked or not: its menu has Ctrl+Alt+Del and full screen.
         const context = await browser.newContext({viewport: {width: 1440, height: 860}});
-        for (const [name, buttons] of [['index.en.nopaste.html', 1], ['index.en.html', 2]]) {
+        for (const name of ['index.en.nopaste.html', 'index.en.html']) {
             const view = await context.newPage();
             await start(view, name);
             await openConsole(view, VNC);
-            const bar = await until(async() => (await view.locator('.vncbar .vncbtn').count()) > 0);
-            check(`${name}: buttons under a screen: ${buttons}`, !!bar && (await view.locator('.vncbar .vncbtn').count()) === buttons);
+            const menu = await until(async() => (await view.locator('.vncmenu .vncbtn').count()) > 0);
+            const labels = await view.locator('.vncmenu .vncbtn').allInnerTexts();
+            check(`${name}: the menu of a screen has no Paste`, !!menu && labels.length === 2 && !labels.some(t => /Paste/.test(t)),
+                JSON.stringify(labels));
             await view.close();
         }
         await context.close();

@@ -69,6 +69,8 @@ interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашени�
 - поддельный Lab Slot на такой ноде отдаёт сырой поток RFB 3.8 двоичными кадрами: security None, экран 320×200
   (цветные полосы и буквы VNC), на FramebufferUpdateRequest — raw-прямоугольник. Нажатие клавиши рисует цветной
   квадрат внизу, движение мыши — жёлтый перекрёстный маркер, щелчок — красный квадрат, ClientCutText — голубой;
+  клиенту, который знает ExtendedDesktopSize (как noVNC), экран это объявляет и на SetDesktopSize меняет размер, как
+  QEMU (картинка перерисовывается под новый размер, просьба видна в событиях как "resize");
 - GET /mock/vnc/<node_id> — что дошло до экрана: счётчики и последние события (проверка без глаз).
 Образ debian12-desktop каталога — с console_type "vnc"; в эталонной лабе ospf-multi-area это нода PVE1.
 
@@ -1431,8 +1433,15 @@ class FakeRfb:
     recognised on a screenshot, and input shows on it: a key press adds a coloured square along the bottom, the pointer
     is a yellow cross, a click leaves a red square, ClientCutText a cyan one. Everything that arrived is also kept in
     `events` (GET /mock/vnc/<node_id>).
+
+    A client that lists the ExtendedDesktopSize pseudo-encoding (-308) is told the size of the screen with it, and
+    SetDesktopSize then resizes the screen the way QEMU 8.2 with virtio-gpu and a guest that follows it do: the answer
+    to the request is "forwarded" (status 4, the old size), then the guest changes its mode and the server announces
+    the new size on its own (reason 0) with the whole picture, the logo drawn again for the new size.
     """
     W, H = 320, 200
+    EXT_DESKTOP_SIZE = -308
+    MAX_SIZE = 4096
     # noVNC asks for 32 bits per pixel, little endian, red shift 0, green 8, blue 16: the bytes of a pixel are R, G, B, 0.
     FONT = {  # 5x7 letters of the logo
         "V": ["X...X", "X...X", "X...X", "X...X", "X...X", ".X.X.", "..X.."],
@@ -1451,11 +1460,20 @@ class FakeRfb:
         self.dirty = None  # [x0, y0, x1, y1] of what changed since the last update
         self.cross = None
         self.keys = 0
-        self.counts = {"key": 0, "pointer": 0, "click": 0, "cut": 0}
+        self.counts = {"key": 0, "pointer": 0, "click": 0, "cut": 0, "resize": 0}
         self.events = []
         self.mask = 0
+        self.ext = False  # the client knows ExtendedDesktopSize
         self.draw_logo()
         self.fb = bytearray(self.base)
+
+    def set_size(self, w, h):
+        """A new screen size: the picture starts again from the logo, the marks of input are gone."""
+        self.W, self.H = w, h
+        self.base = bytearray(w * h * 4)
+        self.draw_logo()
+        self.fb = bytearray(self.base)
+        self.cross, self.dirty = None, None
 
     # -------- drawing
     def fill(self, buf, x, y, w, h, rgb):
@@ -1467,8 +1485,9 @@ class FakeRfb:
             buf[(yy * self.W + x0) * 4:(yy * self.W + x1) * 4] = row
 
     def draw_logo(self):
-        for yy in range(self.H):  # a dark blue gradient
-            self.fill(self.base, 0, yy, self.W, 1, (10, 24 + yy // 8, 48 + yy // 4))
+        for yy in range(self.H):  # a dark blue gradient, the same for any height
+            g = yy * 200 // self.H
+            self.fill(self.base, 0, yy, self.W, 1, (10, 24 + g // 8, 48 + g // 4))
         bar = self.W // len(self.BARS)
         for i, rgb in enumerate(self.BARS):
             self.fill(self.base, i * bar, 0, bar, 60, rgb)
@@ -1513,6 +1532,16 @@ class FakeRfb:
         self.counts[kind] += 1
         self.events.append({"type": kind, **fields})
         del self.events[:-200]
+
+    def desktop_size(self, reason, status):
+        """A FramebufferUpdate with one ExtendedDesktopSize rectangle (x: why, y: status) and the whole new picture."""
+        screen = struct.pack(">IHHHHI", 0, 0, 0, self.W, self.H, 0)
+        rects = [struct.pack(">HHHHi", reason, status, self.W, self.H, self.EXT_DESKTOP_SIZE) + struct.pack(">B3x", 1)
+                 + screen]
+        if reason == 0:
+            rects.append(struct.pack(">HHHHi", 0, 0, self.W, self.H, 0) + bytes(self.fb))
+        self.dirty, self.want = None, False
+        return struct.pack(">BxH", 0, len(rects)) + b"".join(rects)
 
     def update(self, x, y, w, h):
         x, y = max(0, min(x, self.W)), max(0, min(y, self.H))
@@ -1559,7 +1588,9 @@ class FakeRfb:
                     size = 4 + 4 * struct.unpack(">H", bytes(buf[2:4]))[0]
                 elif buf[0] == 6 and len(buf) >= 8:
                     size = 8 + struct.unpack(">I", bytes(buf[4:8]))[0]
-                elif buf[0] not in (2, 6) and size is None:
+                elif buf[0] == 251 and len(buf) >= 8:
+                    size = 8 + 16 * buf[6]
+                elif buf[0] not in (2, 6, 251) and size is None:
                     raise ProtocolError(f"client message {buf[0]} is not supported")
                 if size is None or len(buf) < size:
                     break
@@ -1570,8 +1601,25 @@ class FakeRfb:
 
     def message(self, msg):
         kind = msg[0]
-        if kind == 3:  # FramebufferUpdateRequest
+        if kind == 2:  # SetEncodings
+            count = struct.unpack(">H", msg[2:4])[0]
+            encodings = struct.unpack(f">{count}i", msg[4:4 + 4 * count])
+            self.ext = self.EXT_DESKTOP_SIZE in encodings
+        elif kind == 251:  # SetDesktopSize
+            w, h = struct.unpack(">HH", msg[2:6])
+            self.record("resize", w=w, h=h)
+            log.info("vnc %s: resize to %dx%d", self.name, w, h)
+            if not self.ext:
+                return []
+            if not (1 <= w <= self.MAX_SIZE and 1 <= h <= self.MAX_SIZE):
+                return [self.desktop_size(1, 3)]  # invalid screen layout
+            forwarded = self.desktop_size(1, 4)
+            self.set_size(w, h)
+            return [forwarded, self.desktop_size(0, 0)]
+        elif kind == 3:  # FramebufferUpdateRequest
             incremental, x, y, w, h = struct.unpack(">BHHHH", msg[1:10])
+            if not incremental and self.ext:
+                return [self.desktop_size(0, 0)]  # like QEMU: a full request also tells the size (and gets the picture)
             if not incremental:
                 return [self.update(x, y, w, h)]
             if self.dirty:
