@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=GNS3 lab: screen size of the VNC client
+Comment=Switches the screen to the size the graphical console asks for (full screen)
+Exec=/usr/local/bin/gns3lab-vnc-resize
+Terminal=false
+NoDisplay=true

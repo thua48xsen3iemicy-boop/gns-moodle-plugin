@@ -1,0 +1,37 @@
+#!/bin/sh
+# gns3lab-vnc-resize: an X11 guest follows the screen size that the VNC client asks for.
+#
+# The full screen of a graphical console in mod_gns3lab sends SetDesktopSize. QEMU (virtio-gpu) passes it to the
+# guest as a new preferred mode of its output, and Xorg sees the new mode, but on X11 nobody switches to it (under
+# SPICE spice-vdagent does). This script runs in the X session of the user (XDG autostart), waits for RandR events
+# and switches the output to its preferred mode only when the preferred mode itself changed. The mode the user or the
+# desktop chose stays as it is otherwise: at login, after a change in the display settings.
+#
+# Needs xrandr (x11-xserver-utils) and xev (x11-utils). Install: /usr/local/bin/gns3lab-vnc-resize (mode 755) and
+# /etc/xdg/autostart/gns3lab-vnc-resize.desktop. Docs: docs/vnc-guest/README.md of the gns-moodle-plugin repository.
+set -u
+
+command -v xrandr >/dev/null 2>&1 || exit 0
+command -v xev >/dev/null 2>&1 || exit 0
+
+# "<output> <mode>": the first connected output and its preferred mode (marked "+"), nothing if there is none.
+preferred() {
+    xrandr --query 2>/dev/null | awk '
+        / connected/ { if (out != "") exit; out = $1; next }
+        out != "" && /^[^ \t]/ { exit }
+        out != "" && /\+/ { print out " " $1; exit }'
+}
+
+last=$(preferred)
+xev -root -event randr 2>/dev/null | while IFS= read -r line; do
+    case $line in
+        RR*) ;;
+        *) continue ;;
+    esac
+    now=$(preferred)
+    if [ -z "$now" ] || [ "$now" = "$last" ]; then
+        continue
+    fi
+    last=$now
+    xrandr --output "${now%% *}" --auto
+done
