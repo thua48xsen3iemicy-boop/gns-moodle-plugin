@@ -607,6 +607,16 @@ define([], function() {
             keepRevealed(have);
             return {added};
         },
+        // classes/external/get_activity_ticket.php: only an observer follows the student's consoles.
+        mod_gns3lab_get_activity_ticket: async () => {
+            if (!cfg.observer) {
+                const e = new Error('Only a teacher who looks at a student\'s lab follows the student\'s consoles.');
+                e.errorcode = 'consoleactivityobserver';
+                throw e;
+            }
+            window.__stub.activityTickets = (window.__stub.activityTickets || 0) + 1;
+            return {ticket: 'a' + Math.random().toString(36).slice(2), gatewayurl: `ws://${location.host}/gw`, expiresin: 30};
+        },
         mod_gns3lab_get_console_ticket: async args => {
             if (!cfg.observer) {
                 needSeat(args, 'get_console_ticket');

@@ -75,6 +75,10 @@ class TicketRequest(Strict):
     issued_for_user_id: int | None = Field(default=None, gt=0)
 
 
+class ActivityTicketRequest(Strict):
+    issued_for_user_id: int | None = Field(default=None, gt=0)
+
+
 class Threshold(Strict):
     mark: int = Field(ge=0, le=100, strict=True)
     critical: int | None = Field(default=None, ge=0, strict=True)
@@ -380,9 +384,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         # check-script-needs: a script waits for earlier ones and takes their values: `needs`, {{id.group}} (2.9)
         # forecast: POST /forecasts, the teacher's mark from the facts alone (CONTRACTS 2.9a)
         # live-sessions: GET /live-sessions, every live session of the site for its administrator (CONTRACTS 2.13)
+        # console-activity: POST /sessions/{id}/activity-tickets, the owner's consoles for an observer (CONTRACTS 6.3)
         features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "check-script-needs", "forecast",
                     "purge",
-                    "maintenance", "iso", "live-sessions"]
+                    "maintenance", "iso", "live-sessions", "console-activity"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
@@ -773,6 +778,23 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         await store.event(s["id"], s["slot_vmid"], "console_ticket",
                           {"node_id": body.node_id, "readonly": body.readonly,
                            "issued_for_user_id": body.issued_for_user_id})
+        return ticket
+
+    @app.post("/api/v1/sessions/{session_id}/activity-tickets")
+    async def activity_ticket(session_id: str, body: ActivityTicketRequest, site=Depends(site_of)):
+        """Which consoles the owner has open and where they type, for an observer (CONTRACTS 6.3). Read only."""
+        s = await own_session(session_id, site)
+        if s["status"] != "running" or not s["topology"]:
+            raise ApiError(409, "session_not_running", "Session is not running")
+        slot = settings.slots.get(s["slot_vmid"])
+        if slot is None:
+            raise ApiError(503, "slot_unavailable", "Slot is not configured")
+        try:
+            ticket = await services.gateway.issue_activity(slot=slot.address, project_id=str(s["project_id"]),
+                                                           who=f"{s['id']}:observer")
+        except SlotError as exc:
+            raise ApiError(502, "gateway_unavailable", "Console gateway did not issue a ticket") from exc
+        await store.event(s["id"], s["slot_vmid"], "activity_ticket", {"issued_for_user_id": body.issued_for_user_id})
         return ticket
 
     if not hasattr(services, "derived"):

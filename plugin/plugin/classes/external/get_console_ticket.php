@@ -123,7 +123,7 @@ class get_console_ticket extends external_api {
      * @param mixed $frommanager gateway_url from the ticket answer
      * @return string URL without the trailing slash
      */
-    protected static function gateway_url(mixed $frommanager): string {
+    public static function gateway_url(mixed $frommanager): string {
         $url = is_string($frommanager) && $frommanager !== '' ? $frommanager : (string) get_config('gns3lab', 'gatewayurl');
         $url = rtrim(trim($url), '/');
         if (!preg_match('~^wss?://[^\s/?#]+(/[^\s?#]*)?$~i', $url)) {

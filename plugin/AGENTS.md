@@ -65,7 +65,10 @@ docs/          SPEC.md и прочая документация
   запоминаются в браузере; проверка — `devtools/ui-harness/check_assignment.js`), `checks.js` (панель автопроверок: кнопка «Проверить», ход прогона, отчёт, прошлые прогоны, `docs/autochecks.md`),
   `checkreport.js` (отчёт без DOM: находки по первопричинам, состояние кнопки, период опроса; проверка — `devtools/check_checkreport.mjs`,
   в браузере — `devtools/ui-harness/check_checks.js`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
-  настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники).
+  настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники),
+  `consoleactivity.js` (0.48.0, `docs/teacher-dashboard.md` §15: на `lab.php` наблюдателя — какие консоли открыл студент и куда
+  он печатает, по `/console/activity` шлюза, без DOM; значок `.sbadge` рисует `stage.js`; проверка —
+  `devtools/check_consoleactivity.mjs`, в браузере — `devtools/ui-harness/check_activity.js`).
   Страница преподавателя «Лабы курса» (0.14.0, `docs/teacher-dashboard.md`; с 0.28.0 — §12, оценки автопроверок и сортировка — §13): `course.js` (вкладки «Сводка» оценок журнала
   и вид одной лабы с живым состоянием, карточка с историей проверок, опрос) и
   `coursefacts.js` (сводка ячейки и данные карточки из `model.buildModel` + `facts.derive`, без DOM; проверка — `devtools/check_coursefacts.mjs`,

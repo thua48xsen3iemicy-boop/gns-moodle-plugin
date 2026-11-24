@@ -15,6 +15,10 @@
  * like the real gateway does with `console: "vnc"` (CONTRACTS §6). The slot closing is code 4000, a slot that
  * does not take the connection is 4001. GET /gw/stats counts the screens that are open now.
  *
+ * /gw/console/activity is the activity of the student's consoles for an observer (manager CONTRACTS §6.3): a snapshot
+ * on connect, then whatever a test POSTs to /gw/activity (a frame such as {"type": "input", "node": "<id>"}) goes to
+ * every watcher. GET /gw/stats counts the watchers too.
+ *
  *   node server.js [port]       → http://127.0.0.1:8123/index.ru.html
  */
 const fs = require('fs');
@@ -36,7 +40,9 @@ const factNodes = Object.assign({}, ...fs.readdirSync(demoDir).filter(f => f.end
     .map(f => JSON.parse(fs.readFileSync(path.join(demoDir, f), 'utf8')).nodes));
 const SLOT_URL = process.env.HARNESS_SLOT_URL || 'ws://127.0.0.1:8091';
 const SLOT_TOKEN = process.env.HARNESS_SLOT_TOKEN || 'dev-console-token';
-const stats = {screens: 0, opened: 0};
+const stats = {screens: 0, opened: 0, watchers: 0};
+const watchers = new Set();
+const activity = {open: new Set(), input: new Map()};
 
 // This is only the harness's Moodle stand-in. Production capability and draft
 // checks live in classes/external/authoring.php and are not exercised by this bridge.
@@ -135,6 +141,17 @@ const server = http.createServer(async(req, res) => {
             res.writeHead(error.status || 400, {'Content-Type': 'application/json'})
                 .end(JSON.stringify({message: error.message}));
         }
+        return;
+    }
+    if (url.pathname === '/gw/activity' && req.method === 'POST') {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const frame = JSON.parse(Buffer.concat(chunks));
+        if (frame.type === 'open') activity.open.add(frame.node);
+        if (frame.type === 'close') activity.open.delete(frame.node);
+        if (frame.type === 'input') activity.input.set(frame.node, Date.now());
+        watchers.forEach(w => w.send(JSON.stringify(frame)));
+        res.writeHead(200, {'Content-Type': 'application/json'}).end(JSON.stringify({watchers: watchers.size}));
         return;
     }
     if (url.pathname === '/gw/stats') {
@@ -342,6 +359,18 @@ server.on('upgrade', (req, socket, head) => {
     }
     wss.handleUpgrade(req, socket, head, ws => {
         const id = decodeURIComponent(new URL(req.url, 'http://x').pathname.split('/').pop());
+        if (id === 'activity') {
+            watchers.add(ws);
+            stats.watchers++;
+            const input = {};
+            activity.input.forEach((at, node) => { input[node] = Math.round((Date.now() - at) / 100) / 10; });
+            ws.send(JSON.stringify({type: 'snapshot', open: [...activity.open], input}));
+            ws.on('close', () => {
+                watchers.delete(ws);
+                stats.watchers--;
+            });
+            return;
+        }
         if (screens.has(id)) {
             screen(ws, id);
             return;

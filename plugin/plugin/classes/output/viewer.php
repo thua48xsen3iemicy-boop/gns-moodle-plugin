@@ -24,6 +24,7 @@ use mod_gns3lab\local\checks;
 use mod_gns3lab\local\demo;
 use mod_gns3lab\local\lab_definition;
 use mod_gns3lab\local\lab_preview;
+use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\reveal;
 use mod_gns3lab\local\seat;
 
@@ -53,6 +54,20 @@ class viewer implements renderable, templatable {
         /** @var bool the teacher came from the course page */
         protected bool $fromcourse = false
     ) {
+    }
+
+    /**
+     * Whether the lab manager announces a feature; a manager that is not set up or does not answer has none.
+     *
+     * @param string $feature feature name
+     * @return bool
+     */
+    protected static function manager_has(string $feature): bool {
+        try {
+            return \core\di::get(manager_client::class)->has_feature($feature);
+        } catch (\moodle_exception $e) {
+            return false;
+        }
     }
 
     /**
@@ -86,6 +101,9 @@ class viewer implements renderable, templatable {
         }
         // Auto-checks (docs/autochecks.md): the page asks for the details (mod_gns3lab_get_checks) only when they are on.
         $data->checks = checks::enabled($this->instance);
+        // Where an observed student works (manager CONTRACTS §6.3): the page follows the student's consoles when the
+        // manager can tell. mod_gns3lab_get_activity_ticket checks the access again.
+        $data->consoleactivity = $this->observed !== null && self::manager_has('console-activity');
         $mode = $data->factsview;
         $back = $this->fromcourse && $this->observed
             ? new url('/mod/gns3lab/course.php', ['id' => $this->cm->course])

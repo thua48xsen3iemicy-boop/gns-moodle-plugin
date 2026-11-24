@@ -178,3 +178,16 @@ class GatewayClient:
         body = resp.json()
         return {"ticket": body["ticket"], "gateway_url": self.public_url,
                 "expires_in": int(body.get("expires_in", 30))}
+
+    async def issue_activity(self, *, slot: str, project_id: str, who: str) -> dict:
+        """A ticket to /console/activity: the owner's consoles of the project for an observer (CONTRACTS 6.3)."""
+        try:
+            resp = await self._http.post("/internal/tickets", json={"slot": slot, "project_id": project_id,
+                                                                    "activity": True, "who": who})
+        except httpx.HTTPError as exc:
+            raise SlotUnavailable(f"Gateway: {type(exc).__name__}") from exc
+        if resp.status_code != 200:
+            raise SlotError(resp.status_code, "GATEWAY_ERROR", "Gateway refused the ticket")
+        body = resp.json()
+        return {"ticket": body["ticket"], "gateway_url": self.public_url,
+                "expires_in": int(body.get("expires_in", 30))}

@@ -28,6 +28,11 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
       - `vnc` (экран QEMU, в браузере noVNC): по соединению идёт сырой RFB. Двоичные кадры идут в обе стороны
         без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателя у экрана нет
         (его видит только владелец сессии): билет с `console: "vnc"` и `readonly: true` не выдаётся (400);
+  * активность консолей владельца (CONTRACTS.md §6.3): наблюдатель (преподаватель) по билету с `"activity": true`
+    открывает /console/activity и получает текстовые кадры JSON — у каких нод открыта консоль владельца сессии и
+    когда в неё идёт ввод. Содержимое ввода не передаётся, только номер ноды; вход прореживается до кадра в
+    ACTIVITY_INPUT_EVERY секунд на ноду. Наблюдателей одной лабы не больше GW_MAX_WATCHERS_PER_PROJECT, всего —
+    GW_MAX_WATCHERS; сверх предела — 4001;
   * коды закрытия для браузера: 4000 — консоль закрылась на стороне слота, 4001 — слот не пустил к консоли
     (нода не готова, слот недоступен, неверный токен в GW_SLOTS);
   * WebSocket только с сайтов из GW_ALLOWED_ORIGINS: без этой настройки шлюз не запускается;
@@ -49,8 +54,10 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
     → {"ticket": "…", "expires_in": 30}
 `console` необязательно: "telnet" (по умолчанию) или "vnc"; любое другое значение, как и "vnc" вместе
 с "readonly": true, — 400.
+Билет активности: {"slot", "project_id", "activity": true, "who"} — без nodes, только для /console/activity.
 
 Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>[&history=1]
+               и к      wss://<шлюз>/console/activity?ticket=<билет активности>
 """
 import asyncio
 import base64
@@ -96,6 +103,12 @@ HANDSHAKE_TIMEOUT = float(os.environ.get("GW_HANDSHAKE_TIMEOUT", "15"))  # TCP, 
 # Console subprotocols (CONTRACTS.md §6.1): with "lab-slot.2" input goes as binary frames and text frames carry control JSON.
 SLOT_PROTOCOL, SLOT_PROTOCOL_2 = "lab-slot", "lab-slot.2"
 MAX_WINSIZE = 1000       # cols and rows of a window size frame: 1..MAX_WINSIZE
+# Activity of the owner's consoles for observers (CONTRACTS.md §6.3).
+ACTIVITY_INPUT_EVERY = 0.5   # seconds: at most one "input" frame per node in this time
+MAX_WATCHERS_PER_PROJECT = int(os.environ.get("GW_MAX_WATCHERS_PER_PROJECT", "10"))
+MAX_WATCHERS = int(os.environ.get("GW_MAX_WATCHERS", "200"))
+WATCH_QUEUE = 64             # frames waiting for a slow watcher; on overflow the queue is replaced by a snapshot
+RFB_KEY, RFB_POINTER = 4, 5  # RFB client message types that a person makes (keys, clicks)
 
 log = logging.getLogger("console-gw")
 
@@ -152,6 +165,96 @@ class Limits:
                 del counts[key]
 
 
+class Activity:
+    """The owner's consoles of every project for its watchers (CONTRACTS.md §6.3). Only node ids, never the input.
+
+    A project is (slot, project_id). Per project: how many owner consoles each node has open, when its last input came
+    and the queues of the watchers. Nothing here awaits: the relay of a console never waits for a watcher.
+    """
+
+    def __init__(self):
+        self.projects: dict = {}
+        self.watchers = 0
+
+    def _get(self, project: tuple) -> dict:
+        return self.projects.setdefault(project, {"open": {}, "last": {}, "sent": {}, "queues": set()})
+
+    def _drop_if_idle(self, project: tuple):
+        p = self.projects.get(project)
+        if p is not None and not p["open"] and not p["queues"]:
+            del self.projects[project]
+
+    def snapshot(self, project: tuple) -> dict:
+        p = self.projects.get(project) or {"open": {}, "last": {}}
+        now = time.monotonic()
+        return {"type": "snapshot", "open": sorted(p["open"]),
+                "input": {node: round(now - at, 1) for node, at in sorted(p["last"].items())}}
+
+    def _send(self, project: tuple, frame: dict):
+        p = self.projects.get(project)
+        for q in (p["queues"] if p else ()):
+            if q.full():
+                # A watcher that does not read loses the frames, not the state: it gets the whole state at once.
+                while not q.empty():
+                    q.get_nowait()
+                q.put_nowait(self.snapshot(project))
+            else:
+                q.put_nowait(frame)
+
+    def opened(self, project: tuple, node_id: str):
+        p = self._get(project)
+        p["open"][node_id] = p["open"].get(node_id, 0) + 1
+        if p["open"][node_id] == 1:
+            self._send(project, {"type": "open", "node": node_id})
+
+    def closed(self, project: tuple, node_id: str):
+        p = self._get(project)
+        p["open"][node_id] -= 1
+        if not p["open"][node_id]:
+            del p["open"][node_id]
+            self._send(project, {"type": "close", "node": node_id})
+        if not p["open"]:
+            # Nothing of the owner is open: the times of input go too, so a project left alone takes no memory.
+            p["last"].clear()
+            p["sent"].clear()
+        self._drop_if_idle(project)
+
+    def input(self, project: tuple, node_id: str):
+        p = self.projects.get(project)
+        if p is None:
+            return
+        now = time.monotonic()
+        p["last"][node_id] = now
+        if now - p["sent"].get(node_id, -ACTIVITY_INPUT_EVERY) >= ACTIVITY_INPUT_EVERY:
+            p["sent"][node_id] = now
+            self._send(project, {"type": "input", "node": node_id})
+
+    def watch(self, project: tuple) -> asyncio.Queue | None:
+        """A queue of frames for a new watcher, the snapshot first; None when a limit is reached."""
+        p = self.projects.get(project)
+        if self.watchers >= MAX_WATCHERS or (p and len(p["queues"]) >= MAX_WATCHERS_PER_PROJECT):
+            return None
+        q = asyncio.Queue(WATCH_QUEUE)
+        q.put_nowait(self.snapshot(project))
+        self._get(project)["queues"].add(q)
+        self.watchers += 1
+        return q
+
+    def unwatch(self, project: tuple, q: asyncio.Queue):
+        self.projects[project]["queues"].discard(q)
+        self.watchers -= 1
+        self._drop_if_idle(project)
+
+
+def human_input(data: bytes) -> bool:
+    """Whether a binary frame of a vnc browser carries a key or a click (RFB client messages).
+
+    noVNC flushes each of them as its own frame; a frame that starts with something else (a screen update request,
+    the mouse moving without a button) is not taken for input.
+    """
+    return len(data) >= 2 and (data[0] == RFB_KEY or (data[0] == RFB_POINTER and data[1] != 0))
+
+
 def window_size(data: bytes) -> dict | None:
     """{"cols", "rows"} of a browser window size frame, or None for anything else (CONTRACTS.md §6.1)."""
     try:
@@ -180,6 +283,16 @@ async def issue_ticket(request: web.Request):
         raise web.HTTPForbidden()
     g = await request.json()
     project_id = canonical_uuid(g.get("project_id"))
+    if "activity" in g:
+        # The activity of the owner's consoles (CONTRACTS.md §6.3): the whole project, read only, no node.
+        if g["activity"] is not True or g.get("slot") not in SLOTS or not project_id:
+            raise web.HTTPBadRequest(text="нужны activity: true, slot (из GW_SLOTS) и project_id (UUID)")
+        grant = {"slot": g["slot"], "project_id": project_id, "nodes": set(), "console": "telnet",
+                 "readonly": True, "activity": True, "who": g.get("who", "")}
+        ticket = request.app["tickets"].issue(grant)
+        if ticket is None:
+            raise web.HTTPTooManyRequests(text="слишком много неиспользованных билетов этой лабы")
+        return web.json_response({"ticket": ticket, "expires_in": TICKET_TTL})
     nodes = g.get("nodes")
     node_ids = {canonical_uuid(n) for n in nodes} if isinstance(nodes, list) else set()
     if g.get("slot") not in SLOTS or not project_id or not node_ids or None in node_ids:
@@ -235,6 +348,10 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
     if not vnc and request.query.get("history") == "1":
         url += "?history=1"  # a new terminal asks for the tail of the output (CONTRACTS.md §6.2)
     up = None
+    # The owner's console is shown to the watchers of the project while it relays (CONTRACTS.md §6.3).
+    activity: Activity = request.app["activity"]
+    project = (slot, g["project_id"])
+    shown = False
     try:
         try:
             # The whole handshake is bounded: a slot that accepts TCP and never upgrades must not hold the console.
@@ -262,6 +379,9 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
         control = not vnc and up.protocol == SLOT_PROTOCOL_2
         log.info("консоль открыта: %s %s/%s%s%s", g["who"], slot, node_id,
                  " (vnc)" if vnc else "", " (наблюдатель)" if g["readonly"] else "")
+        if not g["readonly"]:
+            activity.opened(project, node_id)
+            shown = True
 
         async def from_browser():
             async for m in browser:
@@ -269,8 +389,11 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
                     continue  # У vnc такого билета нет (400 при выдаче); проверка остаётся на случай ошибки в коде
                 if vnc:
                     if m.type == WSMsgType.BINARY:  # RFB: байты клиента как есть
+                        if human_input(m.data):
+                            activity.input(project, node_id)
                         await up.send_bytes(m.data)
                 elif m.type == WSMsgType.TEXT:
+                    activity.input(project, node_id)
                     if control:
                         await up.send_bytes(m.data.encode())
                     else:
@@ -302,9 +425,59 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
             log.info("консоль закрыта: %s/%s (Slot: %s)", slot, node_id, upstream_code)
         return browser
     finally:
+        if shown:
+            activity.closed(project, node_id)
         # A failed answer to the browser, a cancelled request: the slot connection goes back at once.
         if up is not None and not up.closed:
             await up.close()
+
+
+async def console_activity(request: web.Request):
+    """The owner's consoles of a project for an observer (CONTRACTS.md §6.3): text JSON frames, nothing is read."""
+    origin = request.headers.get("Origin")
+    if origin not in ALLOWED_ORIGINS:
+        raise web.HTTPForbidden(text="чужой Origin")
+    browser = web.WebSocketResponse(heartbeat=HEARTBEAT, max_msg_size=MAX_MSG)
+    if not browser.can_prepare(request).ok:
+        raise web.HTTPBadRequest(text="нужен WebSocket")
+    g = request.app["tickets"].take(request.query.get("ticket", ""))
+    if not g or not g.get("activity"):
+        raise web.HTTPForbidden(text="билет недействителен")
+    activity: Activity = request.app["activity"]
+    project = (g["slot"], g["project_id"])
+    q = activity.watch(project)
+    try:
+        await browser.prepare(request)
+    except ConnectionResetError:
+        if q is not None:
+            activity.unwatch(project, q)
+        return browser
+    if q is None:
+        await browser.close(code=4001, message=b"watch limit")
+        log.warning("активность не открыта: %s %s/%s (предел наблюдателей)", g["who"], *project)
+        return browser
+    log.info("активность открыта: %s %s/%s", g["who"], *project)
+
+    async def send():
+        while True:
+            await browser.send_str(json.dumps(await q.get()))
+
+    async def drain():
+        async for _ in browser:  # The browser has nothing to say; reading notices that it went away
+            pass
+
+    tasks = [asyncio.create_task(send()), asyncio.create_task(drain())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        activity.unwatch(project, q)
+        if not browser.closed:
+            await browser.close()
+        log.info("активность закрыта: %s/%s", *project)
+    return browser
 
 
 def slot_tls_context() -> ssl.SSLContext:
@@ -334,6 +507,7 @@ async def on_startup(app):
     app["http"] = ClientSession(connector=TCPConnector(limit=0), timeout=ClientTimeout(total=None, connect=10))
     app["tickets"] = Tickets()
     app["limits"] = Limits()
+    app["activity"] = Activity()
 
 
 async def on_cleanup(app):
@@ -343,6 +517,7 @@ async def on_cleanup(app):
 def make_app():
     app = web.Application()
     app.router.add_post("/internal/tickets", issue_ticket)
+    app.router.add_get("/console/activity", console_activity)  # Before the node route: "activity" is not a node id
     app.router.add_get("/console/{node_id}", console)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)

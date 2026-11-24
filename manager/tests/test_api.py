@@ -142,6 +142,26 @@ async def test_console_tickets(tmp_path, dsn):
                                          "nodes": [node_id], "readonly": True, "who": f"{sid}:observer"}]
 
 
+async def test_activity_tickets(tmp_path, dsn):
+    async with make_env(tmp_path, dsn) as env:
+        r = await env.client.post("/api/v1/sessions", json={"user_id": 42, "instance_id": 1, "lab_ref": "cisco-3x2"})
+        sid = r.json()["session_id"]
+        r = await env.client.post(f"/api/v1/sessions/{sid}/activity-tickets", json={"issued_for_user_id": 9})
+        assert r.status_code == 409 and r.json()["error"] == "session_not_running"
+        await env.run()
+        r = await env.client.post(f"/api/v1/sessions/{sid}/activity-tickets", json={"node_id": "x"})
+        assert r.status_code == 400 and r.json()["error"] == "unsupported_field"  # No node: the whole lab
+        assert env.gateway.requests == []
+        r = await env.client.post(f"/api/v1/sessions/{sid}/activity-tickets", json={"issued_for_user_id": 9})
+        assert r.status_code == 200
+        assert r.json() == {"ticket": "t-1", "gateway_url": "wss://gateway.example.edu", "expires_in": 30}
+        pid = (await env.services.store.session(sid))["project_id"]
+        assert env.gateway.requests == [{"slot": "10.0.0.1", "project_id": str(pid), "activity": True,
+                                         "who": f"{sid}:observer"}]
+        r = await env.client.post("/api/v1/sessions/s-unknown/activity-tickets", json={})
+        assert r.status_code == 404 and r.json()["error"] == "session_not_found"
+
+
 async def test_health_endpoints(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         async with anon(env) as c:
@@ -200,7 +220,7 @@ async def test_info(tmp_path, dsn):
         r = await env.client.get("/api/v1/info")
         assert r.json() == {"schema": "gns3lab.info/1", "version": r.json()["version"],
                             "session_schemas": ["gns3lab.session/1"], "options": ["max_duration"],
-                            "features": ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "check-script-needs", "forecast", "purge", "maintenance", "iso", "live-sessions"]}
+                            "features": ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "check-script-needs", "forecast", "purge", "maintenance", "iso", "live-sessions", "console-activity"]}
         async with anon(env) as c:
             assert (await c.get("/api/v1/info")).status_code == 401
 

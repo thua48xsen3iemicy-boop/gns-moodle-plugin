@@ -87,6 +87,8 @@ const demoOf = (lab, labname) => ({
     facts: {ok: read(`${lab}.facts.json`), broken: read(`${lab}.facts-broken.json`)},
     source: 'demo',
     labname,
+    // An observer (?observer) follows the student's consoles from the fake gateway (/gw/console/activity, server.js).
+    consoleactivity: true,
 });
 const EXTRA_LABS = {'linux-switch-vlan': {ru: 'Лаба 5 · Linux-коммутатор', en: 'Lab 5 · Linux switch'}};
 const data = demoOf('ospf-multi-area', 'Lab 4');

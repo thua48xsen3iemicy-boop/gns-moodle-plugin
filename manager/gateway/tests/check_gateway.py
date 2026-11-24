@@ -1,6 +1,6 @@
 """Проверка шлюза против поддельного Lab Slot: билеты, субпротокол с токеном, наблюдатель, коды закрытия,
 консоль telnet и экран vnc (сырой RFB: двоичные кадры в обе стороны), размер окна слоту lab-slot.2, пределы консолей и билетов,
-срок рукопожатия со слотом, закрытие соединения со слотом при любом сбое.
+срок рукопожатия со слотом, закрытие соединения со слотом при любом сбое, активность консолей владельца для наблюдателя.
 Запуск: pip install aiohttp && python3 manager/gateway/tests/check_gateway.py
 """
 import asyncio, json, os, sys
@@ -320,6 +320,100 @@ async def main():
         assert await until(lambda: not hang_open and app["limits"].total == 0, 4), (hang_open, app["limits"].__dict__)
         gw.HANDSHAKE_TIMEOUT = 15
         print("browser gone during the handshake -> slot connection closed, limit released OK")
+        # --- активность консолей владельца для наблюдателя (CONTRACTS.md §6.3) -------------------------------
+        async def activity_ticket(**body):
+            body = {"slot": "127.0.0.1", "project_id": P, **body}
+            async with s.post("http://127.0.0.1:38081/internal/tickets", headers={"X-Internal-Key": "k"},
+                              json=body) as r:
+                return r.status, (await r.json())["ticket"] if r.status == 200 else None
+        async def watch():
+            _, t = await activity_ticket(activity=True, who="s1:observer")
+            return await s.ws_connect(f"http://127.0.0.1:38081/console/activity?ticket={t}", headers=moodle)
+        async def frame(ws):
+            m = await ws.receive(timeout=3); assert m.type == WSMsgType.TEXT, m
+            return json.loads(m.data)
+        async def silent(ws, wait=0.3):
+            try:
+                m = await ws.receive(timeout=wait)
+            except asyncio.TimeoutError:
+                return True
+            raise SystemExit(f"FAIL: unexpected activity frame {m}")
+        assert (await activity_ticket(activity="yes"))[0] == 400
+        assert (await activity_ticket(activity=True, project_id="../x"))[0] == 400
+        _, t = await activity_ticket(activity=True)          # билет активности не открывает консоль ноды
+        try:
+            await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle); raise SystemExit("FAIL: activity ticket opened a console")
+        except Exception as e: assert getattr(e, "status", None) == 403, e
+        _, t = await ticket(True)                             # билет консоли не открывает активность
+        try:
+            await s.ws_connect(f"http://127.0.0.1:38081/console/activity?ticket={t}", headers=moodle); raise SystemExit("FAIL: console ticket opened the activity")
+        except Exception as e: assert getattr(e, "status", None) == 403, e
+        _, t = await activity_ticket(activity=True)
+        try:
+            await s.ws_connect(f"http://127.0.0.1:38081/console/activity?ticket={t}"); raise SystemExit("FAIL: activity without Origin")
+        except Exception as e: assert getattr(e, "status", None) == 403, e
+        print("activity tickets: validated, not interchangeable with console tickets, Origin checked OK")
+        w = await watch()
+        assert await frame(w) == {"type": "snapshot", "open": [], "input": {}}
+        owner = await open_console(); await prompt(owner)
+        assert await frame(w) == {"type": "open", "node": N1}
+        observer = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={(await ticket(True))[1]}", headers=moodle)
+        await prompt(observer); await observer.send_str("observer\r")
+        assert await silent(w)                                # консоль наблюдателя и его ввод не в счёт
+        await owner.send_bytes(b'{"cols":100,"rows":30}')     # размер окна — не ввод
+        assert await silent(w)
+        await owner.send_str("e"); await owner.send_str("n")
+        assert await frame(w) == {"type": "input", "node": N1}
+        assert await silent(w)                                # второй символ в пределах ACTIVITY_INPUT_EVERY не шлётся
+        await asyncio.sleep(gw.ACTIVITY_INPUT_EVERY)
+        await owner.send_str("\r")
+        assert await frame(w) == {"type": "input", "node": N1}
+        w2 = await watch()                                    # новый наблюдатель сразу видит, где студент
+        snap = await frame(w2)
+        assert snap["type"] == "snapshot" and snap["open"] == [N1] and list(snap["input"]) == [N1], snap
+        assert 0 <= snap["input"][N1] < 2, snap
+        second = await open_console(); await prompt(second)   # вторая консоль той же ноды: open уже был
+        await second.close()
+        assert await silent(w)
+        await owner.close()
+        assert await frame(w) == {"type": "close", "node": N1}
+        assert await frame(w2) == {"type": "close", "node": N1}
+        await observer.close()
+        print("activity: open/input/close of the owner only, throttled, snapshot for a new watcher OK")
+        # экран vnc: ввод — сообщения RFB с клавишей или нажатой кнопкой мыши
+        _, t = await ticket(False, nodes=(VNC,), console="vnc")
+        d = await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}", headers=moodle)
+        assert (await d.receive(timeout=3)).data == BANNER
+        assert await frame(w) == {"type": "open", "node": VNC}
+        await d.send_bytes(b"\x03\x01\x00\x00\x00\x00\x04\x00\x03\x00"); await d.receive()  # запрос экрана
+        await d.send_bytes(b"\x05\x00\x00\x10\x00\x10"); await d.receive()                  # мышь без кнопки
+        assert await silent(w)
+        await d.send_bytes(b"\x04\x01\x00\x00\x00\x00\x00\x61"); await d.receive()          # клавиша
+        assert await frame(w) == {"type": "input", "node": VNC}
+        await d.close()
+        assert await frame(w) == {"type": "close", "node": VNC}
+        print("activity: vnc keys count, screen requests and bare mouse moves do not OK")
+        # пределы наблюдателей
+        gw.MAX_WATCHERS_PER_PROJECT = 2
+        w3 = await watch()
+        m = await w3.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        gw.MAX_WATCHERS_PER_PROJECT = 10
+        await w2.close()
+        assert await until(lambda: app["activity"].watchers == 1)
+        w3 = await watch(); assert (await frame(w3))["type"] == "snapshot"
+        # отстающий наблюдатель получает снимок вместо потерянных кадров
+        lag = gw.Activity(); proj = ("127.0.0.1", P)
+        q = lag.watch(proj); lag.opened(proj, N1)
+        for _ in range(gw.WATCH_QUEUE + 5):
+            lag._send(proj, {"type": "input", "node": N1})
+        assert q.qsize() <= gw.WATCH_QUEUE
+        got = [q.get_nowait() for _ in range(q.qsize())]
+        assert {"type": "snapshot", "open": [N1], "input": {}} in got, got[:3]
+        gw_act = app["activity"]
+        await w.close(); await w3.close()
+        assert await until(lambda: gw_act.watchers == 0 and not gw_act.projects), gw_act.__dict__
+        assert await until(lambda: app["limits"].total == 0), app["limits"].__dict__
+        print("activity: watcher limit -> 4001, overflow -> snapshot, state released OK")
     await r2.cleanup(); await r1.cleanup(); hang_srv.close()
 asyncio.run(main())
 print("ALL OK")
