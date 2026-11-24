@@ -52,8 +52,8 @@ const ICON_UNFULL = '<svg viewBox="0 0 16 16"><path d="M6 2v4H2M14 6h-4V2M10 14v
  */
 export const FONT_STEPS = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
 
-/** Font size before the student chooses one, px. */
-const FONT_DESKTOP = 9;
+/** Font size before the student chooses one, px. On a desktop most students went two steps up from 9, so it starts at 11. */
+const FONT_DESKTOP = 11;
 const FONT_MOBILE = 13;
 
 /** Most remembered console font choices; the oldest are dropped. */
