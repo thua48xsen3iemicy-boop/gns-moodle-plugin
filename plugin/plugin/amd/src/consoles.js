@@ -52,8 +52,8 @@ const ICON_UNFULL = '<svg viewBox="0 0 16 16"><path d="M6 2v4H2M14 6h-4V2M10 14v
  */
 export const FONT_STEPS = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
 
-/** Font size before the student chooses one, px. */
-const FONT_DESKTOP = 9;
+/** Font size before the student chooses one, px. On a desktop most students went two steps up from 9, so it starts at 11. */
+const FONT_DESKTOP = 11;
 const FONT_MOBILE = 13;
 
 /** Most remembered console font choices; the oldest are dropped. */
@@ -88,7 +88,7 @@ const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: '
  * One console: the terminal, its connection, the bar under it (snippets and font size).
  *
  * A node with a graphical console (console_type "vnc") gets a noVNC screen instead of the terminal, and instead of the
- * bar a tab at the top edge of the screen with Ctrl+Alt+Del and full screen. The views do not tell them apart: both
+ * bar a tab at the right edge of the screen with Ctrl+Alt+Del and full screen. The views do not tell them apart: both
  * have a host, a connection in `conn` and the same methods.
  */
 /**
@@ -395,7 +395,7 @@ class Con {
     }
 
     /**
-     * The tab at the top edge of a screen: it opens a small menu with Ctrl+Alt+Del and full screen. Nothing else lies
+     * The tab at the right edge of a screen (the top one is where desktops keep their panel): it opens a small menu with Ctrl+Alt+Del and full screen. Nothing else lies
      * over the picture, and the screen takes the whole tile.
      */
     buildScreenTab() {
