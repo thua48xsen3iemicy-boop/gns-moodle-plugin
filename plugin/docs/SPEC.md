@@ -90,6 +90,10 @@ Moodle никогда не держит WebSocket и не видит токен�
   После переподключения показать подсказку «нажмите Enter», ничего не слать самому.
 - Шлюз принимает WebSocket только с origin из `GW_ALLOWED_ORIGINS`; без этой настройки он не запускается.
 - В режиме наблюдателя шлюз сам отбрасывает ввод и смену размера; клиент дополнительно ставит `disableStdin`.
+- 🆕 (0.48.0) Активность консолей студента для наблюдателя: `new WebSocket(gateway_url + "/console/activity?ticket=" +
+  ticket)` с билетом `mod_gns3lab_get_activity_ticket`. Шлюз шлёт текстовые кадры JSON: `snapshot` (открытые консоли
+  студента и сколько секунд назад был ввод), `open` / `close` / `input` с `node`. Содержимого ввода нет. Переподключение —
+  с теми же паузами, что у консоли (manager `CONTRACTS.md` §6.3, `docs/teacher-dashboard.md` §15).
 - Графическая консоль (нода с `console_type: vnc`, CONTRACTS §2.4, §2.6, §6, модуль `amd/src/vnc.js`): тот же адрес,
   билет, origin и коды `4000` / `4001` с теми же паузами, но кадры в обе стороны — двоичные кадры сырого потока RFB
   (текстовых нет, размера окна нет), а вместо xterm.js — noVNC. Страница сама создаёт `WebSocket` и отдаёт его noVNC
@@ -163,6 +167,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_start_session` | `cmid` | use | сессия |
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
 | `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — только своя: чужая → отказ `consolevncobserver` без запроса к менеджеру; в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
+| `mod_gns3lab_get_activity_ticket` | `cmid`, `userid` | 🆕 (0.48.0) только observe + группы для чужой лабы: своя — отказ `consoleactivityobserver`; менеджер без `console-activity` — `consoleactivityunsupported`; лаба не `running` — `sessionnotrunning` | `{"ticket","gatewayurl","expiresin"}` — билет к `/console/activity` шлюза (manager CONTRACTS §6.3, `docs/teacher-dashboard.md` §15) |
 | `mod_gns3lab_list_students` | `cmid` | observe | студенты (с учётом групп) и статус их сессий |
 | `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
 | `mod_gns3lab_refresh_facts` | `cmid`, `userid=0` | те же; только `running`-сессия | `{"requested"}`; частоту ограничивает менеджер |

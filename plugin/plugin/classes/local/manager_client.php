@@ -543,6 +543,25 @@ class manager_client {
     }
 
     /**
+     * Ticket to the activity of the owner's consoles of a session, for an observer (CONTRACTS §6.3).
+     *
+     * @param string $sessionid session id
+     * @param int $issuedfor the user who asks (journal of the manager only)
+     * @return \stdClass ticket, gateway_url, expires_in
+     */
+    public function issue_activity_ticket(string $sessionid, int $issuedfor): \stdClass {
+        $ticket = $this->expect_object($this->request(
+            'POST',
+            '/api/v1/sessions/' . rawurlencode($sessionid) . '/activity-tickets',
+            ['issued_for_user_id' => $issuedfor]
+        ));
+        if (!isset($ticket->ticket) || !is_string($ticket->ticket) || $ticket->ticket === '') {
+            throw new manager_exception('badresponse', 200, 'ticket without ticket');
+        }
+        return $ticket;
+    }
+
+    /**
      * The last facts snapshot of a session (CONTRACTS §2.7, format gns3lab.facts/1 of docs/live-state.md).
      *
      * The manager answers for a stopped session too: then it is the last saved state.

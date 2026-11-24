@@ -53,6 +53,13 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_get_activity_ticket' => [
+        'classname' => \mod_gns3lab\external\get_activity_ticket::class,
+        'description' => 'One-time ticket to follow which consoles an observed student has open and types into.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_get_facts' => [
         'classname' => \mod_gns3lab\external\get_facts::class,
         'description' => 'Facts about the devices of the running lab of the user or of an observed student.',

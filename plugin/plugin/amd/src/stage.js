@@ -194,6 +194,7 @@ export class Stage {
         this.statusKnown = false;
         this.guests = null;
         this.badges = new Map();
+        this.studentCons = new Map();
         this.bounds = {x: -200, y: -150, w: 400, h: 300};
         this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         this.mq = matchMedia('(max-width: 760px)');
@@ -615,6 +616,11 @@ export class Stage {
             const bd = el('g', {class: 'cbadge', transform: 'translate(-22 -21)'}, g);
             el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, bd);
             el('text', {y: 3}, bd).textContent = '>_';
+            // The student's console, for a teacher who looks at their lab (consoleactivity.js): the other top corner.
+            const sb = el('g', {class: 'sbadge', transform: 'translate(22 -21)'}, g);
+            el('title', {}, sb).textContent = this.s('ui_student_console');
+            el('rect', {x: -10, y: -7.5, width: 20, height: 15, rx: 3.5}, sb);
+            el('text', {y: 3}, sb).textContent = '>_';
             this.paintBadge(n);
             this.grow(n.cx - 40, n.cy - 36, n.cx + 40, n.cy + 52);
         });
@@ -633,12 +639,29 @@ export class Stage {
         if (n) this.paintBadge(n);
     }
 
+    /**
+     * The student's console of a node, for a teacher who looks at their lab (consoleactivity.js state()).
+     *
+     * @param {string} nodeId node id
+     * @param {object} flags {open, typing, last}
+     */
+    setStudentConsole(nodeId, flags) {
+        if (flags && flags.open) this.studentCons.set(nodeId, flags);
+        else this.studentCons.delete(nodeId);
+        const n = this.model && this.model.nodes.get(nodeId);
+        if (n) this.paintBadge(n);
+    }
+
     paintBadge(n) {
         if (!n.g) return;
         const f = this.badges.get(n.id) || {};
         n.g.classList.toggle('has-con', !!f.has);
         n.g.classList.toggle('unread', !!f.unread);
         n.g.classList.toggle('minimized', !!f.min);
+        const st = this.studentCons.get(n.id) || {};
+        n.g.classList.toggle('stu-con', !!st.open);
+        n.g.classList.toggle('stu-typing', !!st.typing);
+        n.g.classList.toggle('stu-last', !!st.last);
     }
 
     /* ---------------- view: zoom, position, levels of detail ---------------- */
@@ -1110,7 +1133,7 @@ export class Stage {
             this.select({kind: 'switchvlan', id: virtual.dataset.virtual});
             return;
         }
-        const badge = near('.cbadge'), nodeEl = near('.node');
+        const badge = near('.cbadge, .sbadge'), nodeEl = near('.node');
         const m = this.model;
         if (badge && nodeEl) {
             this.call('console', m.nodes.get(nodeEl.dataset.node));

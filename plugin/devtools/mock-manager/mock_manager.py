@@ -15,6 +15,8 @@
   options.max_duration задаёт expires_at; у failed-сессии error {"code", "retryable"};
 - у запущенной сессии topology (properties нод пустые), nodes со статусами и nodes_stale, если включено;
 - билеты консолей выдаёт настоящий шлюз (manager/gateway/console_gateway.py в ветке менеджера) через /internal/tickets;
+- POST /api/v1/sessions/{id}/activity-tickets и feature "console-activity" (CONTRACTS §6.3): билет активности консолей
+  владельца для наблюдателя у того же шлюза ({"activity": true}, без nodes);
   к остановленной ноде — 409 node_not_running (если статусы не устарели).
 
 Лабы из Moodle (CONTRACTS §2.6 менеджера 0.5, ветка claude/determined-brown-lfgnxy):
@@ -666,7 +668,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions", "console-activity"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -1047,6 +1049,28 @@ async def console_ticket(request):
              "who": f"{s.id}:{'observer' if readonly else 'owner'}"}
     if screen:
         grant["console"] = "vnc"  # CONTRACTS §6: only for vnc, the tickets of text consoles stay as they were
+    try:
+        async with request.app["http"].post(f"{GW_INTERNAL_URL}/internal/tickets", json=grant,
+                                            headers={"X-Internal-Key": GW_INTERNAL_KEY}) as resp:
+            if resp.status != 200:
+                return error(502, "gateway_unavailable", f"Gateway answered {resp.status}")
+            ticket = await resp.json()
+    except Exception as exc:  # noqa: BLE001 - any transport problem is "gateway unavailable"
+        return error(502, "gateway_unavailable", f"Gateway: {type(exc).__name__}")
+    return web.json_response({"ticket": ticket["ticket"], "gateway_url": GW_PUBLIC_URL,
+                              "expires_in": ticket.get("expires_in", 30)})
+
+
+async def activity_ticket(request):
+    """POST /sessions/{id}/activity-tickets: the owner's consoles for an observer (CONTRACTS §6.3), from the real gateway."""
+    s = own(request, site_of(request))
+    try:
+        await read_body(request, {"issued_for_user_id": 1})
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    if s.status() != "running":
+        return error(409, "session_not_running", "Session is not running")
+    grant = {"slot": SLOT_ADDRESS, "project_id": s.project_id, "activity": True, "who": f"{s.id}:observer"}
     try:
         async with request.app["http"].post(f"{GW_INTERNAL_URL}/internal/tickets", json=grant,
                                             headers={"X-Internal-Key": GW_INTERNAL_KEY}) as resp:
@@ -1797,6 +1821,7 @@ def make_apps():
     api.router.add_get("/api/v1/sessions/{sid}", get_session)
     api.router.add_post("/api/v1/sessions/{sid}/stop", stop_session)
     api.router.add_post("/api/v1/sessions/{sid}/console-tickets", console_ticket)
+    api.router.add_post("/api/v1/sessions/{sid}/activity-tickets", activity_ticket)
     api.router.add_get("/api/v1/sessions/{sid}/state", session_facts)
     api.router.add_post("/api/v1/sessions/{sid}/state/refresh", refresh_facts)
     api.router.add_post("/api/v1/sessions/{sid}/checks", start_check)

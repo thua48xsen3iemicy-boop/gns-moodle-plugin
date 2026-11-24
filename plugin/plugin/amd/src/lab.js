@@ -46,6 +46,7 @@ import {
 import {STRING_KEYS as SNIPPET_KEYS} from 'mod_gns3lab/snippets';
 import {Checks, STRING_KEYS as CHECK_KEYS} from 'mod_gns3lab/checks';
 import {Assignment} from 'mod_gns3lab/assignment';
+import {ConsoleActivity} from 'mod_gns3lab/consoleactivity';
 import {Consoles} from 'mod_gns3lab/consoles';
 import {Details} from 'mod_gns3lab/details';
 import {fill} from 'mod_gns3lab/dom';
@@ -107,6 +108,7 @@ const UI_KEYS = [
     'ui_act_console', 'ui_act_console_open', 'ui_act_console_goto', 'ui_act_info', 'ui_act_info_full', 'ui_act_zoom',
     'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
     'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',
+    'ui_student_console',
     'consoleneedsrunning', 'consolenone',
     'ui_facts_at', 'ui_facts_ago', 'ui_facts_ago_now', 'ui_facts_stale', 'ui_facts_stale_mark', 'ui_facts_nodata',
     'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_refreshing', 'ui_facts_refreshed', 'ui_facts_nochange',
@@ -207,6 +209,14 @@ class LabPage {
             onSeen: event => this.takeSeen(event),
             onScreen: nodeId => this.takeScreen(nodeId),
         });
+        // Where the student works (manager CONTRACTS §6.3): a teacher who looks at the lab sees the student's consoles
+        // on the scheme, the badge blinks while the student types. Only when the manager has it; the server checks again.
+        this.activity = userid !== 0 && this.data.consoleactivity && !this.data.authoring ? new ConsoleActivity({
+            cmid,
+            userid,
+            api: this.api,
+            onChange: ids => ids.forEach(id => this.stage.setStudentConsole(id, this.activity.state(id))),
+        }) : null;
         this.wheel = new Wheel(region('radial'), {
             stage: this.stage,
             prefix,
@@ -402,6 +412,9 @@ class LabPage {
         if (this.factsSession && (!running || s.sessionid !== this.factsSession)) {
             this.stopFacts();
         }
+        if (this.activity && !(running && s.topology)) {
+            this.activity.stop();
+        }
         if (running && s.topology) {
             const statuses = new Map(s.nodes.map(n => [n.nodeid, n.status]));
             const key = s.sessionid + '\n' + s.topology;
@@ -413,6 +426,9 @@ class LabPage {
             }
             this.consoles.updateNodes(statuses);
             this.followFacts(s);
+            if (this.activity) {
+                this.activity.start(s.sessionid);
+            }
         } else if (this.liveKey) {
             this.liveKey = null;
             this.liveSession = null;

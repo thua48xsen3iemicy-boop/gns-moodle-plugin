@@ -4971,6 +4971,17 @@ body.gns3lab-fullscreen {
 .gns3lab-student.canvas-ui .unread .cbadge rect{fill:var(--accent);animation:gnsCanvasPulse 1.2s ease-in-out infinite}
 .gns3lab-student.canvas-ui .unread .cbadge text{fill:var(--accent-ink)}
 .gns3lab-student.canvas-ui .minimized .cbadge rect{stroke:var(--accent);stroke-width:2}
+/* The student's console for a teacher who looks at the lab (consoleactivity.js): outlined while open, filled on the
+   console of the last input, blinking while the student types. */
+.gns3lab-student.canvas-ui .sbadge{display:none;cursor:pointer}
+.gns3lab-student.canvas-ui .stu-con .sbadge{display:inline}
+.gns3lab-student.canvas-ui .sbadge rect{fill:var(--canvas);stroke:var(--ok);stroke-width:1.5}
+.gns3lab-student.canvas-ui .sbadge text{font:600 8px var(--mono);fill:var(--ok);text-anchor:middle}
+.gns3lab-student.canvas-ui .stu-last .sbadge rect{fill:var(--ok)}
+.gns3lab-student.canvas-ui .stu-last .sbadge text{fill:var(--canvas)}
+.gns3lab-student.canvas-ui .stu-typing .sbadge rect{fill:var(--ok);animation:gnsCanvasPulse .5s ease-in-out infinite}
+.gns3lab-student.canvas-ui .stu-typing .sbadge text{fill:var(--canvas)}
+.gns3lab-student.canvas-ui .node.stu-typing:not(.sel) .halo{fill:color-mix(in srgb,var(--ok) 16%,transparent);animation:gnsCanvasPulse .5s ease-in-out infinite}
 @keyframes gnsCanvasPulse{
 50%{opacity:.45}
 
@@ -4992,6 +5003,8 @@ body.gns3lab-fullscreen {
 .gns3lab-student.canvas-ui .l3,
 .gns3lab-student.canvas-ui .l2x{transition:none}
 .gns3lab-student.canvas-ui .unread .cbadge rect{animation:none}
+.gns3lab-student.canvas-ui .stu-typing .sbadge rect,
+.gns3lab-student.canvas-ui .node.stu-typing:not(.sel) .halo{animation:none}
 
 }
 .gns3lab-student.canvas-ui /* overlays on the topology */
