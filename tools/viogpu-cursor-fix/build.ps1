@@ -102,14 +102,11 @@ if (-not $sys) {
 }
 $driver = Join-Path $Out 'viogpudo'
 New-Item -ItemType Directory -Force -Path $driver | Out-Null
+# The package of the virtio-win build: the driver, and the resolution service vgpusrv.exe with viogpuap.exe, which it
+# starts in each user session (unsigned user-mode programs, not installed by the INF).
 Get-ChildItem -Path $sys.DirectoryName -File | Copy-Item -Destination $driver
-# The resolution helper (a service that starts viogpuap.exe in the user session), unsigned user-mode programs.
-$tools = Join-Path $Out 'tools'
-New-Item -ItemType Directory -Force -Path $tools | Out-Null
-foreach ($name in @('viogpusc.exe', 'viogpuap.exe')) {
-    $exe = Get-ChildItem -Path (Join-Path $src 'viogpu') -Recurse -Filter $name |
-        Where-Object { $_.FullName -match 'win10_amd64' } | Select-Object -First 1
-    if ($exe) { Copy-Item $exe.FullName -Destination $tools } else { Write-Host "note: $name was not built" }
+foreach ($name in @('viogpudo.inf', 'viogpudo.cat', 'vgpusrv.exe', 'viogpuap.exe')) {
+    if (-not (Test-Path (Join-Path $driver $name))) { throw "$name is missing from the package" }
 }
 
 # ---------------------------------------------------------------- test signing
