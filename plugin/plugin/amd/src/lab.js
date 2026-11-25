@@ -970,10 +970,6 @@ class LabPage {
         if (!live.state.canuse && !live.state.readonly) {
             return this.strings.ui_why_viewer;
         }
-        if (n.consoleType === 'vnc' && live.state.readonly) {
-            // The screen is the student's own: the teacher does not see it (and the server issues no ticket for it).
-            return this.strings.consolevncobserver;
-        }
         if (!n.consoleType || n.consoleType === 'none') {
             return this.strings.consolenone;
         }

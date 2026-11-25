@@ -428,12 +428,16 @@ class Con {
         // The screen keeps the keyboard focus while the tab or a button is pressed.
         tools.addEventListener('pointerdown', e => e.preventDefault());
         tab.addEventListener('click', () => this.showTools(menu.hidden));
-        button('', 'Ctrl+Alt+Del', o.s('consolevncctrlaltdel'), () => {
-            if (this.conn && this.conn.ctrlAltDel()) this.focus();
-            else o.toast(fill(o.s('ui_not_connected'), this.n.name));
-        });
+        // An observer only looks (noVNC viewOnly): no keys to send, and full screen does not change the size of the screen.
+        if (!o.readonly) {
+            button('', 'Ctrl+Alt+Del', o.s('consolevncctrlaltdel'), () => {
+                if (this.conn && this.conn.ctrlAltDel()) this.focus();
+                else o.toast(fill(o.s('ui_not_connected'), this.n.name));
+            });
+        }
         if (document.fullscreenEnabled) {
-            this.fullBtn = button(ICON_FULL, o.s('consolevncfullscreen'), o.s('consolevncfullscreenhint'), () => this.toggleFull());
+            this.fullBtn = button(ICON_FULL, o.s('consolevncfullscreen'),
+                o.s(o.readonly ? 'consolevncfullscreen' : 'consolevncfullscreenhint'), () => this.toggleFull());
         }
         menu.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
@@ -998,11 +1002,6 @@ export class Consoles {
      */
     async open(node) {
         const screen = node.consoleType === 'vnc';
-        if (screen && this.readonly) {
-            // The teacher does not see the screen of a student; the server does not issue the ticket either.
-            this.toast(this.s('consolevncobserver'));
-            return;
-        }
         try {
             if (screen && !this.RFB) this.RFB = await loadNovnc();
             if (!screen && !this.xterm) this.xterm = await loadXterm();

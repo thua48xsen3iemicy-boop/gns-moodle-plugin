@@ -314,19 +314,27 @@ const openConsole = async(page, id) => {
             !!term && (await page.locator('.tbar .tfont').count()) === 1 && (await page.locator('.vnctools').count()) === 0);
         await context.close();
 
-        // ---- the teacher: no screen
+        // ---- the teacher: the screen, view only (noVNC viewOnly; the gateway passes the frames, manager CONTRACTS §6)
         const teacher = await browser.newContext({viewport: {width: 1440, height: 860}});
         const view = await teacher.newPage();
         await view.goto(`${BASE}/index.en.html?observer`);
         await view.locator(`.node[data-node="${PVE1}"].st-started`).waitFor();
         await openConsole(view, PVE1);
-        const toast = await until(async() => {
-            const text = await view.locator('[data-region="toast"]').innerText();
-            return /graphical console of a student/.test(text) ? text : null;
-        });
-        check('the teacher is told that he does not see the screen of a student', !!toast, JSON.stringify(toast));
-        check('and no ticket is asked, no canvas appears',
-            (await view.evaluate(() => window.__stub.tickets || 0)) === 0 && (await view.locator('.vncscreen').count()) === 0);
+        check('the teacher sees the screen of the student',
+            !!(await until(async() => near(await pixel(view, 60, 30), [235, 235, 16]), 15000)));
+        check('...with a read-only ticket', (await view.evaluate(() => window.__stub.tickets || 0)) === 1);
+        const seenBefore = await screenOf();
+        const vbox = await view.locator('.vncscreen canvas').boundingBox();
+        await view.mouse.click(vbox.x + vbox.width * 0.5, vbox.y + vbox.height * 0.5);
+        await view.keyboard.press('a');
+        await view.keyboard.press('Enter');
+        await sleep(800);
+        const seenAfter = await screenOf();
+        check('the keys and clicks of the teacher do not reach the screen', seenAfter.keys === seenBefore.keys
+            && seenAfter.counts.click === seenBefore.counts.click, JSON.stringify([seenBefore.counts, seenAfter.counts]));
+        await view.getByRole('button', {name: 'Screen controls'}).click();
+        check('the menu of the teacher has Full screen and no Ctrl+Alt+Del',
+            (await view.locator('.vncmenu .vncbtn', {hasText: 'Ctrl+Alt+Del'}).count()) === 0);
         await teacher.close();
 
         // ---- a phone: hold the node, drag to "Console" in the wheel, let go; the screen is in the sheet

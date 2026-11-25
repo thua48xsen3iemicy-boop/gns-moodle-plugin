@@ -97,9 +97,10 @@ Moodle никогда не держит WebSocket и не видит токен�
 - Графическая консоль (нода с `console_type: vnc`, CONTRACTS §2.4, §2.6, §6, модуль `amd/src/vnc.js`): тот же адрес,
   билет, origin и коды `4000` / `4001` с теми же паузами, но кадры в обе стороны — двоичные кадры сырого потока RFB
   (текстовых нет, размера окна нет), а вместо xterm.js — noVNC. Страница сама создаёт `WebSocket` и отдаёт его noVNC
-  каналом, поэтому код закрытия виден. Экран есть только у владельца лабы: у `vnc` нет режима «только просмотр»,
-  билет с `readonly: true` менеджер не выдаёт (`403 console_disabled`), поэтому плагин его и не просит — наблюдателю
-  отказ даёт сам Moodle (`consolevncobserver`), менеджера он не зовёт. Пароля нет (security None): если сервер просит
+  каналом, поэтому код закрытия виден. 🆕 (0.49.0) Наблюдатель тоже открывает экран: билет `readonly: true`, noVNC
+  с `viewOnly` (клавиши, мышь и Ctrl+Alt+Del не уходят), размер экрана наблюдатель не задаёт и в полноэкранном режиме —
+  экран лишь масштабируется. Шлюз кадры наблюдателя не фильтрует: преподавателю доверяют (manager `CONTRACTS.md` §6);
+  если ему понадобится управлять экраном, это снимается в браузере. Пароля нет (security None): если сервер просит
   учётные данные, страница отключается и говорит об этом.
 
 Со стороны слота (менеджер и эксплуатация, браузер этого не видит):
@@ -166,7 +167,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}`; 🆕 (0.21.0) `maintenance` `{state, startsat, message}` — из сессии, а без неё из `GET /api/v1/maintenance` (MUC `info`, 30 с); недоступный менеджер — `off` |
 | `mod_gns3lab_start_session` | `cmid` | use | сессия |
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
-| `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — только своя: чужая → отказ `consolevncobserver` без запроса к менеджеру; в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
+| `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — 🆕 (0.49.0) и чужая, тоже `readonly` (экран без ввода, noVNC `viewOnly`); в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
 | `mod_gns3lab_get_activity_ticket` | `cmid`, `userid` | 🆕 (0.48.0) только observe + группы для чужой лабы: своя — отказ `consoleactivityobserver`; менеджер без `console-activity` — `consoleactivityunsupported`; лаба не `running` — `sessionnotrunning` | `{"ticket","gatewayurl","expiresin"}` — билет к `/console/activity` шлюза (manager CONTRACTS §6.3, `docs/teacher-dashboard.md` §15) |
 | `mod_gns3lab_list_students` | `cmid` | observe | студенты (с учётом групп) и статус их сессий |
 | `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
@@ -375,7 +376,7 @@ H.264 через WebCodecs) ломает Babel-шаг `grunt amd`, теперь 
 
 - [ ] Ни одна external function не доверяет `userid` из запроса без `observe` и проверки групп.
 - [ ] Лабой студента управляет одно место (`tab` / `login`): второй вход под той же учётной записью не запускает, не останавливает лабу и не получает билет к консоли (`seat::require_seat`).
-- [ ] Билет к чужой лабе — всегда `readonly`, решает сервер; к экрану (`vnc`) чужой лабы билета нет вообще.
+- [ ] Билет к чужой лабе — всегда `readonly`, решает сервер; у экрана (`vnc`) «только просмотр» держит браузер (noVNC `viewOnly`), преподавателю доверяют.
 - [ ] `nodeid` сверяется с топологией сессии.
 - [ ] Секрет менеджера не уходит в JS, не логируется, не попадает в backup.
 - [ ] SVG drawings санитайзятся, все строки из `.gns3` экранируются.

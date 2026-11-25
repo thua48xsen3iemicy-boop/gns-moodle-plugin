@@ -35,9 +35,8 @@ use mod_gns3lab\local\session_data;
  * The owner gets a ticket only from the page that holds the seat of the student (mode `tab` or `login` of the activity,
  * docs/seat.md): a second person on the same account cannot open a console next to the student.
  *
- * A node with a graphical console (console_type vnc) has no read-only mode: its screen belongs to the owner of the
- * lab. An observer gets no ticket for it, and Moodle does not even ask the manager (which would refuse too:
- * 403 console_disabled).
+ * A node with a graphical console (console_type vnc) is open to an observer too: the browser shows the screen view
+ * only (noVNC viewOnly), and the gateway passes the frames as they come; the teacher is trusted (manager CONTRACTS §6).
  *
  * In a fog that starts from named nodes a student gets no ticket for a node they have not found yet (the mask of
  * mod_gns3lab_reveal, docs/lab-constructor/README.md §2.2). An observer sees everything.
@@ -99,11 +98,7 @@ class get_console_ticket extends external_api {
             throw new \moodle_exception('nodenotfound', 'gns3lab');
         }
         $type = session_data::console_type($session, $nodeid);
-        if ($type === 'vnc') {
-            if ($readonly) {
-                throw new \moodle_exception('consolevncobserver', 'gns3lab');
-            }
-        } else if ($type !== '' && $type !== 'telnet') {
+        if ($type !== '' && $type !== 'telnet' && $type !== 'vnc') {
             throw new \moodle_exception('consolenotsupported', 'gns3lab');
         }
 

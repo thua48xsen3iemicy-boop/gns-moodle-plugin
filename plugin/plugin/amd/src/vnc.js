@@ -43,7 +43,7 @@ import {BACKOFF, CLOSE_UNAVAILABLE, CLOSE_UPSTREAM, STABLE_AFTER, consoleUrl} fr
  * (mod_gns3lab/console STRING_KEYS).
  */
 export const STRING_KEYS = [
-    'consolevncobserver', 'consolevnccreds', 'consolevnclabel', 'consolevncctrlaltdel', 'consolevnctools',
+    'consolevnccreds', 'consolevnclabel', 'consolevncctrlaltdel', 'consolevnctools',
     'consolevncfullscreen', 'consolevncfullscreenexit', 'consolevncfullscreenhint', 'consolevncfullscreenfailed',
     'ui_screen_fail',
 ];
@@ -139,6 +139,8 @@ export class VncConnection {
         this.wanted = null;
         this.sizes = sizes || {get: () => null, set: () => undefined, clear: () => undefined};
         this.sizeTimer = null;
+        // Read only: an observer. Its screen follows the size the student chose and never asks for one.
+        this.readonly = false;
     }
 
     /**
@@ -186,12 +188,9 @@ export class VncConnection {
         if (this.state === 'closed') {
             return;
         }
-        if (ticket.readonly) {
-            // The screen has no view-only mode, so a read-only ticket is a mistake of the server, not something to use.
-            this.onNote(this.strings.consolevncobserver);
-            this.setState('failed');
-            return;
-        }
+        // A teacher who looks at the lab of a student sees the screen without keys and mouse (noVNC viewOnly). The gateway
+        // passes the frames either way: the teacher is trusted (manager CONTRACTS §6).
+        this.readonly = !!ticket.readonly;
         this.open(ticket);
     }
 
@@ -223,7 +222,7 @@ export class VncConnection {
         }
         rfb.scaleViewport = true;
         rfb.resizeSession = false;
-        rfb.viewOnly = false;
+        rfb.viewOnly = this.readonly;
         rfb.clipViewport = false;
         rfb.background = 'transparent';
         const link = {ws, rfb, done: false, off: []};
@@ -293,7 +292,7 @@ export class VncConnection {
      * @returns {boolean} false: not connected, or the server cannot change the size
      */
     sendSize(size) {
-        const rfb = this.state === 'open' && this.link ? this.link.rfb : null;
+        const rfb = this.state === 'open' && this.link && !this.readonly ? this.link.rfb : null;
         if (!VncConnection.resizable(rfb) || !this.RFB.messages || !this.RFB.messages.setDesktopSize) {
             return false;
         }
@@ -310,6 +309,9 @@ export class VncConnection {
      */
     applySize() {
         clearTimeout(this.sizeTimer);
+        if (this.readonly) {
+            return;
+        }
         const started = Date.now();
         const attempt = () => {
             if (this.state !== 'open' || !this.link) {

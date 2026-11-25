@@ -66,7 +66,7 @@ ISO из каталога гостя (CONTRACTS §2.12 менеджера 0.30):
 interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашение — для клавиатуры консоли.
 
 Графическая консоль (CONTRACTS §2.4, §2.6, §6 менеджера): у ноды с console_type "vnc" вместо терминала экран.
-- билет на такую ноду получает только владелец сессии; readonly: true — 403 console_disabled, шлюз не вызывается;
+- билет на такую ноду получает и владелец, и наблюдатель (readonly: true): «только просмотр» держит noVNC в браузере;
   в тело /internal/tickets для vnc-ноды добавляется "console": "vnc" (для остальных поля нет, как у менеджера);
 - поддельный Lab Slot на такой ноде отдаёт сырой поток RFB 3.8 двоичными кадрами: security None, экран 320×200
   (цветные полосы и буквы VNC), на FramebufferUpdateRequest — raw-прямоугольник. Нажатие клавиши рисует цветной
@@ -1042,9 +1042,6 @@ async def console_ticket(request):
         return error(409, "node_not_running", "Node is not running")
     readonly = bool(body.get("readonly"))
     screen = m.node_console(node_id) == "vnc"
-    if screen and readonly:
-        # The manager does not show the screen of a student to the teacher (CONTRACTS §2.4).
-        return error(403, "console_disabled", "The screen of a node is shown to the owner of the lab only")
     grant = {"slot": SLOT_ADDRESS, "project_id": s.project_id, "nodes": [node_id], "readonly": readonly,
              "who": f"{s.id}:{'observer' if readonly else 'owner'}"}
     if screen:

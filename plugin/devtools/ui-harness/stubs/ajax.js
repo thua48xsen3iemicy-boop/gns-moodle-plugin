@@ -630,12 +630,6 @@ define([], function() {
                 e.errorcode = 'nodenotfound';
                 throw e;
             }
-            if (node && node.console_type === 'vnc' && cfg.observer) {
-                // classes/external/get_console_ticket.php: the teacher does not see the screen of a student.
-                const e = new Error('The teacher does not see the graphical console of a student.');
-                e.errorcode = 'consolevncobserver';
-                throw e;
-            }
             if ((nodeStatus[args.nodeid] || 'stopped') !== 'started') {
                 const e = new Error('The device is stopped.');
                 e.errorcode = 'managererror_node_not_running';

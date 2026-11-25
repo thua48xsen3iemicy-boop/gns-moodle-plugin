@@ -163,21 +163,19 @@ final class console_ticket_test extends \advanced_testcase {
             'issued_for_user_id' => (int) $this->student->id], $request['body']);
     }
 
-    public function test_teacher_gets_no_ticket_to_the_graphical_console_of_a_student(): void {
+    public function test_teacher_gets_a_read_only_ticket_to_the_graphical_console_of_a_student(): void {
         $group = $this->getDataGenerator()->create_group(['courseid' => $this->course->id]);
         $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->student->id]);
         $this->getDataGenerator()->create_group_member(['groupid' => $group->id, 'userid' => $this->teacher->id]);
         $this->prohibit_access_all_groups();
         $this->setUser($this->teacher);
 
-        try {
-            $this->ticket(fake_manager::NODE_VNC, (int) $this->student->id);
-            $this->fail('No exception');
-        } catch (\moodle_exception $e) {
-            $this->assertSame('consolevncobserver', $e->errorcode);
-        }
-        // The refusal is made by Moodle: the manager is not asked for a ticket.
-        $this->assertSame([], $this->manager->requests_to('POST', self::TICKETS));
+        $ticket = $this->ticket(fake_manager::NODE_VNC, (int) $this->student->id);
+
+        $this->assertTrue($ticket['readonly']);
+        [$request] = $this->manager->requests_to('POST', self::TICKETS);
+        $this->assertSame(['node_id' => fake_manager::NODE_VNC, 'readonly' => true,
+            'issued_for_user_id' => (int) $this->teacher->id], $request['body']);
     }
 
     public function test_console_of_another_kind_is_refused(): void {

@@ -161,7 +161,6 @@ $string['consolevncfullscreenexit'] = 'Exit full screen';
 $string['consolevncfullscreenfailed'] = 'The browser did not allow full screen.';
 $string['consolevncfullscreenhint'] = 'Full screen: the device switches to the resolution of your monitor (at most 2560×1440) and back when you leave';
 $string['consolevnclabel'] = 'Graphical console of {$a}';
-$string['consolevncobserver'] = 'The teacher does not see the graphical console of a student.';
 $string['consolevnctools'] = 'Screen controls';
 $string['courselabs'] = 'Course labs';
 $string['demonotice'] = 'The activity has no reference lab on the lab manager yet, so this is a demo lab: an OSPF topology with device facts. Switch the layers L1, L2, L3 and OSPF and try the configuration with mistakes.';
