@@ -760,8 +760,6 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         nodes, stale = await services.orchestrator.live_nodes(s)
         node = nodes.get(body.node_id, {})
         console = node.get("console_type")
-        if console == "vnc" and body.readonly:  # A permission, so it goes before the state check below
-            raise ApiError(403, "console_disabled", "The screen of this node is visible to the session owner only")
         if not stale and node.get("status") != "started":
             # Saves the plugin a closed WebSocket and a session re-read (П5).
             raise ApiError(409, "node_not_running", "Node is not started")
