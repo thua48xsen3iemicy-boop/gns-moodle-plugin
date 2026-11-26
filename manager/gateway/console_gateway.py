@@ -26,8 +26,9 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
           · `?history=1` от браузера (новый терминал) уходит слоту: тот первым кадром отдаёт хвост прежнего вывода
             ноды (CONTRACTS.md §6.2); наблюдателю тоже;
       - `vnc` (экран QEMU, в браузере noVNC): по соединению идёт сырой RFB. Двоичные кадры идут в обе стороны
-        без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателя у экрана нет
-        (его видит только владелец сессии): билет с `console: "vnc"` и `readonly: true` не выдаётся (400);
+        без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателю (`readonly`) экран
+        тоже открыт, и его кадры идут к слоту так же: без них нет рукопожатия RFB и запросов экрана. «Только
+        просмотр» держит браузер (noVNC viewOnly), шлюз его не проверяет: преподавателю доверяют (CONTRACTS.md §6);
   * активность консолей владельца (CONTRACTS.md §6.3): наблюдатель (преподаватель) по билету с `"activity": true`
     открывает /console/activity и получает текстовые кадры JSON — у каких нод открыта консоль владельца сессии и
     когда в неё идёт ввод. Содержимое ввода не передаётся, только номер ноды; вход прореживается до кадра в
@@ -52,8 +53,7 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
     curl -s -X POST localhost:8080/internal/tickets -H 'X-Internal-Key: секрет' \
       -d '{"slot":"10.19.36.216","project_id":"<uuid>","nodes":["<uuid>"],"readonly":false,"console":"telnet"}'
     → {"ticket": "…", "expires_in": 30}
-`console` необязательно: "telnet" (по умолчанию) или "vnc"; любое другое значение, как и "vnc" вместе
-с "readonly": true, — 400.
+`console` необязательно: "telnet" (по умолчанию) или "vnc"; любое другое значение — 400.
 Билет активности: {"slot", "project_id", "activity": true, "who"} — без nodes, только для /console/activity.
 
 Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>[&history=1]
@@ -301,8 +301,6 @@ async def issue_ticket(request: web.Request):
     if console_type not in CONSOLES:  # Не только незнакомое имя: null и другой регистр тоже
         raise web.HTTPBadRequest(text='console: "telnet" или "vnc"')
     readonly = bool(g.get("readonly"))
-    if console_type == "vnc" and readonly:
-        raise web.HTTPBadRequest(text="у экрана vnc нет режима просмотра: readonly недопустим")
     grant = {"slot": g["slot"], "project_id": project_id, "nodes": node_ids, "console": console_type,
              "readonly": readonly, "who": g.get("who", "")}
     ticket = request.app["tickets"].issue(grant)
@@ -385,13 +383,14 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
 
         async def from_browser():
             async for m in browser:
-                if g["readonly"]:
-                    continue  # У vnc такого билета нет (400 при выдаче); проверка остаётся на случай ошибки в коде
                 if vnc:
-                    if m.type == WSMsgType.BINARY:  # RFB: байты клиента как есть
-                        if human_input(m.data):
+                    # RFB: bytes of the client as they are, an observer's too (the browser keeps it view only).
+                    if m.type == WSMsgType.BINARY:
+                        if not g["readonly"] and human_input(m.data):
                             activity.input(project, node_id)
                         await up.send_bytes(m.data)
+                elif g["readonly"]:
+                    continue  # An observer of a terminal: neither input nor window size
                 elif m.type == WSMsgType.TEXT:
                     activity.input(project, node_id)
                     if control:

@@ -151,13 +151,13 @@ async def main():
         assert not leaked, leaked
         print("observer is read-only OK")
         # --- тип консоли в билете ---------------------------------------------------------------------------
-        # поле необязательное; всё, кроме "telnet" и "vnc", — 400, как и vnc с readonly
+        # поле необязательное; всё, кроме "telnet" и "vnc", — 400; экран наблюдателю тоже выдаётся
         for bad in ("ssh", "VNC", "", None, 5, ["vnc"]):
             assert (await ticket(False, console=bad))[0] == 400, bad
-        assert (await ticket(True, console="vnc"))[0] == 400
+        assert (await ticket(True, console="vnc"))[0] == 200
         assert (await ticket(True, console="telnet"))[0] == 200
         assert (await ticket(False, console="vnc"))[0] == 200 and (await ticket(False, console="telnet"))[0] == 200
-        print("console field: default telnet, others 400, vnc+readonly 400 OK")
+        print("console field: default telnet, others 400, vnc for an observer too OK")
         # явный telnet — прежнее поведение: только текстовые кадры, бинарные отбрасываются
         seen.clear(); _, t = await ticket(False, console="telnet")
         ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}", headers=moodle)
@@ -392,6 +392,18 @@ async def main():
         assert await frame(w) == {"type": "input", "node": VNC}
         await d.close()
         assert await frame(w) == {"type": "close", "node": VNC}
+        # наблюдатель экрана: кадры RFB идут к слоту как есть, но ни консоль, ни ввод не попадают в активность
+        _, t = await ticket(True, nodes=(VNC,), console="vnc")
+        o = await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}", headers=moodle)
+        assert (await o.receive(timeout=3)).data == BANNER
+        await o.send_bytes(b"RFB 003.008\n"); assert (await o.receive(timeout=3)).data == b"ack:RFB 003.008\n"
+        await o.send_bytes(b"\x04\x01\x00\x00\x00\x00\x00\x61"); await o.receive(timeout=3)
+        await o.send_str("text"); await asyncio.sleep(0.2)
+        assert seen_vnc[-1] == (WSMsgType.BINARY, b"\x04\x01\x00\x00\x00\x00\x00\x61"), seen_vnc[-2:]
+        assert await silent(w)
+        await o.close()
+        assert await silent(w)
+        print("vnc observer: RFB passes both ways, text dropped, no activity OK")
         print("activity: vnc keys count, screen requests and bare mouse moves do not OK")
         # пределы наблюдателей
         gw.MAX_WATCHERS_PER_PROJECT = 2

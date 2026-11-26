@@ -170,13 +170,14 @@ async def running_vnc_session(env):
     return sid, {n["name"]: n["node_id"] for n in s["topology"]["topology"]["nodes"]}
 
 
-async def test_only_the_owner_gets_a_ticket_for_a_vnc_screen(tmp_path, dsn):
+async def test_owner_and_observer_get_a_ticket_for_a_vnc_screen(tmp_path, dsn):
     async with make_env(tmp_path, dsn, vmids=(201,), images=CATALOG) as env:
         sid, ids = await running_vnc_session(env)
-        r = await ticket_of(env, sid, ids["KALI"], readonly=True)  # A teacher watching
-        assert r.status_code == 403 and r.json()["error"] == "console_disabled", r.text
-        assert "owner" in r.json()["message"]
-        assert env.gateway.requests == []  # Nothing reached the gateway
+        r = await ticket_of(env, sid, ids["KALI"], readonly=True)  # A teacher watching (manager 0.38.0)
+        assert r.status_code == 200, r.text
+        sent = env.gateway.requests[-1]
+        assert sent["console"] == "vnc" and sent["readonly"] is True and sent["who"] == f"{sid}:observer"
+        env.gateway.requests.clear()
 
         r = await ticket_of(env, sid, ids["KALI"])
         assert r.status_code == 200, r.text
@@ -200,16 +201,14 @@ async def test_telnet_tickets_are_what_they_were(tmp_path, dsn):
                             "readonly": readonly, "who": f"{sid}:{who}"}
 
 
-async def test_a_vnc_ticket_check_goes_before_the_state_check(tmp_path, dsn):
+async def test_a_stopped_vnc_node_gets_no_ticket(tmp_path, dsn):
     async with make_env(tmp_path, dsn, vmids=(201,), images=CATALOG) as env:
         sid, ids = await running_vnc_session(env)
         env.slots[201].stopped_nodes.add("KALI")
         env.orch._live_cache.clear()
-        # The screen belongs to the owner, and that is said before anything about its state.
-        r = await ticket_of(env, sid, ids["KALI"], readonly=True)
-        assert r.status_code == 403 and r.json()["error"] == "console_disabled"
-        r = await ticket_of(env, sid, ids["KALI"])
-        assert r.status_code == 409 and r.json()["error"] == "node_not_running"
+        for readonly in (True, False):
+            r = await ticket_of(env, sid, ids["KALI"], readonly=readonly)
+            assert r.status_code == 409 and r.json()["error"] == "node_not_running"
         assert env.gateway.requests == []
         r = await ticket_of(env, sid, "00000000-0000-4000-8000-000000000000")
         assert r.status_code == 404 and r.json()["error"] == "node_not_found"
@@ -224,7 +223,7 @@ async def test_the_type_of_a_screen_comes_from_the_snapshot_when_the_slot_is_sil
         env.slots[201].reachable = False
         env.orch._live_cache.clear()
         r = await ticket_of(env, sid, ids["KALI"], readonly=True)
-        assert r.status_code == 403 and r.json()["error"] == "console_disabled"
+        assert r.status_code == 200 and env.gateway.requests[-1]["console"] == "vnc"
         r = await ticket_of(env, sid, ids["KALI"])  # nodes_stale: a ticket is issued, as for any node
         assert r.status_code == 200, r.text
         assert env.gateway.requests[-1]["console"] == "vnc"
