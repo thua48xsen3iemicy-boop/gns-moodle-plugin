@@ -350,7 +350,7 @@ pct exec $MGR -- $ADM slots               # 703, 704: state free, in_config true
 студентов общие, uid/gid во всех слотах должны совпадать.
 
 **Память ноды.** Новые слоты делят те же лимиты размещения (`NODE_GUEST_MEMORY_MB`,
-`NODE_CPU_OVERCOMMIT` в `lab.conf`). Если лимит уже почти выбран, лишние слоты будут стоять
+`NODE_CPU_OVERCOMMIT`, `NODE_HOST_CPUS` в `lab.conf`). Если лимит уже почти выбран, лишние слоты будут стоять
 свободными, а сессии ждать «Недостаточно ресурсов на узлах».
 
 ## Собрать ZIP плагина и поставить в Moodle
@@ -411,7 +411,7 @@ pct exec $MOODLE -- runuser -u www-data -- php $ROOT/admin/cli/upgrade.php --non
 | У студента | Причина |
 |---|---|
 | «Ожидание свободного слота…», потом `QUEUE_TIMEOUT` | все рабочие слоты заняты |
-| «Недостаточно ресурсов на узлах, ожидание…» | свободные слоты есть, но на их нодах не хватает памяти или CPU (`NODE_MEMORY_RESERVE_MB`, `NODE_GUEST_MEMORY_MB`, `NODE_CPU_OVERCOMMIT`) |
+| «Недостаточно ресурсов на узлах, ожидание…» | свободные слоты есть, но на их нодах не хватает памяти или CPU (`NODE_MEMORY_RESERVE_MB`, `NODE_GUEST_MEMORY_MB`, `NODE_CPU_OVERCOMMIT`, `NODE_HOST_CPUS`; CPU образов с `busy_cpus` в `images.json` не переподписываются) |
 | «Proxmox недоступен, ожидание…» | менеджер не достучался до API Proxmox (`PVE_NODES`, токен) |
 | `STUDENT_DIR_BUSY` | у какого-то слота в `slots` стоит `student_key` этого студента: §3, потом §4. Текст «Слот требует проверки администратором…» — слот в карантине: раздел `COMMAND_UNCERTAIN` |
 | `SLOT_QUARANTINED` | агент держит отметку `uncertain` на слоте: раздел `COMMAND_UNCERTAIN` |

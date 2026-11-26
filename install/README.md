@@ -49,7 +49,7 @@
 
 `manager.env`, `sites.json`, `slots.json`, `slot.env` и `nginx/lab.conf` собираются заново при каждом
 `secrets` и `manager`: правьте `lab.conf`, а не эти файлы. Лимиты размещения лаб на ноде
-(`NODE_GUEST_MEMORY_MB`, `NODE_CPU_OVERCOMMIT`) тоже задаются в `lab.conf` и попадают в `manager.env`. Дополнительные строки `manager.env`
+(`NODE_GUEST_MEMORY_MB`, `NODE_CPU_OVERCOMMIT`, `NODE_HOST_CPUS`) тоже задаются в `lab.conf` и попадают в `manager.env`. Дополнительные строки `manager.env`
 кладутся в `secrets/manager/manager.env.local`, каталог образов для лаб из Moodle — в
 `secrets/manager/images.json` (образец — `manager/examples/images.json`).
 
