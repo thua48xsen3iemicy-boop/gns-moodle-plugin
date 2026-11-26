@@ -793,8 +793,11 @@ class Orchestrator:
         # failed pre-start attempt; no early failure may leave a student's mp1.
         key = self.settings.placeholder_student_key
         if not self.mounts_ok(await self.pve.ct_config(vmid), key, read_only=True):
-            await self.agent.set_mounts(node, vmid, student_key=key, data_mode="ro",
-                                        code_revision=self.settings.slot_code_revision)
+            try:
+                await self.agent.set_mounts(node, vmid, student_key=key, data_mode="ro",
+                                            code_revision=self.settings.slot_code_revision)
+            except AgentBusy:
+                raise Wait() from None  # Another slot of the node holds the placeholder lock for a moment
             if not self.mounts_ok(await self.pve.ct_config(vmid), key, read_only=True):
                 raise Failure("Парковка перед подготовкой не подтверждена", "PARK_FAILED",
                               slot_state="maintenance")
@@ -1387,6 +1390,8 @@ class Orchestrator:
             except AgentQuarantined:
                 raise
             except (AgentBusy, AgentUncertain, AgentNotStopped):
+                # AgentBusy includes STUDENT_DIR_BUSY: slots of one node released together all mount the
+                # same placeholder, and the agent does not wait for its lock. Retried until the stage timeout.
                 raise Wait() from None
             except (AgentRejected, AgentCommandFailed) as exc:
                 await self.store.event(s["id"], vmid, "park_failed", {"error": exc.message[:200]})
