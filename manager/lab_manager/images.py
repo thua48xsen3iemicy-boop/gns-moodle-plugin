@@ -41,6 +41,12 @@ path ("C:\\ToISO"), whose files a student may turn into an ISO image (CONTRACTS 
 image take that image into their CD-ROM drive. Only the administrator names the directory; public() carries just
 `iso_source: true` and `iso_target: true`.
 
+busy_cpus (iou and qemu): how many CPUs a node of the image keeps busy all the time, idle or not (Cisco IOSv/IOL,
+some proprietary images spin on their CPU). Placement counts them as real CPUs of the Proxmox node, never
+overcommitted (orchestrator.placement); other vCPUs share the node's CPUs by NODE_CPU_OVERCOMMIT. An iou node takes
+at most 1, a qemu node at most its cpus.max (1 without cpus); a node never counts more than its own vCPUs. Default 0.
+Never told to the plugin.
+
 Port names follow GNS3 2.2.61 without port_name_format (slot ALIGNMENT §4, В8):
 iou Ethernet{adapter}/{port} (4 ports per adapter), qemu Ethernet{adapter}, vpcs Ethernet0.
 """
@@ -138,6 +144,7 @@ class Image(Strict):
     # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
     role: Literal["switch"] | None = None
     qga: bool = Field(default=True, strict=True)  # False: no guest agent in the image (CONTRACTS 2.6, 4.2)
+    busy_cpus: int = Field(default=0, strict=True, ge=0, le=16)  # CPUs a node keeps busy all the time (placement)
     iso_source: str | None = Field(default=None, pattern=ISO_PATH_PATTERN)  # CONTRACTS 2.12
     iso_target: bool = Field(default=False, strict=True)
     sha256: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
@@ -169,6 +176,12 @@ class Image(Strict):
             raise ValueError("random_ifnames needs qemu and net_config ifupdown, networkmanager, netplan or networkd")
         if self.extra_disks and (self.kind != "qemu" or self.uplink_port is not None):
             raise ValueError("extra_disks is for qemu images without uplink_port")
+        if self.busy_cpus and self.kind == "vpcs":
+            raise ValueError("busy_cpus is for iou and qemu only")
+        if self.kind == "iou" and self.busy_cpus > 1:
+            raise ValueError("busy_cpus of an iou image is 0 or 1")
+        if self.kind == "qemu" and self.busy_cpus > (self.cpus.max if self.cpus else 1):
+            raise ValueError("busy_cpus of a qemu image cannot exceed its cpus.max (1 without cpus)")
         if self.console_type == "vnc" and self.kind != "qemu":
             raise ValueError("console_type vnc is for qemu only")  # CONTRACTS 2.6
         if self.uplink_port is not None:

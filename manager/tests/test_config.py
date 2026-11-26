@@ -45,6 +45,9 @@ def test_valid_config(env):
     assert s.node_guest_memory_mb == 0 and s.node_cpu_overcommit == 0  # No node limits by default
     env.update(NODE_GUEST_MEMORY_MB="118784", NODE_CPU_OVERCOMMIT="1.5")
     assert (load(env).node_guest_memory_mb, load(env).node_cpu_overcommit) == (118784, 1.5)
+    assert s.node_host_cpus == 0  # No CPUs kept for the host by default
+    env["NODE_HOST_CPUS"] = "4"
+    assert load(env).node_host_cpus == 4
     env["AGENT_START_ACTIONS"] = ""
     assert load(env).agent_start_actions == ()
     assert s.slot_lab_failure_limit == 3
@@ -106,7 +109,8 @@ def test_short_secret_rejected_without_leaking_it(env, tmp_path):
                                        ("LAB_CODE_DIR", "../slot"), ("LAB_CODE_DIR", "a//b"),
                                        ("LAB_STUDENTS_DIR", ""), ("LAB_STUDENTS_DIR", ".hidden/students"),
                                        ("NODE_GUEST_MEMORY_MB", "116G"), ("NODE_CPU_OVERCOMMIT", "-1"),
-                                       ("NODE_CPU_OVERCOMMIT", "two"), ("SLOT_LAB_FAILURE_LIMIT", "-1"),
+                                       ("NODE_CPU_OVERCOMMIT", "two"), ("NODE_HOST_CPUS", "-1"),
+                                       ("NODE_HOST_CPUS", "1.5"), ("SLOT_LAB_FAILURE_LIMIT", "-1"),
                                        ("SLOT_LAB_FAILURE_LIMIT", "few")])
 def test_invalid_values(env, key, value):
     env[key] = value
