@@ -36,6 +36,11 @@ feature/proxmox-node-agent is classified by HTTP status and wording:
     503/504, connection errors, timeouts: the outcome is unknown           -> AgentUncertain
     409 COMMAND_UNCERTAIN, 504 PCT_TIMEOUT of a mutating command          -> AgentQuarantined
         the agent wrote an `uncertain` mark for the slot; it does not pass by itself, waiting is useless
+    409 STUDENT_DIR_BUSY of PUT mounts / POST start                      -> AgentBusy
+        the agent's per-node lock of that student_key is held by another request right now (it does not
+        wait for it). The placeholder key is the same for every slot, so slots of one node parked at the
+        same moment meet here; the lock is held only for one `pct set`, so the call is repeated. On other
+        routes (capture, project delete) the code also means "mounted in a CT" and stays AgentRejected.
 """
 
 import ssl
@@ -260,15 +265,25 @@ class AgentClient:
     def mounts_body(student_key: str, code_revision: str | None, data_mode: str = "rw") -> dict:
         return {"code_revision": code_revision, "student_key": student_key, "data_mode": data_mode}
 
+    async def _student_call(self, method, node, path, *, json, timeout):
+        """Mounts and start take the agent's lock of the student_key without waiting: a held lock is a
+        concurrent request, nothing was changed, and the caller retries (see the module docstring)."""
+        try:
+            return await self._call(method, node, path, json=json, timeout=timeout, mutating=True)
+        except AgentRejected as exc:
+            if exc.code == "STUDENT_DIR_BUSY":
+                raise AgentBusy(exc.status, exc.message, exc.code, exc.command) from exc
+            raise
+
     async def set_mounts(self, node, vmid, *, student_key, code_revision=None, data_mode="rw"):
-        return await self._call("PUT", node, f"/slots/{vmid}/mounts",
-                                json=self.mounts_body(student_key, code_revision, data_mode),
-                                timeout=self.mounts_timeout, mutating=True)
+        return await self._student_call("PUT", node, f"/slots/{vmid}/mounts",
+                                        json=self.mounts_body(student_key, code_revision, data_mode),
+                                        timeout=self.mounts_timeout)
 
     async def start(self, node, vmid, *, student_key, code_revision=None, data_mode="rw", actions=()):
         body = dict(self.mounts_body(student_key, code_revision, data_mode), actions=list(actions))
-        return await self._call("POST", node, f"/slots/{vmid}/start", json=body,
-                                timeout=self.start_timeout, mutating=True)
+        return await self._student_call("POST", node, f"/slots/{vmid}/start", json=body,
+                                        timeout=self.start_timeout)
 
     async def ensure_student(self, node: str, student_key: str) -> dict:
         """Idempotent: creates the student directory or confirms it; never touches contents."""

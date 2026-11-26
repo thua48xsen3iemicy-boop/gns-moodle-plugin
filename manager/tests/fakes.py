@@ -148,6 +148,7 @@ class FakeAgent:
         self.shutdown_fails_but_stops = False  # 409 from pct shutdown although the CT stopped
         self.fences = {}
         self.park_fails = False  # PUT mounts fails with a pct error
+        self.student_locked = {}  # student_key -> how many mounts/start calls meet its lock held (409 STUDENT_DIR_BUSY)
         self.no_snapshot = set()  # Slots without the clean snapshot: reset answers SNAPSHOT_MISSING
         self.reset_fails = False  # pct rollback fails
         self.reset_unsupported = False  # An agent older than 1.2: the route does not exist
@@ -270,6 +271,10 @@ class FakeAgent:
             self.timeline.append(("agent:reset", vmid))
             return httpx.Response(200, json={"vmid": vmid, "state": "stopped", "reset": True,
                                              "snapshot": "lab-clean"})
+        if action in ("mounts", "start") and self.student_locked.get(body["student_key"]):
+            self.student_locked[body["student_key"]] -= 1
+            self.timeline.append(("agent:student_busy", vmid, body["student_key"]))
+            return self._err(409, {"code": "STUDENT_DIR_BUSY", "message": "Student directory has an active operation"})
         if action == "mounts":
             if self.park_fails:
                 return self._err(409, "Proxmox command failed: unable to apply mount points")

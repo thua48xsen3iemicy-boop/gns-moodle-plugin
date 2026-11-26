@@ -19,6 +19,12 @@ from urllib.parse import urlsplit
 from . import config
 from .db import latest_version, migrate
 
+# slot-enable parks the slot with the placeholder; a slot of the same node parked at the same moment
+# holds the agent's placeholder lock for one `pct set` (AgentBusy): try a few times before giving up.
+PARK_ATTEMPTS = 5
+PARK_RETRY_SECONDS = 2.0
+_sleep = asyncio.sleep  # Kept apart from `asyncio`, which the tests of the commands replace
+
 
 def _settings():
     try:
@@ -180,7 +186,7 @@ def cmd_slot_state(args):
     """enable: maintenance/failed -> free, after the operator checked the CT and its lab."""
 
     async def run(services):
-        from .agent_client import AgentError
+        from .agent_client import AgentBusy, AgentError
         from .ownership import command_scope
 
         async with services.store.allocation_guard():
@@ -201,8 +207,17 @@ def cmd_slot_state(args):
                     except AgentError as exc:
                         raise SystemExit(f"CT {args.vmid} was not reset, the slot remains unavailable: {exc}")
                     key = services.settings.placeholder_student_key
-                    await services.agent.set_mounts(node, args.vmid, student_key=key, data_mode="ro",
-                                                   code_revision=services.settings.slot_code_revision)
+                    for attempt in range(PARK_ATTEMPTS):
+                        try:
+                            await services.agent.set_mounts(node, args.vmid, student_key=key, data_mode="ro",
+                                                           code_revision=services.settings.slot_code_revision)
+                            break
+                        except AgentBusy:
+                            # Another slot of the node is being parked: the placeholder lock is brief.
+                            if attempt == PARK_ATTEMPTS - 1:
+                                raise SystemExit("Parking not confirmed: the agent stayed busy; "
+                                                 "slot remains unavailable, try again") from None
+                            await _sleep(PARK_RETRY_SECONDS)
                     config = await services.pve.ct_config(args.vmid)
                     if not services.orchestrator.mounts_ok(config, key, read_only=True):
                         raise SystemExit("Parking not confirmed; slot remains unavailable")

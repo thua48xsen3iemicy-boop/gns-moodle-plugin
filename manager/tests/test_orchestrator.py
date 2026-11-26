@@ -515,6 +515,42 @@ async def test_failed_park_puts_slot_into_maintenance(tmp_path, dsn):
         assert s["status"] == "failed" and s["error"]["code"] == "NO_SLOTS" and s["slot_vmid"] is None
 
 
+async def test_slots_released_together_wait_for_the_placeholder_lock(tmp_path, dsn):
+    # The end of a class: slots of one node are parked at the same moment and meet the agent's lock of the
+    # shared placeholder (409 STUDENT_DIR_BUSY). That is not a broken slot: the park is repeated.
+    async with make_env(tmp_path, dsn, vmids=(201, 202)) as env:
+        first, second = await start(env), await start(env, user_id=7)
+        await env.run()
+        env.agent.student_locked["placeholder"] = 3
+        await stop(env, first)
+        await stop(env, second)
+        await env.run()
+        assert ("agent:student_busy", 201, "placeholder") in env.timeline or \
+            ("agent:student_busy", 202, "placeholder") in env.timeline
+        for sid in (first, second):
+            assert (await session(env, sid))["status"] == "stopped"
+        for vmid in (201, 202):
+            slot = await env.services.store.slot(vmid)
+            assert slot["state"] == "free" and slot["student_key"] is None
+            assert "students/placeholder," in env.pve.cts[vmid]["config"]["mp1"]
+        async with env.services.store.pool.connection() as conn:
+            cur = await conn.execute("SELECT count(*) AS n FROM events WHERE kind = 'park_failed'")
+            assert (await cur.fetchone())["n"] == 0
+
+
+async def test_prepare_and_start_wait_for_a_held_student_lock(tmp_path, dsn):
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        env.pve.cts[201]["config"].pop("mp1", None)  # Not parked: ct_prepare mounts the placeholder first
+        env.agent.student_locked["placeholder"] = 2
+        sid = await start(env)
+        env.agent.student_locked[(await session(env, sid))["student_key"]] = 2
+        await env.run()
+        assert (await session(env, sid))["status"] == "running"
+        busy = [t for t in env.timeline if t[0] == "agent:student_busy"]
+        assert len(busy) == 4
+        assert (await env.services.store.slot(201))["state"] == "busy"
+
+
 async def test_shutdown_error_is_rechecked_before_force(tmp_path, dsn):
     async with make_env(tmp_path, dsn) as env:
         sid = await start(env)
@@ -853,6 +889,25 @@ async def test_slot_enable_resets_the_slot_before_it_is_freed(tmp_path, dsn, mon
         await enable_slot(env, monkeypatch, 201)
         assert (await env.services.store.slot(201))["state"] == "free"
         assert names(env.timeline).index("agent:reset") < names(env.timeline).index("agent:mounts")
+        assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
+
+
+async def test_slot_enable_waits_for_the_placeholder_lock(tmp_path, dsn, monkeypatch):
+    from lab_manager import admin
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(admin, "_sleep", no_sleep)
+    async with make_env(tmp_path, dsn, vmids=(201,)) as env:
+        await env.services.store.set_slot_admin_state(201, "maintenance")
+        env.agent.student_locked["placeholder"] = admin.PARK_ATTEMPTS
+        with pytest.raises(SystemExit, match="stayed busy"):
+            await enable_slot(env, monkeypatch, 201)
+        assert (await env.services.store.slot(201))["state"] == "maintenance"
+        env.agent.student_locked["placeholder"] = admin.PARK_ATTEMPTS - 1
+        await enable_slot(env, monkeypatch, 201)
+        assert (await env.services.store.slot(201))["state"] == "free"
         assert "students/placeholder," in env.pve.cts[201]["config"]["mp1"]
 
 

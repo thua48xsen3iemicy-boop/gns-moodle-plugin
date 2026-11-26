@@ -73,6 +73,23 @@ async def test_error_codes_take_precedence_over_text(code):
     await agent.close()
 
 
+async def test_student_lock_held_on_mounts_and_start_is_busy():
+    # The agent does not wait for its lock of a student_key: on mounts and start a held lock is a
+    # concurrent request (the placeholder is shared by every slot of the node), so the caller retries.
+    body = {"detail": {"code": "STUDENT_DIR_BUSY", "message": "Student directory has an active operation"}}
+    agent = client(lambda r: httpx.Response(409, json=body))
+    with pytest.raises(AgentBusy) as err:
+        await agent.set_mounts("pve1", 2001, student_key="placeholder", data_mode="ro")
+    assert err.value.code == "STUDENT_DIR_BUSY"
+    with pytest.raises(AgentBusy):
+        await agent.start("pve1", 2001, student_key="main-42")
+    # Elsewhere it also means "mounted in a CT": deleting a project stays rejected.
+    with pytest.raises(AgentRejected) as err:
+        await agent.delete_project("pve1", "main-42", "00000000-0000-4000-8000-000000000000")
+    assert not isinstance(err.value, AgentBusy)
+    await agent.close()
+
+
 async def test_validation_error_list_is_rejection():
     body = {"detail": [{"type": "extra_forbidden", "loc": ["body", "x"], "msg": "Extra inputs"}]}
     agent = client(lambda r: httpx.Response(422, json=body))
