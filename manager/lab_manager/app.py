@@ -530,11 +530,17 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if authoring:
             max_duration = min(requested or settings.authoring_max_duration, settings.authoring_max_duration)
         image_map = await site_images(site) if checked else {}
+        if checked:
+            busy = labdef.busy_cpus(checked.definition["nodes"], image_map)
+        elif settings.images is not None:  # A catalog lab: its images are found by file name
+            busy = labdef.ticket_busy_cpus(lab.ticket["nodes"], await services.derived.catalog(site.slug))
+        else:
+            busy = 0
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
             student_key=key, resources=resources, mode=mode, library_lab_id=body.library_lab_id,
-            lab_def=lab_def, definition=checked.definition if checked else None,
+            lab_def=lab_def, definition=checked.definition if checked else None, busy_cpus=busy,
             ticket_factory=lambda pid, name: (
                 labdef.deploy_ticket(checked.definition, image_map, project_id=pid, project_name=name)
                 if checked else deploy_ticket(lab, project_id=pid, project_name=name)),

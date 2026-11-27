@@ -1,11 +1,12 @@
 from datetime import timedelta
 
 import pytest
-from conftest import make_env
+from conftest import ROOT, make_env
 from fakes import GIB
 
 from lab_manager.admin import quarantine_report
 from lab_manager.agent_client import start_budget_warnings
+from lab_manager.images import load_images
 from lab_manager.orchestrator import QUARANTINE_MESSAGE, Orchestrator
 
 
@@ -212,6 +213,74 @@ async def test_node_cpu_overcommit_limits_vcpus(tmp_path, dsn):
         env.pve.cts[900]["status"] = "stopped"  # Its cores are free again: the queued lab fits pve2
         await env.run(1)
         assert (await session(env, got[2]["id"]))["slot_vmid"] == 204
+
+
+async def test_placement_gives_a_bigger_node_more_labs(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve1", 204: "pve2", 205: "pve2"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes) as env:
+        env.pve.node_mem["pve1"].update(maxcpu=48, maxmem=256 * GIB)
+        env.pve.node_mem["pve2"].update(maxcpu=16, maxmem=256 * GIB)
+        got = []
+        for user in range(1, 5):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append((await session(env, sid))["slot_vmid"])
+        # 8-core labs: pve1 at 8/48 and 16/48 is less loaded than pve2 at 8/16; at 24/48 = 8/16 the node
+        # with fewer labs wins; then pve2 would be at 16/16 and pve1 at 32/48.
+        assert got == [201, 202, 204, 203]
+
+
+def busy_iol_images():
+    images = load_images(ROOT / "examples" / "images.json")
+    images["cisco-iou-l2"] = images["cisco-iou-l2"].model_copy(update={"busy_cpus": 1})
+    return images
+
+
+async def test_busy_cpus_are_never_overcommitted(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve1"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes, node_memory_reserve_mb=0,
+                        node_cpu_overcommit=4, node_host_cpus=4, images=busy_iol_images()) as env:
+        env.pve.node_mem["pve1"].update(maxmem=256 * GIB)
+        got = []
+        for user in (1, 2, 3):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append(await session(env, sid))
+        # cisco-3x2: 8 vCPUs, three busy IOL. Capacity 16 - 4 = 12 CPUs; a lab loads 3 + 5 / 4 = 4.25 of them.
+        assert got[0]["resources"] == {"cores": 8, "memory_mb": 16384, "busy_cpus": 3}
+        assert [s["slot_vmid"] for s in got[:2]] == [201, 202]  # 8.5 <= 12
+        assert got[2]["status"] == "queued"  # 12.75 > 12, though 24 vCPUs are well within 12 x 4
+        ws = await env.services.store.workspace(got[0]["workspace_id"])
+        assert ws["resource_snapshot"] == {"cores": 8, "memory_mb": 16384}  # Counted again on every start
+
+
+async def test_light_labs_keep_the_cpu_overcommit(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve1"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes, node_memory_reserve_mb=0,
+                        node_cpu_overcommit=4, node_host_cpus=4,
+                        images=load_images(ROOT / "examples" / "images.json")) as env:
+        env.pve.node_mem["pve1"].update(maxmem=256 * GIB)
+        got = []
+        for user in (1, 2, 3):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append(await session(env, sid))
+        assert "busy_cpus" not in got[0]["resources"]
+        assert [s["slot_vmid"] for s in got] == [201, 202, 203]  # 3 x 8 / 4 = 6 <= 12
+
+
+async def test_node_host_cpus_are_kept_from_labs(tmp_path, dsn):
+    nodes = {201: "pve1", 202: "pve1", 203: "pve2"}
+    async with make_env(tmp_path, dsn, vmids=tuple(nodes), nodes_of=nodes, node_cpu_overcommit=1,
+                        node_host_cpus=4) as env:
+        got = []
+        for user in (1, 2, 3):
+            sid = await start(env, user_id=user)
+            await env.run(1)
+            got.append(await session(env, sid))
+        # 16 - 4 = 12 CPUs per node: one 8-core lab each, the third waits.
+        assert [s["slot_vmid"] for s in got[:2]] == [201, 203]
+        assert got[2]["status"] == "queued"
 
 
 async def test_offline_node_is_skipped(tmp_path, dsn):
