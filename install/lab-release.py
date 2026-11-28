@@ -641,6 +641,7 @@ SOURCE_FILES = (
     'manager/tests/test_facts.py',
     'manager/tests/test_forecast.py',
     'manager/tests/test_ifnames.py',
+    'manager/tests/test_extra_consoles.py',
     'manager/tests/test_extra_disks.py',
     'manager/tests/test_ios_config.py',
     'manager/tests/test_iso.py',
