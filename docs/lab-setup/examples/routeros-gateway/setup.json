@@ -1,0 +1,44 @@
+{
+  "setup": [
+    {
+      "id": "r1-ports",
+      "title": "R1: адреса шлюза LAN1 и LAN2 на портах по MAC",
+      "node": "R1",
+      "shell": "routeros",
+      "timeout": 120,
+      "run": "# R1 is the gateway of LAN1 and LAN2, but the lab constructor configures only IOL gateways (gateway_not_configured):\n# this step sets the addresses. R1 has no built-in setup, so this is its first command: wait for the ports.\n:local t 0\n:while ([:len [/interface ethernet find]] < 2 && $t < 90) do={:delay 1s; :set t ($t + 1)}\n# Adapter N is the N-th ethernet port by ascending MAC (as the manager does it), not etherN.\n:local macs ({})\n:foreach i in=[/interface ethernet find] do={:set ($macs->[/interface ethernet get $i mac-address]) $i}\n:local ids ({})\n:foreach m,i in=$macs do={:set ids ($ids, $i)}\n:if ([:len $ids] < 2) do={:log error \"gns3lab-setup r1-ports: 2 ethernet ports expected\"; :error \"ports\"}\n:local lan1 [/interface ethernet get [:pick $ids 0] name]\n:local lan2 [/interface ethernet get [:pick $ids 1] name]\n/interface ethernet set [find name=$lan1] comment=\"LAN1 (PC1)\"\n/interface ethernet set [find name=$lan2] comment=\"LAN2 (SRV1)\"\n# The default configuration of CHR asks DHCP on ether1.\n/ip dhcp-client remove [find interface=$lan1]\n/ip dhcp-client remove [find interface=$lan2]\n# Repeatable: what this step or someone else set before goes first.\n/ip address remove [find comment=\"gns3lab-setup\"]\n/ip address remove [find address=\"192.168.10.1/24\"]\n/ip address remove [find address=\"192.168.20.1/24\"]\n/ip address add address=192.168.10.1/24 interface=$lan1 comment=\"gns3lab-setup\"\n/ip address add address=192.168.20.1/24 interface=$lan2 comment=\"gns3lab-setup\""
+    },
+    {
+      "id": "r1-base",
+      "title": "R1: имя, loopback lo0, DNS srv1.lab, пользователь auditor",
+      "node": "R1",
+      "shell": "routeros",
+      "timeout": 30,
+      "run": "/system identity set name=\"R1-SETUP\"\n:if ([:len [/interface bridge find name=\"lo0\"]] = 0) do={/interface bridge add name=\"lo0\" protocol-mode=none comment=\"gns3lab-setup\"}\n/ip address remove [find address=\"10.255.255.1/32\"]\n/ip address add address=10.255.255.1/32 interface=\"lo0\" comment=\"gns3lab-setup-lo\"\n/ip dns static remove [find name=\"srv1.lab\"]\n/ip dns static add name=\"srv1.lab\" address=192.168.20.10 comment=\"gns3lab-setup\"\n:if ([:len [/user find name=\"auditor\"]] = 0) do={/user add name=\"auditor\" group=read password=\"Audit-2026\" comment=\"gns3lab-setup\"} else={/user set [find name=\"auditor\"] group=read}"
+    },
+    {
+      "id": "r1-sec",
+      "title": "R1: выключить telnet/ftp/www/api, фильтр input",
+      "node": "R1",
+      "shell": "routeros",
+      "timeout": 30,
+      "run": "/ip service set [find name=\"telnet\"] disabled=yes\n/ip service set [find name=\"ftp\"] disabled=yes\n/ip service set [find name=\"www\"] disabled=yes\n/ip service set [find name=\"api\"] disabled=yes\n/ip firewall filter remove [find where comment~\"^gns3lab-setup\"]\n/ip firewall filter add chain=input connection-state=established,related action=accept comment=\"gns3lab-setup: established\"\n/ip firewall filter add chain=input protocol=icmp action=accept comment=\"gns3lab-setup: icmp\"\n/ip firewall filter add chain=input protocol=tcp dst-port=22 src-address=192.168.20.0/24 action=accept comment=\"gns3lab-setup: ssh from LAN2\"\n/ip firewall filter add chain=input protocol=tcp dst-port=22 action=drop comment=\"gns3lab-setup: ssh from elsewhere\""
+    },
+    {
+      "id": "pc1-hosts",
+      "title": "PC1: имена srv1.lab и r1.lab в /etc/hosts",
+      "node": "PC1",
+      "shell": "sh",
+      "timeout": 30,
+      "run": "set -e\n# cloud-init may rebuild /etc/hosts from its template at boot: the names go to both.\nfor f in /etc/hosts /etc/cloud/templates/hosts.debian.tmpl; do\n  [ -f \"$f\" ] || continue\n  grep -q '[[:space:]]srv1\\.lab$' \"$f\" || printf '192.168.20.10\\tsrv1.lab\\n' >> \"$f\"\n  grep -q '[[:space:]]r1\\.lab$' \"$f\" || printf '10.255.255.1\\tr1.lab\\n' >> \"$f\"\ndone"
+    },
+    {
+      "id": "srv1-base",
+      "title": "SRV1: пользователь netops и файл /srv/lab/README",
+      "node": "SRV1",
+      "shell": "sh",
+      "timeout": 30,
+      "run": "set -e\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nid -u netops >/dev/null 2>&1 || useradd -m -s /bin/bash netops\necho 'netops:Netops-2026' | chpasswd\nmkdir -p /srv/lab\nprintf '%s\\n' 'gns3lab setup ok: SRV1' > /srv/lab/README"
+    }
+  ]
+}

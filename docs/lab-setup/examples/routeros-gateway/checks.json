@@ -1,0 +1,224 @@
+{
+  "format": "gns3lab.checks/1",
+  "scripts": [
+    {
+      "id": "r1-identity",
+      "title": "Имя R1 — R1-SETUP",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":put [/system identity get name]",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^R1-SETUP$"
+      },
+      "group": "host",
+      "class": "minor"
+    },
+    {
+      "id": "r1-gw-lan1",
+      "title": "На R1 есть адрес шлюза LAN1 192.168.10.1/24, порт поднят",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":local a [/ip address find address=\"192.168.10.1/24\" disabled=no]\n:if ([:len $a] != 1) do={:put (\"lan1 count=\" . [:len $a])} else={\n  :local i [/ip address get [:pick $a 0] interface]\n  :put (\"lan1 \" . $i . \" running=\" . [/interface get [find name=$i] running])\n}",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^lan1 \\S+ running=true$"
+      },
+      "group": "addressing",
+      "class": "major"
+    },
+    {
+      "id": "r1-gw-lan2",
+      "title": "На R1 есть адрес шлюза LAN2 192.168.20.1/24, порт поднят",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":local a [/ip address find address=\"192.168.20.1/24\" disabled=no]\n:if ([:len $a] != 1) do={:put (\"lan2 count=\" . [:len $a])} else={\n  :local i [/ip address get [:pick $a 0] interface]\n  :put (\"lan2 \" . $i . \" running=\" . [/interface get [find name=$i] running])\n}",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^lan2 \\S+ running=true$"
+      },
+      "group": "addressing",
+      "class": "major"
+    },
+    {
+      "id": "r1-loopback",
+      "title": "На R1 есть loopback lo0 с адресом 10.255.255.1/32",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":put (\"lo0 \" . [:len [/ip address find address=\"10.255.255.1/32\" interface=\"lo0\" disabled=no]])",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^lo0 1$"
+      },
+      "group": "addressing",
+      "class": "major"
+    },
+    {
+      "id": "r1-dns",
+      "title": "На R1 имя srv1.lab указывает на 192.168.20.10",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":local e [/ip dns static find name=\"srv1.lab\" disabled=no]\n:if ([:len $e] = 0) do={:put \"srv1.lab missing\"} else={:put (\"srv1.lab \" . [/ip dns static get [:pick $e 0] address])}",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^srv1\\.lab 192\\.168\\.20\\.10$"
+      },
+      "group": "host",
+      "class": "major"
+    },
+    {
+      "id": "r1-user",
+      "title": "На R1 есть пользователь auditor с правами read",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":local u [/user find name=\"auditor\"]\n:if ([:len $u] = 0) do={:put \"auditor missing\"} else={:put (\"auditor \" . [/user get [:pick $u 0] group])}",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^auditor read$"
+      },
+      "group": "host",
+      "class": "major"
+    },
+    {
+      "id": "r1-services",
+      "title": "На R1 выключены telnet, ftp, www и api",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":foreach s in={\"telnet\";\"ftp\";\"www\";\"api\"} do={\n  :foreach i in=[/ip service find name=$s] do={:put ($s . \" disabled=\" . [/ip service get $i disabled])}\n}",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "contains": [
+          "telnet disabled=true",
+          "ftp disabled=true",
+          "www disabled=true",
+          "api disabled=true"
+        ],
+        "not_contains": [
+          "disabled=false"
+        ]
+      },
+      "group": "host",
+      "class": "major"
+    },
+    {
+      "id": "r1-fw",
+      "title": "На R1 фильтр input: 4 правила преднастроя, SSH не из LAN2 запрещён",
+      "node": "R1",
+      "shell": "routeros",
+      "run": ":local n [:len [/ip firewall filter find where comment~\"^gns3lab-setup\"]]\n:local d [:len [/ip firewall filter find comment=\"gns3lab-setup: ssh from elsewhere\" action=drop disabled=no]]\n:put (\"rules=\" . $n . \" drop=\" . $d)",
+      "timeout": 6,
+      "expect": {
+        "exit": 0,
+        "match": "^rules=4 drop=1$"
+      },
+      "group": "host",
+      "class": "major"
+    },
+    {
+      "id": "srv1-gw",
+      "title": "SRV1 достаёт до своего шлюза R1 (192.168.20.1)",
+      "node": "SRV1",
+      "shell": "sh",
+      "run": "ping -c 2 -W 2 -q 192.168.20.1",
+      "timeout": 8,
+      "group": "gateways",
+      "class": "critical",
+      "needs": [
+        "r1-gw-lan2"
+      ]
+    },
+    {
+      "id": "pc1-gw",
+      "title": "PC1 достаёт до своего шлюза R1 (192.168.10.1)",
+      "node": "PC1",
+      "shell": "sh",
+      "run": "ping -c 2 -W 2 -q 192.168.10.1",
+      "timeout": 8,
+      "group": "gateways",
+      "class": "critical",
+      "needs": [
+        "r1-gw-lan1"
+      ]
+    },
+    {
+      "id": "pc1-srv1",
+      "title": "PC1 достаёт до SRV1 через R1",
+      "node": "PC1",
+      "shell": "sh",
+      "run": "ping -c 2 -W 2 -q 192.168.20.10",
+      "timeout": 8,
+      "group": "routing",
+      "class": "major",
+      "needs": [
+        "pc1-gw",
+        "srv1-gw"
+      ]
+    },
+    {
+      "id": "pc1-hosts",
+      "title": "На PC1 имена srv1.lab и r1.lab разрешаются в нужные адреса",
+      "node": "PC1",
+      "shell": "sh",
+      "run": "getent hosts srv1.lab; getent hosts r1.lab",
+      "timeout": 5,
+      "expect": {
+        "match": "(?m)^192\\.168\\.20\\.10\\s+srv1\\.lab$",
+        "contains": [
+          "10.255.255.1"
+        ]
+      },
+      "group": "host",
+      "class": "major"
+    },
+    {
+      "id": "pc1-r1-lo",
+      "title": "PC1 достаёт до loopback R1 по имени r1.lab",
+      "node": "PC1",
+      "shell": "sh",
+      "run": "ping -c 2 -W 2 -q r1.lab",
+      "timeout": 8,
+      "group": "routing",
+      "class": "major",
+      "needs": [
+        "pc1-gw",
+        "pc1-hosts",
+        "r1-loopback"
+      ]
+    },
+    {
+      "id": "srv1-user",
+      "title": "На SRV1 есть пользователь netops с паролем и оболочкой bash",
+      "node": "SRV1",
+      "shell": "sh",
+      "run": "printf '%s %s\\n' \"$(getent passwd netops | cut -d: -f7)\" \"$(passwd -S netops | cut -d' ' -f2)\"",
+      "timeout": 5,
+      "expect": {
+        "match": "^/bin/bash P$"
+      },
+      "group": "host",
+      "class": "major"
+    },
+    {
+      "id": "srv1-file",
+      "title": "На SRV1 есть файл /srv/lab/README от преднастроя",
+      "node": "SRV1",
+      "shell": "sh",
+      "run": "cat /srv/lab/README",
+      "timeout": 5,
+      "expect": {
+        "contains": [
+          "gns3lab setup ok: SRV1"
+        ]
+      },
+      "group": "host",
+      "class": "minor"
+    }
+  ]
+}

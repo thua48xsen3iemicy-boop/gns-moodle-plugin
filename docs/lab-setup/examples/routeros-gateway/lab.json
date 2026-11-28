@@ -1,0 +1,21 @@
+{
+  "format": "gns3lab.lab/2",
+  "title": "RouterOS gateway: setup and checks demo",
+  "nodes": [
+    {"name": "R1", "image": "mikrotik-chr7", "x": 0, "y": 0, "adapters": 2},
+    {"name": "PC1", "image": "debian12", "x": -250, "y": 0},
+    {"name": "SRV1", "image": "debian12", "x": 250, "y": 0}
+  ],
+  "links": [
+    {"a": {"node": "R1", "adapter": 0, "port": 0}, "b": {"node": "PC1", "adapter": 0, "port": 0}},
+    {"a": {"node": "R1", "adapter": 1, "port": 0}, "b": {"node": "SRV1", "adapter": 0, "port": 0}}
+  ],
+  "segments": [
+    {"name": "LAN1", "subnet": {"fixed": "192.168.10.0/24"},
+     "gateway": {"node": "R1", "adapter": 0, "port": 0, "host": 1},
+     "members": [{"node": "PC1", "adapter": 0, "port": 0, "host": 10}]},
+    {"name": "LAN2", "subnet": {"fixed": "192.168.20.0/24"},
+     "gateway": {"node": "R1", "adapter": 1, "port": 0, "host": 1},
+     "members": [{"node": "SRV1", "adapter": 0, "port": 0, "host": 10}]}
+  ]
+}
