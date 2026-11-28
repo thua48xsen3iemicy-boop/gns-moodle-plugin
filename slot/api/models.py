@@ -82,6 +82,9 @@ class NodeSpec(BaseModel):
     firmware: Literal["uefi"] | None = None
     # QEMU only: the network adapter model of the node, from the image catalog (GNS3's "adapter_type"). Absent: "e1000".
     adapter_type: AdapterType | None = None
+    # QEMU only, telnet console and a guest agent: additional serial console lines ttyS1..ttyS<n> of the node, each with its
+    # own login (CONTRACTS.md 4.2, 6.4, api/lines.py).
+    extra_consoles: int | None = Field(default=None, ge=1, le=3, strict=True)
 
     @model_serializer(mode="wrap")
     def omit_default_console(self, handler) -> dict[str, Any]:
@@ -111,6 +114,8 @@ class NodeSpec(BaseModel):
                 data.pop("firmware", None)
             if data.get("adapter_type") is None:
                 data.pop("adapter_type", None)
+            if data.get("extra_consoles") is None:
+                data.pop("extra_consoles", None)
         return data
 
     @model_validator(mode="after")
@@ -156,6 +161,13 @@ class NodeSpec(BaseModel):
             raise ValueError("adapter_type is only supported for qemu nodes")
         if self.disks and self.kind != "qemu":
             raise ValueError("disks are only supported for qemu nodes")
+        if self.extra_consoles is not None:
+            if self.kind != "qemu":
+                raise ValueError("extra_consoles is only supported for qemu nodes")
+            if self.console != "telnet":
+                raise ValueError("extra_consoles needs the telnet console")
+            if not self.qga:
+                raise ValueError("extra_consoles needs the guest agent")
         if self.nvram_config is not None:
             if self.kind != "iou":
                 raise ValueError("nvram_config is only supported for iou nodes")

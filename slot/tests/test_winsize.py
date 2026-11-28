@@ -256,7 +256,7 @@ def test_lab_slot_2_takes_binary_input_and_control_text(mock_server, monkeypatch
     monkeypatch.setenv("SLOT_CONSOLE_TOKEN", "console-token")
     applied = []
 
-    async def apply(lifecycle, pid, node_id, cols, rows, redraw=False):
+    async def apply(lifecycle, pid, node_id, cols, rows, redraw=False, serial=winsize.SERIAL):
         applied.append((pid, node_id, cols, rows, redraw))
         return True
 
