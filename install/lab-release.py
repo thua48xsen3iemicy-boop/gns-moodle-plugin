@@ -661,6 +661,7 @@ SOURCE_FILES = (
     'manager/tests/test_proxmox.py',
     'manager/tests/test_purge.py',
     'manager/tests/test_segments.py',
+    'manager/tests/test_setup_example.py',
     'manager/tests/test_setup_prompt.py',
     'manager/tests/test_slot_tls.py',
     'manager/tests/test_storage.py',
