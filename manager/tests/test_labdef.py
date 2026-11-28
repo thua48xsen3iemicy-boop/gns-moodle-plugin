@@ -7,7 +7,7 @@ import pytest
 
 from lab_manager.config import SiteLimits
 from lab_manager.images import ImageError, load_images
-from lab_manager.labdef import LabInvalid, check, deploy_ticket, reference_topology
+from lab_manager.labdef import LabInvalid, busy_cpus, check, deploy_ticket, reference_topology, ticket_busy_cpus
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGES = load_images(ROOT / "examples" / "images.json")
@@ -142,6 +142,15 @@ def test_size_and_type():
     {"id": "r", "title": "x", "kind": "iou", "file": "x.bin", "ram_mb": {"default": 512, "min": 512, "max": 1024},
      "adapters": {"default": 1, "min": 1, "max": 4}, "slot": {"cli_prompt": ".*"}},
     {"id": "r", "title": "x", "kind": "vpcs", "secret_field": 1},
+    {"id": "r", "title": "x", "kind": "vpcs", "busy_cpus": 1},
+    {"id": "r", "title": "x", "kind": "iou", "file": "x.bin", "ram_mb": {"default": 512, "min": 512, "max": 1024},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "busy_cpus": 2},
+    {"id": "r", "title": "x", "kind": "qemu", "file": "x.qcow2", "ram_mb": {"default": 512, "min": 512, "max": 1024},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "busy_cpus": 2},
+    {"id": "r", "title": "x", "kind": "qemu", "file": "x.qcow2", "ram_mb": {"default": 512, "min": 512, "max": 1024},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "cpus": {"default": 1, "min": 1, "max": 2}, "busy_cpus": 3},
+    {"id": "r", "title": "x", "kind": "qemu", "file": "x.qcow2", "ram_mb": {"default": 512, "min": 512, "max": 1024},
+     "adapters": {"default": 1, "min": 1, "max": 4}, "busy_cpus": True},
 ])
 def test_bad_image_catalog_is_refused(tmp_path, image):
     path = tmp_path / "images.json"
@@ -175,3 +184,26 @@ def test_routeros_nodes_carry_their_guest_to_the_reference_and_the_live_topology
     live = {n["name"]: n for n in session_topology("lab", raw, ref)["topology"]["nodes"]}
     assert live["R1"]["guest"] == "routeros" and live["R1"]["symbol"] == ":/symbols/router.svg"
     assert "guest" not in live["PC1"]
+
+
+def busy_images(**busy):
+    return {k: v.model_copy(update={"busy_cpus": busy[k]}) if k in busy else v for k, v in IMAGES.items()}
+
+
+def test_busy_cpus_of_a_definition():
+    assert busy_cpus(LAB["nodes"], IMAGES) == 0  # Nothing marked: the default
+    images = busy_images(**{"cisco-iou-l2": 1, "debian12": 2})
+    assert busy_cpus(LAB["nodes"], images) == 2 + 2  # Two IOL, PC1 with 2 vCPUs
+    one_cpu = changed(nodes__2__cpus=1)
+    assert busy_cpus(one_cpu["nodes"], images) == 2 + 1  # Never more than the node's own vCPUs
+    # A busy IOL takes a core of its own in the CT instead of half of one: 2 (PC1) + 2 (IOL) + 1 (VPCS).
+    assert check(LAB, images, ALL).resources == {"cores": 5, "memory_mb": 4608}
+    assert check(LAB, IMAGES, ALL).resources["cores"] == 4  # Unmarked images keep the CT as it was
+    assert "busy_cpus" not in images["cisco-iou-l2"].public()  # The plugin never gets it
+
+
+def test_busy_cpus_of_a_catalog_ticket():
+    ticket = json.loads((ROOT / "examples" / "labs" / "cisco-3x2" / "ticket.json").read_text())
+    assert ticket_busy_cpus(ticket["nodes"], IMAGES) == 0
+    assert ticket_busy_cpus(ticket["nodes"], busy_images(**{"cisco-iou-l2": 1})) == 3  # Found by file name
+    assert ticket_busy_cpus(ticket["nodes"], busy_images(**{"cisco-iou-l2": 1, "debian12": 2})) == 3 + 6

@@ -509,6 +509,7 @@ GATEWAY_PUBLIC_URL=wss://$PUBLIC_NAME
 EOF
     [[ -z ${NODE_GUEST_MEMORY_MB:-} ]] || echo "NODE_GUEST_MEMORY_MB=$NODE_GUEST_MEMORY_MB"
     [[ -z ${NODE_CPU_OVERCOMMIT:-} ]] || echo "NODE_CPU_OVERCOMMIT=$NODE_CPU_OVERCOMMIT"
+    [[ -z ${NODE_HOST_CPUS:-} ]] || echo "NODE_HOST_CPUS=$NODE_HOST_CPUS"
     [[ ! -s $S/manager/images.json ]] || echo "IMAGES_FILE=/etc/lab-manager/images.json"
     [[ ! -s $S/manager/manager.env.local ]] || cat "$S/manager/manager.env.local"
   } >"$f.tmp"

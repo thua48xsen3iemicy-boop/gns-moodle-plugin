@@ -56,7 +56,7 @@ ISO из каталога гостя (CONTRACTS §2.12 менеджера 0.30):
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'  # следующий прогон: incomplete
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'      # следующий прогон: failed
     curl -X POST localhost:8090/mock/checks/next -d '{"scripts": true}'          # прогоны со скриптами преподавателя
-- info: feature "activity-checks" (CONTRACTS §2.9 «Описание из активности», менеджер 0.39.0): поле "checks" в
+- info: feature "activity-checks" (CONTRACTS §2.9 «Описание из активности», менеджер 0.40.0): поле "checks" в
   POST /api/v1/sessions — описание активности вместо описания лабы; неподходящее (скрипт на узле, которого нет в лабе)
   лабу не останавливает: checks_error и нет "checks" в features. У сессии checks_def, checks_source, checks_error;
   POST /api/v1/checks/validate {"lab" | "lab_ref", "checks"} → {"checks_def", "warnings"} или 422 checks_invalid;
@@ -83,7 +83,7 @@ interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашени�
 - GET /mock/vnc/<node_id> — что дошло до экрана: счётчики и последние события (проверка без глаз).
 Образ debian12-desktop каталога — с console_type "vnc"; в эталонной лабе ospf-multi-area это нода PVE1.
 
-Преднастрой преподавателя (CONTRACTS §2.6 `setup`, менеджер 0.40.0, docs/lab-setup/README.md):
+Преднастрой преподавателя (CONTRACTS §2.6 `setup`, менеджер 0.41.0, docs/lab-setup/README.md):
 - info: features "lab_constructor" и "lab-setup", lab_formats ["gns3lab.lab/1", "gns3lab.lab/2"]; lab/2 принимает
   "segments" (мок их не проверяет и не настраивает) и "setup";
 - шаги проверяются коротко: поля, id (bad_name, duplicate_name), нода есть (unknown_node), шаг по виду ноды — "run" у QEMU,

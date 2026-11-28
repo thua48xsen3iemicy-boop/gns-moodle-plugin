@@ -93,22 +93,56 @@ def effective(node: dict, image) -> dict:
     }
 
 
+def node_busy_cpus(image, cpus: int) -> int:
+    """CPUs a node keeps busy all the time (images.busy_cpus), never more than its own vCPUs."""
+    return min(image.busy_cpus, cpus) if image.kind == "qemu" else image.busy_cpus if image.kind == "iou" else 0
+
+
 def resources_of(nodes, images, overhead_mb: int) -> dict:
     """CT size for a lab: node memory plus 10 % and a fixed overhead for GNS3 and the guest
-    (rounded up to 256 MiB); cores: QEMU vCPUs, one per two IOL, one per eight VPCS, at least 2."""
-    memory = cores_qemu = iou = vpcs = 0
+    (rounded up to 256 MiB); cores: QEMU vCPUs, one per two IOL (one per busy IOL, images.busy_cpus),
+    one per eight VPCS, at least 2."""
+    memory = cores_qemu = iou = busy_iou = vpcs = 0
     for node in nodes:
         image = images[node["image"]]
         values = effective(node, image)
         memory += values["ram_mb"]
         if image.kind == "qemu":
             cores_qemu += values["cpus"]
+        elif image.kind == "iou" and image.busy_cpus:
+            busy_iou += 1  # It spins on a CPU of its own: two of them in one core would slow both down
         elif image.kind == "iou":
             iou += 1
         else:
             vpcs += 1
     memory_mb = math.ceil((memory * 1.1 + overhead_mb) / 256) * 256
-    return {"cores": max(2, cores_qemu + math.ceil(iou / 2) + math.ceil(vpcs / 8)), "memory_mb": memory_mb}
+    cores = cores_qemu + busy_iou + math.ceil(iou / 2) + math.ceil(vpcs / 8)
+    return {"cores": max(2, cores), "memory_mb": memory_mb}
+
+
+def busy_cpus(nodes, images) -> int:
+    """CPUs that the nodes of a stored definition keep busy all the time (placement)."""
+    total = 0
+    for node in nodes:
+        image = images.get(node["image"])
+        if image is not None:
+            total += node_busy_cpus(image, effective(node, image)["cpus"])
+    return total
+
+
+def ticket_busy_cpus(nodes, images) -> int:
+    """The same for the nodes of a catalog lab's ticket.json: images are found by kind and file name."""
+    by_file = {}
+    for image in images.values():
+        if image.file:
+            key = (image.kind, image.file)
+            by_file[key] = max(by_file.get(key, 0), image.busy_cpus)
+    total = 0
+    for node in nodes:
+        busy = by_file.get((node.get("kind"), node.get("image")), 0)
+        cpus = node.get("cpus") or 1
+        total += min(busy, cpus) if node.get("kind") == "qemu" else busy
+    return total
 
 
 def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:

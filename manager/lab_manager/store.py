@@ -140,8 +140,12 @@ class Store:
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
                              student_key, resources, lab_def=None, definition=None, ticket_factory=None, mode=None, library_lab_id=None,
-                             checks=None, checks_def=None, checks_error=None):
+                             busy_cpus=0, checks=None, checks_def=None, checks_error=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
+
+        busy_cpus: CPUs the lab's nodes keep busy all the time (images.busy_cpus), counted from the current image
+        catalog on every start. It goes into the session's resources for placement, capped by the CT's cores,
+        never into the workspace's resource snapshot.
 
         The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
         Every session of a workspace runs its one GNS3 project (same project_id, on any slot).
@@ -198,6 +202,9 @@ class Store:
                                         Jsonb(ticket) if ticket else None, ws["id"]))
                     sid = new_session_id()
                     project_id, name = ws["project_id"], ws["project_name"]
+                    session_resources = dict(snapshot) if snapshot else None
+                    if busy_cpus and session_resources:
+                        session_resources["busy_cpus"] = min(busy_cpus, int(session_resources.get("cores") or 0))
                     await conn.execute(
                         "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref, lab_def,"
                         " workspace_id, student_key, project_id, project_name, resources,"
@@ -206,7 +213,7 @@ class Store:
                         " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s, %s, %s,"
                         " %s, %s, %s)",
                         (sid, site, user_id, instance_id, course_id, lab_ref, lab_def, ws["id"], student_key,
-                         project_id, name, Jsonb(snapshot) if snapshot else None,
+                         project_id, name, Jsonb(session_resources) if session_resources else None,
                          "Ожидание свободного слота…", max_duration, mode, library_lab_id,
                          Jsonb(checks) if checks is not None else None, checks_def,
                          Jsonb(checks_error) if checks_error is not None else None),

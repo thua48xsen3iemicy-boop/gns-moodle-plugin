@@ -216,7 +216,7 @@ Privacy API: таблица объявлена, экспортируется и 
 
 Решение владельца 2026-11-28: описание проверок `gns3lab.checks/1` — настройка элемента курса, а не лабы; преднастрой остаётся
 в лабе. Проект — `../../docs/activity-checks/README.md`, контракт — `manager/docs/CONTRACTS.md` §2.9 «Описание из активности»
-(менеджер 0.39.0, `activity-checks` в `info.features`). Без этой возможности у менеджера всё работает как в 0.49.0.
+(менеджер 0.40.0, `activity-checks` в `info.features`). Без этой возможности у менеджера всё работает как в 0.49.0.
 
 - **Данные.** `gns3lab.checksdef` — документ активности (JSON, до 64 КБ; `null` — проверки лабы), `gns3lab.checksdefhash` —
   `checks_def` менеджера для него на момент сохранения. `gns3lab_check_runs.checksdef` — `checks_def` прогона,
@@ -259,7 +259,7 @@ Privacy API: таблица объявлена, экспортируется и 
   {"status": 422}` — следующий `PUT` откажет. **ui-harness**: `checksform.<язык>.html`, `checksform.<язык>.own.html`,
   `editor.<язык>.activitychecks.html`; проверка — `check_checksform.js`.
 
-На стенде (владелец), вместе с менеджером 0.39.0:
+На стенде (владелец), вместе с менеджером 0.40.0:
 1. `admin/cli/upgrade.php` (0.50.0, БД: поля `checksdef`, `checksdefhash` и `checksdef`, `trial` прогонов), `grunt amd`
    (`amd/build` собран ui-harness), сброс кешей. PHPUnit: `tests/external/activity_checks_test.php`, `tests/local/checks_test.php`,
    `tests/external/checks_test.php`.

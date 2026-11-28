@@ -1,8 +1,8 @@
 """Session state machine: placement, CT preparation, start via the node agent, deploy, stop.
 
 Slots are interchangeable executors. A session gets any free slot whose Proxmox node has
-room for the lab (memory and CPU limits of the node; labs spread over the nodes, the least
-busy node first); the next session of the same student may run on another slot and another node.
+room for the lab (memory and CPU limits of the node; labs spread over the nodes, the least loaded
+node for its size first); the next session of the same student may run on another slot and another node.
 
 Every stage is re-entrant: it first reads the real state (node agent, Proxmox config, Lab
 Slot) and only then acts, so after a manager restart the loop continues from the stage
@@ -670,9 +670,13 @@ class Orchestrator:
     def _need_cores(resources):
         return int((resources or {}).get("cores") or 0)
 
+    @staticmethod
+    def _need_busy(resources, cores):
+        return min(int((resources or {}).get("busy_cpus") or 0), cores)
+
     # ------------------------------------------------------------------ placement
     async def placement(self, s) -> list[tuple[int, str]]:
-        """Free slots that fit the lab, spread over the nodes: the node with the fewest labs first.
+        """Free slots that fit the lab, the least loaded node (by its share of its own capacity) first.
 
         A node takes the lab only if all of its limits hold (from one /cluster/resources call):
           * live memory: maxmem - mem - NODE_MEMORY_RESERVE_MB, minus the memory promised to the
@@ -682,10 +686,16 @@ class Orchestrator:
             slots: whoever takes one stops and resizes it first) plus the labs promised to
             handed-out slots. On a hyperconverged node the rest belongs to the host and Ceph,
             whatever the guests do;
-          * NODE_CPU_OVERCOMMIT: vCPUs of the same guests and labs <= node CPUs x the ratio.
-        Order: fewest handed-out slots on the node, then least promised memory, then VMID. With a
-        VMID block per node, lab 1 goes to the first slot of node 1, lab 2 to the first slot of
-        node 2, and so on round the nodes; a lab that does not fit its turn goes to the next node.
+          * CPU. The node's capacity for guests is its CPUs minus NODE_HOST_CPUS (the host and Ceph).
+            Busy CPUs of the labs (images.busy_cpus: Cisco and other images that spin on their CPU all
+            the time) are real CPUs and are never overcommitted: their sum stays within the capacity.
+            Every other vCPU of the same guests and labs counts as 1/NODE_CPU_OVERCOMMIT of a CPU, and
+            busy + other / ratio stays within the capacity too (without a ratio other vCPUs are not limited).
+        Order: the smallest share the node would have with the lab, max(CPU load / CPU capacity, guest
+        memory / memory budget), so a node with three times the CPUs takes about three times the labs;
+        then fewest handed-out slots, least promised memory, VMID. Equal nodes take labs in turn: with a
+        VMID block per node, lab 1 goes to the first slot of node 1, lab 2 to the first slot of node 2,
+        and so on round the nodes; a lab that does not fit its turn goes to the next node.
         """
         free = await self.store.free_slots()
         if free and await self._needs_uplink(s):
@@ -699,6 +709,7 @@ class Orchestrator:
         unused = defaultdict(int)  # Promised to handed-out slots, not in use yet
         mem = defaultdict(int)  # Memory limits of running guests and promised labs
         cpu = defaultdict(int)  # The same in vCPUs
+        busy = defaultdict(int)  # The busy CPUs among them (labs only: other guests are not known)
         labs = defaultdict(int)
         skip = set(free)  # Free slots and the handed-out ones counted below: not running guests
         for r in await self.store.reservations():
@@ -707,7 +718,9 @@ class Orchestrator:
                 promised = self._need_mb(r["resources"]) * MIB or int(ct.get("maxmem") or 0)
                 unused[ct["node"]] += max(0, promised - int(ct.get("mem") or 0))
                 mem[ct["node"]] += promised
-                cpu[ct["node"]] += self._need_cores(r["resources"]) or int(ct.get("maxcpu") or 0)
+                vcpus = self._need_cores(r["resources"]) or int(ct.get("maxcpu") or 0)
+                cpu[ct["node"]] += vcpus
+                busy[ct["node"]] += self._need_busy(r["resources"], vcpus)
                 labs[ct["node"]] += 1
                 skip.add(r["slot_vmid"])
         for r in resources:
@@ -719,6 +732,7 @@ class Orchestrator:
         reserve = self.settings.node_memory_reserve_mb * MIB
         budget = self.settings.node_guest_memory_mb * MIB
         ratio = self.settings.node_cpu_overcommit
+        host_cpus = self.settings.node_host_cpus
         fitting = []
         for vmid in free:
             ct = cts.get(vmid)
@@ -730,16 +744,25 @@ class Orchestrator:
                 continue
             want = need or int(ct.get("maxmem") or 0)
             want_cpu = cores or int(ct.get("maxcpu") or 0)
+            want_busy = self._need_busy(s["resources"], want_cpu)
             room = int(node.get("maxmem", 0)) - int(node.get("mem", 0)) - unused[name] - reserve
             if room < want:
                 continue
             if budget and mem[name] + want > budget:
                 continue
-            if ratio and cpu[name] + want_cpu > int(node.get("maxcpu") or 0) * ratio:
+            capacity = int(node.get("maxcpu") or 0) - host_cpus
+            hot = busy[name] + want_busy
+            other = cpu[name] + want_cpu - hot
+            if hot > capacity:
+                continue  # Also every node whose CPUs NODE_HOST_CPUS keeps whole
+            if ratio and other > (capacity - hot) * ratio + 1e-9:
                 continue
-            fitting.append((labs[name], mem[name], vmid, name))
+            # Node CPUs unknown (0) with no ratio and no host CPUs: not limited, as before; memory decides.
+            cpu_share = (hot + other / (ratio or 1)) / capacity if capacity > 0 else 0
+            share = max(cpu_share, (mem[name] + want) / (budget or int(node.get("maxmem") or 1)))
+            fitting.append((share, labs[name], mem[name], vmid, name))
         fitting.sort()
-        return [(vmid, name) for _, _, vmid, name in fitting]
+        return [(vmid, name) for *_, vmid, name in fitting]
 
     # ------------------------------------------------------------------ queued
     async def _stage_wait_slot(self, s):

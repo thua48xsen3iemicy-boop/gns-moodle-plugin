@@ -156,6 +156,7 @@ class Settings:
     node_memory_reserve_mb: int = 2048
     node_guest_memory_mb: int = 0  # Memory limits of all guests of a node, MiB; 0: no limit
     node_cpu_overcommit: float = 0.0  # vCPUs of all guests of a node per node CPU; 0: no limit
+    node_host_cpus: int = 0  # CPUs of every node never given to labs (the host and Ceph); 0: none kept
     listen_host: str = "127.0.0.1"
     listen_port: int = 8090
     pve_timeout: float = 10.0
@@ -316,6 +317,7 @@ def load(env=None, check_mode=True) -> Settings:
         node_memory_reserve_mb=_int(env, "NODE_MEMORY_RESERVE_MB", 2048, 0, 10**7),
         node_guest_memory_mb=_int(env, "NODE_GUEST_MEMORY_MB", 0, 0, 10**8),
         node_cpu_overcommit=_float(env, "NODE_CPU_OVERCOMMIT", 0, 0, 64),
+        node_host_cpus=_int(env, "NODE_HOST_CPUS", 0, 0, 1024),
         listen_host=env.get("MANAGER_LISTEN_HOST", "127.0.0.1"),
         listen_port=_int(env, "MANAGER_LISTEN_PORT", 8090, 1, 65535),
         pve_timeout=_int(env, "PVE_TIMEOUT", 10, 1, 300),
