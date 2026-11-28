@@ -228,6 +228,12 @@ def guest_fact_names(ticket: dict) -> set:
             if isinstance(n, dict) and n.get("kind") == "qemu" and n.get("qga", True) is not False}
 
 
+def extra_console_counts(ticket: dict) -> dict:
+    """{name: number of additional console lines} of the nodes of a ticket that have them (CONTRACTS 2.3, 6.4)."""
+    return {n["name"]: n["extra_consoles"] for n in ticket.get("nodes") or []
+            if isinstance(n, dict) and type(n.get("extra_consoles")) is int and n["extra_consoles"] > 0}
+
+
 def consoleless_names(ticket: dict, images: dict) -> set:
     """Names of the nodes whose image the catalog declares without a console (`console_type: none`).
 
@@ -270,6 +276,7 @@ class Orchestrator:
         self._consoleless: dict[str, set] = {}  # session id -> node_ids nobody gets a console ticket for
         self._iso: dict[str, dict] = {}  # session id -> iso_nodes()
         self._guest_facts: dict[str, set] = {}  # session id -> node_ids whose facts come from the guest agent
+        self._lines: dict[str, dict] = {}  # session id -> {node_id: number of additional console lines}
         self.leader = False
         self.epoch = None
         self._claims = set()
@@ -611,6 +618,7 @@ class Orchestrator:
         self._scripted.pop(s["id"], None)
         self._consoleless.pop(s["id"], None)
         self._guest_facts.pop(s["id"], None)
+        self._lines.pop(s["id"], None)
         self._iso.pop(s["id"], None)
         self._live_cache.pop(s["id"], None)
 
@@ -1518,6 +1526,10 @@ class Orchestrator:
         except (LabError, KeyError):
             hidden = set()  # Only what the plugin draws: console_ticket asks again and refuses
         nodes = {k: ({**v, "console_type": "none"} if k in hidden else v) for k, v in nodes.items()}
+        # Additional console lines (CONTRACTS 2.3, 6.4): only a node with a text console shows them.
+        lines = await self.line_counts(s)
+        nodes = {k: ({**v, "extra_consoles": lines[k]} if k in lines and v["console_type"] == "telnet" else v)
+                 for k, v in nodes.items()}
         self._live_cache[s["id"]] = (time.monotonic(), nodes, stale)
         return nodes, stale
 
@@ -1533,6 +1545,20 @@ class Orchestrator:
             names = guest_fact_names(ticket)
             known = {n["node_id"] for n in s["topology"]["topology"]["nodes"] if n["name"] in names}
             self._guest_facts[s["id"]] = known
+        return known
+
+    async def line_counts(self, s) -> dict:
+        """{node_id: number of additional console lines} of a running session (extra_console_counts); empty if the
+        lab of the session can no longer be resolved: the plugin then opens no line."""
+        known = self._lines.get(s["id"])
+        if known is None:
+            try:
+                ticket, _ = await self._ticket(s)
+            except (LabError, KeyError):
+                return {}
+            counts = extra_console_counts(ticket)
+            known = {n["node_id"]: counts[n["name"]] for n in s["topology"]["topology"]["nodes"] if n["name"] in counts}
+            self._lines[s["id"]] = known
         return known
 
     async def consoleless(self, s) -> set:

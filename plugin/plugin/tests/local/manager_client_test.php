@@ -118,9 +118,23 @@ final class manager_client_test extends \advanced_testcase {
         $this->assertStringContainsString('"properties":{}', $exported['topology']);
         $this->assertCount(2, $exported['nodes']);
         $this->assertSame(
-            ['nodeid' => fake_manager::NODE_TELNET, 'status' => 'started', 'consoletype' => 'telnet'],
+            ['nodeid' => fake_manager::NODE_TELNET, 'status' => 'started', 'consoletype' => 'telnet', 'extralines' => 0],
             $exported['nodes'][0]
         );
+    }
+
+    public function test_session_export_gives_console_lines_of_text_consoles_only(): void {
+        $session = json_decode(json_encode(fake_manager::session('running')));
+        foreach (get_object_vars($session->nodes) as $node) {
+            $node->extra_consoles = 2;
+        }
+        $nodes = array_column(session_data::export($session)['nodes'], null, 'consoletype');
+        $this->assertSame(2, $nodes['telnet']['extralines'], 'manager CONTRACTS §2.3, §6.4');
+        foreach ($nodes as $type => $node) {
+            if ($type !== 'telnet') {
+                $this->assertSame(0, $node['extralines'], 'a screen or no console has no lines');
+            }
+        }
     }
 
     public function test_session_export_hides_topology_unless_running(): void {

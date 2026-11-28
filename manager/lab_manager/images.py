@@ -19,6 +19,11 @@ lab editor offers the teacher a checkbox for nodes of the image. public() carrie
 extra_disks (qemu only): the teacher may give a node of the image additional blank disks (node field `disks`,
 CONTRACTS 2.6 and 4.2). public() then carries how many and how large; the numbers are the manager's, not the catalog's.
 
+extra_consoles (qemu, telnet console, guest agent, Linux guest): the teacher may give a node of the image additional serial
+console lines ttyS1..ttyS3 with their own login (node field `extra_consoles`, CONTRACTS 2.6, 4.2, 6.4). The slot starts
+serial-getty on them through the agent, so RouterOS, the ISP and images without an agent cannot have them. public() then
+carries `{"max": 3}`; the number is the manager's: the kernel makes four 8250 ports and ttyS0 is the node's console.
+
 qga (qemu only): false for an image without a QEMU guest agent. Nodes of the image get `qga: false` in the slot's ticket
 (labdef.deploy_ticket): the slot never asks them anything (no facts, no guest shutdown). Absent means true, and nodes of
 other images get no such field. Everything that works through the agent - net_config, random_ifnames, role, uplink_port,
@@ -65,6 +70,7 @@ DEFAULT_SYMBOLS = {"iou": ":/symbols/router.svg", "qemu": ":/symbols/computer.sv
                    "vpcs": ":/symbols/vpcs_guest.svg"}
 MECHANISMS = ("ifupdown", "networkmanager", "netplan", "networkd")  # netconfig.MECHANISMS: /bin/sh guests
 MAX_EXTRA_DISKS = 3  # GNS3 2.2.61 has hda..hdd, hda is the image
+MAX_EXTRA_CONSOLES = 3  # ttyS1..ttyS3: the kernel makes four 8250 ports by default, ttyS0 is the node's console
 EXTRA_DISK_GB = {"default": 1, "min": 1, "max": 20}
 # slot.cpu: the value of QEMU "-cpu" (NodeSpec.cpu). The same pattern as slot/api/models.py CPU_PATTERN: no spaces
 # and no "%", so the value never becomes another QEMU option.
@@ -139,6 +145,7 @@ class Image(Strict):
     capture: bool | None = None
     random_ifnames: bool = False
     extra_disks: bool = False
+    extra_consoles: bool = Field(default=False, strict=True)
     uplink_port: int | None = Field(default=None, strict=True, ge=0, le=15)
     # What a node of the image is beyond its kind (NodeSpec.role, CONTRACTS 4.2): "switch" is the Linux switch,
     # the only node the slot asks switch.net and switch.fdb. Never told by the guest.
@@ -176,6 +183,10 @@ class Image(Strict):
             raise ValueError("random_ifnames needs qemu and net_config ifupdown, networkmanager, netplan or networkd")
         if self.extra_disks and (self.kind != "qemu" or self.uplink_port is not None):
             raise ValueError("extra_disks is for qemu images without uplink_port")
+        if self.extra_consoles and (self.kind != "qemu" or self.console_type != "telnet" or not self.qga
+                                    or self.uplink_port is not None or self.net_config == "routeros"):
+            raise ValueError("extra_consoles is for qemu images with a telnet console and a guest agent, "
+                             "without uplink_port and not RouterOS")
         if self.busy_cpus and self.kind == "vpcs":
             raise ValueError("busy_cpus is for iou and qemu only")
         if self.kind == "iou" and self.busy_cpus > 1:
@@ -246,6 +257,7 @@ class Image(Strict):
             **({"iso_source": True} if self.iso_source is not None else {}),
             **({"iso_target": True} if self.iso_target else {}),
             **({"extra_disks": {"max": MAX_EXTRA_DISKS, "size_gb": dict(EXTRA_DISK_GB)}} if self.extra_disks else {}),
+            **({"extra_consoles": {"max": MAX_EXTRA_CONSOLES}} if self.extra_consoles else {}),
             **({"derived": self.derived, "featured": self.featured, "retired": self.retired} if self.derived else {}),
         }
 

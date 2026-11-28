@@ -197,6 +197,33 @@ async def main():
             await prompt(ws); await ws.close()
             assert queries[-1] == want, (ro, q, queries[-1])
         print("history flag passed to the slot OK")
+        # линии консоли (§6.4): ?line=1…3 уходит слоту в адресе, line=0 — основная консоль, иное — 400 до траты билета
+        for q, want in (("&line=2", "line=2"), ("&line=3&history=1", "line=3&history=1"), ("&line=0", ""),
+                        ("&history=1&line=1", "line=1&history=1")):
+            _, t = await ticket(False, nodes=(V2,))
+            ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{V2}?ticket={t}{q}", headers=moodle)
+            await prompt(ws); await ws.send_str("ls\r")
+            assert (await ws.receive()).data == b"ls\r"
+            await ws.close()
+            assert paths[-1] == f"/v1/console/{P}/{V2}" and queries[-1] == want, (q, queries[-1])
+        _, t = await ticket(False, nodes=(V2,)); n = len(paths)
+        for bad in ("4", "-1", "01", "x", ""):
+            try:
+                await s.ws_connect(f"http://127.0.0.1:38081/console/{V2}?ticket={t}&line={bad}", headers=moodle)
+                raise SystemExit("FAIL: принята неверная линия " + bad)
+            except Exception as e:
+                assert getattr(e, "status", None) == 400, (bad, e)
+        assert len(paths) == n                            # слот не звали, билет цел
+        ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{V2}?ticket={t}&line=1", headers=moodle)
+        await prompt(ws); await ws.close()
+        _, t = await ticket(False, console="vnc")
+        try:
+            await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}&line=1", headers=moodle)
+            raise SystemExit("FAIL: линия у экрана")
+        except Exception as e:
+            assert getattr(e, "status", None) == 400, e
+        assert len(paths) == n + 1
+        print("console lines: passed to the slot, bad value 400 before the ticket, none for vnc OK")
         # vnc: двоичные кадры в обе стороны без изменений
         seen_vnc.clear(); _, t = await ticket(False, console="vnc")
         ws = await s.ws_connect(f"http://127.0.0.1:38081/console/{VNC}?ticket={t}&history=1", headers=moodle)
@@ -283,6 +310,20 @@ async def main():
         assert await until(lambda: app["limits"].total == 0), app["limits"].__dict__
         gw.MAX_PER_NODE, gw.MAX_PER_PROJECT = 6, 40
         print("per-node and per-project limits -> 4001, other lab unaffected, released on close OK")
+        # предел ноды считается на линию консоли: основная и линия 1 открыты, вторая на линии 1 — сверх предела
+        gw.MAX_PER_NODE = 1
+        async def open_line(line):
+            _, t = await ticket(False, nodes=(N1,))
+            return await s.ws_connect(f"http://127.0.0.1:38081/console/{N1}?ticket={t}&line={line}", headers=moodle)
+        a, b = await open_line(0), await open_line(1)
+        await prompt(a); await prompt(b)
+        c = await open_line(1)
+        m = await c.receive(); assert m.type == WSMsgType.CLOSE and m.data == 4001, m
+        assert app["limits"].total == 2, app["limits"].__dict__
+        for w in (a, b): await w.close()
+        assert await until(lambda: app["limits"].total == 0), app["limits"].__dict__
+        gw.MAX_PER_NODE = 6
+        print("per-node limit counts per console line OK")
         # общий предел шлюза
         gw.MAX_CONSOLES = 1
         a = await open_console(); await prompt(a)

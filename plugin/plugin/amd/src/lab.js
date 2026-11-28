@@ -110,7 +110,7 @@ const UI_KEYS = [
     'ui_act_zoom_node', 'ui_act_close', 'ui_act_close_full', 'ui_act_free', 'ui_act_free_full',
     'ui_act_free_why', 'ui_act_link_info', 'ui_act_link_zoom', 'ui_why_node_off', 'ui_why_viewer', 'ui_live_bad',
     'ui_student_console',
-    'consoleneedsrunning', 'consolenone',
+    'consoleneedsrunning', 'consolenone', 'consoleclosed',
     'ui_facts_at', 'ui_facts_ago', 'ui_facts_ago_now', 'ui_facts_stale', 'ui_facts_stale_mark', 'ui_facts_nodata',
     'ui_facts_refresh', 'ui_facts_refresh_sent', 'ui_facts_refreshing', 'ui_facts_refreshed', 'ui_facts_nochange',
     'ui_facts_late', 'ui_facts_refresh_failed', 'ui_facts_last', 'ui_facts_never', 'ui_facts_err_other',
@@ -503,9 +503,13 @@ class LabPage {
             return;
         }
         const types = new Map(s.nodes.map(n => [n.nodeid, n.consoletype]));
+        // Additional console lines of a node come with its live state (manager CONTRACTS §2.3, §6.4).
+        const lines = new Map(s.nodes.map(n => [n.nodeid, n.extralines || 0]));
         // No pasting into the console is a mark of the lab, not of the project: it goes over by node name.
         const ref = this.data.topology && this.data.topology.topology;
         const nopaste = new Set(((ref && ref.nodes) || []).filter(n => n && n.nopaste === true).map(n => n.name));
+        // So is a console closed to the student (lab_definition::NOCONSOLE); the server refuses its ticket as well.
+        const closed = new Set(((ref && ref.nodes) || []).filter(n => n && n.noconsole === true).map(n => n.name));
         // So is the icon a teacher chose in the lab editor.
         const icons = new Map(((ref && ref.nodes) || []).filter(n => n && n.icon).map(n => [n.name, n.icon]));
         // And the provider of the lab, the node with the external port (lab_definition::to_topology).
@@ -517,6 +521,8 @@ class LabPage {
         ((doc.topology && doc.topology.nodes) || []).forEach(n => {
             delete n.status;
             delete n.nopaste;
+            delete n.noconsole;
+            delete n.extra_lines;
             delete n.icon;
             delete n.uplink;
             if (types.get(n.node_id)) {
@@ -524,6 +530,12 @@ class LabPage {
             }
             if (nopaste.has(n.name)) {
                 n.nopaste = true;
+            }
+            if (closed.has(n.name)) {
+                n.noconsole = true;
+            }
+            if (lines.get(n.node_id) > 0) {
+                n.extra_lines = lines.get(n.node_id);
             }
             if (icons.has(n.name)) {
                 n.icon = icons.get(n.name);
@@ -1023,6 +1035,9 @@ class LabPage {
         if (!n.consoleType || n.consoleType === 'none') {
             return this.strings.consolenone;
         }
+        if (n.noconsole) {
+            return this.strings.consoleclosed;
+        }
         if (this.stage.nodeStatus(n) !== 'started') {
             return fill(this.strings.ui_why_node_off, n.name);
         }
@@ -1070,6 +1085,10 @@ class LabPage {
                 id: 'console', label: s.ui_act_console, full: open ? s.ui_act_console_goto : s.ui_act_console_open,
                 icon: 'term', off: !!why, why,
             });
+            if (n.extralines > 0 && !why) {
+                // Another independent terminal of the node (manager CONTRACTS §6.4).
+                items.push({id: 'newterm', label: s.ui_newterm, full: s.ui_newterm_full, icon: 'term'});
+            }
         }
         items.push({id: 'info', label: s.ui_act_info, full: s.ui_act_info_full, icon: 'info'});
         if (n.state === 'silhouette') {
@@ -1167,7 +1186,15 @@ class LabPage {
                 this.details.show(stage.sel);
             },
             zoom: () => stage.zoomToNode(t, Math.max(2.4, stage.view.k)),
-            close: () => this.consoles.close(t.id),
+            close: () => this.consoles.closeNode(t.id),
+            newterm: () => {
+                const why = this.consoleWhy(t);
+                if (why) {
+                    this.toast(why);
+                } else {
+                    this.consoles.openLine(t);
+                }
+            },
             iso: () => this.mountIso(t),
             linfo: () => {
                 stage.select({kind: 'link', id: t.id}, true);

@@ -869,6 +869,25 @@ export const init = (prefix) => {
     `<label class="ed-field ed-check"><input type="checkbox" data-field="nopaste"${
       n.nopaste ? " checked" : ""}> <span>${esc(str("ed_nopaste"))}</span><small>${
       esc(str("ed_nopaste_help"))}</small></label>`;
+  /* no console for students at all (lab_definition::NOCONSOLE, plugin only): they reach the device over the network */
+  const noconsoleField = (n, img) => img && img.console_type === "none" && !n.noconsole ? "" :
+    `<label class="ed-field ed-check"><input type="checkbox" data-field="noconsole"${
+      n.noconsole ? " checked" : ""}> <span>${esc(str("ed_noconsole"))}</span><small>${
+      esc(str("ed_noconsole_help"))}</small></label>`;
+  /* additional console lines (manager CONTRACTS §2.6, §6.4): only images that take them offer the choice; a number an
+     image no longer takes stays visible, so that it can be set back to none */
+  const linesField = (n, img) => {
+    const spec = img && img.extra_consoles, value = Number.isInteger(n.extra_consoles) ? n.extra_consoles : 0;
+    if (!spec && !value) {
+      return "";
+    }
+    const max = Math.max(spec ? spec.max : 0, value);
+    const options = Array.from({length: max + 1}, (_, k) => `<option value="${k}"${k === value ? " selected" : ""}>${
+      k ? k : esc(str("ed_extraconsoles_none"))}</option>`).join("");
+    return `<label class="ed-field"><span>${esc(str("ed_extraconsoles"))}</span>
+      <select class="form-select form-select-sm" data-field="extra_consoles">${options}</select>
+      <small>${esc(str("ed_extraconsoles_help"))}</small></label>`;
+  };
   /* icon picker: the first button goes back to the icon of the image */
   const iconField = n => {
     const button = (value, icon, title) => {
@@ -922,6 +941,8 @@ export const init = (prefix) => {
       ${numberField(n, "cpus", str("ed_cpus"))}
       ${ifnamesField(n, img)}
       ${nopasteField(n, img)}
+      ${noconsoleField(n, img)}
+      ${linesField(n, img)}
       <p class="ed-error" data-region="fielderror" role="alert" hidden></p>
       ${disksField(n, img)}
       <h3>${esc(str("ed_ports"))}</h3>
@@ -1656,7 +1677,18 @@ export const init = (prefix) => {
       });
       return;
     }
-    if (field === "random_ifnames" || field === "nopaste") {
+    if (field === "extra_consoles") {
+      const v = Number(t.value);
+      change(() => {
+        if (Number.isInteger(v) && v > 0) {
+          n.extra_consoles = v;
+        } else {
+          delete n.extra_consoles;
+        }
+      });
+      return;
+    }
+    if (field === "random_ifnames" || field === "nopaste" || field === "noconsole") {
       change(() => {
         if (t.checked) {
           n[field] = true;

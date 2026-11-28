@@ -40,7 +40,7 @@ const factNodes = Object.assign({}, ...fs.readdirSync(demoDir).filter(f => f.end
     .map(f => JSON.parse(fs.readFileSync(path.join(demoDir, f), 'utf8')).nodes));
 const SLOT_URL = process.env.HARNESS_SLOT_URL || 'ws://127.0.0.1:8091';
 const SLOT_TOKEN = process.env.HARNESS_SLOT_TOKEN || 'dev-console-token';
-const stats = {screens: 0, opened: 0, watchers: 0};
+const stats = {screens: 0, opened: 0, watchers: 0, lines: []};
 const watchers = new Set();
 const activity = {open: new Set(), input: new Map()};
 
@@ -380,10 +380,13 @@ server.on('upgrade', (req, socket, head) => {
         }
         const host = names.get(id) || 'Device';
         const kind = family(id);
+        // An additional console line (manager CONTRACTS §6.4): its own login, so its own banner and its own echo.
+        const consoleLine = +(new URL(req.url, 'http://x').searchParams.get('line') || 0);
+        stats.lines.push({node: id, line: consoleLine});
         let line = '';
         const out = s => ws.send(Buffer.from(s, 'utf8'));
         const prompt = () => out(PROMPTS[kind](host));
-        setTimeout(() => out(`\r\n${host} console\r\n${PROMPTS[kind](host)}`), 50);
+        setTimeout(() => out(`\r\n${host} ${consoleLine ? 'line ' + consoleLine : 'console'}\r\n${PROMPTS[kind](host)}`), 50);
         ws.on('message', (data, isBinary) => {
             if (isBinary) {
                 return; // window size

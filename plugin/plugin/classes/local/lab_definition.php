@@ -83,6 +83,24 @@ class lab_definition {
     public const NOPASTE = 'nopaste';
 
     /**
+     * Node field of the plugin alone: the student gets no console of the node at all and works with it over the network
+     * (SSH from a workstation node). Teachers who may observe and the author of the lab keep the console.
+     *
+     * Unlike NOPASTE this holds on the server: mod_gns3lab_get_console_ticket refuses such a node to its owner. Like
+     * NOPASTE, for_manager() takes it out.
+     */
+    public const NOCONSOLE = 'noconsole';
+
+    /**
+     * Node field the lab manager takes (CONTRACTS 2.6, 6.4): additional console lines ttyS1..ttyS3 of the node, each with
+     * its own login, so that a student keeps several independent terminals on it. 0 is no field.
+     */
+    public const EXTRA_CONSOLES = 'extra_consoles';
+
+    /** Most additional console lines of a node (manager CONTRACTS 6.4). */
+    public const MAX_EXTRA_CONSOLES = 3;
+
+    /**
      * Node field of the plugin alone: the icon the lab pages draw instead of the one of the image category.
      *
      * Like NOPASTE, for_manager() takes it out; the device stays what its image is (console snippets, hosts).
@@ -141,7 +159,7 @@ class lab_definition {
         unset($def[self::ANNOTATIONS]);
         foreach ($def['nodes'] ?? [] as $i => $node) {
             if (is_array($node)) {
-                unset($def['nodes'][$i][self::NOPASTE], $def['nodes'][$i][self::ICON]);
+                unset($def['nodes'][$i][self::NOPASTE], $def['nodes'][$i][self::NOCONSOLE], $def['nodes'][$i][self::ICON]);
             }
         }
         return $def;
@@ -155,11 +173,27 @@ class lab_definition {
     public static function allow_paste(\stdClass $doc): void {
         foreach ($doc->topology->nodes ?? [] as $i => $node) {
             if (is_array($node)) {
-                unset($doc->topology->nodes[$i][self::NOPASTE]);
+                unset($doc->topology->nodes[$i][self::NOPASTE], $doc->topology->nodes[$i][self::NOCONSOLE]);
             } else if (is_object($node)) {
-                unset($node->{self::NOPASTE});
+                unset($node->{self::NOPASTE}, $node->{self::NOCONSOLE});
             }
         }
+    }
+
+    /**
+     * Names of the nodes whose console the student does not get (NOCONSOLE).
+     *
+     * @param array $def clean definition
+     * @return string[]
+     */
+    public static function closed_names(array $def): array {
+        $names = [];
+        foreach ($def['nodes'] ?? [] as $node) {
+            if (is_array($node) && !empty($node[self::NOCONSOLE]) && is_string($node['name'] ?? null)) {
+                $names[] = $node['name'];
+            }
+        }
+        return $names;
     }
 
     /**
@@ -221,6 +255,25 @@ class lab_definition {
                 }
                 if ($node[self::NOPASTE]) {
                     $clean[self::NOPASTE] = true;
+                }
+            }
+            // No console for the student at all: like NOPASTE, only true is kept.
+            if (array_key_exists(self::NOCONSOLE, $node) && $node[self::NOCONSOLE] !== null) {
+                if (!is_bool($node[self::NOCONSOLE])) {
+                    throw self::invalid("nodes[{$i}]." . self::NOCONSOLE);
+                }
+                if ($node[self::NOCONSOLE]) {
+                    $clean[self::NOCONSOLE] = true;
+                }
+            }
+            // Additional console lines (manager CONTRACTS 2.6): 0 is no field, like the lab manager does.
+            if (array_key_exists(self::EXTRA_CONSOLES, $node) && $node[self::EXTRA_CONSOLES] !== null) {
+                $lines = $node[self::EXTRA_CONSOLES];
+                if (!is_int($lines) || $lines < 0 || $lines > self::MAX_EXTRA_CONSOLES) {
+                    throw self::invalid("nodes[{$i}]." . self::EXTRA_CONSOLES);
+                }
+                if ($lines > 0) {
+                    $clean[self::EXTRA_CONSOLES] = $lines;
                 }
             }
             // Icon of the node: one of ICONS, an empty one is no field (the icon of the image category).
@@ -662,6 +715,10 @@ class lab_definition {
             if (!empty($node[self::NOPASTE])) {
                 // The lab page keeps the clipboard out of the console of this node (consoles.js).
                 $nodes[count($nodes) - 1][self::NOPASTE] = true;
+            }
+            if (!empty($node[self::NOCONSOLE])) {
+                // The lab page offers no console of this node; mod_gns3lab_get_console_ticket refuses it too.
+                $nodes[count($nodes) - 1][self::NOCONSOLE] = true;
             }
             if ($uplink !== null) {
                 // The node with the external port is the provider of the lab (ISP): the reach of the scheme does not

@@ -228,6 +228,10 @@ export const buildModel = doc => {
             status: n.status || null,
             // The lab keeps the clipboard out of the console of this node (lab_definition::NOPASTE).
             nopaste: n.nopaste === true,
+            // The student gets no console of this node and reaches it over the network (lab_definition::NOCONSOLE).
+            noconsole: n.noconsole === true,
+            // Additional console lines of the node, each its own login (manager CONTRACTS §6.4); set by lab.js loadLive.
+            extralines: Number.isInteger(n.extra_lines) && n.extra_lines > 0 ? Math.min(3, n.extra_lines) : 0,
         };
         node.cat = catOf(node);
         // The icon only draws the node: what the device is (snippets, hosts, switches) stays its category.

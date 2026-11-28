@@ -8,6 +8,9 @@ frames as input and text frames as control JSON: `{"resize": {"cols", "rows"}}` 
 
 History (telnet only, CONTRACTS.md §6.2): the slot keeps the tail of each node's output and replays it to a new console that
 asks for it with `?history=1`, so a teacher who opens the console of a student sees what was printed before.
+
+Lines (CONTRACTS.md §6.4): `?line=1..3` opens an additional serial console line of a QEMU node (ttyS1..ttyS3, api/lines.py)
+instead of the GNS3 telnet port; frames, window size and history work the same, per line.
 """
 import asyncio
 import json
@@ -16,8 +19,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from api import lines
 from api.auth import offered_protocols, websocket_token_ok
-from api.winsize import WindowSizes, parse_control
+from api.winsize import WindowSizes, key as line_key, parse_control
 
 router = APIRouter(tags=["console"])
 
@@ -92,6 +96,20 @@ class ConsoleHistory:
         entry = self.nodes.get(node_id)
         if entry is not None and console in entry.writers:
             entry.writers.remove(console)  # the history stays for the next console
+
+
+def line_hub(app):
+    hub = getattr(app.state, "line_hub", None)
+    if hub is None:
+        hub = app.state.line_hub = lines.LineHub()
+    return hub
+
+
+def gettys(app):
+    starter = getattr(app.state, "gettys", None)
+    if starter is None:
+        starter = app.state.gettys = lines.Gettys()
+    return starter
 
 
 def console_history(app):
@@ -195,6 +213,10 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
     if not websocket_token_ok(websocket.headers.get("sec-websocket-protocol")):
         await websocket.close(code=1008)
         return
+    line = lines.parse_line(websocket.query_params.get("line"))
+    if line is None:
+        await websocket.close(code=1008)
+        return
     client = websocket.app.state.gns3_http
     try:
         r = await client.get(f"projects/{project_id}/nodes/{node_id}")
@@ -202,6 +224,9 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
             await websocket.close(code=1008)
             return
         node = r.json()
+        if line:
+            await line_console(websocket, str(project_id), str(node_id), line, node)
+            return
         port = node.get("console")
         console_type = node.get("console_type")
         if node.get("status") != "started" or console_type not in ("telnet", "vnc") or not isinstance(port, int):
@@ -294,3 +319,92 @@ async def console_ws(websocket: WebSocket, project_id: UUID, node_id: UUID):
             await websocket.close()
         except RuntimeError:
             pass
+
+
+async def line_console(websocket: WebSocket, pid, node_id, line, node):
+    """An additional console line of a running QEMU node: a shared connection to its socket, no Telnet."""
+    if node.get("status") != "started" or node.get("node_type") != "qemu" or node.get("console_type") != "telnet":
+        await websocket.close(code=1008)
+        return
+    hubs = line_hub(websocket.app)
+    try:
+        hub, queue = await hubs.join(pid, node_id, line)
+    except OSError:
+        await websocket.close(code=1008)  # the node has no such line
+        return
+    offered = offered_protocols(websocket.headers.get("sec-websocket-protocol"))
+    control = PROTOCOL_2 in offered
+    history = console_history(websocket.app)
+    me = object()
+    hkey = line_key(node_id, line)
+    past = history.opened(pid, hkey, me)
+    lifecycle = getattr(websocket.app.state, "lifecycle", None)
+    guest = lifecycle is not None and getattr(websocket.app.state, "initialized", False)
+    sizes = window_sizes(websocket.app) if control and guest else None
+    logins = gettys(websocket.app) if guest else None
+
+    async def to_browser():
+        while True:
+            data = await queue.get()
+            if data is None:
+                return  # the line closed or this console fell behind
+            history.record(hkey, me, data)
+            await websocket.send_bytes(data)
+
+    gone = False  # the gateway disconnected: nothing is sent back
+
+    async def to_line():
+        nonlocal gone
+        while True:
+            packet = await websocket.receive()
+            if packet["type"] == "websocket.disconnect":
+                gone = True
+                return
+            if control:
+                if packet.get("text") is not None:
+                    size = parse_control(packet["text"])
+                    if size and sizes is not None:
+                        sizes.resize(lifecycle, node_id, *size, line=line)
+                    continue
+                data = packet.get("bytes") or b""
+                if data and sizes is not None:
+                    sizes.touch(lifecycle, node_id, line=line)
+            else:
+                data = packet.get("bytes") or (packet.get("text") or "").encode()
+            if not data:
+                continue
+            if logins is not None:
+                logins.touch(lifecycle, pid, node_id, line)
+            await hubs.write(hub, data)
+
+    if sizes is not None:
+        sizes.opened(pid, node_id, line)
+    if logins is not None:
+        logins.opened(lifecycle, pid, node_id, line)
+    tasks = []
+    try:
+        await websocket.accept(subprotocol=PROTOCOL_2 if control else PROTOCOL)
+        if past and websocket.query_params.get("history") == "1":
+            await websocket.send_bytes(past)
+        tasks = [asyncio.create_task(to_browser()), asyncio.create_task(to_line())]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for t in done:
+            t.result()
+    except (OSError, RuntimeError, WebSocketDisconnect):
+        pass
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        history.closed(hkey, me)
+        if sizes is not None:
+            sizes.closed(node_id, line)
+        await hubs.leave(hub, queue)
+        if not gone:
+            try:
+                await websocket.close()
+            except RuntimeError:
+                pass

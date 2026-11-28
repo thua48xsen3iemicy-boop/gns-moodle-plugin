@@ -170,7 +170,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}`; 🆕 (0.21.0) `maintenance` `{state, startsat, message}` — из сессии, а без неё из `GET /api/v1/maintenance` (MUC `info`, 30 с); недоступный менеджер — `off`; 🆕 (0.51.0) у сессии с `SETUP_FAILED` — `setuperror` `{step, node, exitcode, message}`, только при observe (`docs/lab-setup.md` §3) |
 | `mod_gns3lab_start_session` | `cmid` | use | сессия |
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
-| `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — 🆕 (0.49.0) и чужая, тоже `readonly` (экран без ввода, noVNC `viewOnly`); в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
+| `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | 🆕 (0.52.0) владельцу без observe — не к ноде с `noconsole` в версии лабы (`consoleclosed`); use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — 🆕 (0.49.0) и чужая, тоже `readonly` (экран без ввода, noVNC `viewOnly`); в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
 | `mod_gns3lab_get_activity_ticket` | `cmid`, `userid` | 🆕 (0.48.0) только observe + группы для чужой лабы: своя — отказ `consoleactivityobserver`; менеджер без `console-activity` — `consoleactivityunsupported`; лаба не `running` — `sessionnotrunning` | `{"ticket","gatewayurl","expiresin"}` — билет к `/console/activity` шлюза (manager CONTRACTS §6.3, `docs/teacher-dashboard.md` §15) |
 | `mod_gns3lab_list_students` | `cmid` | observe | студенты (с учётом групп) и статус их сессий |
 | `mod_gns3lab_get_facts` | `cmid`, `userid=0`, `sincerev=0` | view, затем как у `get_state` для чужого userid; сессию находит сервер | `{"available","changed","rev","generatedat","ttl","facts"}`: `facts` — документ `gns3lab.facts/1` строкой `PARAM_RAW`, пустой при `changed: false`; `available: false` — нет сессии или в её `features` нет `facts` |
@@ -439,6 +439,28 @@ H.264 через WebCodecs) ломает Babel-шаг `grunt amd`, теперь 
 блока нет. Если образ потерял поле, а диски в черновике есть, они видны, чтобы их можно было убрать.
 Диски пустые и неразмеченные, у каждого студента свои; в «Сохранить с образами» они не входят. Схема и страница
 студента их не показывают.
+
+### Лаба «по SSH»: закрытая консоль и дополнительные терминалы (0.52.0)
+
+Студент работает с рабочего места — Linux-ноды «дома» за ISP или внутри сети — и ходит по SSH на устройства.
+
+- **«Закрыть консоль студентам»** — галочка ноды в редакторе лаб, поле ноды `noconsole: true` (`lab_definition::NOCONSOLE`).
+  Поле только плагина, как `nopaste`: `for_manager()` его убирает, `to_topology()` ставит ноде, `lab.js` переносит на живую
+  топологию по имени. На странице лабы консоль такой ноды не открывается: в колесе пункт «Консоль» выключен с причиной
+  `consoleclosed`, двойной щелчок показывает её же. В отличие от `nopaste` это **защита на сервере**:
+  `mod_gns3lab_get_console_ticket` не выдаёт владельцу билет к ноде, помеченной в версии лабы библиотеки активности
+  (`consoleclosed`). Кто может `mod/gns3lab:observe` (преподаватель), и автор на странице авторского запуска консоль
+  видят: `allow_paste()` снимает и эту пометку.
+- **«Дополнительные терминалы»** — выбор «Нет / 1 / 2 / 3» у ноды образа с `extra_consoles` в каталоге (manager CONTRACTS
+  §2.6, §6.4, менеджер 0.42.0, слот 0.31.0); поле ноды `extra_consoles` уходит менеджеру (0 — поля нет). Сессия отдаёт число
+  линий в `nodes[].extralines` (`mod_gns3lab_get_state`, только у консоли `telnet`). У терминала такой ноды на панели
+  снизу кнопка «Новый терминал»; тот же пункт есть в колесе. Каждое нажатие открывает следующую линию отдельной вкладкой
+  («WS1 · 2», «WS1 · 3») — свой вход в систему; все открыты — «Все терминалы … уже открыты». Линия открывается тем же
+  билетом ноды и адресом шлюза `…&line=<n>` (`console.js` `consoleUrl`); размер окна, история, переподключение и
+  «увидено в консоли» — как у основной консоли. Закрытая вкладка линии остаётся подключённой, как основная (`PARK_MAX`),
+  и возвращается той же кнопкой. В `consoles.js` консоль линии хранится под ключом `<node_id>#<n>`; значок ноды на схеме
+  горит, пока открыт хоть один её терминал.
+- Проверки: `devtools/ui-harness/check_lines.js` (закрытая консоль, линии, колесо), `check_editor.js` (поля редактора).
 
 ### Преднастрой преподавателя (0.51.0)
 

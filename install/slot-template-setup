@@ -69,7 +69,7 @@ cmd_install() {
   log "directories: mount points of the agent and the local GNS3 ones"
   install -d -m 0755 /srv/gns3-ro/slot /opt/gns3 /opt/gns3/projects /opt/gns3/images \
     /opt/gns3/images/QEMU /opt/gns3/images/IOU /etc/gns3
-  install -d -o gns3 -g gns3 -m 0700 /opt/gns3/qga
+  install -d -o gns3 -g gns3 -m 0700 /opt/gns3/qga /opt/gns3/serial
   install -d -o gns3 -g gns3 -m 0750 /var/lib/gns3/configs /var/lib/gns3/appliances /var/lib/gns3/symbols
 
   log "GNS3 server $GNS3_VERSION in /opt/gns3-server"

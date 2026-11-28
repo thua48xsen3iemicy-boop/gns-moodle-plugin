@@ -61,6 +61,9 @@ class image_data {
                     'max' => new external_value(PARAM_INT, 'Maximum'),
                 ], 'Size of one disk, GiB'),
             ], 'Additional blank disks a node may take', VALUE_OPTIONAL),
+            'extra_consoles' => new external_single_structure([
+                'max' => new external_value(PARAM_INT, 'Additional console lines per node'),
+            ], 'Additional console lines a node may take (manager CONTRACTS §6.4)', VALUE_OPTIONAL),
             'authorname' => new external_value(PARAM_TEXT, 'Moodle display name', VALUE_DEFAULT, ''),
             'featured' => new external_value(PARAM_BOOL, 'Featured', VALUE_DEFAULT, false),
             'retired' => new external_value(PARAM_BOOL, 'Retired', VALUE_DEFAULT, false),

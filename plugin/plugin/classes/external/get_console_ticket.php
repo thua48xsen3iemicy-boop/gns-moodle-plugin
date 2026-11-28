@@ -21,6 +21,7 @@ use core_external\external_function_parameters;
 use core_external\external_single_structure;
 use core_external\external_value;
 use mod_gns3lab\local\lab_access;
+use mod_gns3lab\local\lab_definition;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\reveal;
 use mod_gns3lab\local\seat;
@@ -40,6 +41,9 @@ use mod_gns3lab\local\session_data;
  *
  * In a fog that starts from named nodes a student gets no ticket for a node they have not found yet (the mask of
  * mod_gns3lab_reveal, docs/lab-constructor/README.md §2.2). An observer sees everything.
+ *
+ * A node of a library lab marked "no console" (lab_definition::NOCONSOLE) gives its owner no ticket at all: the student
+ * works with it over the network, SSH from a workstation node. Whoever may observe keeps the console, as on the page.
  *
  * @package    mod_gns3lab
  * @copyright  2026 mod_gns3lab contributors
@@ -97,6 +101,9 @@ class get_console_ticket extends external_api {
         if (!$readonly && !reveal::console_allowed($access->instance, $userid, $session, $nodeid)) {
             throw new \moodle_exception('nodenotfound', 'gns3lab');
         }
+        if (!$readonly && self::closed($access, $session, $nodeid)) {
+            throw new \moodle_exception('consoleclosed', 'gns3lab');
+        }
         $type = session_data::console_type($session, $nodeid);
         if ($type !== '' && $type !== 'telnet' && $type !== 'vnc') {
             throw new \moodle_exception('consolenotsupported', 'gns3lab');
@@ -110,6 +117,32 @@ class get_console_ticket extends external_api {
             'expiresin' => (int) ($ticket->expires_in ?? 30),
             'readonly' => $readonly,
         ];
+    }
+
+    /**
+     * Whether the node is closed to its owner: marked NOCONSOLE in the library lab of the activity, matched by name.
+     *
+     * @param lab_access $access access to the activity
+     * @param \stdClass $session running session
+     * @param string $nodeid node id in the live project
+     * @return bool
+     */
+    protected static function closed(lab_access $access, \stdClass $session, string $nodeid): bool {
+        global $DB;
+
+        if (empty($access->instance->labversionid) || has_capability('mod/gns3lab:observe', $access->context)) {
+            return false;
+        }
+        $definition = $DB->get_field('gns3lab_lab_versions', 'definition', ['id' => $access->instance->labversionid]);
+        if (!is_string($definition) || $definition === '') {
+            return false;
+        }
+        $closed = lab_definition::closed_names(lab_definition::decode($definition));
+        if (!$closed) {
+            return false;
+        }
+        $names = reveal::live_ids($session)['nodes'];
+        return in_array($names[$nodeid] ?? '', $closed, true);
     }
 
     /**

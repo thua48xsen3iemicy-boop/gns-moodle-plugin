@@ -44,6 +44,7 @@ const ICON_MIN = '<svg viewBox="0 0 16 16"><path d="M3 12h10"/></svg>';
 const ICON_FOLD = '<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>';
 const ICON_LIST = '<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>';
 const ICON_FULL = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
+const ICON_PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
 const ICON_UNFULL = '<svg viewBox="0 0 16 16"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/></svg>';
 
 /**
@@ -97,6 +98,15 @@ const STATE_DOT = {open: 'open', connecting: 'wait', waiting: 'wait', stopped: '
  * @param {KeyboardEvent} e key event
  * @returns {boolean}
  */
+/**
+ * Key of a console in the views: the node id for its console, "<node id>#<line>" for an additional line.
+ *
+ * @param {string} nodeId node id
+ * @param {number} line console line, 0 for the console of the node
+ * @returns {string}
+ */
+const lineKey = (nodeId, line) => (line > 0 ? `${nodeId}#${line}` : nodeId);
+
 const cycleKey = e => e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight');
 
 class Con {
@@ -105,10 +115,15 @@ class Con {
      *
      * @param {Consoles} owner the views
      * @param {object} node node of the model
+     * @param {number} [line] additional console line of the node, 1..3 (manager CONTRACTS §6.4); 0 is its console
      */
-    constructor(owner, node) {
+    constructor(owner, node, line = 0) {
         this.owner = owner;
         this.n = node;
+        // A node can have several terminals: its console (line 0) and its additional lines, each its own login. The views
+        // know a console by its key; the scheme, the tickets and "seen in the console" by the node.
+        this.line = line;
+        this.key = lineKey(node.id, line);
         this.unread = false;
         this.min = false;
         // Closed by the student but still connected: out of every view, back as it was when opened again.
@@ -143,6 +158,11 @@ class Con {
         this.ro.observe(this.host);
     }
 
+    /** What the views call the console: the name of the node, with the number of the terminal for an additional line. */
+    get title() {
+        return this.line ? `${this.n.name} · ${this.line + 1}` : this.n.name;
+    }
+
     /** The bar under the terminal: the snippets menu, the pinned snippets, the font size, the fold button. */
     buildBar() {
         const o = this.owner, bar = hel('div', 'tbar', this.host);
@@ -164,6 +184,15 @@ class Con {
             b.addEventListener('click', () => o.snip.toggle(this, b));
             this.menuBtn = b;
         }
+        // Another terminal of the same node, when it has additional console lines (manager CONTRACTS §6.4).
+        const plus = hel('button', 'snipbtn newterm', bar);
+        plus.type = 'button';
+        plus.innerHTML = ICON_PLUS + '<span></span>';
+        plus.querySelector('span').textContent = o.s('ui_newterm');
+        plus.title = o.s('ui_newterm_full');
+        plus.addEventListener('pointerdown', e => e.preventDefault());
+        plus.addEventListener('click', () => o.openLine(this.n));
+        this.plusBtn = plus;
         bar.appendChild(this.quick);
         this.quick.addEventListener('scroll', () => this.fadeSnips(), {passive: true});
         // The wheel over the strip scrolls it sideways: the scrollbar is hidden.
@@ -219,6 +248,7 @@ class Con {
         const o = this.owner, strip = this.quick;
         o.snip.hideTip();
         strip.textContent = '';
+        if (this.plusBtn) this.plusBtn.hidden = !(this.n.extralines > 0);
         if (o.readonly) {
             return;
         }
@@ -265,7 +295,7 @@ class Con {
             o.toast(fill(o.s('ui_not_connected'), this.n.name));
             return false;
         }
-        o.active = this.n.id;
+        o.active = this.key;
         this.unread = false;
         o.paintBadges(this);
         o.markFocus();
@@ -544,8 +574,8 @@ class Con {
         this.vnote.hidden = true;
         // The canvas takes the focus on a click; the screen is the current console from then on.
         this.screen.addEventListener('focusin', () => {
-            if (o.active !== this.n.id) {
-                o.active = this.n.id;
+            if (o.active !== this.key) {
+                o.active = this.key;
                 o.markFocus();
             }
         });
@@ -589,14 +619,14 @@ class Con {
         });
         if (this.term.textarea) {
             this.term.textarea.addEventListener('focus', () => {
-                if (o.active !== this.n.id) {
-                    o.active = this.n.id;
+                if (o.active !== this.key) {
+                    o.active = this.key;
                     o.markFocus();
                 }
             });
         }
         this.conn = new ConsoleConnection({
-            api: o.api, cmid: o.cmid, userid: o.userid, nodeId: this.n.id, term: this.term, strings: o.strings,
+            api: o.api, cmid: o.cmid, userid: o.userid, nodeId: this.n.id, line: this.line, term: this.term, strings: o.strings,
             nodeStatus: () => o.nodeStatus(this.n.id),
             transform: data => (this.pasted(data) ? '' : o.applyCtrl(data)),
             paced: CISCO_TYPES.includes(this.n.type),
@@ -903,8 +933,14 @@ export class Consoles {
         return this.cons.size;
     }
 
+    /**
+     * Whether a console of the node is open, its console or one of its additional lines.
+     *
+     * @param {string} nodeId node id
+     * @returns {boolean}
+     */
     has(nodeId) {
-        return this.cons.has(nodeId);
+        return [...this.cons.values()].some(c => c.n.id === nodeId);
     }
 
     /* ---------------- font size of each console and pinned snippets, kept in the browser ---------------- */
@@ -999,8 +1035,9 @@ export class Consoles {
      * Opens the console of a node or brings it to the front.
      *
      * @param {object} node node of the model
+     * @param {number} [line] additional console line of the node, 0 for its console (manager CONTRACTS §6.4)
      */
-    async open(node) {
+    async open(node, line = 0) {
         const screen = node.consoleType === 'vnc';
         try {
             if (screen && !this.RFB) this.RFB = await loadNovnc();
@@ -1009,13 +1046,14 @@ export class Consoles {
             this.toast(this.s(screen ? 'ui_screen_fail' : 'ui_term_fail'));
             return;
         }
-        let c = this.cons.get(node.id) || this.unpark(node);
+        const key = lineKey(node.id, line);
+        let c = this.cons.get(key) || this.unpark(node, line);
         if (!c) {
-            c = new Con(this, node);
+            c = new Con(this, node, line);
             c.titled = node.name;
-            this.cons.set(node.id, c);
+            this.cons.set(key, c);
         }
-        this.active = node.id;
+        this.active = key;
         c.unread = false;
         this.paintBadges(c);
         this.stage.call('closeOverlays');
@@ -1040,21 +1078,49 @@ export class Consoles {
     }
 
     /**
+     * Opens the next terminal of a node that has additional console lines: the first line not open in the views (one
+     * closed earlier comes back as it was). All open: the student is told.
+     *
+     * @param {object} node node of the model
+     */
+    openLine(node) {
+        for (let line = 1; line <= (node.extralines || 0); line++) {
+            if (!this.cons.has(lineKey(node.id, line))) {
+                this.open(node, line);
+                return;
+            }
+        }
+        this.toast(fill(this.s('ui_newterm_all'), node.name));
+    }
+
+    /**
+     * Closes every terminal of a node.
+     *
+     * @param {string} nodeId node id
+     */
+    closeNode(nodeId) {
+        [...this.cons.values()].filter(c => c.n.id === nodeId).forEach(c => this.close(c.key));
+    }
+
+    /**
      * Closes a console in the views. A terminal stays connected in the background, so that opening it again shows
      * the screen of the device as it was: a new connection to a node gets nothing until the device prints, and a
      * full-screen program (nano, less) would leave a black terminal. A screen (noVNC) redraws itself on connection
      * and is disconnected.
      *
-     * @param {string} nodeId Node of the console.
+     * @param {string} key Key of the console: the node id, or "<node id>#<line>" for an additional line.
      */
-    close(nodeId) {
-        const c = this.cons.get(nodeId);
+    close(key) {
+        const c = this.cons.get(key);
         if (!c) return;
         if (c.vnc || !c.conn || c.state === 'failed') c.dispose();
         else this.park(c);
-        this.cons.delete(nodeId);
-        this.stage.setBadge(nodeId, null);
-        if (this.active === nodeId) this.active = this.cons.size ? Array.from(this.cons.keys()).pop() : null;
+        this.cons.delete(key);
+        // The mark on the scheme stays while another terminal of the node is open.
+        const other = [...this.cons.values()].find(o => o.n.id === c.n.id);
+        if (other) this.paintBadges(other);
+        else this.stage.setBadge(c.n.id, null);
+        if (this.active === key) this.active = this.cons.size ? Array.from(this.cons.keys()).pop() : null;
         if (this.diving) {
             if (this.active) this.enterDive(this.cons.get(this.active));
             else this.exitDive(true);
@@ -1076,8 +1142,8 @@ export class Consoles {
         c.host.remove();
         if (c.win) c.win.remove();
         c.win = null;
-        this.parked.delete(c.n.id);
-        this.parked.set(c.n.id, c);
+        this.parked.delete(c.key);
+        this.parked.set(c.key, c);
         while (this.parked.size > PARK_MAX) {
             const [id, old] = this.parked.entries().next().value;
             this.parked.delete(id);
@@ -1089,16 +1155,18 @@ export class Consoles {
      * Brings back a terminal closed earlier, still connected.
      *
      * @param {object} node node of the model
+     * @param {number} [line] console line of the node
      * @returns {Con|null} the console, or null when none is kept for the node
      */
-    unpark(node) {
-        const c = this.parked.get(node.id);
+    unpark(node, line = 0) {
+        const key = lineKey(node.id, line);
+        const c = this.parked.get(key);
         if (!c) return null;
-        this.parked.delete(node.id);
+        this.parked.delete(key);
         c.parked = false;
         c.n = node;
         c.titled = node.name;
-        this.cons.set(node.id, c);
+        this.cons.set(key, c);
         // The bar and the font may have changed while the terminal was hidden.
         c.renderQuick();
         c.applyFont();
@@ -1121,8 +1189,8 @@ export class Consoles {
      * @param {Map} statuses node id → status
      */
     updateNodes(statuses) {
-        [this.cons, this.parked].forEach(map => map.forEach((c, id) => {
-            if (c.conn) c.conn.nodeChanged(statuses.get(id) || null);
+        [this.cons, this.parked].forEach(map => map.forEach(c => {
+            if (c.conn) c.conn.nodeChanged(statuses.get(c.n.id) || null);
         }));
     }
 
@@ -1132,9 +1200,9 @@ export class Consoles {
     refreshNames() {
         const base = this.stage.base;
         let changed = false;
-        this.cons.forEach((c, id) => {
+        this.cons.forEach(c => {
             // The scheme is loaded again now and then: the node of a console is a new object then.
-            const fresh = base && base.nodes.get(id);
+            const fresh = base && base.nodes.get(c.n.id);
             if (fresh) c.n = fresh;
             if (c.titled !== c.n.name) {
                 c.titled = c.n.name;
@@ -1149,10 +1217,10 @@ export class Consoles {
     /* ---------------- state of a console on the screen ---------------- */
 
     isVisible(c) {
-        if (this.stage.mobile) return this.diving && this.active === c.n.id;
+        if (this.stage.mobile) return this.diving && this.active === c.key;
         if (this.mode === 'grid') return true;
         if (this.mode === 'windows') return !c.min;
-        return !this.dockOff && this.active === c.n.id;
+        return !this.dockOff && this.active === c.key;
     }
 
     paintBadges(c) {
@@ -1162,7 +1230,7 @@ export class Consoles {
 
     paintState(c) {
         const cls = 'dotst ' + (STATE_DOT[c.state] || 'wait');
-        this.root.querySelectorAll(`[data-con="${CSS.escape(c.n.id)}"] .dotst`).forEach(d => { d.className = cls; });
+        this.root.querySelectorAll(`[data-con="${CSS.escape(c.key)}"] .dotst`).forEach(d => { d.className = cls; });
     }
 
     markFocus() {
@@ -1210,7 +1278,7 @@ export class Consoles {
 
     headHtml(c, buttons) {
         const kind = c.n.state === 'silhouette' ? this.s('ui_fog_unknown') : this.s('ui_cat_' + c.n.cat);
-        return `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span><span class="nm">${esc(c.n.name)}<small>${esc(kind.toLowerCase())}</small></span>`
+        return `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span><span class="nm">${esc(c.title)}<small>${esc(kind.toLowerCase())}</small></span>`
             + `${c.unread ? `<span class="unr" title="${esc(this.s('ui_new_output'))}"></span>` : ''}${buttons}`;
     }
 
@@ -1229,16 +1297,16 @@ export class Consoles {
         this.cons.forEach(c => {
             const t = hel('button', 'tab', tabs);
             t.type = 'button';
-            t.dataset.con = c.n.id;
+            t.dataset.con = c.key;
             t.setAttribute('role', 'tab');
-            t.setAttribute('aria-selected', String(c.n.id === this.active));
-            t.innerHTML = `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span>${esc(c.n.name)}${c.unread ? '<span class="unr"></span>' : ''}<span class="x" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</span>`;
+            t.setAttribute('aria-selected', String(c.key === this.active));
+            t.innerHTML = `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span>${esc(c.title)}${c.unread ? '<span class="unr"></span>' : ''}<span class="x" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</span>`;
             t.onclick = ev => {
                 if (ev.target.closest('[data-x]')) {
-                    this.close(c.n.id);
+                    this.close(c.key);
                     return;
                 }
-                this.active = c.n.id;
+                this.active = c.key;
                 c.unread = false;
                 this.paintBadges(c);
                 this.renderPanel();
@@ -1396,8 +1464,8 @@ export class Consoles {
         this.box.dataset.rows = Math.ceil(n / cols);
         this.cons.forEach(c => {
             const t = hel('div', 'tile', this.grid);
-            t.dataset.id = c.n.id;
-            t.dataset.con = c.n.id;
+            t.dataset.id = c.key;
+            t.dataset.con = c.key;
             const hd = hel('div', 'thead', t);
             hd.innerHTML = this.headHtml(c, `<button type="button" data-max title="${esc(this.s('ui_maximize'))}">${ICON_MAX}</button><button type="button" data-x title="${esc(this.s('ui_close_console'))}">${ICON_X}</button>`);
             const b = hel('div', 'tbody', t);
@@ -1407,9 +1475,9 @@ export class Consoles {
                 if (!e.target.closest('button')) this.toggleMax(t);
             });
             hd.querySelector('[data-max]').onclick = () => this.toggleMax(t);
-            hd.querySelector('[data-x]').onclick = () => this.close(c.n.id);
+            hd.querySelector('[data-x]').onclick = () => this.close(c.key);
             t.addEventListener('pointerdown', () => {
-                this.active = c.n.id;
+                this.active = c.key;
                 this.markFocus();
             });
             c.attach(b);
@@ -1423,8 +1491,8 @@ export class Consoles {
         this.cons.forEach(c => {
             if (!c.win) {
                 const w = hel('div', 'win', layer);
-                w.dataset.id = c.n.id;
-                w.dataset.con = c.n.id;
+                w.dataset.id = c.key;
+                w.dataset.con = c.key;
                 c.win = w;
                 if (!c.wpos) {
                     const W = Math.min(620, r.width * 0.5), H = Math.min(300, r.height * 0.44);
@@ -1435,7 +1503,7 @@ export class Consoles {
                 const b = hel('div', 'tbody', w);
                 w.addEventListener('pointerdown', () => {
                     w.style.zIndex = ++this.zTop;
-                    this.active = c.n.id;
+                    this.active = c.key;
                     this.markFocus();
                 });
                 this.dragWin(c, hd);
@@ -1463,7 +1531,7 @@ export class Consoles {
             };
             c.win.querySelector('[data-x]').onclick = ev => {
                 ev.stopPropagation();
-                this.close(c.n.id);
+                this.close(c.key);
             };
             c.win.hidden = c.min;
             i++;
@@ -1484,7 +1552,7 @@ export class Consoles {
     focusOnTitle(c, hd) {
         hd.addEventListener('click', e => {
             if (e.target.closest('button')) return;
-            this.active = c.n.id;
+            this.active = c.key;
             this.markFocus();
             c.focus();
         });
@@ -1611,7 +1679,7 @@ export class Consoles {
             c.refit();
             c.focus();
         }, this.stage.reduced ? 0 : 270);
-        this.active = c.n.id;
+        this.active = c.key;
         this.markFocus();
     }
 
@@ -1620,7 +1688,7 @@ export class Consoles {
     enterDive(c) {
         if (!this.diving) this.preDive = {...this.stage.view};
         this.diving = true;
-        this.active = c.n.id;
+        this.active = c.key;
         c.unread = false;
         this.paintBadges(c);
         this.stage.markHinted();
@@ -1697,9 +1765,9 @@ export class Consoles {
             this.cons.forEach(c => {
                 const b = hel('button', 'dchip', box);
                 b.type = 'button';
-                b.dataset.con = c.n.id;
-                b.setAttribute('aria-pressed', String(c.n.id === this.active));
-                b.innerHTML = `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span>${esc(c.n.name)}${c.unread ? '<span class="unr"></span>' : ''}`;
+                b.dataset.con = c.key;
+                b.setAttribute('aria-pressed', String(c.key === this.active));
+                b.innerHTML = `<span class="dotst ${STATE_DOT[c.state] || 'wait'}"></span>${esc(c.title)}${c.unread ? '<span class="unr"></span>' : ''}`;
                 b.onclick = () => this.enterDive(c);
             });
             return;
@@ -1832,7 +1900,7 @@ export class Consoles {
         this.r('diveBack').onclick = () => this.exitDive(true);
         this.r('diveClose').onclick = () => {
             const c = this.cons.get(this.active);
-            if (c) this.close(c.n.id);
+            if (c) this.close(c.key);
         };
         // Pinching the sheet apart or together leaves it, like pinching the scheme out of a node.
         let d0 = 0;
@@ -1858,9 +1926,9 @@ export class Consoles {
     cycle(dir) {
         const list = Array.from(this.cons.values());
         if (list.length < 2) return;
-        const at = Math.max(0, list.findIndex(c => c.n.id === this.active));
+        const at = Math.max(0, list.findIndex(c => c.key === this.active));
         const c = list[(at + dir + list.length) % list.length];
-        this.active = c.n.id;
+        this.active = c.key;
         c.unread = false;
         this.paintBadges(c);
         if (this.stage.mobile) {
@@ -1880,7 +1948,7 @@ export class Consoles {
             c.win.style.zIndex = ++this.zTop;
         }
         if (spread) {
-            const el = this.mode === 'windows' ? c.win : this.root.querySelector(`.tile[data-id="${CSS.escape(c.n.id)}"]`);
+            const el = this.mode === 'windows' ? c.win : this.root.querySelector(`.tile[data-id="${CSS.escape(c.key)}"]`);
             spread.classList.remove('max');
             if (el) el.classList.add('max');
         }
@@ -1924,7 +1992,7 @@ export class Consoles {
      */
     afterMax(c) {
         if (c) {
-            this.active = c.n.id;
+            this.active = c.key;
             this.markFocus();
         }
         requestAnimationFrame(() => {

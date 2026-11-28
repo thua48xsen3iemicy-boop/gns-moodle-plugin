@@ -25,6 +25,9 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
           · режим наблюдателя: вывод идёт, ввод отбрасывается;
           · `?history=1` от браузера (новый терминал) уходит слоту: тот первым кадром отдаёт хвост прежнего вывода
             ноды (CONTRACTS.md §6.2); наблюдателю тоже;
+          · `?line=1…3` — дополнительная линия консоли ноды (ttyS1…ttyS3, CONTRACTS.md §6.4): уходит слоту в адресе,
+            кадры те же. Без параметра или `line=0` — основная консоль. Другое значение — 400 до траты билета,
+            `line` у `vnc` — 400 (билет уже потрачен: тип консоли знает только билет);
       - `vnc` (экран QEMU, в браузере noVNC): по соединению идёт сырой RFB. Двоичные кадры идут в обе стороны
         без изменений и без разбора, текстовые кадры браузера отбрасываются. Наблюдателю (`readonly`) экран
         тоже открыт, и его кадры идут к слоту так же: без них нет рукопожатия RFB и запросов экрана. «Только
@@ -38,7 +41,7 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
     (нода не готова, слот недоступен, неверный токен в GW_SLOTS);
   * WebSocket только с сайтов из GW_ALLOWED_ORIGINS: без этой настройки шлюз не запускается;
   * одна лаба не занимает весь шлюз: открытых консолей не больше GW_MAX_CONSOLES всего, GW_MAX_PER_PROJECT
-    на проект слота и GW_MAX_PER_NODE на ноду; неиспользованных билетов не больше GW_MAX_TICKETS_PER_PROJECT
+    на проект слота и GW_MAX_PER_NODE на линию консоли ноды; неиспользованных билетов не больше GW_MAX_TICKETS_PER_PROJECT
     на проект (иначе выдача — 429). Сверх предела браузер получает 4001, как при недоступном слоте:
     плагин переподключается с паузой 1 → 30 с. Рукопожатие со слотом ограничено GW_HANDSHAKE_TIMEOUT
     секундами, открытая консоль живёт сколько угодно.
@@ -56,7 +59,7 @@ plugin/docs/MANAGER_REQUESTS.md §12, менять их только через 
 `console` необязательно: "telnet" (по умолчанию) или "vnc"; любое другое значение — 400.
 Билет активности: {"slot", "project_id", "activity": true, "who"} — без nodes, только для /console/activity.
 
-Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>[&history=1]
+Браузер подключается к  wss://<шлюз>/console/<node_id>?ticket=<билет>[&history=1][&line=1…3]
                и к      wss://<шлюз>/console/activity?ticket=<билет активности>
 """
 import asyncio
@@ -136,8 +139,19 @@ class Tickets:
         return g if g and g["exp"] > time.time() else None
 
 
+LINES = {"1": 1, "2": 2, "3": 3}  # additional console lines of a node (CONTRACTS.md §6.4); 0 is the node's console
+
+
+def console_line(value) -> int | None:
+    """The line of `?line=`: 0 without it or for "0", 1..3 as written, None for anything else."""
+    if value is None or value == "0":
+        return 0
+    return LINES.get(value)
+
+
 class Limits:
-    """Open consoles: in total, per project of a slot and per node. Checked and counted in one step (no await)."""
+    """Open consoles: in total, per project of a slot and per console line of a node (CONTRACTS.md §6, §6.4).
+    Checked and counted in one step (no await)."""
 
     def __init__(self):
         self.total = 0
@@ -151,7 +165,7 @@ class Limits:
         if self.projects.get(project, 0) >= MAX_PER_PROJECT:
             return "too many consoles of the lab"
         if self.nodes.get(node, 0) >= MAX_PER_NODE:
-            return "too many consoles of the node"
+            return "too many consoles of the node's line"
         self.total += 1
         self.projects[project] = self.projects.get(project, 0) + 1
         self.nodes[node] = self.nodes.get(node, 0) + 1
@@ -318,12 +332,18 @@ async def console(request: web.Request):
         # Before the ticket is spent and before the slot is called: a plain HTTP request costs nothing.
         raise web.HTTPBadRequest(text="нужен WebSocket")
     node_id = canonical_uuid(request.match_info["node_id"])
+    line = console_line(request.query.get("line"))
+    if line is None:
+        raise web.HTTPBadRequest(text="неверная линия консоли")  # before the ticket is spent
     g = request.app["tickets"].take(request.query.get("ticket", ""))
     if not g or node_id not in g["nodes"]:
         raise web.HTTPForbidden(text="билет недействителен")
+    if line and g["console"] == "vnc":
+        raise web.HTTPBadRequest(text="у экрана нет линий")
 
     slot = g["slot"]
-    project, node = (slot, g["project_id"]), (slot, g["project_id"], node_id)
+    # The node's limit counts per line: four terminals of the owner and two of a teacher on one node fit.
+    project, node = (slot, g["project_id"]), (slot, g["project_id"], node_id, line)
     limits: Limits = request.app["limits"]
     refused = limits.acquire(project, node)
     if refused:
@@ -332,19 +352,24 @@ async def console(request: web.Request):
         log.warning("консоль не открыта: %s %s/%s (%s)", g["who"], slot, node_id, refused)
         return browser
     try:
-        return await relay(request, browser, g, node_id)
+        return await relay(request, browser, g, node_id, line)
     finally:
         limits.release(project, node)
 
 
-async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, node_id: str):
+async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, node_id: str, line: int = 0):
     """Connects to the slot, answers the browser and passes the frames; the slot connection never outlives it."""
     http: ClientSession = request.app["http"]
     slot = g["slot"]
     vnc = g["console"] == "vnc"
     url = f"{SLOT_SCHEME}://{slot}:{SLOT_PORT}/v1/console/{g['project_id']}/{node_id}"
+    query = []
+    if line:
+        query.append(f"line={line}")  # an additional console line of the node (CONTRACTS.md §6.4)
     if not vnc and request.query.get("history") == "1":
-        url += "?history=1"  # a new terminal asks for the tail of the output (CONTRACTS.md §6.2)
+        query.append("history=1")  # a new terminal asks for the tail of the output (CONTRACTS.md §6.2)
+    if query:
+        url += "?" + "&".join(query)
     up = None
     # The owner's console is shown to the watchers of the project while it relays (CONTRACTS.md §6.3).
     activity: Activity = request.app["activity"]
@@ -375,7 +400,7 @@ async def relay(request: web.Request, browser: web.WebSocketResponse, g: dict, n
             return browser
         # A slot that knows lab-slot.2 takes the window size; vnc stays a raw RFB stream whatever it answers.
         control = not vnc and up.protocol == SLOT_PROTOCOL_2
-        log.info("консоль открыта: %s %s/%s%s%s", g["who"], slot, node_id,
+        log.info("консоль открыта: %s %s/%s%s%s%s", g["who"], slot, node_id, f" (линия {line})" if line else "",
                  " (vnc)" if vnc else "", " (наблюдатель)" if g["readonly"] else "")
         if not g["readonly"]:
             activity.opened(project, node_id)

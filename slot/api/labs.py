@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
-from api import disks, iol_nvram, uplink
+from api import disks, iol_nvram, lines, uplink
 from api.client import call, get_lifecycle
 from api.models import CPU_PATTERN, DEFAULT_ADAPTER_TYPE, DeployTicket, NodeSpec
 
@@ -78,6 +78,9 @@ def node_payload(spec: NodeSpec, node_id: str):
         # QEMU merges several -machine options, so the type of the ticket and those properties coexist.
         if spec.machine is not None:
             options = f"{options} -machine type={spec.machine}".strip()
+        # Additional console lines (CONTRACTS.md 6.4): one chardev socket and ISA serial port per line, ttyS1..ttyS3.
+        if spec.extra_consoles:
+            options = f"{options} {lines.options(node_id, spec.extra_consoles)}".strip()
         common.update(
             console_type=spec.console,
             properties={
@@ -143,6 +146,15 @@ def require_disks(ticket: DeployTicket):
         )
 
 
+def require_lines(ticket: DeployTicket):
+    """A ticket with extra_consoles needs the `extra-consoles` feature of this slot: 422, nothing is created."""
+    if any(node.extra_consoles for node in ticket.nodes) and not lines.enabled():
+        raise HTTPException(
+            422,
+            f"extra_consoles need the extra-consoles feature of the slot: a directory {lines.SERIAL_DIR} of gns3",
+        )
+
+
 def require_uefi(ticket: DeployTicket):
     """A ticket with firmware "uefi" needs the `qemu-uefi` feature of this slot: 422, nothing is created."""
     if any(node.firmware == "uefi" for node in ticket.nodes) and not uefi_enabled():
@@ -183,6 +195,7 @@ async def create_project(request: Request, ticket: DeployTicket):
         )
     require_uplink(ticket)
     require_disks(ticket)
+    require_lines(ticket)
     require_uefi(ticket)
     prepared = [(node, node_payload(node, str(uuid4()))) for node in ticket.nodes]
     cloud = None
@@ -290,6 +303,7 @@ async def topology(request: Request, project_id: UUID):
 async def deploy(request: Request, ticket: DeployTicket):
     require_uplink(ticket)
     require_disks(ticket)
+    require_lines(ticket)
     require_uefi(ticket)
     return get_lifecycle(request).submit(
         "deploy", ticket=ticket, key=request.headers.get("Idempotency-Key")

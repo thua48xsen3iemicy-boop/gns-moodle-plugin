@@ -686,7 +686,7 @@ systemctl daemon-reload
 . /etc/os-release
 [ "$VERSION_ID" = 24.04 ] || echo "WARNING: Ubuntu $VERSION_ID, Lab Slot expects 24.04"
 python3 -c "import sys; sys.exit(sys.version_info[:2] != (3, 12))" || echo "WARNING: python3 is not 3.12"
-for p in /opt/gns3/images/QEMU /opt/gns3/images/IOU /opt/gns3/qga /dev/kvm /dev/net/tun; do
+for p in /opt/gns3/images/QEMU /opt/gns3/images/IOU /opt/gns3/qga /opt/gns3/serial /dev/kvm /dev/net/tun; do
   [ -e "$p" ] || echo "WARNING: $p is missing"
 done
 systemctl is-enabled gns3.service >/dev/null 2>&1 || echo "WARNING: gns3.service is not enabled"
@@ -1277,7 +1277,7 @@ usermod -aG kvm gns3
 # Mount points of the agent (code, student directory, images) and the local GNS3 directories.
 install -d -m 0755 /srv/gns3-ro/slot /opt/gns3 /opt/gns3/projects /opt/gns3/images \
   /opt/gns3/images/QEMU /opt/gns3/images/IOU /etc/gns3
-install -d -o gns3 -g gns3 -m 0700 /opt/gns3/qga
+install -d -o gns3 -g gns3 -m 0700 /opt/gns3/qga /opt/gns3/serial
 install -d -o gns3 -g gns3 -m 0750 /var/lib/gns3/configs /var/lib/gns3/appliances /var/lib/gns3/symbols
 
 python3.12 -m venv --clear /opt/gns3-server

@@ -80,6 +80,41 @@ final class lab_definition_test extends \basic_testcase {
         lab_definition::from_json(json_encode($raw), 'Paste');
     }
 
+    public function test_closed_console_stays_in_moodle(): void {
+        $raw = ['nodes' => [['name' => 'R1', 'image' => 'cisco-iou-l3', 'x' => 0, 'y' => 0, 'noconsole' => true],
+            ['name' => 'WS1', 'image' => 'debian12', 'x' => 100, 'y' => 0, 'noconsole' => false]], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'SSH');
+        $this->assertTrue($def['nodes'][0]['noconsole']);
+        $this->assertArrayNotHasKey('noconsole', $def['nodes'][1], 'only true is kept');
+        $this->assertSame(['R1'], lab_definition::closed_names($def));
+
+        $sent = lab_definition::for_manager($def);
+        $this->assertArrayNotHasKey('noconsole', $sent['nodes'][0], 'the lab manager refuses unknown fields');
+
+        $data = lab_definition::to_topology($def, []);
+        $this->assertTrue($data->topology->nodes[0]['noconsole']);
+        $this->assertArrayNotHasKey('noconsole', $data->topology->nodes[1]);
+        lab_definition::allow_paste($data);
+        $this->assertArrayNotHasKey('noconsole', $data->topology->nodes[0], 'a teacher or an author keeps the console');
+
+        $raw['nodes'][1]['noconsole'] = 'yes';
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode($raw), 'SSH');
+    }
+
+    public function test_extra_consoles_go_to_the_manager(): void {
+        $raw = ['nodes' => [['name' => 'WS1', 'image' => 'debian12', 'x' => 0, 'y' => 0, 'extra_consoles' => 3],
+            ['name' => 'WS2', 'image' => 'debian12', 'x' => 100, 'y' => 0, 'extra_consoles' => 0]], 'links' => []];
+        $def = lab_definition::from_json(json_encode($raw), 'Lines');
+        $this->assertSame(3, $def['nodes'][0]['extra_consoles']);
+        $this->assertArrayNotHasKey('extra_consoles', $def['nodes'][1], '0 is no field, as at the manager');
+        $this->assertSame(3, lab_definition::for_manager($def)['nodes'][0]['extra_consoles'], 'a field of the manager');
+
+        $raw['nodes'][1]['extra_consoles'] = 4;
+        $this->expectException(\moodle_exception::class);
+        lab_definition::from_json(json_encode($raw), 'Lines');
+    }
+
     public function test_icon_stays_in_moodle(): void {
         $raw = ['nodes' => [['name' => 'PC1', 'image' => 'debian12', 'x' => 0, 'y' => 0, 'icon' => 'router'],
             ['name' => 'PC2', 'image' => 'debian12', 'x' => 100, 'y' => 0, 'icon' => '']], 'links' => []];

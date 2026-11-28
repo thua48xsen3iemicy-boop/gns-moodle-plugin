@@ -2525,6 +2525,10 @@ body.gns3lab-fullscreen {
 .gns3lab-student .snipbtn.open i {
     transform: translateY(-1px) rotate(45deg);
 }
+/* Another terminal of a node with additional console lines (consoles.js openLine); hidden on other nodes. */
+.gns3lab-student .snipbtn.newterm[hidden] {
+    display: none;
+}
 .gns3lab-student .snips {
     flex: 1;
     min-width: 0;
