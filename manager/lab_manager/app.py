@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import VERSION, checks as checks_mod, labdef
+from . import VERSION, checks as checks_mod, labdef, labs as labs_mod
 from .derived import DerivedImages, register_routes
 from .agent_client import AgentClient, AgentError, start_budget_warnings
 from .db import latest_version, make_pool, schema_version
@@ -27,7 +27,7 @@ from .ownership import command_scope
 from .proxmox import PveClient
 from .slot_client import GatewayClient, SlotClient, SlotError
 from .storage import StorageError, student_key, authoring_key
-from .store import Store, CaptureConflict, Fenced, WorkspacePurging
+from .store import LIVE, Store, CaptureConflict, Fenced, WorkspacePurging
 from .purge import Purges
 from .maintenance import Maintenance
 
@@ -63,10 +63,23 @@ class SessionCreate(Strict):
     course_id: int | None = Field(default=None, ge=0)
     options: SessionOptions | None = None
     client: ClientInfo | None = None
+    checks: dict | None = None  # gns3lab.checks/1 of the activity (CONTRACTS 2.9), not part of lab_def
 
 
 class LabValidate(Strict):
     lab: dict
+
+
+class ChecksValidate(Strict):
+    """CONTRACTS 2.9, POST /checks/validate: an activity's document against a lab (exactly one of lab and lab_ref)."""
+    lab: dict | None = None
+    lab_ref: str | None = Field(default=None, min_length=1, max_length=64)
+    checks: dict
+
+
+class ChecksDefinition(Strict):
+    """CONTRACTS 2.9, PUT /sessions/{id}/checks-definition: the activity's document, null for the lab's own."""
+    checks: dict | None
 
 
 class TicketRequest(Strict):
@@ -306,6 +319,11 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             body["mode"] = s["mode"]
         if maintenance and maintenance["state"] != "off":
             body["maintenance"] = maintenance  # CONTRACTS 2.11
+        if "checks_def" in s:  # CONTRACTS 2.3: which description the session is checked by (2.9)
+            body["checks_def"] = s["checks_def"]
+            body["checks_source"] = "activity" if s["checks"] is not None or s["checks_error"] else "lab"
+            if s["checks_error"]:
+                body["checks_error"] = s["checks_error"]
         return body
 
     async def present(s):
@@ -313,7 +331,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         body = summary(s, await services.maintenance.public_state())
         body["features"] = ["consoles"] if s["status"] == "running" else []
         if s["status"] == "running" and s["facts_polled_at"] is not None:
-            body["features"] += ["facts", "checks"]  # The slot of this session serves facts (CONTRACTS 2.7, 2.9)
+            body["features"] += ["facts"]  # The slot of this session serves facts (CONTRACTS 2.7)
+            if not s["checks_error"]:
+                body["features"] += ["checks"]  # CONTRACTS 2.9: not with a document of the activity that does not fit
         if s["status"] == "running" and s["topology"]:
             body["topology"] = s["topology"]
             body["nodes"], stale = await services.orchestrator.live_nodes(s)
@@ -376,6 +396,28 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         except labdef.LabInvalid as exc:
             raise ApiError(422, "lab_invalid", "The lab definition is invalid", problems=exc.problems) from exc
 
+    async def fit_checks(raw, *, checked=None, definition=None, lab=None, site_slug):
+        """(normalized, problems) of an activity's gns3lab.checks/1 against a lab: a definition of Moodle (checked or
+        stored) or a catalog lab. The images are the site's catalog, as when the lab itself is checked."""
+        if lab is not None:
+            return labs_mod.check_checks(raw, lab)
+        return labdef.check_checks(raw, checked.definition if checked else definition,
+                                   await services.derived.catalog(site_slug))
+
+    async def lab_of(s):
+        """(stored definition, catalog lab) of a session: one of the two is None."""
+        if s["lab_def"]:
+            return (await store.workspace(s["workspace_id"]))["definition"], None
+        try:
+            return None, await asyncio.to_thread(services.catalog.get, s["lab_ref"])
+        except LabNotFound as exc:
+            raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
+        except LabError as exc:
+            raise ApiError(409, "lab_invalid", str(exc)) from exc
+
+    def checks_invalid(problems):
+        return ApiError(422, "checks_invalid", "The checks do not fit the lab", problems=problems)
+
     @app.get("/api/v1/info")
     async def info(site=Depends(site_of)):
         # resume: the next session continues the project; checks: CONTRACTS 2.9
@@ -385,7 +427,10 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         # forecast: POST /forecasts, the teacher's mark from the facts alone (CONTRACTS 2.9a)
         # live-sessions: GET /live-sessions, every live session of the site for its administrator (CONTRACTS 2.13)
         # console-activity: POST /sessions/{id}/activity-tickets, the owner's consoles for an observer (CONTRACTS 6.3)
+        # activity-checks: the activity's own gns3lab.checks/1 outside the lab: POST /checks/validate, `checks` of
+        # POST /sessions, PUT /sessions/{id}/checks-definition (CONTRACTS 2.9)
         features = ["consoles", "observer", "resume", "facts", "checks", "check-scripts", "check-script-needs", "forecast",
+                    "activity-checks",
                     "purge",
                     "maintenance", "iso", "live-sessions", "console-activity"]
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
@@ -420,6 +465,26 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def validate_lab(body: LabValidate, site=Depends(site_of)):
         checked = await check_lab(body.lab, site)
         return {"lab_def": checked.lab_def, "resources": checked.resources, "warnings": list(checked.warnings)}
+
+    @app.post("/api/v1/checks/validate")
+    async def validate_checks(body: ChecksValidate, site=Depends(site_of)):
+        """CONTRACTS 2.9: an activity's document against the lab it is meant for; nothing is stored."""
+        if (body.lab is None) == (body.lab_ref is None):
+            raise ApiError(400, "invalid_request", "Exactly one of lab_ref and lab is required")
+        checked, lab = None, None
+        if body.lab is not None:
+            checked = await check_lab(body.lab, site)
+        else:
+            try:
+                lab = await asyncio.to_thread(services.catalog.get, body.lab_ref)
+            except LabNotFound as exc:
+                raise ApiError(404, "lab_not_found", "Unknown lab_ref") from exc
+            except LabError as exc:
+                raise ApiError(409, "lab_invalid", str(exc)) from exc
+        normalized, problems = await fit_checks(body.checks, checked=checked, lab=lab, site_slug=site.slug)
+        if problems:
+            raise checks_invalid(problems)
+        return {"checks_def": checks_mod.digest(normalized), "warnings": []}
 
     @app.get("/api/v1/labs")
     async def list_labs(site=Depends(site_of)):
@@ -490,6 +555,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             raise ApiError(400, "unsupported_field", "Authoring is unavailable")
         if (body.lab_ref is None) == (body.lab is None):
             raise ApiError(400, "invalid_request", "Exactly one of lab_ref and lab is required")
+        if authoring and body.checks is not None:
+            raise ApiError(400, "invalid_request", "An authoring session has no activity and no checks of one")
         # A definition is checked (and hashed) even for a repeated POST: lab_def identifies the lab.
         checked = await check_lab(body.lab, site) if body.lab is not None else None
         lab_def = checked.lab_def if checked else None
@@ -507,6 +574,14 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if existing:
             if not same(existing):
                 raise conflict(existing)
+            if body.checks is not None:
+                # The activity's checks follow it to the live lab; a document that does not fit is not applied.
+                definition, catalog_lab = (None, None) if checked else await lab_of(existing)
+                normalized, problems = await fit_checks(body.checks, checked=checked, definition=definition,
+                                                        lab=catalog_lab, site_slug=site.slug)
+                if not problems and checks_mod.digest(normalized) != existing["checks_def"]:
+                    existing = await store.set_checks(existing["id"], checks=normalized,
+                                                      checks_def=checks_mod.digest(normalized)) or existing
             return JSONResponse(status_code=200, content=await present(existing))  # options not re-applied
         await refuse_in_maintenance()  # CONTRACTS 2.11: no new lab once maintenance is announced
         try:
@@ -530,11 +605,22 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         if authoring:
             max_duration = min(requested or settings.authoring_max_duration, settings.authoring_max_duration)
         image_map = await site_images(site) if checked else {}
+        # Which description the session is checked by (CONTRACTS 2.9): the activity's, else the lab's own. A document
+        # of the activity that does not fit the lab does not stop the lab: the session has no checks then.
+        checks, checks_error = None, None
+        checks_def = checks_mod.digest(checked.definition.get("checks") if checked else lab.checks)
+        if body.checks is not None:
+            normalized, problems = await fit_checks(body.checks, checked=checked, lab=lab, site_slug=site.slug)
+            if problems:
+                checks_def, checks_error = None, {"code": "checks_invalid", "problems": problems}
+            else:
+                checks, checks_def = normalized, checks_mod.digest(normalized)
         s, created = await store.create_session(
             site=site.slug, user_id=body.user_id, instance_id=body.instance_id,
             course_id=body.course_id, lab_ref=body.lab_ref, max_duration=max_duration,
             student_key=key, resources=resources, mode=mode, library_lab_id=body.library_lab_id,
             lab_def=lab_def, definition=checked.definition if checked else None,
+            checks=checks, checks_def=checks_def, checks_error=checks_error,
             ticket_factory=lambda pid, name: (
                 labdef.deploy_ticket(checked.definition, image_map, project_id=pid, project_name=name)
                 if checked else deploy_ticket(lab, project_id=pid, project_name=name)),
@@ -615,6 +701,9 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         s = await own_session(session_id, site)
         if s["status"] != "running":
             raise ApiError(409, "session_not_running", "Session is not running")
+        if s["checks_error"]:
+            raise ApiError(409, "checks_invalid", "The checks of the activity do not fit the lab",
+                           problems=s["checks_error"].get("problems", []))
         try:
             grading = checks_mod.normalize_grading(body.grading.model_dump(exclude_none=True) if body.grading else None)
         except ValueError as exc:
@@ -627,6 +716,32 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                           {"run_id": run["id"], "user_id": body.requested_by_user_id})
         services.orchestrator.wake()
         return JSONResponse(status_code=202, content=present_run(run))
+
+    @app.put("/api/v1/sessions/{session_id}/checks-definition")
+    async def put_checks_definition(session_id: str, body: ChecksDefinition, site=Depends(site_of)):
+        """CONTRACTS 2.9: an edit of the activity's checks reaches a live lab. Checked against the lab of this session,
+        which may be an earlier version than the activity's: a document that does not fit leaves it as it was."""
+        s = await own_session(session_id, site)
+        if s["status"] not in LIVE:
+            raise ApiError(409, "session_not_running", "Session is not running")
+        if s.get("mode") == "authoring":
+            raise ApiError(400, "invalid_request", "An authoring session has no activity and no checks of one")
+        definition, catalog_lab = await lab_of(s)
+        if body.checks is None:
+            normalized = None
+            checks_def = checks_mod.digest(definition.get("checks") if definition is not None else catalog_lab.checks)
+        else:
+            normalized, problems = await fit_checks(body.checks, definition=definition, lab=catalog_lab,
+                                                    site_slug=site.slug)
+            if problems:
+                raise checks_invalid(problems)
+            checks_def = checks_mod.digest(normalized)
+        updated = await store.set_checks(s["id"], checks=normalized, checks_def=checks_def)
+        if updated is None:
+            raise ApiError(409, "session_not_running", "Session is not running")
+        await store.event(s["id"], s["slot_vmid"], "checks_replaced",
+                          {"checks_def": checks_def, "source": "activity" if normalized is not None else "lab"})
+        return {"checks_def": checks_def, "checks_source": "activity" if normalized is not None else "lab"}
 
     @app.get("/api/v1/sessions/{session_id}/checks")
     async def list_checks(session_id: str, site=Depends(site_of)):

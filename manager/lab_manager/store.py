@@ -139,7 +139,8 @@ class Store:
 
     # ------------------------------------------------------------------ sessions
     async def create_session(self, *, site, user_id, instance_id, course_id, lab_ref, max_duration,
-                             student_key, resources, lab_def=None, definition=None, ticket_factory=None, mode=None, library_lab_id=None):
+                             student_key, resources, lab_def=None, definition=None, ticket_factory=None, mode=None, library_lab_id=None,
+                             checks=None, checks_def=None, checks_error=None):
         """Returns (session, created). Idempotent: an existing live session is returned as is.
 
         The lab is either lab_ref (catalog) or lab_def with its normalized definition (Moodle).
@@ -200,11 +201,15 @@ class Store:
                     await conn.execute(
                         "INSERT INTO sessions (id, site, user_id, instance_id, course_id, lab_ref, lab_def,"
                         " workspace_id, student_key, project_id, project_name, resources,"
-                        " status, stage, status_message, max_duration, mode, library_lab_id)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s, %s, %s)",
+                        " status, stage, status_message, max_duration, mode, library_lab_id,"
+                        " checks, checks_def, checks_error)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 'wait_slot', %s, %s, %s, %s,"
+                        " %s, %s, %s)",
                         (sid, site, user_id, instance_id, course_id, lab_ref, lab_def, ws["id"], student_key,
                          project_id, name, Jsonb(snapshot) if snapshot else None,
-                         "Ожидание свободного слота…", max_duration, mode, library_lab_id),
+                         "Ожидание свободного слота…", max_duration, mode, library_lab_id,
+                         Jsonb(checks) if checks is not None else None, checks_def,
+                         Jsonb(checks_error) if checks_error is not None else None),
                     )
                     await self._event(conn, sid, None, "session_created", {"lab_ref": lab_ref, "lab_def": lab_def})
                 return await self.session(sid), True
@@ -616,6 +621,19 @@ class Store:
             cur = await conn.execute("SELECT id, status, forecast, forecast_rev, forecast_at FROM sessions"
                                      " WHERE site = %s AND id = ANY(%s)", (site, list(sids)))
             return await cur.fetchall()
+
+    async def set_checks(self, sid, *, checks, checks_def):
+        """Replace the description a live session is checked by (CONTRACTS 2.9, activity checks); clears an error.
+
+        checks: the activity's normalized document, or None for the lab's own. Returns the session, or None if it is
+        no longer live. Not fenced: the orchestrator never writes these columns.
+        """
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "UPDATE sessions SET checks = %s, checks_def = %s, checks_error = NULL"
+                " WHERE id = %s AND status = ANY(%s) RETURNING *",
+                (Jsonb(checks) if checks is not None else None, checks_def, sid, list(LIVE)))
+            return await cur.fetchone()
 
     async def request_facts_refresh(self, sid, min_gap=10):
         """The plugin asked for a collection now. A request within min_gap seconds of the last is merged."""

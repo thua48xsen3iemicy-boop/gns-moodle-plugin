@@ -1844,9 +1844,12 @@ def run_checks(*, topology: dict, state: dict, statuses: dict, definition: dict 
 
 # ---------------------------------------------------------------------- forecast (CONTRACTS 2.9a)
 
-def forecast_basis(rules: list, findings: list, checks: dict | None) -> dict:
-    """What a forecast keeps of an assessment: graded later by forecast() under the grading of the activity."""
-    return {"rules": rules,
+def forecast_basis(rules: list, findings: list, checks: dict | None, checks_def: str | None = None) -> dict:
+    """What a forecast keeps of an assessment: graded later by forecast() under the grading of the activity.
+
+    checks_def: the description of the session it was assessed by (`sessions.checks_def`); an edit reassesses it.
+    """
+    return {"rules": rules, "checks_def": checks_def,
             "findings": [{"id": f.id, "code": f.code, "message": f.message, "nodes": f.nodes, "ifaces": f.ifaces,
                           "caused_by": f.caused_by} for f in findings],
             "focus": list((checks or {}).get("focus") or []),
@@ -1862,7 +1865,7 @@ def forecast(basis: dict, grading: dict, *, details: bool = False) -> dict:
                 for f in basis["findings"]]
     result = grade(basis["rules"], findings, grading, {"focus": basis["focus"]})
     body = {"outcome": result["outcome"], "mark": mark_of(result["counts"], grading), "counts": result["counts"],
-            "scripts_ignored": basis["scripts"] > 0}
+            "scripts_ignored": basis["scripts"] > 0, "checks_def": basis.get("checks_def")}
     if details:
         body["findings"] = result["findings"]
     return body

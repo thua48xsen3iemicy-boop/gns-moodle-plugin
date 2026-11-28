@@ -1178,10 +1178,13 @@ class Orchestrator:
             return
         try:
             fresh = await self.store.session(sid)
-            if fresh is None or fresh["facts_rev"] == 0 or fresh["forecast_rev"] == fresh["facts_rev"]:
-                return
+            if fresh is None or fresh["facts_rev"] == 0 or fresh["checks_error"]:
+                return  # No facts yet, or the activity's checks do not fit the lab: nothing to assess by
+            if fresh["forecast_rev"] == fresh["facts_rev"] and (
+                    (fresh["forecast"] or {}).get("checks_def") == fresh["checks_def"]):
+                return  # Assessed already: the same snapshot by the same description (an edit reassesses it)
             self._forecast_next[sid] = mono + FORECAST_INTERVAL
-            definition, images, checks = await self._checks_of(s)
+            definition, images, checks = await self._checks_of(s, fresh)
             rows = await self.store.facts_rows(sid)
             nodes, _ = await self.live_nodes(s)
             statuses = {node_id: n["status"] for node_id, n in nodes.items()}
@@ -1194,7 +1197,8 @@ class Orchestrator:
                 checks_mod.assess, topology=s["topology"], state=state, statuses=statuses, definition=definition,
                 images=images, checks=checks, stale=stale, now=now(),
                 consoles={node_id: n.get("console_type") for node_id, n in nodes.items()})
-            await self.store.set_forecast(sid, checks_mod.forecast_basis(rules, findings, checks), fresh["facts_rev"])
+            await self.store.set_forecast(sid, checks_mod.forecast_basis(rules, findings, checks, fresh["checks_def"]),
+                                          fresh["facts_rev"])
         except (SlotOwnerLost, Fenced):
             raise
         except Exception:  # noqa: BLE001 - a forecast must never break the session
@@ -1211,16 +1215,23 @@ class Orchestrator:
             log.warning("Check %s: facts refresh failed: %s", run["id"], exc)
         self._facts_next[s["id"]] = time.monotonic() + 3  # Time for the slot to collect
 
-    async def _checks_of(self, s):
-        """(definition, images, checks) of the lab of a session: what its runs are graded by."""
+    async def _checks_of(self, s, fresh=None):
+        """(definition, images, checks) of the lab of a session: what its runs are graded by.
+
+        checks: the document the activity sent (CONTRACTS 2.9, activity checks), else the lab's own. `fresh` is the
+        session row just read; without it the row is read again, so an edit sent a moment ago is not missed.
+        """
+        fresh = fresh or await self.store.session(s["id"]) or s
         definition, images, checks = None, {}, None
         if s["lab_def"]:
             ws = await self.store.workspace(s["workspace_id"])
             definition = ws["definition"]
             images = await self.derived.catalog(s["site"]) if self.derived else dict(self.settings.images or {})
             checks = definition.get("checks")
-        else:
+        elif fresh.get("checks") is None:
             checks = (await asyncio.to_thread(self.catalog.get, s["lab_ref"])).checks
+        if fresh.get("checks") is not None:
+            checks = fresh["checks"]
         return definition, images, checks
 
     async def _finish_check(self, s, run, rows, statuses, stale, nodes, lab, scripts=None, nonce=None):

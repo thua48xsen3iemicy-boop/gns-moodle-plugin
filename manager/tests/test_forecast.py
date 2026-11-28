@@ -81,8 +81,12 @@ async def test_a_bad_request_is_refused(tmp_path, dsn):
 
 
 def test_scripts_are_named_but_not_graded():
-    basis = checks_mod.forecast_basis([], [], {"focus": [], "scripts": [{"id": "a"}]})
+    basis = checks_mod.forecast_basis([], [], {"focus": [], "scripts": [{"id": "a"}]}, "sha256:ab")
     grading = checks_mod.normalize_grading(None)
     assert checks_mod.forecast(basis, grading) == {
         "outcome": "graded", "mark": grading["thresholds"][0]["mark"],
-        "counts": {"critical": 0, "major": 0, "minor": 0, "note": 0}, "scripts_ignored": True}
+        "counts": {"critical": 0, "major": 0, "minor": 0, "note": 0}, "scripts_ignored": True,
+        "checks_def": "sha256:ab"}
+    # A basis kept before the description was recorded (manager 0.38) names none.
+    del basis["checks_def"]
+    assert checks_mod.forecast(basis, grading)["checks_def"] is None

@@ -304,15 +304,9 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
 
     out_checks = None
     if fmt == FORMAT_2 and "checks" in lab:
-        script_nodes = {}
-        for name, node in by_name.items():
-            image = images.get(node.get("image"))
-            if image is not None:
-                script_nodes[name] = {"ok": image.kind == "qemu" and image.qga and image.uplink_port is None,
-                                      "family": scripts_mod.family_of(image.net_config)}
         out_checks, found = checks_mod.check_definition(
             lab["checks"], {n.get("name") for n in nodes if isinstance(n, dict) and isinstance(n.get("name"), str)},
-            script_nodes=script_nodes)
+            script_nodes=script_nodes(by_name.values(), images))
         problems.extend(found)
 
     if problems:
@@ -343,6 +337,27 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
                 warn(f"nodes[{i}].name", "hostname_not_set",
                      "not an IOS hostname (a letter first, then letters, digits and '-', 63 characters at most)")
     return LabDef(lab_def_of(definition), definition, resources, tuple(warnings))
+
+
+def script_nodes(nodes, images: dict) -> dict:
+    """Node name -> {"ok", "family"}: the nodes a teacher's script may run on (CONTRACTS 2.9 `scripts`)."""
+    out = {}
+    for node in nodes:
+        image = images.get(node.get("image")) if isinstance(node, dict) else None
+        if image is not None and isinstance(node.get("name"), str):
+            out[node["name"]] = {"ok": image.kind == "qemu" and image.qga and image.uplink_port is None,
+                                 "family": scripts_mod.family_of(image.net_config)}
+    return out
+
+
+def check_checks(raw, definition: dict, images: dict):
+    """(normalized, problems) of a `gns3lab.checks/1` document of an activity against a normalized definition.
+
+    The document is not part of the definition (CONTRACTS 2.9, activity checks): it is checked against the nodes of
+    the lab it is used with. A node whose image left the catalog takes no script.
+    """
+    return checks_mod.check_definition(raw, {n["name"] for n in definition["nodes"]},
+                                       script_nodes=script_nodes(definition["nodes"], images))
 
 
 def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_name: str) -> dict:
