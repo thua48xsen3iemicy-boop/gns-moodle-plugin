@@ -12,6 +12,7 @@ labels and texts stay in Moodle; node parameters that are not the teacher's (ima
 disk interface, CLI prompt, provisioning) come from the image catalog only.
 
 gns3lab.lab/2 is lab/1 plus `segments` (segments.py): the manager compiles them into the node setup of the ticket.
+It may also carry `checks` (checks.py) and the teacher's own setup steps `setup` (labsetup.py, after the segments).
 A lab/1 definition is normalized and hashed exactly as before.
 """
 
@@ -21,7 +22,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from . import ifnames, iosconfig, netconfig
+from . import ifnames, iosconfig, labsetup, netconfig
 from . import checks as checks_mod
 from . import scripts as scripts_mod
 from . import segments as segments_mod
@@ -36,7 +37,7 @@ MAX_NODES = 100  # DeployTicket of the slot
 MAX_LINKS = 1000
 COORD = 100_000
 TOP_KEYS = {"format", "title", "nodes", "links"}
-TOP_KEYS_2 = TOP_KEYS | {"segments", "checks"}
+TOP_KEYS_2 = TOP_KEYS | {"segments", "checks", "setup"}
 NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port", "random_ifnames", "disks"}
 ENDPOINT_KEYS = {"node", "adapter", "port"}
 CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "duplicate_name", "unknown_image",
@@ -51,7 +52,9 @@ CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "dup
          # lab/2, auto-checks (CONTRACTS 2.9)
          "unknown_rule", "group_overlap", "bad_range",
          # uplink node
-         "too_many_uplinks", "uplink_port_in_use")
+         "too_many_uplinks", "uplink_port_in_use",
+         # lab/2, the teacher's setup steps (docs/lab-setup/README.md §4)
+         "setup_node_unsupported", "shell_mismatch")
 
 
 class LabInvalid(ValueError):
@@ -309,6 +312,13 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
             script_nodes=script_nodes(by_name.values(), images))
         problems.extend(found)
 
+    out_setup = None
+    if fmt == FORMAT_2 and "setup" in lab:
+        out_setup = labsetup.check(
+            lab["setup"], nodes=labsetup.step_nodes(by_name.values(), images),
+            known={n.get("name") for n in nodes if isinstance(n, dict) and isinstance(n.get("name"), str)},
+            problem=problem)
+
     if problems:
         raise LabInvalid(problems)
     resources = resources_of(out_nodes, images, overhead_mb)
@@ -326,17 +336,60 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
         definition["segments"] = out_segments
     if out_checks is not None:
         definition["checks"] = out_checks
+    if out_setup:
+        # An empty list is no field: the lab_def of a lab without steps does not change.
+        definition["setup"] = out_setup
+    preset, configured = {}, set()
     if out_segments is not None:
         try:
-            segments_mod.setup(definition, images)  # The scripts and configurations must fit the slot's ticket
+            preset = segments_mod.setup(definition, images)  # The scripts and configurations must fit the slot's ticket
         except (netconfig.ScriptTooLarge, iosconfig.ConfigTooLarge) as exc:
             raise LabInvalid([{"path": "segments", "code": "too_large", "message": str(exc)}]) from exc
-        configured = segments_mod.ios_plans(definition, images)
+        configured = set(segments_mod.ios_plans(definition, images))
+    if out_setup:
+        setup_problems(definition, images, preset)
+        configured |= {n["name"] for n in out_nodes
+                       if images[n["image"]].kind == "iou" and n["name"] in labsetup.by_node(definition)}
+    if configured:
         for i, node in enumerate(out_nodes):  # Indexes of `nodes` as sent: every node is sound when we get here
             if node["name"] in configured and not iosconfig.hostname_ok(node["name"]):
                 warn(f"nodes[{i}].name", "hostname_not_set",
                      "not an IOS hostname (a letter first, then letters, digits and '-', 63 characters at most)")
     return LabDef(lab_def_of(definition), definition, resources, tuple(warnings))
+
+
+def setup_problems(definition: dict, images: dict, preset: dict):
+    """The final `nvram_config` of an IOL node and `startup_script` of a VPCS node with their steps must fit the slot
+    (docs/lab-setup/README.md §4): `too_large` at the last step of the node."""
+    problems = []
+    last = {step["node"]: i for i, step in enumerate(definition["setup"])}
+    steps = labsetup.by_node(definition)
+    for node in definition["nodes"]:
+        name, image = node["name"], images[node["image"]]
+        if name not in steps:
+            continue
+        if image.kind == "iou":
+            size = len(labsetup.ios_config(name, preset.get(name, {}).get("nvram_config"), steps[name]))
+            limit = labsetup.MAX_IOS_CONFIG
+        elif image.kind == "vpcs":
+            size = len(labsetup.vpcs_script(vpcs_base(image, preset.get(name, {})), steps[name]))
+            limit = labsetup.MAX_VPCS_SCRIPT
+        else:
+            continue
+        if size > limit:
+            problems.append({"path": f"setup[{last[name]}]", "code": "too_large",
+                             "message": f"the configuration of {name} would be {size} characters, at most {limit}"})
+    if problems:
+        raise LabInvalid(problems)
+
+
+def vpcs_base(image, preset: dict) -> str:
+    """`startup_script` of a VPCS node before its steps: the image's, then the address of its segment."""
+    text = image.slot.startup_script or ""
+    if "startup_line" in preset:
+        text = text.rstrip("\n")
+        text += ("\n" if text else "") + preset["startup_line"] + "\n"
+    return text
 
 
 def script_nodes(nodes, images: dict) -> dict:
@@ -367,6 +420,7 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
     """
     nodes = []
     setup = segments_mod.setup(definition, images) if definition.get("segments") else {}
+    steps = labsetup.by_node(definition)
     for node in definition["nodes"]:
         image = images[node["image"]]
         values = effective(node, image)
@@ -413,8 +467,18 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
             # nodes without it do not change (CONTRACTS 4.2).
             spec["nvram_config"] = preset["nvram_config"]
         if "startup_line" in preset:
-            options["startup_script"] = options.get("startup_script", "").rstrip("\n")
-            options["startup_script"] += ("\n" if options["startup_script"] else "") + preset["startup_line"] + "\n"
+            options["startup_script"] = vpcs_base(image, preset)
+        own = steps.get(node["name"])
+        if own and image.kind == "qemu":
+            # The teacher's steps after everything the manager sets up itself, in the order of `setup`.
+            family = scripts_mod.family_of(image.net_config)
+            options["provisioning"] = [*options.get("provisioning", []),
+                                       *({"command": labsetup.wrap(step, labsetup.shell_of(step, family)),
+                                          "timeout_seconds": step["timeout"]} for step in own)]
+        elif own and image.kind == "iou":
+            spec["nvram_config"] = labsetup.ios_config(node["name"], preset.get("nvram_config"), own)
+        elif own and image.kind == "vpcs":
+            options["startup_script"] = labsetup.vpcs_script(options.get("startup_script", ""), own)
         if not options.get("provisioning"):
             options.pop("provisioning", None)
         spec.update(options)

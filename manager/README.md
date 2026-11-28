@@ -1,4 +1,14 @@
-# Lab Manager — 0.39.0
+# Lab Manager — 0.40.0
+
+0.40.0: преднастрой преподавателя в лабе (CONTRACTS §2.6 «Преднастрой преподавателя», возможность `lab-setup`; проект —
+`docs/lab-setup/README.md`, этап 1). В `gns3lab.lab/2` новое поле `setup` — шаги на нодах: `run` у QEMU с гостевым агентом
+(скрипт `sh` или RouterOS, `ProvisionCommand` после встроенных команд), `config` у IOL (строки перед `end` в `nvram_config`) и
+VPCS (строки в конце `startup_script`). Шаги входят в `lab_def`; лаба без `setup` — билет прежний до байта. Сбой шага: обёртка
+менеджера кладёт метку `gns3lab-setup <id> exit <код>: <строка stderr>` последней строкой `stderr`, слот переносит её в текст
+ошибки, и сессия получает `SETUP_FAILED` (`retryable: false`) и поле `setup_error` вместо `SLOT_OPERATION_FAILED`. Срок ожидания
+первого запуска удлиняется на сумму `timeout` шагов. Слот, агент, шлюз и БД не меняются (миграции нет); плагин без
+`lab-setup` работает как раньше. На стенде: §12 проекта, через плагин с блоком «Преднастрой», до него — `curl` с секретом
+сайта: `POST /labs/validate` и `POST /sessions` с `lab`, где у Debian шаг `exit 3`.
 
 0.39.0: автопроверки — настройка активности курса, а не лабы (CONTRACTS §2.9 «Описание из активности», возможность
 `activity-checks`; проект — `docs/activity-checks/README.md`). Плагин присылает описание `gns3lab.checks/1` полем `checks` в

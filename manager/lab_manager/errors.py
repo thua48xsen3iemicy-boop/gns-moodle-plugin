@@ -33,6 +33,8 @@ SESSION_ERRORS: dict[str, bool] = {
     "NO_SLOTS": False,
     "PROJECT_MISSING": False,
     "STUDENT_DIR_BUSY": False,
+    # A step of the teacher's setup of the lab failed: the teacher fixes the lab (docs/lab-setup/README.md §6).
+    "SETUP_FAILED": False,
     # The agent holds the slot's `uncertain` mark: an operator reconciles it, the student's directory stays held.
     "SLOT_QUARANTINED": False,
 }

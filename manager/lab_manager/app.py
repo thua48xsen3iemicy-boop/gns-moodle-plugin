@@ -314,6 +314,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         }
         if s["progress"] is not None:
             body["progress"] = s["progress"]
+        if s["status"] == "failed" and (s["error"] or {}).get("setup_error"):
+            body["setup_error"] = s["error"]["setup_error"]  # CONTRACTS 2.3: the step of the lab's setup that failed
         if s.get("slot_vmid") is not None and s["status"] in ("starting", "running", "stopping"):
             body["slot_vmid"] = s["slot_vmid"]  # CONTRACTS 2.3: Proxmox VMID of the slot CT, for the student
         if s.get("mode"):
@@ -439,7 +441,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
         body = {"schema": "gns3lab.info/1", "version": VERSION, "session_schemas": ["gns3lab.session/1"],
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
-            features += ["images", "lab_definitions", "lab_constructor", "random_ifnames", "extra_disks"]
+            # lab-setup: the teacher's setup steps `setup` of gns3lab.lab/2 (CONTRACTS 2.6), SETUP_FAILED (2.5)
+            features += ["images", "lab_definitions", "lab_constructor", "lab-setup", "random_ifnames", "extra_disks"]
             body["lab_formats"] = list(labdef.FORMATS)
             body["limits"] = site.limits.public()
         if await services.derived.enabled():
