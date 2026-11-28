@@ -123,6 +123,8 @@ define([], function() {
                 nodeid: n.node_id,
                 status: nodeStatus[n.node_id] || 'stopped',
                 consoletype: n.console_type || 'none',
+                // ?lines=SRV1:2: additional console lines of a node (manager CONTRACTS §2.3, §6.4).
+                extralines: n.console_type === 'telnet' ? (cfg.lines || {})[n.name] || 0 : 0,
             })) : [],
             nodesstale: false,
             slotvmid: ['starting', 'running', 'stopping'].includes(session.status) ? 9012 : 0,
@@ -637,6 +639,12 @@ define([], function() {
                 === false && !revealed().some(i => i.nodeid === args.nodeid && ['node', 'known'].includes(i.kind))) {
                 const e = new Error('This device has not been found yet.');
                 e.errorcode = 'nodenotfound';
+                throw e;
+            }
+            // classes/external/get_console_ticket.php closed(): ?closed=R1 is a console closed to the student (NOCONSOLE).
+            if (!cfg.observer && node && (cfg.closed || []).includes(node.name)) {
+                const e = new Error('The console of this device is closed in this lab.');
+                e.errorcode = 'consoleclosed';
                 throw e;
             }
             if ((nodeStatus[args.nodeid] || 'stopped') !== 'started') {

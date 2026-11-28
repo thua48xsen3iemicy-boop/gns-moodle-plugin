@@ -57,6 +57,8 @@ class session_data {
                 'nodeid' => new external_value(PARAM_ALPHANUMEXT, 'Node id in the live project'),
                 'status' => new external_value(PARAM_ALPHA, 'started, stopped or suspended'),
                 'consoletype' => new external_value(PARAM_ALPHA, 'telnet, vnc or none'),
+                'extralines' => new external_value(PARAM_INT,
+                    'Additional console lines of the node, 0..3 (manager CONTRACTS §6.4)', VALUE_DEFAULT, 0),
             ]), 'Node states, empty unless running'),
             'nodesstale' => new external_value(PARAM_BOOL, 'Node states are an old snapshot: the slot did not answer'),
             'slotvmid' => new external_value(PARAM_INT, 'Proxmox VMID of the slot container running the lab, 0 if none'),
@@ -106,10 +108,14 @@ class session_data {
         $nodes = [];
         if ($running && isset($session->nodes) && $session->nodes instanceof \stdClass) {
             foreach (get_object_vars($session->nodes) as $nodeid => $node) {
+                $type = (string) ($node->console_type ?? 'none');
+                // Additional console lines only of a text console (manager CONTRACTS §2.3, §6.4).
+                $lines = is_int($node->extra_consoles ?? null) && $type === 'telnet' ? $node->extra_consoles : 0;
                 $nodes[] = [
                     'nodeid' => (string) $nodeid,
                     'status' => (string) ($node->status ?? ''),
-                    'consoletype' => (string) ($node->console_type ?? 'none'),
+                    'consoletype' => $type,
+                    'extralines' => max(0, min(lab_definition::MAX_EXTRA_CONSOLES, $lines)),
                 ];
             }
         }

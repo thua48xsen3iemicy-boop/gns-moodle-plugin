@@ -95,7 +95,8 @@ export const THEME = {
 /** Strings of the connection and of the key strip. */
 export const STRING_KEYS = [
     'consoleconnecting', 'consoleconnected', 'consolereconnected', 'consolereconnecting', 'consolenodestopped',
-    'consoleerror', 'consolecopied', 'consolecopyfailed', 'consolekeys', 'consolenopaste',
+    'consoleerror', 'consolecopied', 'consolecopyfailed', 'consolekeys', 'consolenopaste', 'ui_newterm', 'ui_newterm_full',
+    'ui_newterm_all',
     'keyctrl', 'keybreak', 'keyspace', 'consolereconnect', 'consolenodesunknown', 'consoleunavailable',
 ];
 
@@ -104,10 +105,12 @@ export const STRING_KEYS = [
  *
  * @param {object} ticket answer of mod_gns3lab_get_console_ticket
  * @param {string} nodeId node id in the live project
- * @returns {string} wss://…/console/<node_id>?ticket=…
+ * @param {number} [line] additional console line of the node, 1..3 (manager CONTRACTS §6.4); 0 is its console
+ * @returns {string} wss://…/console/<node_id>?ticket=…[&line=n]
  */
-export const consoleUrl = (ticket, nodeId) =>
-    `${ticket.gatewayurl}/console/${encodeURIComponent(nodeId)}?ticket=${encodeURIComponent(ticket.ticket)}`;
+export const consoleUrl = (ticket, nodeId, line = 0) =>
+    `${ticket.gatewayurl}/console/${encodeURIComponent(nodeId)}?ticket=${encodeURIComponent(ticket.ticket)}`
+    + (line > 0 ? `&line=${line}` : '');
 
 let xtermPromise = null;
 
@@ -146,6 +149,7 @@ export class ConsoleConnection {
      * @param {number} options.cmid course module id
      * @param {number} options.userid whose lab, 0 for the current user
      * @param {string} options.nodeId node id in the live project
+     * @param {number} [options.line] additional console line of the node, 0 for its console (manager CONTRACTS §6.4)
      * @param {object} options.term xterm.js Terminal
      * @param {object} options.strings language strings
      * @param {Function} options.nodeStatus async () => {status, stale} from a fresh session state
@@ -154,12 +158,13 @@ export class ConsoleConnection {
      * @param {boolean} [options.paced] send long pastes line by line (Cisco IOS)
      * @param {Function} [options.api] the transport of web service calls, Ajax.call by default
      */
-    constructor({cmid, userid, nodeId, term, strings, nodeStatus, onState, transform = data => data, paced = false,
+    constructor({cmid, userid, nodeId, line = 0, term, strings, nodeStatus, onState, transform = data => data, paced = false,
             api = requests => Ajax.call(requests)}) {
         this.api = api;
         this.cmid = cmid;
         this.userid = userid;
         this.nodeId = nodeId;
+        this.line = line;
         this.term = term;
         this.strings = strings;
         this.nodeStatus = nodeStatus;
@@ -240,7 +245,7 @@ export class ConsoleConnection {
         try {
             // The gateway and the slot replay the tail of the output to a new terminal (CONTRACTS.md §6.2); a terminal
             // that already shows output does not ask, or the output would be doubled.
-            ws = new WebSocket(consoleUrl(ticket, this.nodeId) + (this.blank ? '&history=1' : ''));
+            ws = new WebSocket(consoleUrl(ticket, this.nodeId, this.line) + (this.blank ? '&history=1' : ''));
         } catch (error) {
             // A ws:// gateway on an https page or a malformed URL: the browser refuses at once, no close event follows.
             // Without this the console would stay "connecting" for good.

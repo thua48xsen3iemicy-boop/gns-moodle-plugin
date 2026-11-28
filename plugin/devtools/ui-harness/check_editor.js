@@ -193,6 +193,36 @@ const saved = page => page.evaluate(() => JSON.parse(JSON.stringify(window.__stu
         await act(page, 'save').click();
         await until(async() => !('nopaste' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {nopaste: 1})));
         check('unticking drops nopaste', !('nopaste' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
+        // ---- no console for students (plugin only): a checkbox like nopaste, only true is saved
+        await tap(page, SW1);
+        check('a node without a console offers no closed-console checkbox', (await page.locator('[data-field="noconsole"]').count()) === 0);
+        await tap(page, PC1);
+        const noconsole = page.locator('[data-field="noconsole"]');
+        check('a node with a console offers it, off by default', (await noconsole.count()) === 1 && !(await noconsole.isChecked()));
+        await noconsole.check();
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.find(n => n.name === 'PC1')?.noconsole === true);
+        check('the ticked node is saved with noconsole', (await saved(page)).nodes.find(n => n.name === 'PC1').noconsole === true
+            && !(await saved(page)).nodes.some(n => n.name !== 'PC1' && 'noconsole' in n));
+        await page.locator('[data-field="noconsole"]').uncheck();
+        await act(page, 'save').click();
+        await until(async() => !('noconsole' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {noconsole: 1})));
+        check('unticking drops noconsole', !('noconsole' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
+        // ---- additional terminals (manager CONTRACTS §6.4): a choice on nodes of images that take them, 0 is no field
+        await tap(page, PC3);
+        check('a VPCS node offers no additional terminals', (await page.locator('[data-field="extra_consoles"]').count()) === 0);
+        await tap(page, PC1);
+        const lines = page.locator('[data-field="extra_consoles"]');
+        check('a Debian node offers none to three, none by default', (await lines.count()) === 1
+            && (await lines.inputValue()) === '0' && (await lines.locator('option').count()) === 4);
+        await lines.selectOption('2');
+        await act(page, 'save').click();
+        await until(async() => (await saved(page))?.nodes.find(n => n.name === 'PC1')?.extra_consoles === 2);
+        check('the choice is saved with the node', (await saved(page)).nodes.find(n => n.name === 'PC1').extra_consoles === 2);
+        await page.locator('[data-field="extra_consoles"]').selectOption('0');
+        await act(page, 'save').click();
+        await until(async() => !('extra_consoles' in ((await saved(page))?.nodes.find(n => n.name === 'PC1') || {extra_consoles: 1})));
+        check('none drops the field', !('extra_consoles' in (await saved(page)).nodes.find(n => n.name === 'PC1')));
         // ---- additional blank disks: a block on nodes of images that take them, up to three, an empty list is no field
         await tap(page, PC3);
         check('a VPCS node offers no additional disks', (await page.locator('[data-act="adddisk"]').count()) === 0);
