@@ -442,7 +442,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
                 "options": list(OPTIONS), "features": features}
         if settings.images is not None:
             # lab-setup: the teacher's setup steps `setup` of gns3lab.lab/2 (CONTRACTS 2.6), SETUP_FAILED (2.5)
-            features += ["images", "lab_definitions", "lab_constructor", "lab-setup", "random_ifnames", "extra_disks"]
+            features += ["images", "lab_definitions", "lab_constructor", "lab-setup", "random_ifnames", "extra_disks",
+                         "extra_consoles"]
             body["lab_formats"] = list(labdef.FORMATS)
             body["limits"] = site.limits.public()
         if await services.derived.enabled():

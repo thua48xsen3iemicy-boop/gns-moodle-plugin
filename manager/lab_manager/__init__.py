@@ -1,4 +1,4 @@
 """Lab Manager: allocates Lab Slot LXCs in Proxmox and runs student labs on them."""
 
-VERSION = "0.41.0"
+VERSION = "0.42.0"
 

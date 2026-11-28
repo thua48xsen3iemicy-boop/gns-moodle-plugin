@@ -26,7 +26,7 @@ from . import ifnames, iosconfig, labsetup, netconfig
 from . import checks as checks_mod
 from . import scripts as scripts_mod
 from . import segments as segments_mod
-from .images import EXTRA_DISK_GB, MAX_EXTRA_DISKS, PORTS_PER_ADAPTER, VPCS_MEMORY_MB
+from .images import EXTRA_DISK_GB, MAX_EXTRA_CONSOLES, MAX_EXTRA_DISKS, PORTS_PER_ADAPTER, VPCS_MEMORY_MB
 
 FORMAT = "gns3lab.lab/1"
 FORMAT_2 = "gns3lab.lab/2"
@@ -38,7 +38,8 @@ MAX_LINKS = 1000
 COORD = 100_000
 TOP_KEYS = {"format", "title", "nodes", "links"}
 TOP_KEYS_2 = TOP_KEYS | {"segments", "checks", "setup"}
-NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port", "random_ifnames", "disks"}
+NODE_KEYS = {"name", "image", "x", "y", "ram_mb", "cpus", "adapters", "uplink_port", "random_ifnames", "disks",
+             "extra_consoles"}
 ENDPOINT_KEYS = {"node", "adapter", "port"}
 CODES = ("required", "unknown_field", "bad_type", "bad_format", "bad_name", "duplicate_name", "unknown_image",
          "image_not_allowed", "out_of_range", "unknown_node", "bad_port", "port_in_use", "self_link",
@@ -275,6 +276,18 @@ def check(lab, images: dict, limits, *, overhead_mb: int = 1024) -> LabDef:
                         sizes.append({"size_gb": size})
                 if len(sizes) == len(value):
                     out["disks"] = sizes
+        if "extra_consoles" in node:
+            # Additional console lines (CONTRACTS 2.6, 6.4): only a number above 0 is kept, so a lab with 0 everywhere
+            # has the lab_def it had without the field.
+            value = node["extra_consoles"]
+            if not is_int(value):
+                problem(f"{path}.extra_consoles", "bad_type", "integer")
+            elif not 0 <= value <= MAX_EXTRA_CONSOLES:
+                problem(f"{path}.extra_consoles", "out_of_range", f"0..{MAX_EXTRA_CONSOLES}")
+            elif value and image is not None and not image.extra_consoles:
+                problem(f"{path}.extra_consoles", "unsupported_image", f"{image.id} takes no additional console lines")
+            elif value:
+                out["extra_consoles"] = value
         if ok and image is not None:
             out = {"name": name, "image": image.id, **out}
             by_name[name] = out
@@ -472,6 +485,9 @@ def deploy_ticket(definition: dict, images: dict, *, project_id: str, project_na
         if node.get("disks"):
             # Only a node with additional disks carries the field (CONTRACTS 4.2), like uplink_port.
             spec["disks"] = [{"size_gb": d["size_gb"]} for d in node["disks"]]
+        if node.get("extra_consoles"):
+            # Only a node with additional console lines carries the field (CONTRACTS 4.2), like disks.
+            spec["extra_consoles"] = node["extra_consoles"]
         if image.role is not None:
             # Only a node of an image with a role carries it (CONTRACTS 4.2), like uplink_port.
             spec["role"] = image.role
