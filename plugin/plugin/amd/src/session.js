@@ -47,7 +47,8 @@ export const STRING_KEYS = [
     'status_none', 'status_queued', 'status_starting', 'status_running', 'status_stopping', 'status_stopped',
     'status_failed', 'timeleft', 'startlab', 'startagain', 'stoplab', 'managernotconfigured', 'labnotready',
     'failedretry', 'failedadmin', 'stopconfirmtitle', 'stopconfirm', 'stopconfirmkept', 'conflictlink',
-    'maintenanceannounced', 'maintenanceactive', 'maintenancenote', 'slotvmid',
+    'maintenanceannounced', 'maintenanceactive', 'maintenancenote', 'slotvmid', 'failed_setup', 'setupfailed_detail',
+    'setupfailed_nomessage',
     ...STAGES.map(stage => 'stage_' + stage),
 ];
 
@@ -95,6 +96,7 @@ export class Session {
         this.stopBtn = region('stop');
         this.messageEl = region('message');
         this.maintenanceEl = region('maintenance');
+        this.setupEl = region('setuperror');
         this.startBtn.addEventListener('click', () => this.act('mod_gns3lab_start_session'));
         this.stopBtn.addEventListener('click', () => this.stop());
         setInterval(() => this.renderTime(), 1000);
@@ -238,6 +240,7 @@ export class Session {
 
         const live = session && !['stopped', 'failed'].includes(status);
         this.renderSlot(live ? session.slotvmid : 0);
+        this.renderSetupError(status === 'failed' ? session.setuperror : null);
         const retry = status === 'failed' && session.errorretryable;
         this.startBtn.textContent = retry ? this.strings.startagain : this.strings.startlab;
         this.startBtn.hidden = !state.canuse || !!live;
@@ -246,6 +249,23 @@ export class Session {
         this.startBtn.disabled = this.busy || !state.labready || this.maintenance.state !== 'off';
         this.stopBtn.disabled = this.busy;
         this.renderTime();
+    }
+
+    /**
+     * Which setup step of the lab failed (manager CONTRACTS §2.3 `setup_error`). The server sends it only to the author of
+     * the lab and to an observer; the student sees the general text of SETUP_FAILED. The line is the guest's: text only.
+     *
+     * @param {object|null} err {step, node, exitcode, message} or null
+     */
+    renderSetupError(err) {
+        if (!this.setupEl) {
+            return;
+        }
+        const text = !err ? '' : (err.message ? this.strings.setupfailed_detail : this.strings.setupfailed_nomessage)
+            .replace(/\{\$a->(\w+)\}/g, (m, k) => String({step: err.step, node: err.node, code: err.exitcode,
+                message: err.message}[k] ?? ''));
+        this.setupEl.textContent = text;
+        this.setupEl.hidden = !text;
     }
 
     /**
@@ -268,6 +288,10 @@ export class Session {
      * @returns {string} empty if the session says nothing more than its status
      */
     sessionText(session) {
+        if (session.status === 'failed' && session.errorcode === 'SETUP_FAILED') {
+            // The same lab fails the same way: nothing to retry, the teacher fixes the setup (CONTRACTS §2.5).
+            return this.strings.failed_setup;
+        }
         if (session.status === 'failed' && session.errorcode) {
             return session.errorretryable
                 ? this.strings.failedretry

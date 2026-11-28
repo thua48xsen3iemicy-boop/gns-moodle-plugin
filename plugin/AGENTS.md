@@ -65,6 +65,9 @@ docs/          SPEC.md и прочая документация
   запоминаются в браузере; проверка — `devtools/ui-harness/check_assignment.js`), `checks.js` (панель автопроверок: кнопка «Проверить», ход прогона, отчёт, прошлые прогоны, `docs/autochecks.md`),
   `checksform.js` (0.50.0: блок проверок `gns3lab.checks/1` — в форме активности `init`, в редакторе лаб `create`;
   `docs/autochecks.md` §12; проверка — `devtools/ui-harness/check_checksform.js`),
+  `promptwindow.js` (0.51.0: окно промпта для нейросети — вкладки, копирование, разбор ответа, карточки, «Проверить у
+  менеджера»; общее у `checksform.js` и `setupform.js`), `setupform.js` (0.51.0: блок «Преднастрой» редактора лаб, шаги `setup`
+  `lab/2` и окно «исправить шаг»; `docs/lab-setup.md`; проверка — `devtools/ui-harness/check_setup.js`),
   `checkreport.js` (отчёт без DOM: находки по первопричинам, состояние кнопки, период опроса; проверка — `devtools/check_checkreport.mjs`,
   в браузере — `devtools/ui-harness/check_checks.js`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
   настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники),

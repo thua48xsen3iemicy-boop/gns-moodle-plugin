@@ -78,6 +78,7 @@ class get_checks_lab extends external_api {
             'links' => $ctx['links'],
             'segments' => json_encode($ctx['segments'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'labchecks' => checks::encode_document($ctx['labchecks']),
+            'setup' => $ctx['setup'] ?? [],
         ];
     }
 
@@ -103,6 +104,11 @@ class get_checks_lab extends external_api {
             ])),
             'segments' => new external_value(PARAM_RAW, 'Segments of the lab as JSON'),
             'labchecks' => new external_value(PARAM_RAW, 'Checks the lab carries itself as JSON, empty for none'),
+            'setup' => new external_multiple_structure(new external_single_structure([
+                'id' => new external_value(PARAM_TEXT, 'Id of the setup step'),
+                'title' => new external_value(PARAM_TEXT, 'What the step sets up'),
+                'node' => new external_value(PARAM_TEXT, 'Its node'),
+            ]), 'Setup steps of the lab without their code (docs/lab-setup/README.md §9)', VALUE_DEFAULT, []),
         ]);
     }
 }

@@ -36,6 +36,8 @@ $data = [
     'labname' => $lab->name, 'source' => get_string('authoringrun', 'gns3lab'),
     'factsview' => 'live', 'seatmode' => 'off', 'authoring' => $id,
     'definition' => lab_definition::to_json($def),
+    // A failed setup step offers "Prompt: fix the step", which opens in the lab editor (docs/lab-setup/README.md §6a).
+    'labsetup' => $client->supports_lab_setup(),
 ];
 // The author prepares the lab: the clipboard is never kept out of the consoles here.
 lab_definition::allow_paste($data['topology']);

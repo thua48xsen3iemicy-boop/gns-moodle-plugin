@@ -46,11 +46,13 @@ class checks_lab {
      *
      * @param string|array|null $lab what lab_of() gives
      * @return array found (bool), catalog (bool: a reference lab), nodes [{name, image, kind, category, scripts}],
-     *     links [{a, b}] (ends as "node port"), segments (list), labchecks (gns3lab.checks/1 of the lab or null)
+     *     links [{a, b}] (ends as "node port"), segments (list), labchecks (gns3lab.checks/1 of the lab or null),
+     *     setup [{id, title, node}] (the setup steps of the lab without their code: what the student is given,
+     *     docs/lab-setup/README.md §9)
      */
     public static function context(string|array|null $lab): array {
         $out = ['found' => false, 'catalog' => is_string($lab), 'nodes' => [], 'links' => [], 'segments' => [],
-            'labchecks' => checks::lab_document($lab)];
+            'labchecks' => checks::lab_document($lab), 'setup' => []];
         if (is_array($lab)) {
             $images = [];
             try {
@@ -81,6 +83,12 @@ class checks_lab {
                 $out['links'][] = ['a' => $end($link['a']), 'b' => $end($link['b'])];
             }
             $out['segments'] = array_values($lab['segments'] ?? []);
+            foreach (is_array($lab['setup'] ?? null) ? $lab['setup'] : [] as $step) {
+                if (is_array($step)) {
+                    $out['setup'][] = ['id' => (string) ($step['id'] ?? ''), 'title' => (string) ($step['title'] ?? ''),
+                        'node' => (string) ($step['node'] ?? '')];
+                }
+            }
             $out['found'] = true;
         } else if (is_string($lab)) {
             try {

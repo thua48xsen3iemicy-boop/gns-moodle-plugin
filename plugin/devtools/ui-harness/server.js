@@ -64,6 +64,9 @@ const exportSession = s => s && ({sessionid: s.session_id, status: s.status, sta
     expiresat: Date.parse(s.expires_at) / 1000 || 0, topology: s.topology ? JSON.stringify(s.topology) : '',
     features: s.status === 'running' ? ['consoles'] : [], nodesstale: false,
     nodes: Object.entries(s.nodes || {}).map(([id, n]) => ({nodeid: id, status: n.status, consoletype: n.console_type})),
+    // The author sees which setup step failed (classes/local/session_data.php setup_error).
+    ...(s.status === 'failed' && s.setup_error ? {setuperror: {step: s.setup_error.step, node: s.setup_error.node,
+        exitcode: s.setup_error.exit_code, message: s.setup_error.message}} : {}),
 });
 const exportCapture = c => ({state: c.state, stage: c.stage || '', forced: c.forced || [], nodes: c.error?.nodes || [], errorcode: c.error?.code || '', errornode: c.error?.node || '',
     retryable: c.error?.retryable || false, images: Object.entries(c.images || {}).map(([name, image]) => ({name, image}))});

@@ -88,7 +88,8 @@ class get_state extends external_api {
         $result['resume'] = in_array('resume', $client->get_info()->features, true);
         $session = $client->find_session($userid, (int) $access->instance->id);
         if ($session !== null) {
-            $result['session'] = session_data::export($session);
+            // The failed setup step only to those who may observe (docs/lab-setup/README.md §6), never to the student.
+            $result['session'] = session_data::export($session, has_capability('mod/gns3lab:observe', $access->context));
         }
         $result['maintenance'] = maintenance::current($client, $session);
         return $result;

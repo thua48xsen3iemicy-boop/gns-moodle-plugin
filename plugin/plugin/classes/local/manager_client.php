@@ -180,6 +180,15 @@ class manager_client {
     }
 
     /**
+     * Whether the manager runs the teacher's setup steps of a lab (`setup` of lab/2, CONTRACTS §2.6, `lab-setup`).
+     *
+     * @return bool
+     */
+    public function supports_lab_setup(): bool {
+        return $this->supports_lab_constructor() && $this->has_feature('lab-setup');
+    }
+
+    /**
      * Image catalog for the lab editor (MANAGER_REQUESTS П10), cached like the info.
      *
      * @return \stdClass[] images with id, title, kind, category, symbol, console_type, ram_mb, cpus, adapters,

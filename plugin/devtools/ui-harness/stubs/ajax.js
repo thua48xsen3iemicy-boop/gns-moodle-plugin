@@ -24,7 +24,8 @@
 define([], function() {
     const cfg = window.GNS3LAB_STUB || {};
     const now = () => Math.floor(Date.now() / 1000);
-    let session = cfg.observer ? {status: 'running', stage: 'ready', progress: 100, at: 0, start: Math.floor(Date.now() / 1000)} : null;
+    let session = cfg.observer ? (cfg.setupfail ? {status: 'failed', stage: 'failed', progress: -1, at: 0, start: 0}
+        : {status: 'running', stage: 'ready', progress: 100, at: 0, start: Math.floor(Date.now() / 1000)}) : null;
     let demo = null;
     const nodeStatus = {};
     const seat = {holder: ['othertab', 'otherlogin'].includes(cfg.seat) ? cfg.seat : 'me', tabid: ''};
@@ -84,6 +85,12 @@ define([], function() {
             return null;
         }
         const wait = cfg.fast ? 300 : 2500;
+        if (session.status === 'starting' && Date.now() - session.at > wait && cfg.setupfail) {
+            // ?setupfail: a setup step of the lab fails (CONTRACTS §2.5 SETUP_FAILED); the server tells the step only to an
+            // observer (?observer) or the author of the lab, never to the student.
+            session.status = 'failed';
+            session.stage = 'failed';
+        }
         if (session.status === 'starting' && Date.now() - session.at > wait) {
             session.status = 'running';
             session.stage = 'ready';
@@ -105,8 +112,10 @@ define([], function() {
             stage: session.stage,
             progress: session.progress,
             statusmessage: '',
-            errorcode: '',
+            errorcode: session.status === 'failed' && cfg.setupfail ? 'SETUP_FAILED' : '',
             errorretryable: false,
+            ...(session.status === 'failed' && cfg.setupfail && cfg.observer ? {setuperror: {step: 'web', node: 'PC1',
+                exitcode: 100, message: 'E: Unable to locate package <nginx>'}} : {}),
             startedat: running ? session.start : 0,
             expiresat: running ? session.start + 3 * 3600 : 0,
             topology: running ? JSON.stringify(doc) : '',
@@ -645,7 +654,7 @@ define([], function() {
 
     // The lab editor: a pretend lab manager. validate refuses what the manager would refuse in these simple cases and
     // warns about every gateway, like manager 0.10; save and publish remember the last definition they got.
-    const editor = {saved: null, published: null, validated: 0};
+    const editor = {saved: null, published: null, validated: 0, setupValidated: []};
     const checksform = {labs: [], validated: [], down: false};
     const checksLab = args => {
         const node = (name, scripts = true) => ({name, image: 'Debian 12', kind: scripts ? 'qemu' : 'vpcs', category: 'host',
@@ -653,7 +662,8 @@ define([], function() {
         if (+args.labversionid === 11) {
             return {found: true, catalog: false, nodes: [node('PC1'), node('PC2', false)], links: [{a: 'PC1 ens3', b: 'PC2 e0'}],
                 segments: '[]', labchecks: JSON.stringify({format: 'gns3lab.checks/1', network: 'off',
-                    scripts: [{id: 'ssh', title: 'SSH', node: 'PC1', run: 'systemctl is-active ssh'}]})};
+                    scripts: [{id: 'ssh', title: 'SSH', node: 'PC1', run: 'systemctl is-active ssh'}]}),
+                setup: [{id: 'web', title: 'nginx on PC1', node: 'PC1'}]};
         }
         if (+args.labversionid === 12) {
             return {found: true, catalog: false, nodes: [node('PC9'), node('PC2', false)], links: [], segments: '[]', labchecks: ''};
@@ -669,6 +679,16 @@ define([], function() {
         ((def.checks || {}).scripts || []).forEach((sc, i) => {
             if (!names.has(sc.node)) {
                 problems.push({path: `checks.scripts[${i}].node`, code: 'unknown_node', message: String(sc.node)});
+            }
+        });
+        // The teacher's setup steps (CONTRACTS §2.6 `setup`): a device the lab lacks, and PC2 played as a QEMU image
+        // without a guest agent (qga: false), which only the manager knows; the stub remembers the steps it saw.
+        editor.setupValidated.push(def.setup || null);
+        (def.setup || []).forEach((step, i) => {
+            if (!names.has(step.node)) {
+                problems.push({path: `setup[${i}].node`, code: 'unknown_node', message: String(step.node)});
+            } else if (step.node === 'PC2') {
+                problems.push({path: `setup[${i}].node`, code: 'setup_node_unsupported', message: 'PC2: no guest agent'});
             }
         });
         (def.segments || []).forEach((g, i) => {

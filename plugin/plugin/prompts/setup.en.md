@@ -48,7 +48,9 @@ At most 30 steps. No other fields.
 
 [[SETUP]]
 
-If there are steps already, return the whole new list: keep the fitting ones, fix or add what is needed.
+If there are steps already, return the whole new list: keep the fitting ones, fix or add what is needed. The task names
+the exceptions: if it asks only to add steps, return only the new ones, with ids not taken yet; if it asks to fix one
+step, return only that step, with the same id.
 
 ## What to set up
 

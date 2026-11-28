@@ -83,6 +83,16 @@ interface, router, exit, end, Ctrl+Z, Ctrl+U) меняют приглашени�
 - GET /mock/vnc/<node_id> — что дошло до экрана: счётчики и последние события (проверка без глаз).
 Образ debian12-desktop каталога — с console_type "vnc"; в эталонной лабе ospf-multi-area это нода PVE1.
 
+Преднастрой преподавателя (CONTRACTS §2.6 `setup`, менеджер 0.40.0, docs/lab-setup/README.md):
+- info: features "lab_constructor" и "lab-setup", lab_formats ["gns3lab.lab/1", "gns3lab.lab/2"]; lab/2 принимает
+  "segments" (мок их не проверяет и не настраивает) и "setup";
+- шаги проверяются коротко: поля, id (bad_name, duplicate_name), нода есть (unknown_node), шаг по виду ноды — "run" у QEMU,
+  кроме узла с uplink_port, "config" у IOL и VPCS (иначе setup_node_unsupported, чужое поле — unknown_field), timeout 1…120.
+  Оболочку против семейства гостя, итоговые размеры конфигураций и сумму времени мок не проверяет;
+- следующий запуск лабы с шагом "run" падает в нём: SETUP_FAILED (retryable false) и setup_error у failed-сессии;
+  step — шаг с этим id или первый шаг "run":
+    curl -X POST localhost:8090/mock/setup/fail-next -d '{"step": "web", "exit_code": 100, "message": "E: no nginx"}'
+
 Управление для ручных проверок:
     curl -X POST localhost:8090/mock/nodes/<node_id>/stop    # нода остановлена: консоль закроется
     curl -X POST localhost:8090/mock/nodes/<node_id>/start
@@ -210,6 +220,9 @@ for _image in IMAGES:  # Random guest interface names (CONTRACTS 2.6): the Debia
         _image["extra_disks"] = {"max": 3, "size_gb": {"default": 1, "min": 1, "max": 20}}
 LIMITS = {"max_nodes": 30, "max_memory_mb": 32768, "max_cpus": 16, "max_disk_gb": None, "images": "*"}
 LAB_FORMAT = "gns3lab.lab/1"
+LAB_FORMAT_2 = "gns3lab.lab/2"  # segments (not checked by the mock) and the teacher's setup steps (CONTRACTS §2.6)
+SETUP_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+SETUP_FIELDS = {"id", "title", "node", "run", "shell", "timeout", "config"}
 # Проверка определения — перенос manager/lab_manager/labdef.py (ветка менеджера claude/determined-brown-lfgnxy):
 # те же правила, коды и пути замечаний, хэш без title, тот же размер CT.
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
@@ -262,8 +275,9 @@ def lab_problems(lab):
         return [{"path": "", "code": "bad_type", "message": "object expected"}], None
     if len(canonical(lab).encode()) > MAX_LAB_BYTES:
         return [{"path": "", "code": "too_large", "message": f"max {MAX_LAB_BYTES} bytes"}], None
-    unknown(lab, {"format", "title", "nodes", "links"}, "")
-    if lab.get("format") != LAB_FORMAT:
+    lab2 = lab.get("format") == LAB_FORMAT_2
+    unknown(lab, {"format", "title", "nodes", "links"} | ({"segments", "setup"} if lab2 else set()), "")
+    if lab.get("format") not in (LAB_FORMAT, LAB_FORMAT_2):
         bad("format", "required" if "format" not in lab else "bad_format", LAB_FORMAT)
     title = lab.get("title", "")
     if not isinstance(title, str) or len(title) > 200:
@@ -385,6 +399,7 @@ def lab_problems(lab):
                 bad(path, "self_link", ends[0]["node"])
             else:
                 out_links.append({"a": ends[0], "b": ends[1]})
+    setup = setup_problems(lab.get("setup", []) if lab2 else [], by_name, images, bad)
     if problems:
         return problems, None
     resources = resources_of(out_nodes, images)
@@ -394,7 +409,71 @@ def lab_problems(lab):
         bad("nodes", "limit_exceeded", f"cores {resources['cores']} > {LIMITS['max_cpus']}")
     if problems:
         return problems, None
-    return [], {"format": LAB_FORMAT, "title": title, "nodes": out_nodes, "links": out_links, "_resources": resources}
+    normal = {"format": LAB_FORMAT, "title": title, "nodes": out_nodes, "links": out_links, "_resources": resources}
+    if lab2:
+        normal.update(format=LAB_FORMAT_2, segments=lab.get("segments") or [])
+        if setup:
+            normal["setup"] = setup
+    return [], normal
+
+
+def setup_problems(steps, by_name, images, bad):
+    """The teacher's setup steps, a small part of the manager's check (labsetup.py): fields, ids, the node and its kind.
+
+    Not checked here: shell against the guest family, sizes of the final IOL and VPCS configurations, the sum of the
+    time limits. Returns the normalised steps (timeout of a run step filled in)."""
+    if not isinstance(steps, list):
+        bad("setup", "bad_type", "list")
+        return []
+    if len(steps) > 30:
+        bad("setup", "out_of_range", "max 30 steps")
+    out, ids = [], set()
+    for i, step in enumerate(steps):
+        path = f"setup[{i}]"
+        if not isinstance(step, dict):
+            bad(path, "bad_type", "object expected")
+            continue
+        for key in sorted(set(step) - SETUP_FIELDS):
+            bad(f"{path}.{key}", "unknown_field")
+        sid = step.get("id")
+        if sid is None:
+            bad(f"{path}.id", "required")
+        elif not isinstance(sid, str) or not SETUP_ID_RE.fullmatch(sid):
+            bad(f"{path}.id", "bad_name", SETUP_ID_RE.pattern)
+        elif sid in ids:
+            bad(f"{path}.id", "duplicate_name", sid)
+        ids.add(sid)
+        title = step.get("title")
+        if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
+            bad(f"{path}.title", "required" if title is None else "out_of_range", "1..120 characters")
+        node = by_name.get(step.get("node")) if isinstance(step.get("node"), str) else None
+        if step.get("node") is None:
+            bad(f"{path}.node", "required")
+            continue
+        if node is None:
+            bad(f"{path}.node", "unknown_node", str(step.get("node"))[:80])
+            continue
+        image = images[node["image"]]
+        kind = "run" if image["kind"] == "qemu" and "uplink_port" not in image else (
+            "config" if image["kind"] in ("iou", "vpcs") else None)
+        if kind is None:
+            bad(f"{path}.node", "setup_node_unsupported", node["name"])
+            continue
+        other = {"config"} if kind == "run" else {"run", "shell", "timeout"}
+        for key in sorted(other & set(step)):
+            bad(f"{path}.{key}", "unknown_field", f"not for {image['kind']}")
+        if not isinstance(step.get(kind), str) or not step[kind].strip():
+            bad(f"{path}.{kind}", "required")
+        if kind == "run":
+            timeout = step.get("timeout", 60)
+            if not is_int(timeout) or not 1 <= timeout <= 120:
+                bad(f"{path}.timeout", "out_of_range", "1..120")
+            if step.get("shell") not in (None, "sh", "routeros"):
+                bad(f"{path}.shell", "shell_mismatch", str(step.get("shell")))
+            out.append({**{k: v for k, v in step.items() if k in SETUP_FIELDS - {"config"}}, "timeout": timeout})
+        else:
+            out.append({k: v for k, v in step.items() if k in ("id", "title", "node", "config")})
+    return out
 
 
 def lab_hash(normal):
@@ -467,6 +546,7 @@ class Session:
         self.checks = None  # gns3lab.checks/1 of the activity (CONTRACTS §2.9, activity checks), None: the lab's
         self.checks_def = None
         self.checks_error = None
+        self.setup_error = None  # CONTRACTS 2.3: {step, node, exit_code, message} of a failed setup step
 
     def status(self):
         return self.state()[0]
@@ -511,6 +591,7 @@ class Manager:
         self.workspaces: dict = {}  # (site, user, activity, lab) -> project number
         self.stopped_nodes: set[str] = set()
         self.fail_next = None
+        self.setup_fail_next = None  # the next start of a lab with a run step fails in it: /mock/setup/fail-next
         self.check_next = None  # "incomplete" or "failed": the outcome of the next check run
         self.check_scripts = False  # the next runs have the teacher's scripts (result.scripts), /mock/checks/next
         self.checks_definition_next = None  # the next PUT …/checks-definition answers this status, /mock/checks-definition/next
@@ -589,6 +670,8 @@ class Manager:
         body["checks_source"] = "activity" if s.checks is not None or s.checks_error else "lab"
         if s.checks_error:
             body["checks_error"] = s.checks_error
+        if status == "failed" and s.setup_error:
+            body["setup_error"] = dict(s.setup_error)
         if s.mode:
             body['mode'] = s.mode
             body['capture_nodes'] = [{'name': n['name'], 'status': s.node_statuses.get(n['name'], 'unknown')}
@@ -683,10 +766,10 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "activity-checks", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions", "console-activity"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "activity-checks", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions", "console-activity", "lab_constructor", "lab-setup"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
-                              "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
+                              "features": features, "lab_formats": [LAB_FORMAT, LAB_FORMAT_2], "limits": LIMITS})
 
 
 async def maintenance(request):
@@ -847,6 +930,14 @@ async def create_session(request):
         else:
             s.checks, s.checks_def = body["checks"], checks_hash(body["checks"])
     m.fail_next = None
+    if m.setup_fail_next is not None and normal_setup(body.get("lab")):
+        want = m.setup_fail_next
+        steps = normal_setup(body.get("lab"))
+        step = next((x for x in steps if x["id"] == want.get("step")), steps[0])
+        s.fail = {"code": "SETUP_FAILED", "retryable": False}
+        s.setup_error = {"step": step["id"], "node": step["node"], "exit_code": int(want.get("exit_code", 100)),
+                         "message": str(want.get("message", "E: Unable to locate package nginx"))[:100]}
+        m.setup_fail_next = None
     s.workspace = m.workspaces.setdefault((site, user_id, instance_id, s.key), len(m.workspaces) + 1)
     for node in m.labs[s.key]['doc']['topology']['nodes']:
         m.stopped_nodes.discard(node['node_id'])
@@ -1234,6 +1325,19 @@ async def mock_fail_next(request):
     m: Manager = request.app["m"]
     m.fail_next = {"code": str(body.get("code", "SLOT_START_FAILED")), "retryable": bool(body.get("retryable", True))}
     return web.json_response({"fail_next": m.fail_next})
+
+
+def normal_setup(lab):
+    """The run steps of a lab definition (only they can fail with SETUP_FAILED, CONTRACTS §2.5)."""
+    steps = lab.get("setup") if isinstance(lab, dict) else None
+    return [x for x in steps if isinstance(x, dict) and "run" in x] if isinstance(steps, list) else []
+
+
+async def mock_setup_fail_next(request):
+    body = await request.json() if (await request.text()).strip() else {}
+    m: Manager = request.app["m"]
+    m.setup_fail_next = {k: body[k] for k in ("step", "exit_code", "message") if k in body}
+    return web.json_response({"setup_fail_next": m.setup_fail_next})
 
 
 async def mock_stale(request):
@@ -1902,6 +2006,7 @@ def make_apps():
     api.router.add_get('/api/v1/sessions/{sid}/capture', image_capture)
     api.router.add_patch('/api/v1/images/{image}', image_patch)
     api.router.add_get("/api/v1/info", info)
+    api.router.add_post("/mock/setup/fail-next", mock_setup_fail_next)
     api.router.add_get("/api/v1/maintenance", maintenance)
     api.router.add_post("/mock/maintenance/{mode:on|off}", mock_maintenance)
     api.router.add_post("/api/v1/purges", purge)

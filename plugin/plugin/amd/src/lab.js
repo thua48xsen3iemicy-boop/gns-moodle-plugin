@@ -94,6 +94,7 @@ const FACT_ERRORS = ['unreachable', 'timeout', 'stopped', 'unsupported', 'failed
 
 /** Language strings of the interface; the texts of the layers and of the details tables are in the modules. */
 const UI_KEYS = [
+    'setupfix', 'setupfix_sent', 'setupfix_noeditor',
     ...CANVAS_KEYS,
     'ui_lod0', 'ui_lod1', 'ui_lod2', 'ui_lod3', 'ui_st_started', 'ui_st_stopped', 'ui_st_suspended',
     ...CATEGORIES.map(c => 'ui_cat_' + c),
@@ -346,6 +347,54 @@ class LabPage {
      *
      * @param {Function} region finds an element of the template
      */
+    /**
+     * "Prompt: fix the step" of an authoring run whose setup step failed (docs/lab-setup/README.md §6a, item 4). The window
+     * of the prompt lives in the lab editor: the page asks the editor that opened it (its frame) or, opened in a tab of
+     * its own, an editor of the same lab in another tab. The server gives setuperror only to the author and observers.
+     *
+     * @param {object|null} session session of the page
+     */
+    renderSetupFix(session) {
+        const button = this.root.querySelector('[data-region="setupfix"]');
+        if (!button) {
+            return;
+        }
+        const err = this.data.authoring && this.data.labsetup && session && session.status === 'failed'
+            ? session.setuperror : null;
+        button.hidden = !err;
+        if (!err) {
+            return;
+        }
+        button.onclick = () => {
+            const data = {type: 'gns3lab-setup-fix', labid: this.data.authoring, error: {
+                step: err.step, node: err.node, exitcode: err.exitcode, message: err.message}};
+            let answered = false;
+            let channel = null;
+            const ack = e => {
+                if (e.data && e.data.type === 'gns3lab-setup-fix-ack') {
+                    answered = true;
+                }
+            };
+            if (window.parent !== window) {
+                window.addEventListener('message', ack, {once: true});
+                window.parent.postMessage(data, window.location.origin);
+            } else if (typeof BroadcastChannel === 'function') {
+                channel = new BroadcastChannel('gns3lab-editor-' + this.data.authoring);
+                channel.onmessage = ack;
+                channel.postMessage(data);
+            }
+            setTimeout(() => {
+                if (channel) {
+                    channel.close();
+                }
+                // In a frame the window opens over the page; in a tab of its own it opens in the other tab.
+                if (!answered || window.parent === window) {
+                    this.toast(this.strings[answered ? 'setupfix_sent' : 'setupfix_noeditor'], 4000);
+                }
+            }, 800);
+        };
+    }
+
     bindChrome(region) {
         // The assignment is a floating window over the scheme, beside the object card and the panels, not instead of them.
         const assignments = region('assignments'), open = region('assignmentsOpen');
@@ -402,6 +451,7 @@ class LabPage {
      */
     stateChanged(state, before) {
         const s = state.session;
+        this.renderSetupFix(s);
         if (this.checks) {
             this.checks.setSession(s);
         }

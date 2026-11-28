@@ -36,6 +36,7 @@ import * as Seg from 'mod_gns3lab/segments';
 import {init as initImages} from 'mod_gns3lab/editorimages';
 import {store} from 'mod_gns3lab/dom';
 import {create as createChecks} from 'mod_gns3lab/checksform';
+import {create as createSetup} from 'mod_gns3lab/setupform';
 
 const NS = "http://www.w3.org/2000/svg";
 const FORMAT = "gns3lab.lab/1";
@@ -87,6 +88,8 @@ export const init = (prefix) => {
   const withScripts = withChecks && !activityChecks && !!D.labscripts;
   /* a script may wait for earlier ones and take their values (CONTRACTS §2.9, `check-script-needs`) */
   const withNeeds = withScripts && !!D.labscriptneeds;
+  /* the manager runs the teacher's own setup steps of a lab (CONTRACTS §2.6 `setup`, `lab-setup`) */
+  const withSetup = withSegments && !!D.labsetup;
 
   const def = D.definition || {};
   const st = {
@@ -95,6 +98,7 @@ export const init = (prefix) => {
       links: Array.isArray(def.links) ? def.links : [],
       segments: Array.isArray(def.segments) ? def.segments : [],
       checks: def.checks && typeof def.checks === "object" && !Array.isArray(def.checks) ? def.checks : null,
+      setup: Array.isArray(def.setup) ? def.setup : [],
       annotations: Array.isArray(def.annotations) ? def.annotations : [],
     },
     sel: null,
@@ -192,13 +196,14 @@ export const init = (prefix) => {
       }
     }
   };
-  /* a lab with segments or checks is lab/2; the checks are kept even when this manager does not take them, and they
-     stay out of the lab when they belong to the activities */
-  const definition = (checks = activityChecks ? null : st.lab.checks) => JSON.stringify(Object.assign(st.lab.segments.length || checks
-    ? Object.assign({format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments},
-      checks ? {checks} : {})
-    : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links},
-  st.lab.annotations.length ? {annotations: st.lab.annotations} : {}));
+  /* a lab with segments, checks or setup steps is lab/2; the checks and the steps are kept even when this manager does
+     not take them, and the checks stay out of the lab when they belong to the activities */
+  const definition = (checks = activityChecks ? null : st.lab.checks, setup = st.lab.setup) => JSON.stringify(Object.assign(
+    st.lab.segments.length || checks || setup.length
+      ? Object.assign({format: Seg.FORMAT_2, nodes: st.lab.nodes, links: st.lab.links, segments: st.lab.segments},
+        checks ? {checks} : {}, setup.length ? {setup} : {})
+      : {format: FORMAT, nodes: st.lab.nodes, links: st.lab.links},
+    st.lab.annotations.length ? {annotations: st.lab.annotations} : {}));
 
   /* ---------- изменения и отмена ---------- */
   const snapshot = () => JSON.stringify(st.lab);
@@ -714,7 +719,8 @@ export const init = (prefix) => {
       const text = S["problem_" + p.code] || str("ed_problem", p.code);
       const attr = p.place ? ` data-goto="${p.place.kind}:${p.place.i}"` : "";
       /* a problem of the checks document names its path: there is no object of the scheme to go to */
-      const where = !p.place && typeof p.path === "string" && p.path.startsWith("checks") ? p.path : placeName(p.place);
+      const where = !p.place && typeof p.path === "string" && p.path.startsWith("checks") ? p.path
+        : (!p.place && setupForm.where(p.path)) || placeName(p.place);
       return `<li><button type="button" class="rowbtn"${attr} title="${esc(p.message)}"><span>` +
         `<b>${esc(where)}</b>: ${esc(text)}</span></button></li>`;
     }).join("") + "</ul>";
@@ -1006,6 +1012,7 @@ export const init = (prefix) => {
         }),
         links: st.lab.links.map(l => [end(l.a), end(l.b)]),
         segments: st.lab.segments,
+        setup: st.lab.setup.map(x => ({title: x.title, node: x.node})),
       };
     },
     editable: withChecks && !activityChecks,
@@ -1015,6 +1022,76 @@ export const init = (prefix) => {
     fieldError: text => fieldError(text),
     root,
   });
+  /* the setup block (setupform.js): the devices with what they take, links by ports, segments with their planned
+     addresses, so that the prompt knows the lab as the student gets it */
+  const portEnd = e => {
+    const n = byName(e.node);
+    return `${e.node} ${n ? portName(n, e.adapter, e.port) : ""}`.trim();
+  };
+  const setupSegments = () => st.lab.segments.map(g => {
+    const out = {name: g.name, subnet: g.subnet && g.subnet.fixed ? g.subnet.fixed : null};
+    if (g.vlan && g.vlan.fixed !== undefined) {
+      out.vlan = g.vlan.fixed;
+    }
+    out.configure = g.configure === "student" ? "student" : "manager";
+    const net = Seg.parseSubnet(out.subnet);
+    const plan = net ? Seg.plan(net, g.gateway || null, g.members || []) : null;
+    const withIp = ip => (ip && net ? {ip: `${ip}/${net.prefix}`} : {});
+    if (g.gateway) {
+      out.gateway = Object.assign({port: portEnd(g.gateway)}, withIp(plan && plan.gateway));
+    }
+    out.members = (g.members || []).map((m, j) => Object.assign({port: portEnd(m)}, withIp(plan && plan.members[j])));
+    return out;
+  });
+  const setupForm = createSetup({
+    esc, str, S,
+    get: () => st.lab.setup,
+    set: list => change(() => {
+      st.lab.setup = list;
+    }),
+    lab: () => ({
+      nodes: st.lab.nodes.map(n => {
+        const img = imageOf(n) || {};
+        return {name: n.name, image: img.title || n.image, kind: img.kind || "", category: img.category || "",
+          guest: img.guest || "", uplink: uplinkOf(n) !== null};
+      }),
+      links: st.lab.links.map(l => [portEnd(l.a), portEnd(l.b)]),
+      segments: setupSegments(),
+    }),
+    editable: withSetup,
+    prompt: D.setupprompt || "",
+    validate: async list => (await call("mod_gns3lab_validate_lab", {labid: D.labid,
+      definition: definition(undefined, list)})).problems || [],
+    problems: () => st.problems,
+    fieldError: text => fieldError(text),
+    root,
+  });
+  /* an authoring run whose setup step failed asks for the window that fixes it (authoring page, lab.js) */
+  const fixStep = data => {
+    if (!data || data.type !== "gns3lab-setup-fix" || +data.labid !== +D.labid || !data.error) {
+      return false;
+    }
+    const err = data.error;
+    if (!setupForm.fix({step: String(err.step || ""), node: String(err.node || ""), exitcode: +err.exitcode || 0,
+        message: String(err.message || "")})) {
+      toast(str("ed_setup_fix_missing", String(err.step || "")), true);
+    }
+    return true;
+  };
+  window.addEventListener("message", e => {
+    if (e.origin === window.location.origin && fixStep(e.data)) {
+      e.source.postMessage({type: "gns3lab-setup-fix-ack"}, e.origin);
+    }
+  });
+  if (typeof BroadcastChannel === "function") {
+    const channel = new BroadcastChannel("gns3lab-editor-" + D.labid);
+    channel.onmessage = e => {
+      if (fixStep(e.data)) {
+        channel.postMessage({type: "gns3lab-setup-fix-ack"});
+      }
+    };
+  }
+
   /* the checks of a draft of an earlier version stay out of the next one: they are in the activities now */
   const checksHTML = () => !activityChecks ? checksForm.html() : !st.lab.checks ? "" : `<h3>${esc(str("ed_checks"))}</h3>
     <p class="ed-note" data-region="checksmoved">${esc(str("ed_checksmoved"))}</p>`;
@@ -1024,7 +1101,7 @@ export const init = (prefix) => {
       memory: fmtMem(st.resources.memorymb), cores: st.resources.cores}))}</p>` : "";
     return `<div class="ph"><div><p class="eyebrow">${esc(str("ed_lab"))}</p>
       <h2>${esc(str("ed_summary", {nodes: st.lab.nodes.length, links: st.lab.links.length}))}</h2></div></div>
-      ${res}${segmentsListHTML()}${checksHTML()}${problemsHTML()}${warningsHTML()}${previewHTML()}
+      ${res}${segmentsListHTML()}${setupForm.html()}${checksHTML()}${problemsHTML()}${warningsHTML()}${previewHTML()}
       ${D.canpublish ? "" : `<p class="ed-note">${esc(str("ed_cannotpublish"))}</p>`}
       <p class="muted">${esc(str("ed_hint"))}</p>`;
   };
@@ -1510,7 +1587,9 @@ export const init = (prefix) => {
   props.addEventListener("change", e => {
     const s = st.sel, t = e.target;
     if (!s) {
-      checksForm.change(t);
+      if (!setupForm.change(t)) {
+        checksForm.change(t);
+      }
       return;
     }
     if (s.kind === "segment") {
@@ -1694,6 +1773,8 @@ export const init = (prefix) => {
       }
     } else if (checksForm.action(name, act)) {
       // The checks block took it (checksform.js).
+    } else if (setupForm.action(name, act)) {
+      // The setup block took it (setupform.js).
     } else if (name === "addsegment") {
       addSegment();
     } else if (name === "addmembers" && st.sel && st.sel.kind === "segment") {

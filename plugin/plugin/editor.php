@@ -46,6 +46,7 @@ $labchecks = false;
 $labscripts = false;
 $labscriptneeds = false;
 $activitychecks = false;
+$labsetup = false;
 $imagecapture = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
@@ -63,6 +64,8 @@ if (!manager_client::is_configured()) {
         // The checks are a setting of the course activity (docs/autochecks.md §12): the editor no longer edits them.
         $activitychecks = $labchecks && $client->has_feature('activity-checks');
         $imagecapture = $client->has_feature('image_capture');
+        // The teacher's own setup steps of the lab (docs/lab-setup/README.md §6a).
+        $labsetup = $client->supports_lab_setup();
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
         }
@@ -95,7 +98,7 @@ $keys = [
 $keys = array_merge($keys, ['stoplab', 'ed_save']);
 foreach (array_keys(get_string_manager()->load_component_strings('gns3lab', current_language())) as $key) {
     if (str_starts_with($key, 'authoring') || str_starts_with($key, 'ed_script') || str_starts_with($key, 'ed_ann')
-            || str_starts_with($key, 'ed_fold')) {
+            || str_starts_with($key, 'ed_fold') || str_starts_with($key, 'ed_setup')) {
         $keys[] = $key;
     }
 }
@@ -106,7 +109,7 @@ $codes = [
     'gateway_not_router', 'unsupported_image', 'subnet_too_small', 'bad_subnet', 'vlan_out_of_range',
     'host_out_of_range', 'host_in_use', 'multiple_gateways', 'duplicate_segment', 'gateway_port_conflict',
     'unknown_rule', 'group_overlap', 'bad_range', 'script_node_unsupported', 'shell_mismatch', 'bad_regex',
-    'unknown_reference',
+    'unknown_reference', 'setup_node_unsupported',
 ];
 $warningcodes = ['gateway_not_configured', 'switch_not_configured', 'hostname_not_set'];
 foreach ($keys as $key) {
@@ -138,6 +141,8 @@ $data = [
     'labscriptneeds' => $labscriptneeds,
     'activitychecks' => $activitychecks,
     'checksprompt' => $labscripts && !$activitychecks ? \mod_gns3lab\local\checks_prompt::text(current_language()) : '',
+    'labsetup' => $labsetup,
+    'setupprompt' => $labsetup ? \mod_gns3lab\local\setup_prompt::text(current_language()) : '',
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];
