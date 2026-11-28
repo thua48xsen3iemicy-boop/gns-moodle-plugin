@@ -141,6 +141,7 @@ class ReconcileRequest(Strict):
 
 
 OPTIONS = ["max_duration"]
+CHECKS_MAX_BYTES = 64 * 1024  # An activity's gns3lab.checks/1, canonical JSON (CONTRACTS 2.9, activity checks)
 
 
 def iso_or_none(value):
@@ -399,6 +400,8 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
     async def fit_checks(raw, *, checked=None, definition=None, lab=None, site_slug):
         """(normalized, problems) of an activity's gns3lab.checks/1 against a lab: a definition of Moodle (checked or
         stored) or a catalog lab. The images are the site's catalog, as when the lab itself is checked."""
+        if len(checks_mod.canonical(raw).encode()) > CHECKS_MAX_BYTES:
+            return None, [{"path": "checks", "code": "too_large", "message": f"{CHECKS_MAX_BYTES} bytes at most"}]
         if lab is not None:
             return labs_mod.check_checks(raw, lab)
         return labdef.check_checks(raw, checked.definition if checked else definition,
@@ -575,10 +578,14 @@ def create_app(services: Services, *, run_orchestrator=True) -> FastAPI:
             if not same(existing):
                 raise conflict(existing)
             if body.checks is not None:
-                # The activity's checks follow it to the live lab; a document that does not fit is not applied.
-                definition, catalog_lab = (None, None) if checked else await lab_of(existing)
-                normalized, problems = await fit_checks(body.checks, checked=checked, definition=definition,
-                                                        lab=catalog_lab, site_slug=site.slug)
+                # The activity's checks follow it to the live lab; a document that does not fit is not applied,
+                # and neither is one whose catalog lab broke meanwhile: the student gets the live lab regardless.
+                try:
+                    definition, catalog_lab = (None, None) if checked else await lab_of(existing)
+                    normalized, problems = await fit_checks(body.checks, checked=checked, definition=definition,
+                                                            lab=catalog_lab, site_slug=site.slug)
+                except ApiError:
+                    normalized, problems = None, [None]
                 if not problems and checks_mod.digest(normalized) != existing["checks_def"]:
                     existing = await store.set_checks(existing["id"], checks=normalized,
                                                       checks_def=checks_mod.digest(normalized)) or existing

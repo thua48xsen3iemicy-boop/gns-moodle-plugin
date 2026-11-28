@@ -73,6 +73,10 @@ async def test_validate_against_a_catalog_lab_and_a_definition(tmp_path, dsn):
         assert (await validate(env, checks=OTHER)).status_code == 400
         assert (await validate(env, lab=LAB, lab_ref="cisco-3x2", checks=OTHER)).status_code == 400
         assert (await validate(env, lab_ref="cisco-3x2")).status_code == 400  # checks is required
+        huge = {**OTHER, "nodes": {f"N{i:05d}": {"persistence": "saved"} for i in range(4000)}}
+        r = await validate(env, lab_ref="cisco-3x2", checks=huge)
+        assert r.status_code == 422 and r.json()["problems"] == [
+            {"path": "checks", "code": "too_large", "message": "65536 bytes at most"}]
         r = await validate(env, lab_ref="cisco-3x2", checks=OTHER, extra=1)
         assert r.status_code == 400 and r.json()["error"] == "unsupported_field"
 
