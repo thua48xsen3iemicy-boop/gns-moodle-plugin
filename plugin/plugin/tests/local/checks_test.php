@@ -105,4 +105,42 @@ final class checks_test extends \basic_testcase {
         $this->assertSame(1, checks::attempts_left((object) ['checksattempts' => 3], 2));
         $this->assertSame(0, checks::attempts_left((object) ['checksattempts' => 3], 5));
     }
+
+    public function test_the_checks_of_an_activity_are_a_checks_document_or_nothing(): void {
+        $this->assertNull(checks::parse_document(''));
+        $this->assertNull(checks::parse_document('[1]'));
+        $this->assertNull(checks::parse_document('{"format":"gns3lab.lab/1"}'));
+        $this->assertNull(checks::parse_document('{"format":"gns3lab.checks/1","x":"' . str_repeat('a', 70000) . '"}'));
+        $doc = checks::parse_document('{"format":"gns3lab.checks/1","rules":{},"scripts":[{"id":"a","expect":{}}]}');
+        // Empty objects stay objects for the lab manager, and the document goes back as it came.
+        $this->assertInstanceOf(\stdClass::class, $doc['rules']);
+        $this->assertInstanceOf(\stdClass::class, $doc['scripts'][0]['expect']);
+        $this->assertSame(
+            '{"format":"gns3lab.checks/1","rules":{},"scripts":[{"id":"a","expect":{}}]}',
+            checks::encode_document($doc)
+        );
+        $this->assertSame('', checks::encode_document(null));
+        $this->assertNull(checks::activity_document((object) ['checksdef' => null]));
+    }
+
+    public function test_only_another_known_description_is_earlier_checks(): void {
+        $own = (object) ['checksdefhash' => 'sha256:new'];
+        $this->assertTrue(checks::outdated($own, 'sha256:old'));
+        $this->assertFalse(checks::outdated($own, 'sha256:new'));
+        $this->assertFalse(checks::outdated($own, null)); // An unknown description is never called old
+        $this->assertFalse(checks::outdated((object) ['checksdefhash' => null], 'sha256:old')); // The checks of the lab
+    }
+
+    public function test_the_checks_of_a_lab_and_a_lab_without_them(): void {
+        $lab = ['format' => lab_definition::FORMAT_2, 'nodes' => [], 'links' => [], 'segments' => [],
+            'checks' => ['format' => 'gns3lab.checks/1', 'network' => 'off']];
+        $this->assertSame(['format' => 'gns3lab.checks/1', 'network' => 'off'], checks::lab_document($lab));
+        $this->assertNull(checks::lab_document('cisco-3x2')); // A reference lab keeps its own on the manager
+        $bare = lab_definition::without_checks($lab);
+        $this->assertSame(lab_definition::FORMAT, $bare['format']); // Nothing but the checks made it lab/2
+        $this->assertArrayNotHasKey('segments', $bare);
+        $segmented = lab_definition::without_checks(['segments' => [['name' => 'A']]] + $lab);
+        $this->assertSame(lab_definition::FORMAT_2, $segmented['format']);
+        $this->assertArrayNotHasKey('checks', $segmented);
+    }
 }

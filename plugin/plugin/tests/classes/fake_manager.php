@@ -140,6 +140,27 @@ class fake_manager {
         $this->on('GET', self::CHECKS . '/' . $run['run_id'], 200, $run);
     }
 
+    /** Route of the checks of the running session (CONTRACTS §2.9, activity checks). */
+    public const CHECKS_DEFINITION = '/api/v1/sessions/s-3f9a1c0d2b4e5f60/checks-definition';
+
+    /**
+     * Answers like manager 0.39 with checks of the activity: the routes of with_checks(), validate and the replacement
+     * of the checks of a session; the running session is checked by the description of its lab.
+     *
+     * @param string $checksdef hash that validate and the replacement give
+     */
+    public function with_activity_checks(string $checksdef = 'sha256:cccc'): void {
+        $this->with_checks();
+        $this->with_info(['consoles', 'observer', 'resume', 'facts', 'checks', 'check-scripts', 'activity-checks']);
+        $session = self::session();
+        $session['features'] = ['consoles', 'facts', 'checks'];
+        $session['checks_def'] = null;
+        $session['checks_source'] = 'lab';
+        $this->on('GET', '/api/v1/sessions', 200, $session);
+        $this->on('POST', '/api/v1/checks/validate', 200, ['checks_def' => $checksdef, 'warnings' => []]);
+        $this->on('PUT', self::CHECKS_DEFINITION, 200, ['checks_def' => $checksdef, 'checks_source' => 'activity']);
+    }
+
     /**
      * A check run gns3lab.check-run/1 of the running session.
      *

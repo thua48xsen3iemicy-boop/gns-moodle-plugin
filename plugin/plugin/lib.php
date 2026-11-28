@@ -60,6 +60,7 @@ function gns3lab_add_instance(stdClass $data, $mform = null): int {
     $data->maxduration = (int) ($data->maxduration ?? 0);
     gns3lab_prepare_view_settings($data);
     gns3lab_prepare_checks_settings($data);
+    gns3lab_prepare_activity_checks($data, $mform);
     $data->id = $DB->insert_record('gns3lab', $data);
     gns3lab_grade_item_update($data);
     return $data->id;
@@ -82,7 +83,13 @@ function gns3lab_update_instance(stdClass $data, $mform = null): bool {
     $data->maxduration = (int) ($data->maxduration ?? 0);
     gns3lab_prepare_view_settings($data);
     gns3lab_prepare_checks_settings($data);
+    gns3lab_prepare_activity_checks($data, $mform);
+    $old = $DB->get_record('gns3lab', ['id' => $data->id], 'checksdef, checksdefhash', MUST_EXIST);
     $DB->update_record('gns3lab', $data);
+    if (property_exists($data, 'checksdef') && (string) $old->checksdef !== (string) $data->checksdef) {
+        // The running labs of the activity get the new checks now, for the next check and the teacher's forecast.
+        \mod_gns3lab\task\push_checks_definition::queue((int) $data->id);
+    }
     // The grade type or the maximum may have changed: the item follows and the grades are computed again.
     $instance = $DB->get_record('gns3lab', ['id' => $data->id], '*', MUST_EXIST);
     $instance->cmidnumber = $data->cmidnumber ?? null;
@@ -163,6 +170,35 @@ function gns3lab_prepare_checks_settings(stdClass $data): void {
     $data->checksreport = \mod_gns3lab\local\checks::report_mode($data);
     $data->checksreportdate = $data->checksreport === \mod_gns3lab\local\checks::REPORT_AFTER
         ? (int) ($data->checksreportdate ?? 0) : 0;
+}
+
+/**
+ * Normalises the activity's own auto-checks before the activity is saved (docs/autochecks.md §12).
+ *
+ * The form has the field only when the lab manager offers activity-checks; without it the stored checks stay as they
+ * are. The hash is what the lab manager gave when the form checked the document (mod_form::checksdef_errors()); a
+ * caller without the form asks the manager now, and a document it cannot confirm is kept without a hash.
+ *
+ * @param stdClass $data data from the module form
+ * @param mod_gns3lab_mod_form|null $mform the form
+ */
+function gns3lab_prepare_activity_checks(stdClass $data, $mform = null): void {
+    if (!property_exists($data, 'checksdef')) {
+        return;
+    }
+    $doc = \mod_gns3lab\local\checks::parse_document((string) $data->checksdef);
+    $data->checksdef = $doc === null ? null : \mod_gns3lab\local\checks::encode_document($doc);
+    $data->checksdefhash = null;
+    if ($doc === null) {
+        return;
+    }
+    if ($mform instanceof mod_gns3lab_mod_form && $mform->checkshash !== null) {
+        $data->checksdefhash = $mform->checkshash;
+        return;
+    }
+    $lab = \mod_gns3lab\local\checks_lab::lab_of((int) ($data->labversionid ?? 0), (string) ($data->labref ?? ''));
+    $result = $lab === null ? null : \mod_gns3lab\local\checks_lab::validate($lab, $doc);
+    $data->checksdefhash = $result && $result['valid'] ? $result['checksdef'] : null;
 }
 
 /**

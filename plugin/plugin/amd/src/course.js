@@ -49,7 +49,8 @@ const STRING_KEYS = [
     'cl_overridden', 'cl_passed_n', 'cl_sortgrade', 'cl_sortname', 'cl_sortstate', 'cl_sorttotal', 'cl_started',
     'cl_card_checkmark', 'cl_col_attempts', 'cl_col_avg', 'cl_sortattempts', 'cl_sortavg', 'cl_sortchecks', 'cl_sortfacts',
     'cl_sortlab', 'cl_tries', 'cl_tries_title', 'cl_avg_title', 'cl_attempts_title',
-    'cl_forecast', 'cl_forecast_title', 'cl_forecast_noscripts', 'cl_forecast_incomplete', 'cl_card_forecast',
+    'cl_forecast', 'cl_forecast_title', 'cl_forecast_noscripts', 'cl_forecast_incomplete', 'cl_forecast_outdated',
+    'cl_card_forecast',
     'cl_card_forecast_none', 'cl_card_forecast_at',
     'cl_state_failed', 'cl_state_none', 'cl_state_queued', 'cl_state_running', 'cl_state_starting', 'cl_state_stopped',
     'cl_state_stopping', 'cl_student', 'cl_total', 'cl_total_title', 'cl_unobservable', 'cl_updated', 'cl_warn',
@@ -1035,6 +1036,9 @@ class CoursePage {
             hel('span', 'sub', line).textContent = ' ' + this.str('cl_card_outof', forecast.topmark);
         }
         const notes = [];
+        if (forecast.outdated) {
+            notes.push(this.str('cl_forecast_outdated'));
+        }
         if (forecast.scriptsignored) {
             notes.push(this.str('cl_forecast_noscripts'));
         }
@@ -1069,6 +1073,9 @@ class CoursePage {
      */
     forecastTitle(forecast) {
         const parts = [this.str('cl_forecast_title')];
+        if (forecast.outdated) {
+            parts.push(this.str('cl_forecast_outdated'));
+        }
         if (forecast.scriptsignored) {
             parts.push(this.str('cl_forecast_noscripts'));
         }

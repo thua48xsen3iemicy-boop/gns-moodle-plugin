@@ -64,6 +64,12 @@ class session_data {
                 new external_value(PARAM_ALPHANUMEXT, 'Feature name, such as consoles or facts'),
                 'What this session offers (CONTRACTS §7), empty if the manager did not say'
             ),
+            'checkserror' => new external_value(
+                PARAM_BOOL,
+                'The checks of the activity do not fit this lab: no checks (CONTRACTS §2.3 checks_error)',
+                VALUE_DEFAULT,
+                false
+            ),
             'isosources' => new external_multiple_structure(
                 new external_value(PARAM_ALPHANUMEXT, 'Node id'),
                 'Nodes whose guest directory can become an ISO image (CONTRACTS §2.12), empty without feature iso',
@@ -120,6 +126,7 @@ class session_data {
             'nodesstale' => $running && ($session->nodes_stale ?? false) === true,
             'slotvmid' => self::slot_vmid($session),
             'features' => self::features($session),
+            'checkserror' => !empty($session->checks_error),
             'isosources' => self::iso_nodes($session, 'sources'),
             'isotargets' => self::iso_nodes($session, 'targets'),
         ];

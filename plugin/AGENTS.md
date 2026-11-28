@@ -63,6 +63,8 @@ docs/          SPEC.md и прочая документация
   `.gns3`), `preview.js` (небольшая схема эталонной лабы на странице активности `view.php`, без фактов и щелчков; данные —
   `classes/local/lab_preview.php`, общий с `lab.php`), `assignment.js` (окно задания: описание активности плавающим окном в слое окон консолей, свёртывание, место и размер
   запоминаются в браузере; проверка — `devtools/ui-harness/check_assignment.js`), `checks.js` (панель автопроверок: кнопка «Проверить», ход прогона, отчёт, прошлые прогоны, `docs/autochecks.md`),
+  `checksform.js` (0.50.0: блок проверок `gns3lab.checks/1` — в форме активности `init`, в редакторе лаб `create`;
+  `docs/autochecks.md` §12; проверка — `devtools/ui-harness/check_checksform.js`),
   `checkreport.js` (отчёт без DOM: находки по первопричинам, состояние кнопки, период опроса; проверка — `devtools/check_checkreport.mjs`,
   в браузере — `devtools/ui-harness/check_checks.js`), `segments.js` (сегменты `lab/2`: подсеть, адреса, ожидаемые факты и факты предпросмотра, путь сегмента и ноды, которые
   настраивает менеджер, привязка находок менеджера по `path`, без DOM, `../docs/lab-constructor/README.md` §3, §6), `dom.js` (помощники),

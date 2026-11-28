@@ -646,6 +646,21 @@ define([], function() {
     // The lab editor: a pretend lab manager. validate refuses what the manager would refuse in these simple cases and
     // warns about every gateway, like manager 0.10; save and publish remember the last definition they got.
     const editor = {saved: null, published: null, validated: 0};
+    const checksform = {labs: [], validated: [], down: false};
+    const checksLab = args => {
+        const node = (name, scripts = true) => ({name, image: 'Debian 12', kind: scripts ? 'qemu' : 'vpcs', category: 'host',
+            scripts});
+        if (+args.labversionid === 11) {
+            return {found: true, catalog: false, nodes: [node('PC1'), node('PC2', false)], links: [{a: 'PC1 ens3', b: 'PC2 e0'}],
+                segments: '[]', labchecks: JSON.stringify({format: 'gns3lab.checks/1', network: 'off',
+                    scripts: [{id: 'ssh', title: 'SSH', node: 'PC1', run: 'systemctl is-active ssh'}]})};
+        }
+        if (+args.labversionid === 12) {
+            return {found: true, catalog: false, nodes: [node('PC9'), node('PC2', false)], links: [], segments: '[]', labchecks: ''};
+        }
+        return args.labref ? {found: true, catalog: true, nodes: [node('D1')], links: [], segments: '[]', labchecks: ''}
+            : {found: false, catalog: false, nodes: [], links: [], segments: '[]', labchecks: ''};
+    };
     const SUBNET = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
     const problemsOf = def => {
         const problems = [], warnings = [];
@@ -690,6 +705,25 @@ define([], function() {
             return {valid: !problems.length, memorymb: problems.length ? 0 : 3072, cores: problems.length ? 0 : 2, problems,
                 warnings: problems.length ? [] : warnings};
         },
+        // The checks block of the activity form (checksform.js): version 11 has PC1 and its own checks, version 12 calls
+        // the same Debian PC9 and has none, 0 with a labref is a reference lab. validate_checks refuses a script on a
+        // device the chosen lab lacks and remembers what it was asked (window.__stub.checksform).
+        mod_gns3lab_get_checks_lab: async args => {
+            checksform.labs.push(args);
+            return checksLab(args);
+        },
+        mod_gns3lab_validate_checks: async args => {
+            checksform.validated.push(args);
+            if (checksform.down) {
+                return {valid: false, checksdef: '', problems: [], error: 'unreachable'};
+            }
+            const lab = checksLab(args);
+            const names = new Set(lab.nodes.map(n => n.name));
+            const doc = JSON.parse(args.checks);
+            const problems = (doc.scripts || []).map((sc, i) => names.has(sc.node) ? null
+                : {path: `checks.scripts[${i}].node`, code: 'unknown_node', message: String(sc.node)}).filter(Boolean);
+            return {valid: !problems.length, checksdef: problems.length ? '' : 'sha256:ok', problems, error: ''};
+        },
         mod_gns3lab_save_lab_draft: async args => {
             editor.saved = JSON.parse(args.definition);
             return {version: 1, status: 'draft'};
@@ -707,6 +741,7 @@ define([], function() {
 
     window.__stub = {
         editor,
+        checksform,
         iso,
         // Announce a maintenance that starts in `seconds` (null ends it).
         maintenance: (seconds, message = 'Image update') => {

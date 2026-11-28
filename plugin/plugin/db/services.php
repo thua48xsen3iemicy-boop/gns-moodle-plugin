@@ -137,6 +137,20 @@ $functions = [
         'ajax' => true,
         'loginrequired' => true,
     ],
+    'mod_gns3lab_get_checks_lab' => [
+        'classname' => \mod_gns3lab\external\get_checks_lab::class,
+        'description' => 'The devices of the lab chosen in the activity form, for its auto-checks.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
+    'mod_gns3lab_validate_checks' => [
+        'classname' => \mod_gns3lab\external\validate_checks::class,
+        'description' => 'Asks the lab manager whether the auto-checks of an activity fit its lab.',
+        'type' => 'read',
+        'ajax' => true,
+        'loginrequired' => true,
+    ],
     'mod_gns3lab_publish_lab' => [
         'classname' => \mod_gns3lab\external\publish_lab::class,
         'description' => 'Publishes a new version of a library lab.',

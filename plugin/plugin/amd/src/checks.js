@@ -44,7 +44,7 @@ export const STRING_KEYS = [
     'chk_mark', 'chk_incomplete', 'chk_failed', 'chk_nofindings', 'chk_consequence', 'chk_toroot', 'chk_forgiven',
     'chk_details_counts', 'chk_details_after', 'chk_details_gone', 'chk_history', 'chk_hist_mark', 'chk_hist_incomplete',
     'chk_hist_failed', 'chk_hist_pending', 'chk_gaps', 'chk_started', 'chk_done', 'chk_empty', 'chk_observer',
-    'chk_disabled', 'chk_filter', 'chk_filter_all',
+    'chk_disabled', 'chk_filter', 'chk_filter_all', 'chk_outdated', 'chk_outdated_help', 'chk_trial', 'chk_checksinvalid',
     ...CLASSES.map(c => 'chk_class_' + c),
     ...CLASSES.map(c => 'chk_n_' + c),
     ...DATA_GAPS.map(r => 'chk_gap_' + r),
@@ -339,6 +339,15 @@ export class Checks {
         const box = hel('section', 'chk-run', this.body);
         box.setAttribute('aria-live', 'polite');
         hel('p', 'chk-when', box).textContent = when(run.requestedat);
+        // A teacher's trial run and a run by the checks the activity had before an edit (docs/autochecks.md §12).
+        if (run.trial) {
+            hel('p', 'chk-note chk-trial', box).textContent = this.strings.chk_trial;
+        }
+        if (run.outdated) {
+            const p = hel('p', 'chk-note chk-outdated', box);
+            p.textContent = this.strings.chk_outdated;
+            p.title = this.strings.chk_outdated_help;
+        }
         if (isPending(run)) {
             const p = hel('p', 'chk-progress', box);
             hel('span', 'chk-spin', p).setAttribute('aria-hidden', 'true');
@@ -545,6 +554,9 @@ export class Checks {
             const label = isPending(r) ? this.strings.chk_hist_pending : r.status === 'failed' ? this.strings.chk_hist_failed
                 : r.outcome === 'graded' ? fill(this.strings.chk_hist_mark, r.mark) : this.strings.chk_hist_incomplete;
             b.textContent = label;
+            if (r.outdated || r.trial) {
+                hel('small', 'chk-tag', b).textContent = r.trial ? this.strings.chk_trial : this.strings.chk_outdated;
+            }
             hel('small', '', b).textContent = when(r.requestedat);
             b.addEventListener('click', () => this.show(r.runid));
         });

@@ -45,6 +45,7 @@ $constructor = false;
 $labchecks = false;
 $labscripts = false;
 $labscriptneeds = false;
+$activitychecks = false;
 $imagecapture = false;
 $catalogerror = '';
 if (!manager_client::is_configured()) {
@@ -59,6 +60,8 @@ if (!manager_client::is_configured()) {
         $labchecks = $constructor && $client->has_feature('checks');
         $labscripts = $labchecks && $client->has_feature('check-scripts');
         $labscriptneeds = $labscripts && $client->has_feature('check-script-needs');
+        // The checks are a setting of the course activity (docs/autochecks.md §12): the editor no longer edits them.
+        $activitychecks = $labchecks && $client->has_feature('activity-checks');
         $imagecapture = $client->has_feature('image_capture');
         if (!$client->has_feature('images')) {
             $catalogerror = get_string('librarynofeature', 'gns3lab');
@@ -85,7 +88,7 @@ $keys = [
     'ed_managed', 'ed_hintmembers', 'ed_preview', 'ed_previewempty', 'ed_previewok', 'ed_warnings', 'ed_subnetinvalid',
     'ed_vlaninvalid', 'ed_hostinvalid', 'ed_segnameinvalid', 'ed_segnametaken', 'ed_segkept', 'ed_deletesegment',
     'ed_segconfigure', 'ed_segconfigure_help', 'ed_randomifnames', 'ed_randomifnames_help',
-    'ed_nopaste', 'ed_nopaste_help', 'ed_disks', 'ed_disks_help', 'ed_disk', 'ed_adddisk', 'ed_removedisk', 'ed_diskgb', 'ed_checks', 'ed_checks_help', 'ed_checkskept', 'ed_checksinvalid',
+    'ed_nopaste', 'ed_nopaste_help', 'ed_disks', 'ed_disks_help', 'ed_disk', 'ed_adddisk', 'ed_removedisk', 'ed_diskgb', 'ed_checks', 'ed_checks_help', 'ed_checkskept', 'ed_checksinvalid', 'ed_checksmoved',
     'ed_network', 'ed_network_auto', 'ed_network_off', 'ed_network_help',
     'chk_class_critical', 'chk_class_major', 'chk_class_minor', 'chk_class_note',
 ];
@@ -133,7 +136,8 @@ $data = [
     'labchecks' => $labchecks,
     'labscripts' => $labscripts,
     'labscriptneeds' => $labscriptneeds,
-    'checksprompt' => $labscripts ? \mod_gns3lab\local\checks_prompt::text(current_language()) : '',
+    'activitychecks' => $activitychecks,
+    'checksprompt' => $labscripts && !$activitychecks ? \mod_gns3lab\local\checks_prompt::text(current_language()) : '',
     'catalogerror' => $catalogerror,
     'strings' => $strings,
 ];

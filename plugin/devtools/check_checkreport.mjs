@@ -65,6 +65,9 @@ check('the check button: off, with the reason', () => {
     assert.equal(R.startState(overview(), {status: 'stopped', features: []}, true).reason, 'chk_needsrunning');
     assert.equal(R.startState(overview(), null, true).reason, 'chk_needsrunning');
     assert.equal(R.startState(overview(), {status: 'running', features: ['consoles']}, true).reason, 'chk_nofacts');
+    // The checks of the activity do not fit the lab (docs/autochecks.md §12): the button names it, not the facts.
+    assert.equal(R.startState(overview(), {status: 'running', features: ['consoles', 'facts'], checkserror: true}, true).reason,
+        'chk_checksinvalid');
     assert.equal(R.startState(overview({attempts: {max: 1, used: 1, left: 0}}), running, true).reason, 'chk_noattempts');
     assert.equal(R.startState(overview({runs: [{status: 'queued'}]}), running, true).reason, 'chk_running');
     assert.equal(R.startState(overview({canstart: false}), running, true).reason, 'chk_cannot');

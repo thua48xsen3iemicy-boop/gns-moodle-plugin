@@ -26,6 +26,7 @@ use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\manager_client;
 use mod_gns3lab\local\manager_exception;
 use mod_gns3lab\local\seat;
+use mod_gns3lab\local\session_checks;
 use mod_gns3lab\local\session_data;
 
 /**
@@ -84,6 +85,11 @@ class start_check extends external_api {
         if ($session === null || $session->status !== 'running') {
             throw new \moodle_exception('sessionnotrunning', 'gns3lab');
         }
+        // The activity's checks reach a lab started before they were changed (docs/autochecks.md §12).
+        session_checks::sync($instance, $session, $client);
+        if (!empty($session->checks_error)) {
+            throw new \moodle_exception('checksinvalid', 'gns3lab');
+        }
         if (!session_data::has_feature($session, 'checks')) {
             throw new \moodle_exception('checksnotavailable', 'gns3lab');
         }
@@ -91,7 +97,9 @@ class start_check extends external_api {
         if (check_runs::pending((int) $instance->id, $userid, $session->session_id)) {
             return get_checks::overview($access, $userid, false, false);
         }
-        if (checks::attempts_left($instance, check_runs::attempts_used((int) $instance->id, $userid)) === 0) {
+        // A teacher trying the checks in their own lab spends no attempt and gets no grade.
+        $trial = check_runs::trial_user($access);
+        if (!$trial && checks::attempts_left($instance, check_runs::attempts_used((int) $instance->id, $userid)) === 0) {
             throw new \moodle_exception('checksnoattempts', 'gns3lab');
         }
         try {
@@ -113,7 +121,7 @@ class start_check extends external_api {
                 throw $e;
             }
         }
-        check_runs::record($instance, $userid, $session->session_id, $run, (int) $USER->id);
+        check_runs::record($instance, $userid, $session->session_id, $run, (int) $USER->id, $trial);
         return get_checks::overview($access, $userid, false, false);
     }
 

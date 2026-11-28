@@ -306,8 +306,13 @@ class lab_library {
 
         $lab = self::get_lab($labid);
         $def['title'] = lab_definition::title($lab->name);
+        $client = \core\di::get(manager_client::class);
+        if ($client->has_feature('activity-checks')) {
+            // The checks belong to the course activities now (docs/autochecks.md §12): a new version goes without them.
+            $def = lab_definition::without_checks($def);
+        }
         $draft = self::write_draft($lab->id, $def);
-        $result = \core\di::get(manager_client::class)->validate_lab($def);
+        $result = $client->validate_lab($def);
 
         $last = self::last_published($lab->id);
         if ($last && $last->labdef === $result->lab_def && $last->definition === $draft->definition) {

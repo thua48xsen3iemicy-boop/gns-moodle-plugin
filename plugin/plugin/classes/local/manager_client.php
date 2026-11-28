@@ -226,6 +226,46 @@ class manager_client {
     }
 
     /**
+     * Checks the auto-checks of an activity against the lab they are for, storing nothing (CONTRACTS §2.9, activity
+     * checks; feature activity-checks).
+     *
+     * A document that does not fit is a manager_exception checks_invalid with problems in details; a lab definition
+     * with problems is lab_invalid.
+     *
+     * @param string|array $lab reference lab (lab_ref) or a lab definition from the lab library
+     * @param array $checks gns3lab.checks/1
+     * @return \stdClass checks_def (hash), warnings
+     */
+    public function validate_checks(string|array $lab, array $checks): \stdClass {
+        $result = $this->expect_object($this->request('POST', '/api/v1/checks/validate', [
+            is_array($lab) ? 'lab' : 'lab_ref' => is_array($lab) ? lab_definition::for_manager($lab) : $lab,
+            'checks' => checks::for_manager($checks),
+        ]));
+        if (!is_string($result->checks_def ?? null) || $result->checks_def === '') {
+            throw new manager_exception('badresponse', 200, 'checks validate without checks_def');
+        }
+        return $result;
+    }
+
+    /**
+     * Replaces the auto-checks of a live session (CONTRACTS §2.9, PUT /sessions/{id}/checks-definition).
+     *
+     * checks_invalid: they do not fit the lab of this session (an earlier version of the lab); session_not_running:
+     * the session is over.
+     *
+     * @param string $sessionid session id
+     * @param array|null $checks gns3lab.checks/1 of the activity, null for the lab's own
+     * @return \stdClass checks_def, checks_source
+     */
+    public function put_checks_definition(string $sessionid, ?array $checks): \stdClass {
+        return $this->expect_object($this->request(
+            'PUT',
+            '/api/v1/sessions/' . rawurlencode($sessionid) . '/checks-definition',
+            ['checks' => $checks === null ? null : checks::for_manager($checks)]
+        ));
+    }
+
+    /**
      * Reference labs available on the manager.
      *
      * @return \stdClass[] objects with lab_ref, title, description
@@ -284,6 +324,8 @@ class manager_client {
      * @param int $courseid course id
      * @param string|array $lab reference lab (lab_ref) or a lab definition from the lab library
      * @param int $maxduration session limit of the activity in minutes, 0 for the manager default
+     * @param array|null $checks auto-checks of the activity (CONTRACTS §2.9), null for the lab's own; sent only to a
+     *     manager with activity-checks
      * @return \stdClass session
      */
     public function create_session(
@@ -291,7 +333,8 @@ class manager_client {
         int $instanceid,
         int $courseid,
         string|array $lab,
-        int $maxduration = 0
+        int $maxduration = 0,
+        ?array $checks = null
     ): \stdClass {
         global $CFG;
 
@@ -310,6 +353,9 @@ class manager_client {
         }
         if ($maxduration > 0 && in_array('max_duration', $info->options, true)) {
             $body['options'] = ['max_duration' => $maxduration];
+        }
+        if ($checks !== null && in_array('activity-checks', $info->features, true)) {
+            $body['checks'] = checks::for_manager($checks);
         }
         if ($info->known) {
             $body['client'] = [

@@ -56,6 +56,13 @@ ISO из каталога гостя (CONTRACTS §2.12 менеджера 0.30):
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "incomplete"}'  # следующий прогон: incomplete
     curl -X POST localhost:8090/mock/checks/next -d '{"outcome": "failed"}'      # следующий прогон: failed
     curl -X POST localhost:8090/mock/checks/next -d '{"scripts": true}'          # прогоны со скриптами преподавателя
+- info: feature "activity-checks" (CONTRACTS §2.9 «Описание из активности», менеджер 0.39.0): поле "checks" в
+  POST /api/v1/sessions — описание активности вместо описания лабы; неподходящее (скрипт на узле, которого нет в лабе)
+  лабу не останавливает: checks_error и нет "checks" в features. У сессии checks_def, checks_source, checks_error;
+  POST /api/v1/checks/validate {"lab" | "lab_ref", "checks"} → {"checks_def", "warnings"} или 422 checks_invalid;
+  PUT /api/v1/sessions/{id}/checks-definition {"checks": {…} | null} → {"checks_def", "checks_source"};
+  checks_def прогона и прогноза — описание сессии.
+    curl -X POST localhost:8090/mock/checks-definition/next -d '{"status": 422}'  # следующий PUT: checks_invalid
 - POST /api/v1/forecasts {"session_ids", "grading"?, "details"?} — прогноз преподавателя (CONTRACTS §2.9a): те же
   находки, что дала бы проверка по снимку сессии, без скриптов (scripts_ignored — как у /mock/checks/next); у сессии,
   которая не дошла до running, forecast null; чужая или неизвестная — found false;
@@ -159,7 +166,7 @@ def check_fields(body, allowed, where=""):
             check_fields(value, allowed[key], f"{where}{key}.")
 
 
-SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "library_lab_id": 1, "lab_ref": 1, "lab": 1, "course_id": 1,
+SESSION_FIELDS = {"user_id": 1, "instance_id": 1, "library_lab_id": 1, "lab_ref": 1, "lab": 1, "course_id": 1, "checks": 1,
                   "options": {"max_duration": 1, "mode": 1}, "client": {"plugin_version": 1, "moodle_release": 1}}
 
 
@@ -457,6 +464,9 @@ class Session:
         self.facts_variant = "ok"  # fixture shown: ok or broken, switched by a refresh
         self.facts_refreshed = None  # time of the last refresh that really collected
         self.check_runs = []  # check runs of the session (CONTRACTS §2.9), oldest first
+        self.checks = None  # gns3lab.checks/1 of the activity (CONTRACTS §2.9, activity checks), None: the lab's
+        self.checks_def = None
+        self.checks_error = None
 
     def status(self):
         return self.state()[0]
@@ -503,6 +513,7 @@ class Manager:
         self.fail_next = None
         self.check_next = None  # "incomplete" or "failed": the outcome of the next check run
         self.check_scripts = False  # the next runs have the teacher's scripts (result.scripts), /mock/checks/next
+        self.checks_definition_next = None  # the next PUT …/checks-definition answers this status, /mock/checks-definition/next
         self.capture_fail = os.environ.get('MOCK_CAPTURE_FAIL') == '1'
         self.stale = False
         self.fact_errors: dict = {}  # node_id -> (code, since): the collection from the node fails
@@ -574,6 +585,10 @@ class Manager:
             body["slot_vmid"] = 9000 + s.workspace % 1000  # CONTRACTS 2.3: VMID of the slot CT
         if maintenance:
             body["maintenance"] = maintenance
+        body["checks_def"] = s.checks_def  # CONTRACTS 2.3: the description the session is checked by
+        body["checks_source"] = "activity" if s.checks is not None or s.checks_error else "lab"
+        if s.checks_error:
+            body["checks_error"] = s.checks_error
         if s.mode:
             body['mode'] = s.mode
             body['capture_nodes'] = [{'name': n['name'], 'status': s.node_statuses.get(n['name'], 'unknown')}
@@ -586,7 +601,7 @@ class Manager:
     def present(self, s):
         body = self.summary(s)
         status = body["status"]
-        body["features"] = ["consoles", "facts", "checks"] if status == "running" else []
+        body["features"] = (["consoles", "facts"] + ([] if s.checks_error else ["checks"])) if status == "running" else []
         if status == "running":
             lab = self.labs[s.key]
             doc = json.loads(json.dumps(lab["doc"]))
@@ -668,7 +683,7 @@ def site_of(request):
 
 async def info(request):
     site_of(request)
-    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions", "console-activity"] + (["resume"] if RESUME else [])
+    features = ["consoles", "observer", "images", "lab_definitions", "image_capture", "checks", "check-scripts", "check-script-needs", "forecast", "activity-checks", "purge", "maintenance", "random_ifnames", "extra_disks", "iso", "live-sessions", "console-activity"] + (["resume"] if RESUME else [])
     return web.json_response({"schema": "gns3lab.info/1", "version": "0.14.0-mock",
                               "session_schemas": ["gns3lab.session/1"], "options": ["max_duration", "mode"],
                               "features": features, "lab_formats": [LAB_FORMAT], "limits": LIMITS})
@@ -803,12 +818,16 @@ async def create_session(request):
             return error(422, "lab_invalid", f"{len(problems)} problem(s) in the lab", problems=problems)
         lab_def = lab_hash(normal)
         m.labs.setdefault(lab_def, {"doc": lab_document(normal, lab_def), "statuses": {}, "facts": {}})
+    if authoring and "checks" in body:
+        return error(400, "invalid_request", "An authoring session has no activity and no checks of one")
     live = m.live(site, user_id, library)
     if live:
         if (live.instance_id, live.key) != (instance_id, lab_def or lab_ref):
             return error(409, "session_conflict", "У студента уже запущена другая лаба; сначала остановите её",
                          conflict={"instance_id": live.instance_id, "course_id": live.course_id,
                                    "lab_ref": live.lab_ref, "lab_def": live.lab_def, "status": live.status()})
+        if body.get("checks") is not None and not checks_problems(m, live.key, body["checks"]):
+            live.checks, live.checks_def, live.checks_error = body["checks"], checks_hash(body["checks"]), None
         return web.json_response(m.present(live), status=200)
     if m.maintenance_state():
         return error(503, "maintenance", "Идёт техническое обслуживание: запуск лаб временно недоступен",
@@ -821,6 +840,12 @@ async def create_session(request):
     s.mode = 'authoring' if authoring else None
     s.library_lab_id = library
     s.definition = body.get('lab')
+    if body.get("checks") is not None:
+        problems = checks_problems(m, s.key, body["checks"])
+        if problems:
+            s.checks_error = {"code": "checks_invalid", "problems": problems}
+        else:
+            s.checks, s.checks_def = body["checks"], checks_hash(body["checks"])
     m.fail_next = None
     s.workspace = m.workspaces.setdefault((site, user_id, instance_id, s.key), len(m.workspaces) + 1)
     for node in m.labs[s.key]['doc']['topology']['nodes']:
@@ -829,6 +854,77 @@ async def create_session(request):
     log.info("session %s: user %s, activity %s, lab %s, %s min, client %s", s.id, user_id, instance_id, s.key,
              max_duration, body.get("client"))
     return web.json_response(m.present(s), status=201)
+
+
+def checks_hash(doc):
+    return "sha256:" + hashlib.sha256(canonical(doc).encode()).hexdigest()
+
+
+def checks_problems(m, key, doc):
+    """Problems of a gns3lab.checks/1 of an activity against a lab, like the manager: here only the shape and the nodes
+    of the scripts."""
+    if not isinstance(doc, dict) or doc.get("format") != "gns3lab.checks/1":
+        return [{"path": "checks.format", "code": "required", "message": "gns3lab.checks/1"}]
+    names = {n["name"] for n in m.labs[key]["doc"]["topology"]["nodes"]} if key in m.labs else set()
+    return [{"path": f"checks.scripts[{i}].node", "code": "unknown_node", "message": str(sc.get("node"))}
+            for i, sc in enumerate(doc.get("scripts") or []) if sc.get("node") not in names]
+
+
+async def validate_checks(request):
+    site_of(request)
+    m: Manager = request.app["m"]
+    try:
+        body = await read_body(request, {"lab": 1, "lab_ref": 1, "checks": 1})
+        if ("lab" in body) == ("lab_ref" in body) or "checks" not in body:
+            raise KeyError("lab or lab_ref, and checks")
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    except (KeyError, json.JSONDecodeError):
+        return error(400, "invalid_request", "Exactly one of lab and lab_ref, and checks")
+    if "lab" in body:
+        problems, normal = lab_problems(body["lab"])
+        if problems:
+            return error(422, "lab_invalid", f"{len(problems)} problem(s) in the lab", problems=problems)
+        key = lab_hash(normal)
+        m.labs.setdefault(key, {"doc": lab_document(normal, key), "statuses": {}, "facts": {}})
+    else:
+        key = body["lab_ref"]
+        if key not in m.labs:
+            return error(404, "lab_not_found", "Unknown lab_ref")
+    problems = checks_problems(m, key, body["checks"])
+    if problems:
+        return error(422, "checks_invalid", "The checks do not fit the lab", problems=problems)
+    return web.json_response({"checks_def": checks_hash(body["checks"]), "warnings": []})
+
+
+async def put_checks_definition(request):
+    m: Manager = request.app["m"]
+    s = own(request, site_of(request))
+    try:
+        body = await read_body(request, {"checks": 1})
+        if "checks" not in body:
+            raise KeyError("checks")
+    except Unsupported as exc:
+        return error(400, "unsupported_field", f"Unsupported field: {exc}")
+    except (KeyError, json.JSONDecodeError):
+        return error(400, "invalid_request", "checks is required")
+    if s.status() in ("stopped", "failed"):
+        return error(409, "session_not_running", "Session is not running")
+    forced, m.checks_definition_next = m.checks_definition_next, None
+    doc = body["checks"]
+    problems = [{"path": "checks", "code": "unknown_node", "message": "mock"}] if forced == 422 else (
+        checks_problems(m, s.key, doc) if doc is not None else [])
+    if problems:
+        return error(422, "checks_invalid", "The checks do not fit the lab", problems=problems)
+    s.checks, s.checks_def, s.checks_error = doc, checks_hash(doc) if doc is not None else None, None
+    log.info("session %s: checks of the activity replaced, %s", s.id, s.checks_def or "the lab's own")
+    return web.json_response({"checks_def": s.checks_def, "checks_source": "activity" if doc is not None else "lab"})
+
+
+async def mock_checks_definition_next(request):
+    body = await request.json()
+    request.app["m"].checks_definition_next = int(body.get("status") or 0) or None
+    return web.json_response({"ok": True})
 
 
 def own(request, site):
@@ -1305,7 +1401,7 @@ def present_run(m, s, run, full=True):
             "requested_by_user_id": run["requested_by_user_id"], "requested_at": iso(run["_created"]),
             "started_at": iso(run["_created"] + CHECK_QUEUED_FOR) if age >= CHECK_QUEUED_FOR else None,
             "finished_at": iso(finished) if finished else None, "facts_rev": s.facts_rev,
-            "checks_def": None, "grading": run["grading"], "result": result, "error": err}
+            "checks_def": s.checks_def, "grading": run["grading"], "result": result, "error": err}
 
 
 def iso_body(op_id, op):
@@ -1375,6 +1471,8 @@ async def start_check(request):
         return error(400, "invalid_request", f"Invalid fields: {exc}")
     if s.status() != "running":
         return error(409, "session_not_running", "Session is not running")
+    if s.checks_error:
+        return error(409, "checks_invalid", "The checks of the activity do not fit the lab", problems=s.checks_error["problems"])
     active = next((r for r in s.check_runs if present_run(m, s, r)["status"] in ("queued", "running")), None)
     if active:
         return error(409, "check_in_progress", "Проверка уже идёт", run_id=active["run_id"])
@@ -1425,7 +1523,7 @@ async def forecasts(request):
         result = check_result(m, s, {"_outcome": "graded", "grading": grading})
         forecast = {"schema": "gns3lab.forecast/1", "facts_rev": s.facts_rev, "assessed_at": iso(time.time()),
                     "outcome": "graded", "mark": result["mark"], "counts": result["counts"],
-                    "scripts_ignored": m.check_scripts}
+                    "scripts_ignored": m.check_scripts, "checks_def": s.checks_def}
         if body.get("details") is True:
             forecast["findings"] = result["findings"]
         out.append({"session_id": sid, "found": True, "forecast": forecast})
@@ -1826,6 +1924,9 @@ def make_apps():
     api.router.add_get("/api/v1/sessions/{sid}/checks", list_checks)
     api.router.add_get("/api/v1/sessions/{sid}/checks/{run}", get_check)
     api.router.add_post("/mock/checks/next", mock_check_next)
+    api.router.add_post("/api/v1/checks/validate", validate_checks)
+    api.router.add_put("/api/v1/sessions/{sid}/checks-definition", put_checks_definition)
+    api.router.add_post("/mock/checks-definition/next", mock_checks_definition_next)
     api.router.add_post("/api/v1/sessions/{sid}/iso", start_iso)
     api.router.add_get("/api/v1/sessions/{sid}/iso/{op}", get_iso)
     api.router.add_post("/mock/iso/next", mock_iso_next)

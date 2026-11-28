@@ -26,6 +26,8 @@
         <FIELD NAME="checksattempts" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Most graded attempts of a student, 0 for unlimited"/>
         <FIELD NAME="checksreport" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="full" SEQUENCE="false" COMMENT="What a student sees of a run: full, counts or after (counts until checksreportdate)"/>
         <FIELD NAME="checksreportdate" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="From when the findings are shown in the after mode"/>
+        <FIELD NAME="checksdef" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="The activity's own auto-checks, JSON gns3lab.checks/1; empty means the checks of the lab"/>
+        <FIELD NAME="checksdefhash" TYPE="char" LENGTH="80" NOTNULL="false" SEQUENCE="false" COMMENT="checks_def the lab manager gave for checksdef when it was saved"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
@@ -136,6 +138,8 @@
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timefinished" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the run ended"/>
+        <FIELD NAME="checksdef" TYPE="char" LENGTH="80" NOTNULL="false" SEQUENCE="false" COMMENT="checks_def of the description the run was graded by"/>
+        <FIELD NAME="trial" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="A teacher's trial run in their own lab: no attempt, no grade"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

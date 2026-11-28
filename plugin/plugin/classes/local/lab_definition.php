@@ -524,6 +524,24 @@ class lab_definition {
     }
 
     /**
+     * The definition without its checks document; a lab/2 that had nothing but the checks becomes lab/1 again.
+     *
+     * @param array $def clean definition
+     * @return array
+     */
+    public static function without_checks(array $def): array {
+        if (!array_key_exists('checks', $def)) {
+            return $def;
+        }
+        unset($def['checks']);
+        if (empty($def['segments'])) {
+            unset($def['segments']);
+            $def['format'] = self::FORMAT;
+        }
+        return $def;
+    }
+
+    /**
      * Turns the empty objects of a checks document back into objects.
      *
      * The definition is decoded into arrays, and an empty JSON object would go to the lab manager as an empty list,
