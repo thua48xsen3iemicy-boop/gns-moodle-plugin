@@ -81,7 +81,7 @@ class get_check_run extends external_api {
         $from = checks::details_from($instance);
         $gaps = has_capability('mod/gns3lab:observe', $access->context);
         $details = check_runs::export_details($visible ? $run : null, $gaps);
-        return check_runs::export($row) + [
+        return check_runs::export($row, $instance) + [
             'detailed' => $visible && $run !== null,
             'detailsfrom' => $readonly ? 0 : ($from === PHP_INT_MAX ? -1 : $from),
             'gone' => $run === null,

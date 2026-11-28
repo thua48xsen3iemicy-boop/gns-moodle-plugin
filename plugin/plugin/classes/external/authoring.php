@@ -202,7 +202,8 @@ class authoring extends external_api {
 
     /** The authoring viewer uses the student UI without assessment/facts requests. */
     private static function session(\stdClass $session): array {
-        $result = session_data::export($session);
+        // The author of the lab sees which setup step failed (docs/lab-setup/README.md §6a).
+        $result = session_data::export($session, true);
         $result['features'] = array_values(array_diff($result['features'], ['facts']));
         return $result;
     }

@@ -100,12 +100,15 @@ class get_checks extends external_api {
         return [
             'enabled' => $enabled,
             'available' => $enabled && $available,
-            'canstart' => $enabled && $available && !$readonly && $left !== 0
+            'canstart' => $enabled && $available && !$readonly && ($left !== 0 || check_runs::trial_user($access))
                 && has_capability('mod/gns3lab:use', $access->context),
             'report' => checks::report_mode($instance),
             'detailsfrom' => $readonly ? 0 : ($from === PHP_INT_MAX ? -1 : $from),
             'attempts' => ['max' => checks::max_attempts($instance), 'used' => $used, 'left' => $left],
-            'runs' => $enabled ? array_map([check_runs::class, 'export'], check_runs::rows((int) $instance->id, $userid)) : [],
+            'runs' => $enabled ? array_map(
+                fn($row) => check_runs::export($row, $instance),
+                check_runs::rows((int) $instance->id, $userid)
+            ) : [],
         ];
     }
 

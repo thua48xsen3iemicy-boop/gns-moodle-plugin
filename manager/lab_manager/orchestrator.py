@@ -52,6 +52,7 @@ from .agent_client import (AgentBusy, AgentCommandFailed, AgentError, AgentNotSt
                            AgentRejected, AgentSourceMissing, AgentUncertain, AgentWrongNode)
 from . import checks as checks_mod
 from . import labdef
+from . import labsetup
 from . import scripts as scripts_mod
 from .facts import build_state, parse_slot_facts
 from .labs import LabError, deploy_ticket
@@ -94,7 +95,7 @@ LAB_STAGES = ("lab_submit", "lab_wait", "ready")
 # does not start, the agent or Proxmox refuse, a mount is wrong) would repeat on a clean guest: the
 # operator looks at the slot first.
 LAB_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "SLOT_PROJECT_UNKNOWN",
-                          "SLOT_STOP_FAILED", "LAB_UNAVAILABLE"})
+                          "SLOT_STOP_FAILED", "LAB_UNAVAILABLE", "SETUP_FAILED"})
 # A stage that runs only when the slot is already known to work: a timeout there is the lab's.
 LAB_STAGE_TIMEOUTS = ("lab_submit", "lab_wait", "lab_stop", "lab_stop_wait")
 LAB_TIMEOUT_STAGES = ("student_dir",) + LAB_STAGE_TIMEOUTS
@@ -105,6 +106,8 @@ SLOT_SUSPECT_FAILURES = frozenset({"SLOT_LAB_FAILED", "SLOT_OPERATION_FAILED", "
 # Stages of the release chain: their commands carry the odd (cleanup) generation.
 RELEASE_STAGES = ("lab_stop", "lab_stop_wait", "ct_stop", "ct_reset", "ct_park")
 
+# SETUP_FAILED (docs/lab-setup/README.md §6): the student is told nothing of the step; `setup_error` has it.
+SETUP_MESSAGE = "Лаба не подготовилась: ошибка в преднастрое лабы. Сообщите преподавателю"
 QUARANTINE_MESSAGE = ("Слот требует проверки администратором. Повторный запуск станет возможен "
                       "после проверки — сообщите преподавателю")
 # Starts the state_message of a slot held by _quarantine; the check of STUDENT_DIR_BUSY and the admin check read it.
@@ -136,12 +139,13 @@ class Failure(Exception):
     stopped, rolled back and parked when the failure happens in a MOUNTED_STAGES stage), unless
     slot_state says otherwise or the code is one of LAB_FAILURES: then the slot is freed."""
 
-    def __init__(self, message, code="FAILED", slot_state=None, source=None):
+    def __init__(self, message, code="FAILED", slot_state=None, source=None, details=None):
         super().__init__(message)
         self.message = message
         self.code = code
         self.slot_state = slot_state or ("free" if code in LAB_FAILURES else "failed")
         self.source = source
+        self.details = details or {}  # More fields of the session's error record, e.g. setup_error
 
 
 class Wait(Exception):
@@ -516,6 +520,11 @@ class Orchestrator:
 
     async def _check_stage_timeout(self, s) -> bool:
         limit = self._stage_limit(s["stage"])
+        if limit is not None and s["stage"] == "lab_wait" and s["lab_def"] \
+                and (now() - s["stage_started_at"]).total_seconds() > limit:
+            # The first start of a lab runs the teacher's setup steps: they may take their timeouts on top. Looked up
+            # only once the usual limit is over, so a normal start costs no query.
+            limit += labsetup.total_timeout((await self.store.workspace(s["workspace_id"]))["definition"] or {})
         if limit is not None and (now() - s["stage_started_at"]).total_seconds() > limit:
             # Before ct_start the CT was not touched for this session; after slot_ready the slot is known
             # to work and the lab is what did not finish: the slot stays usable in both cases.
@@ -534,6 +543,8 @@ class Orchestrator:
                                    "slot_state": failure.slot_state}
             if not s["error"] and failure.source:
                 error["source"] = failure.source
+            if not s["error"]:
+                error.update(failure.details)
             lab = s["stage"] in LAB_STAGES and await self.store.current_call(s, ("deploy",)) is not None
             stage, message = ("lab_stop", "Сбой, остановка лабы…") if lab else ("ct_stop", "Сбой, остановка слота…")
             await self.store.update_session(
@@ -545,6 +556,8 @@ class Orchestrator:
         error = s["error"] or {"code": failure.code, "stage": s["stage"], "message": failure.message[:500]}
         if not s["error"] and failure.source:
             error["source"] = failure.source
+        if not s["error"]:
+            error.update(failure.details)
         if s["error"]:
             await self.store.event(s["id"], s["slot_vmid"], "cleanup_failed",
                                    {"code": failure.code, "stage": s["stage"], "message": failure.message[:500]})
@@ -1043,6 +1056,14 @@ class Orchestrator:
                                   "продолжить его нельзя", "SLOT_COLD_RESUME_UNSUPPORTED", slot_state="free")
                 if err.get("code") == "PROJECT_MISSING":
                     raise Failure("Проекта лабы нет в каталоге студента", "PROJECT_MISSING", slot_state="free")
+                if labsetup.MARKER in text and s["lab_def"]:
+                    # A step of the teacher's setup failed (its wrapper put the marker last in stderr): the same lab
+                    # fails the same way again, so not SLOT_OPERATION_FAILED, which invites a retry.
+                    failed = labsetup.failure(text, (await self.store.workspace(s["workspace_id"]))["definition"])
+                    if failed is not None:
+                        raise Failure(SETUP_MESSAGE, "SETUP_FAILED", slot_state="free",
+                                      source={"error": err, "operation_id": str(call["operation_id"])},
+                                      details={"setup_error": failed})
                 raise Failure(f"Слот: {err.get('code', op['status'])}: {text}"[:500], "SLOT_OPERATION_FAILED",
                               source={"error": err, "operation_id": str(call["operation_id"])})
             await self.store.update_call(call["id"], status="succeeded")
@@ -1201,10 +1222,13 @@ class Orchestrator:
             return
         try:
             fresh = await self.store.session(sid)
-            if fresh is None or fresh["facts_rev"] == 0 or fresh["forecast_rev"] == fresh["facts_rev"]:
-                return
+            if fresh is None or fresh["facts_rev"] == 0 or fresh["checks_error"]:
+                return  # No facts yet, or the activity's checks do not fit the lab: nothing to assess by
+            if fresh["forecast_rev"] == fresh["facts_rev"] and (
+                    (fresh["forecast"] or {}).get("checks_def") == fresh["checks_def"]):
+                return  # Assessed already: the same snapshot by the same description (an edit reassesses it)
             self._forecast_next[sid] = mono + FORECAST_INTERVAL
-            definition, images, checks = await self._checks_of(s)
+            definition, images, checks = await self._checks_of(s, fresh)
             rows = await self.store.facts_rows(sid)
             nodes, _ = await self.live_nodes(s)
             statuses = {node_id: n["status"] for node_id, n in nodes.items()}
@@ -1217,7 +1241,8 @@ class Orchestrator:
                 checks_mod.assess, topology=s["topology"], state=state, statuses=statuses, definition=definition,
                 images=images, checks=checks, stale=stale, now=now(),
                 consoles={node_id: n.get("console_type") for node_id, n in nodes.items()})
-            await self.store.set_forecast(sid, checks_mod.forecast_basis(rules, findings, checks), fresh["facts_rev"])
+            await self.store.set_forecast(sid, checks_mod.forecast_basis(rules, findings, checks, fresh["checks_def"]),
+                                          fresh["facts_rev"])
         except (SlotOwnerLost, Fenced):
             raise
         except Exception:  # noqa: BLE001 - a forecast must never break the session
@@ -1234,16 +1259,23 @@ class Orchestrator:
             log.warning("Check %s: facts refresh failed: %s", run["id"], exc)
         self._facts_next[s["id"]] = time.monotonic() + 3  # Time for the slot to collect
 
-    async def _checks_of(self, s):
-        """(definition, images, checks) of the lab of a session: what its runs are graded by."""
+    async def _checks_of(self, s, fresh=None):
+        """(definition, images, checks) of the lab of a session: what its runs are graded by.
+
+        checks: the document the activity sent (CONTRACTS 2.9, activity checks), else the lab's own. `fresh` is the
+        session row just read; without it the row is read again, so an edit sent a moment ago is not missed.
+        """
+        fresh = fresh or await self.store.session(s["id"]) or s
         definition, images, checks = None, {}, None
         if s["lab_def"]:
             ws = await self.store.workspace(s["workspace_id"])
             definition = ws["definition"]
             images = await self.derived.catalog(s["site"]) if self.derived else dict(self.settings.images or {})
             checks = definition.get("checks")
-        else:
+        elif fresh.get("checks") is None:
             checks = (await asyncio.to_thread(self.catalog.get, s["lab_ref"])).checks
+        if fresh.get("checks") is not None:
+            checks = fresh["checks"]
         return definition, images, checks
 
     async def _finish_check(self, s, run, rows, statuses, stale, nodes, lab, scripts=None, nonce=None):

@@ -15,6 +15,9 @@ const src = path.join(plugin, 'amd/src');
 // The prompt for a neural network as editor.php gives it (classes/local/checks_prompt.php): without the leading comments.
 const checksPrompt = lang => fs.readFileSync(path.join(plugin, `prompts/checks.${lang}.md`), 'utf8')
     .replace(/^(?:<!--[\s\S]*?-->\s*)+/, '').trim();
+// The prompt of the setup block (classes/local/setup_prompt.php): the same reading.
+const setupPrompt = lang => fs.readFileSync(path.join(plugin, `prompts/setup.${lang}.md`), 'utf8')
+    .replace(/^(?:<!--[\s\S]*?-->\s*)+/, '').trim();
 const dist = path.join(__dirname, 'dist');
 const THIRD_PARTY = new Set(['xterm', 'xterm-addon-fit']);
 
@@ -307,6 +310,50 @@ function editorPage(lang, def, constructor, extra = {}) {
     const icons = fs.readFileSync(path.join(plugin, 'templates/icons.mustache'), 'utf8');
     return Mustache.render(fs.readFileSync(path.join(plugin, 'templates/editor.mustache'), 'utf8'), view, {'mod_gns3lab/icons': icons, ...THEME_PARTIAL});
 }
+// The checks block of the activity form (mod_form.php checksdef_elements, docs/autochecks.md §12): a bare form with the
+// lab choice of Moodle, the hidden field and the block as the form draws it. checksform.<lang>.html is an activity on
+// version 11 that uses the checks of its lab; checksform.<lang>.own.html has checks of its own.
+const checksformPage = (lang, doc) => {
+    const all = strings(lang);
+    const texts = {};
+    for (const [key, text] of Object.entries(all)) {
+        if (key.startsWith('ed_problem_') && key !== 'ed_problem') {
+            texts['problem_' + key.slice(11)] = text;
+        } else if (key.startsWith('ed_script') || key.startsWith('checksdef_') || key.startsWith('ed_network')
+                || key.startsWith('ed_checks') || key.startsWith('chk_class_')) {
+            texts[key] = text;
+        }
+    }
+    const lab11 = {found: true, catalog: false, nodes: [
+        {name: 'PC1', image: 'Debian 12', kind: 'qemu', category: 'host', scripts: true},
+        {name: 'PC2', image: 'Debian 12', kind: 'vpcs', category: 'host', scripts: false}],
+    links: [{a: 'PC1 ens3', b: 'PC2 e0'}], segments: '[]', labchecks: JSON.stringify({format: 'gns3lab.checks/1',
+        network: 'off', scripts: [{id: 'ssh', title: 'SSH', node: 'PC1', run: 'systemctl is-active ssh'}]}),
+    // The setup steps of the version, without their code (checks_lab::context): the checks prompt says what is given.
+    setup: [{id: 'web', title: 'nginx on PC1', node: 'PC1'}]};
+    const data = {courseid: 2, labversionid: 11, labref: '', lab: lab11, withscripts: true, withneeds: true,
+        prompt: checksPrompt(lang), strings: texts};
+    const esc = v => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return `<form class="mform" style="max-width:52rem;margin:1rem auto;overflow:auto;height:calc(100vh - 2rem)">
+  <label>Lab <select name="labversionid"><option value="0">Lab manager</option><option value="11" selected>Lab v2</option>
+    <option value="12">Lab v3</option></select></label>
+  <label>lab_ref <input name="labref" value=""></label>
+  <input type="hidden" name="checksdef" value="${esc(doc ? JSON.stringify(doc) : '')}">
+  <div id="gns3lab-checksform" class="gns3lab-checksform" data-json="${esc(JSON.stringify(data))}"></div>
+</form>`;
+};
+const CHECKSFORM_INIT = "require(['mod_gns3lab/checksform'], function(f) { f.init('gns3lab-checksform'); });";
+for (const lang of ['en', 'ru']) {
+    fs.writeFileSync(path.join(dist, `checksform.${lang}.html`),
+        shell(lang, '', checksformPage(lang, null), 'live', '', CHECKSFORM_INIT));
+    fs.writeFileSync(path.join(dist, `checksform.${lang}.own.html`), shell(lang, '',
+        checksformPage(lang, {format: 'gns3lab.checks/1', scripts: [{id: 'web', title: 'nginx', node: 'PC1', run: 'true'}]}),
+        'live', '', CHECKSFORM_INIT));
+    // The lab editor when the checks belong to the activities (activitychecks): a lab of an earlier version with checks.
+    fs.writeFileSync(path.join(dist, `editor.${lang}.activitychecks.html`), shell(lang, '',
+        editorPage(lang, {...EDITOR_LAB, checks: {format: 'gns3lab.checks/1', network: 'off'}}, true,
+            {labchecks: true, labscripts: true, activitychecks: true, checksprompt: checksPrompt(lang)}), 'live', '', EDITOR_INIT));
+}
 for (const lang of ['en', 'ru']) {
     fs.writeFileSync(path.join(dist, `editor.${lang}.html`), shell(lang, '', editorPage(lang, EDITOR_LAB, true), 'live', '', EDITOR_INIT));
     const oldIsp = {format: 'gns3lab.lab/1', nodes: [
@@ -343,6 +390,33 @@ for (const lang of ['ru', 'en']) {
     fs.writeFileSync(path.join(dist, `authoring.${lang}.html`), shell(lang, '', page(lang, {
         labname: 'Authoring lab', datajson: JSON.stringify({...data, authoring: 1,
             definition: JSON.stringify(AUTHORING_LAB), seatmode: 'off', factsview: 'live'}),
+    })));
+}
+
+// The setup block of the lab editor (setupform.js, docs/lab-setup.md): editor.<lang>.setup.html is a manager with
+// lab-setup and a lab with a segment, an ISP and one step; editor.<lang>.setup-kept.html is a manager without lab-setup
+// (the steps are read only); editor.<lang>.setup-authoring.html runs the lab through the mock manager, whose authoring
+// page (authoring.<lang>.setup.html) offers "Prompt: fix the step" when a setup step fails.
+const EDITOR_SETUP = {
+    ...EDITOR_SEGMENTED,
+    nodes: EDITOR_SEGMENTED.nodes.concat([{name: 'ISP1', image: 'lab-uplink', x: 200, y: -160, adapters: 3, uplink_port: 0}]),
+    setup: [{id: 'web', title: 'nginx on PC1', node: 'PC1', timeout: 90, run: 'apt-get install -y nginx >/dev/null'}],
+};
+const SETUP_AUTHORING = {format: 'gns3lab.lab/2', nodes: AUTHORING_LAB.nodes, links: [], segments: [],
+    setup: [{id: 'web', title: 'nginx on PC1', node: 'PC1', run: 'apt-get install -y nginx'},
+        {id: 'motd', title: 'motd on PC2', node: 'PC2', run: 'echo hi > /etc/motd'}]};
+for (const lang of ['en', 'ru']) {
+    const flags = {labsetup: true, setupprompt: setupPrompt(lang)};
+    fs.writeFileSync(path.join(dist, `editor.${lang}.setup.html`), shell(lang, '',
+        editorPage(lang, EDITOR_SETUP, true, flags), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `editor.${lang}.setup-kept.html`), shell(lang, '',
+        editorPage(lang, EDITOR_SETUP, true), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `editor.${lang}.setup-authoring.html`), shell(lang, '',
+        editorPage(lang, SETUP_AUTHORING, true, {...flags, imagecapture: true, userid: 42, manageimages: false,
+            labname: 'Authoring lab', authoringurl: `authoring.${lang}.setup.html`}), 'live', '', EDITOR_INIT));
+    fs.writeFileSync(path.join(dist, `authoring.${lang}.setup.html`), shell(lang, '', page(lang, {
+        labname: 'Authoring lab', datajson: JSON.stringify({...data, authoring: 1, labsetup: true,
+            definition: JSON.stringify(SETUP_AUTHORING), seatmode: 'off', factsview: 'live'}),
     })));
 }
 

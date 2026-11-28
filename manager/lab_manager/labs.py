@@ -123,6 +123,12 @@ def script_nodes_of(ticket) -> dict:
             for n in nodes or [] if isinstance(n, dict) and isinstance(n.get("name"), str)}
 
 
+def check_checks(raw, lab) -> tuple:
+    """(normalized, problems) of a `gns3lab.checks/1` document of an activity against a catalog lab."""
+    return checks_mod.check_definition(raw, {n["name"] for n in lab.topology["topology"]["nodes"]},
+                                       script_nodes=script_nodes_of(lab.ticket))
+
+
 class Catalog:
     def __init__(self, root: Path):
         self.root = Path(root)

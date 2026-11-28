@@ -124,6 +124,9 @@ export const startState = (overview, session, own) => {
     if (!running) {
         return {show: true, enabled: false, reason: 'chk_needsrunning'};
     }
+    if (!offers && session.checkserror) {
+        return {show: true, enabled: false, reason: 'chk_checksinvalid'};
+    }
     if (!offers) {
         return {show: true, enabled: false, reason: 'chk_nofacts'};
     }

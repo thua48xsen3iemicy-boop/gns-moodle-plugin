@@ -1,5 +1,6 @@
 <!-- gns3lab-format: {"format": "gns3lab.checks/1", "checks_fields": ["addresses", "focus", "format", "groups", "network", "nodes", "persistence", "reachability", "rules", "scripts", "switches"], "script_fields": ["class", "expect", "group", "id", "needs", "node", "run", "shell", "timeout", "title"], "expect_fields": ["contains", "exit", "match", "not_contains"], "shells": ["sh", "powershell", "routeros"], "groups": ["l1", "l2", "addressing", "gateways", "routing", "host"], "classes": ["critical", "major", "minor", "note"], "limits": {"scripts": 20, "run_bytes": 8000, "timeout": 60, "timeout_default": 20, "timeout_total": 120, "pattern": 500, "strings": 10, "capture_bytes": 256}} -->
-<!-- DRAFT. The text below these lines is shown to a teacher in the lab editor and copied into a neural network.
+<!-- DRAFT. The text below these lines is shown to a teacher in the activity settings ("What to check";
+     with a manager without activity-checks, in the lab editor) and copied into a neural network.
      [[LAB]] — devices, links and segments of the lab (JSON), [[CHECKS]] — the current checks document, [[TASK]] — what to check.
      When the checks format changes (manager/docs/CONTRACTS.md §2.9), update the text and the gns3lab-format line above:
      manager/tests/test_checks_prompt.py compares it. -->

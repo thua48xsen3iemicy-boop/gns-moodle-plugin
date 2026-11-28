@@ -871,6 +871,12 @@ body.gns3lab-fullscreen {
     background: var(--bs-warning-bg-subtle, #fff3cd);
     border: 1px solid var(--bs-warning-border-subtle, #ffe69c);
 }
+.gns3lab-student .cmsg.setuperr {
+    overflow-wrap: anywhere;
+}
+.gns3lab-student .btn.setupfix {
+    margin-left: 6px;
+}
 .gns3lab-student .cmsg a {
     color: inherit;
     text-decoration: underline;
@@ -4751,6 +4757,13 @@ body.gns3lab-fullscreen {
   .gns3lab-editor .ed-prompt-dialog { width: 100vw; height: 100dvh; border-radius: 0; }
   .gns3lab-editor .ed-prompt-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(10rem, 1fr) minmax(0, 1.4fr); }
 }
+/* The setup block of the lab editor (setupform.js, docs/lab-setup.md) */
+.gns3lab-editor .ed-setup-main { margin: .3rem 0 .5rem; }
+.gns3lab-editor .ed-setup-card pre { max-height: 10rem; }
+.gns3lab-editor .ed-setup-fold { margin: .4rem 0; }
+.gns3lab-editor .ed-setup-fold > summary { cursor: pointer; font-weight: 600; margin: 0 0 .4rem; }
+.gns3lab-editor .ed-setup-move { display: flex; flex-wrap: wrap; gap: 6px; }
+.gns3lab-editor .ed-prompt-note { margin: 0; padding: .4rem .6rem; border-left: 3px solid var(--bad); }
 .gns3lab-editor .ed-icons { display: flex; flex-wrap: wrap; gap: 4px; }
 .gns3lab-editor .ed-icon {
     width: 34px; height: 34px; padding: 3px; border: 1px solid var(--line); border-radius: 6px;

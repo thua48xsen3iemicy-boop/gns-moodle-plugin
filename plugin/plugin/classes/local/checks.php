@@ -357,6 +357,86 @@ class checks {
     }
 
     /**
+     * The activity's own auto-checks (docs/autochecks.md §12): the stored document, null when the activity uses the
+     * checks of its lab.
+     *
+     * @param \stdClass $instance gns3lab record
+     * @return array|null gns3lab.checks/1
+     */
+    public static function activity_document(\stdClass $instance): ?array {
+        return self::parse_document((string) ($instance->checksdef ?? ''));
+    }
+
+    /**
+     * A gns3lab.checks/1 document from JSON, checked only for its shape and size: the lab manager checks the rest.
+     *
+     * @param string $json JSON text
+     * @return array|null the document; null for empty or malformed text
+     */
+    public static function parse_document(string $json): ?array {
+        $json = trim($json);
+        if ($json === '' || strlen($json) > lab_definition::CHECKS_MAX) {
+            return null;
+        }
+        $doc = json_decode($json, true);
+        if (!is_array($doc) || array_is_list($doc) || ($doc['format'] ?? null) !== lab_definition::CHECKS_FORMAT) {
+            return null;
+        }
+        return lab_definition::checks_objects($doc);
+    }
+
+    /**
+     * A document as JSON for the form and the database.
+     *
+     * @param array|null $doc gns3lab.checks/1
+     * @return string empty for none
+     */
+    public static function encode_document(?array $doc): string {
+        if ($doc === null) {
+            return '';
+        }
+        return json_encode(
+            lab_definition::checks_objects($doc),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        );
+    }
+
+    /**
+     * A document as the lab manager takes it: its empty objects stay objects.
+     *
+     * @param array $doc gns3lab.checks/1
+     * @return array
+     */
+    public static function for_manager(array $doc): array {
+        return lab_definition::checks_objects($doc);
+    }
+
+    /**
+     * The checks a lab carries itself: the `checks` of a library version published before the checks moved to the
+     * activities. A reference lab keeps its own on the manager (meta.json), the plugin does not see them.
+     *
+     * @param string|array|null $lab what lab_library::activity_lab() gives
+     * @return array|null
+     */
+    public static function lab_document(string|array|null $lab): ?array {
+        return is_array($lab) && is_array($lab['checks'] ?? null) ? lab_definition::checks_objects($lab['checks']) : null;
+    }
+
+    /**
+     * Whether a run, a session or a forecast was graded by another description than the activity's current one.
+     *
+     * Only an activity with its own checks has a hash to compare; an unknown description (null) is never called old.
+     *
+     * @param \stdClass $instance gns3lab record
+     * @param string|null $checksdef checks_def of the run, the session or the forecast
+     * @return bool
+     */
+    public static function outdated(\stdClass $instance, ?string $checksdef): bool {
+        $current = (string) ($instance->checksdefhash ?? '');
+        return $current !== '' && $checksdef !== null && $checksdef !== '' && $checksdef !== $current;
+    }
+
+    /**
      * An integer from a form value, or the value itself when it is not one (the check then refuses it).
      *
      * @param mixed $value submitted value

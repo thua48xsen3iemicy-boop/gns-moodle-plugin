@@ -34,9 +34,21 @@ class checks_prompt {
      * @return string text with [[LAB]], [[CHECKS]] and [[TASK]] for the editor to fill in
      */
     public static function text(string $lang): string {
+        return self::read('checks', $lang);
+    }
+
+    /**
+     * A prompt of prompts/<name>.<lang>.md in a language, else in English, without its leading HTML comments.
+     *
+     * @param string $name checks or setup
+     * @param string $lang Moodle language code
+     * @return string the text, '' if there is none
+     */
+    public static function read(string $name, string $lang): string {
+        $name = preg_replace('/[^a-z]/', '', $name);
         $lang = preg_replace('/[^a-z_]/', '', strtolower($lang));
         foreach (array_unique([$lang, explode('_', $lang)[0], 'en']) as $code) {
-            $file = __DIR__ . '/../../prompts/checks.' . $code . '.md';
+            $file = __DIR__ . '/../../prompts/' . $name . '.' . $code . '.md';
             if ($code !== '' && is_readable($file)) {
                 return trim(preg_replace('/\A(?:<!--.*?-->\s*)+/s', '', (string) file_get_contents($file)));
             }

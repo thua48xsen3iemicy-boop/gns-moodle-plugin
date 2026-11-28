@@ -64,13 +64,13 @@ class lab_problems {
     }
 
     /**
-     * Problems from a lab_invalid error; other errors are thrown again.
+     * Problems from a lab_invalid or checks_invalid error (CONTRACTS §2.9); other errors are thrown again.
      *
      * @param manager_exception $e error of the lab manager
      * @return array
      */
     public static function from_exception(manager_exception $e): array {
-        if ($e->remotecode !== 'lab_invalid') {
+        if (!in_array($e->remotecode, ['lab_invalid', 'checks_invalid'], true)) {
             throw $e;
         }
         $problems = [];

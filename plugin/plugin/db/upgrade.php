@@ -240,5 +240,32 @@ function xmldb_gns3lab_upgrade($oldversion): bool {
         upgrade_mod_savepoint(true, 2026111303, 'gns3lab');
     }
 
+    if ($oldversion < 2026112800) {
+        // Auto-checks of the activity (docs/autochecks.md §12): the document and its hash, the description of a run and
+        // a teacher's trial run. Nothing is copied: an activity without its own checks uses those of its lab.
+        $table = new xmldb_table('gns3lab');
+        $fields = [
+            new xmldb_field('checksdef', XMLDB_TYPE_TEXT, null, null, null, null, null, 'checksreportdate'),
+            new xmldb_field('checksdefhash', XMLDB_TYPE_CHAR, '80', null, null, null, null, 'checksdef'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+        $table = new xmldb_table('gns3lab_check_runs');
+        $fields = [
+            new xmldb_field('checksdef', XMLDB_TYPE_CHAR, '80', null, null, null, null, 'timefinished'),
+            new xmldb_field('trial', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'checksdef'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        upgrade_mod_savepoint(true, 2026112800, 'gns3lab');
+    }
+
     return true;
 }

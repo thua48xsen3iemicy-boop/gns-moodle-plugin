@@ -56,6 +56,7 @@ class check_runs {
      * @param string $sessionid session of the run
      * @param \stdClass $run run from the manager
      * @param int $requestedby user who asked for the check
+     * @param bool $trial a teacher's trial run in their own lab: no attempt, no grade (docs/autochecks.md §12)
      * @return \stdClass row
      */
     public static function record(
@@ -63,7 +64,8 @@ class check_runs {
         int $userid,
         string $sessionid,
         \stdClass $run,
-        int $requestedby
+        int $requestedby,
+        bool $trial = false
     ): \stdClass {
         global $DB;
 
@@ -89,6 +91,8 @@ class check_runs {
                 'timecreated' => $now,
                 'timemodified' => $now,
                 'timefinished' => 0,
+                'checksdef' => null,
+                'trial' => $trial ? 1 : 0,
             ];
             $row->id = $DB->insert_record(self::TABLE, $row);
         }
@@ -126,6 +130,10 @@ class check_runs {
             $code = $run->error->code ?? '';
             $new->errorcode = is_string($code) ? \core_text::substr(preg_replace('/[^A-Za-z0-9_]/', '', $code), 0, 32) : '';
         }
+        // The description the run is graded by (CONTRACTS §2.9): another than the activity's current one is shown.
+        if (is_string($run->checks_def ?? null) && $run->checks_def !== '') {
+            $new->checksdef = \core_text::substr($run->checks_def, 0, 80);
+        }
         if (!in_array($status, self::PENDING, true) && !$row->timefinished) {
             $finished = is_string($run->finished_at ?? null) ? strtotime($run->finished_at) : false;
             $new->timefinished = $finished ?: time();
@@ -135,7 +143,7 @@ class check_runs {
         }
         $new->timemodified = time();
         $DB->update_record(self::TABLE, $new);
-        if (self::is_graded($new) && !self::is_graded($row)) {
+        if (self::is_graded($new) && !self::is_graded($row) && empty($new->trial)) {
             self::update_grades($instance, (int) $row->userid);
         }
         return $new;
@@ -284,7 +292,7 @@ class check_runs {
         global $DB;
 
         return $DB->count_records(self::TABLE, [
-            'gns3labid' => $instanceid, 'userid' => $userid, 'status' => 'done', 'outcome' => 'graded',
+            'gns3labid' => $instanceid, 'userid' => $userid, 'status' => 'done', 'outcome' => 'graded', 'trial' => 0,
         ]);
     }
 
@@ -304,8 +312,9 @@ class check_runs {
             $scale = $DB->get_field('scale', 'scale', ['id' => -$grade]);
             $items = $scale ? count(explode(',', $scale)) : 0;
         }
-        $params = ['labid' => $instance->id, 'status' => 'done', 'outcome' => 'graded'];
-        $where = 'gns3labid = :labid AND status = :status AND outcome = :outcome';
+        // A teacher's trial run is no attempt and goes into no gradebook.
+        $params = ['labid' => $instance->id, 'status' => 'done', 'outcome' => 'graded', 'trial' => 0];
+        $where = 'gns3labid = :labid AND status = :status AND outcome = :outcome AND trial = :trial';
         if ($userid) {
             $where .= ' AND userid = :userid';
             $params['userid'] = $userid;
@@ -356,10 +365,13 @@ class check_runs {
      * Short description of a run for the external functions.
      *
      * @param \stdClass $row row of the run
+     * @param \stdClass|null $instance the activity, to tell a run by earlier checks
      * @return array
      */
-    public static function export(\stdClass $row): array {
+    public static function export(\stdClass $row, ?\stdClass $instance = null): array {
         return [
+            'trial' => !empty($row->trial),
+            'outdated' => $instance !== null && checks::outdated($instance, $row->checksdef ?? null),
             'runid' => $row->runid,
             'status' => $row->status,
             'outcome' => (string) $row->outcome,
@@ -383,6 +395,8 @@ class check_runs {
      */
     public static function summary_fields(): array {
         return [
+            'trial' => new external_value(PARAM_BOOL, 'A teacher\'s trial run: no attempt, no grade'),
+            'outdated' => new external_value(PARAM_BOOL, 'Graded by the checks the activity had before they were changed'),
             'runid' => new external_value(PARAM_ALPHANUMEXT, 'Run id on the lab manager'),
             'status' => new external_value(PARAM_ALPHA, 'queued, running, done or failed'),
             'outcome' => new external_value(PARAM_ALPHA, 'graded or incomplete for a done run, empty otherwise'),
@@ -538,6 +552,17 @@ class check_runs {
                 ]), 'Values a passed script captured for the later ones'),
             ]), 'The teacher\'s scripts of the run with their output, for a teacher only; empty for a student'),
         ];
+    }
+
+    /**
+     * Whether the checks of the current user in their own lab are trial runs: a teacher trying the checks of the
+     * activity (docs/autochecks.md §12). Such a run spends no attempt and goes into no gradebook.
+     *
+     * @param lab_access $access the activity
+     * @return bool
+     */
+    public static function trial_user(lab_access $access): bool {
+        return has_capability('mod/gns3lab:observe', $access->context);
     }
 
     /**

@@ -20,6 +20,7 @@ use core_external\external_api;
 use core_external\external_function_parameters;
 use core_external\external_single_structure;
 use core_external\external_value;
+use mod_gns3lab\local\checks;
 use mod_gns3lab\local\lab_access;
 use mod_gns3lab\local\lab_library;
 use mod_gns3lab\local\manager_client;
@@ -75,7 +76,9 @@ class start_session extends external_api {
                 (int) $access->instance->id,
                 (int) $access->course->id,
                 $lab,
-                (int) $access->instance->maxduration
+                (int) $access->instance->maxduration,
+                // The checks of the activity, not part of the lab (docs/autochecks.md §12); none: those of the lab.
+                checks::activity_document($access->instance)
             );
         } catch (manager_exception $e) {
             if ($e->remotecode === 'session_conflict') {

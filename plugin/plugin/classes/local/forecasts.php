@@ -62,7 +62,7 @@ class forecasts {
             $entry = (object) ['bysession' => array_fill_keys(array_values($ids), null), 'fetchedat' => time()];
             try {
                 foreach ($client->get_forecasts(array_values($ids), $grading) as $sessionid => $forecast) {
-                    $entry->bysession[$sessionid] = $forecast ? self::export($forecast, $grading) : null;
+                    $entry->bysession[$sessionid] = $forecast ? self::export($forecast, $grading, $instance) : null;
                 }
             } catch (manager_exception $e) {
                 debugging('mod_gns3lab: no forecasts from the lab manager: ' . $e->debuginfo, DEBUG_DEVELOPER);
@@ -84,9 +84,10 @@ class forecasts {
      *
      * @param \stdClass $forecast forecast of POST /forecasts
      * @param array $grading the grading it was asked with
+     * @param \stdClass|null $instance the activity, to tell a forecast by earlier checks (docs/autochecks.md §12)
      * @return array
      */
-    public static function export(\stdClass $forecast, array $grading): array {
+    public static function export(\stdClass $forecast, array $grading, ?\stdClass $instance = null): array {
         $thresholds = $grading['thresholds'];
         return [
             'mark' => (int) $forecast->mark,
@@ -94,6 +95,8 @@ class forecasts {
             'failmark' => (int) $grading['fail_mark'],
             'incomplete' => ($forecast->outcome ?? '') === 'incomplete',
             'scriptsignored' => !empty($forecast->scripts_ignored),
+            'outdated' => $instance !== null && checks::outdated($instance, is_string($forecast->checks_def ?? null)
+                ? $forecast->checks_def : null),
             'assessedat' => self::timestamp($forecast->assessed_at ?? null),
         ];
     }
@@ -110,6 +113,8 @@ class forecasts {
             'failmark' => new external_value(PARAM_INT, 'Fail mark of the grading of the activity'),
             'incomplete' => new external_value(PARAM_BOOL, 'Some objects of the focus of the lab could not be checked'),
             'scriptsignored' => new external_value(PARAM_BOOL, 'The lab has scripts of the teacher the forecast does not run'),
+            'outdated' => new external_value(PARAM_BOOL, 'Assessed by the checks the activity had before they were changed',
+                VALUE_DEFAULT, false),
             'assessedat' => new external_value(PARAM_INT, 'When the snapshot was assessed, 0 if unknown'),
         ], 'Forecast from the facts, null without one or when the user may not see grades', VALUE_DEFAULT, null, NULL_ALLOWED);
     }

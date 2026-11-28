@@ -73,12 +73,12 @@ def _finish(lines):
     return text
 
 
-def _head(name):
+def head(name):
     return ([f"hostname {name}"] if hostname_ok(name) else []) + ["no ip domain-lookup"]
 
 
 def render_switch(name: str, plan: SwitchPlan) -> str:
-    lines = [*_head(name), f"vtp mode {VTP_MODE}", "spanning-tree mode pvst"]
+    lines = [*head(name), f"vtp mode {VTP_MODE}", "spanning-tree mode pvst"]
     for vlan in sorted(plan.vlans):
         lines += [f"vlan {vlan}", f" name {plan.vlans[vlan]}"]
     for (adapter, port), setting in sorted(plan.ports.items()):
@@ -96,7 +96,7 @@ def _address(interface: IPv4Interface) -> str:
 
 
 def render_router(name: str, plan: RouterPlan) -> str:
-    lines = _head(name)
+    lines = head(name)
     ports = sorted(plan.up | set(plan.addresses) | {(a, p) for a, p, _ in plan.subifs})
     for adapter, port in ports:
         lines += ["interface " + PORT.format(adapter=adapter, port=port), " no shutdown"]

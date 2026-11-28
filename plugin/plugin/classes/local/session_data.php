@@ -64,6 +64,12 @@ class session_data {
                 new external_value(PARAM_ALPHANUMEXT, 'Feature name, such as consoles or facts'),
                 'What this session offers (CONTRACTS §7), empty if the manager did not say'
             ),
+            'checkserror' => new external_value(
+                PARAM_BOOL,
+                'The checks of the activity do not fit this lab: no checks (CONTRACTS §2.3 checks_error)',
+                VALUE_DEFAULT,
+                false
+            ),
             'isosources' => new external_multiple_structure(
                 new external_value(PARAM_ALPHANUMEXT, 'Node id'),
                 'Nodes whose guest directory can become an ISO image (CONTRACTS §2.12), empty without feature iso',
@@ -76,16 +82,26 @@ class session_data {
                 VALUE_DEFAULT,
                 []
             ),
+            'setuperror' => new external_single_structure([
+                'step' => new external_value(PARAM_ALPHANUMEXT, 'Id of the setup step that failed'),
+                'node' => new external_value(PARAM_TEXT, 'Its node'),
+                'exitcode' => new external_value(PARAM_INT, 'Its exit code (always 1 on RouterOS)'),
+                'message' => new external_value(PARAM_RAW, 'Last line of its stderr, text of the guest, may be empty'),
+            ], 'Which setup step failed (CONTRACTS §2.3 setup_error): only to the lab author and observers', VALUE_OPTIONAL),
         ], 'Lab session', $required);
     }
 
     /**
      * Converts a manager session to the structure above.
      *
+     * Which setup step failed (setuperror) is for the author of the lab and for observers only: the student gets the
+     * general text of SETUP_FAILED (docs/lab-setup/README.md §6). The caller decides, after checking the capability.
+     *
      * @param \stdClass $session session from manager_client
+     * @param bool $setupdetail add setuperror: the user is the author of the lab or may observe
      * @return array
      */
-    public static function export(\stdClass $session): array {
+    public static function export(\stdClass $session, bool $setupdetail = false): array {
         $running = $session->status === 'running';
         $nodes = [];
         if ($running && isset($session->nodes) && $session->nodes instanceof \stdClass) {
@@ -120,9 +136,33 @@ class session_data {
             'nodesstale' => $running && ($session->nodes_stale ?? false) === true,
             'slotvmid' => self::slot_vmid($session),
             'features' => self::features($session),
+            'checkserror' => !empty($session->checks_error),
             'isosources' => self::iso_nodes($session, 'sources'),
             'isotargets' => self::iso_nodes($session, 'targets'),
-        ];
+        ] + ($setupdetail ? self::setup_error($session) : []);
+    }
+
+    /**
+     * The failed setup step of a session (manager CONTRACTS §2.3, only with SETUP_FAILED) as ['setuperror' => …].
+     *
+     * @param \stdClass $session session from manager_client
+     * @return array empty unless the session failed in a setup step
+     */
+    public static function setup_error(\stdClass $session): array {
+        $error = $session->error ?? null;
+        $setup = $session->setup_error ?? null;
+        if (
+            $session->status !== 'failed' || !$error instanceof \stdClass || ($error->code ?? null) !== 'SETUP_FAILED'
+            || !$setup instanceof \stdClass || !is_string($setup->step ?? null)
+        ) {
+            return [];
+        }
+        return ['setuperror' => [
+            'step' => \core_text::substr($setup->step, 0, 32),
+            'node' => \core_text::substr((string) ($setup->node ?? ''), 0, 80),
+            'exitcode' => is_int($setup->exit_code ?? null) ? $setup->exit_code : 0,
+            'message' => \core_text::substr((string) ($setup->message ?? ''), 0, 200),
+        ]];
     }
 
     /**

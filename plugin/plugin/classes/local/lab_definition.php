@@ -20,8 +20,9 @@ namespace mod_gns3lab\local;
  * Lab definition gns3lab.lab/1 or gns3lab.lab/2: what the lab library stores and sends to the lab manager
  * (MANAGER_REQUESTS П11, lab constructor stage 2).
  *
- * lab/2 is lab/1 plus segments (docs/lab-constructor/README.md §3). A definition with segments is lab/2, one
- * without them is lab/1, whatever format the editor named.
+ * lab/2 is lab/1 plus segments (docs/lab-constructor/README.md §3), the checks document and the teacher's setup steps
+ * (`setup`, docs/lab-setup/README.md §4). A definition with any of them is lab/2 (with empty segments if it has none),
+ * one without them is lab/1, whatever format the editor named.
  *
  * The plugin only checks the shape and the size: the lab manager knows the images and their limits and
  * checks the rest (POST /api/v1/labs/validate). The texts and boxes a teacher puts on the scheme (ANNOTATIONS) belong to
@@ -46,6 +47,9 @@ class lab_definition {
 
     /** Longest checks document as JSON: far more than any real lab needs. */
     public const CHECKS_MAX = 65536;
+
+    /** Longest list of setup steps as JSON (docs/lab-setup/README.md §4); the lab manager checks the steps themselves. */
+    public const SETUP_MAX = 65536;
 
     /** Most segments in a lab, as in the lab manager. */
     public const MAX_SEGMENTS = 100;
@@ -274,6 +278,19 @@ class lab_definition {
             $def['format'] = self::FORMAT_2;
             $def['segments'] = $segments;
             $def['checks'] = self::checks_objects($checks);
+        }
+        if (isset($raw['setup']) && $raw['setup'] !== []) {
+            // The teacher's setup steps (manager CONTRACTS §2.6 `setup`): a list of objects; the content is the manager's.
+            $setup = $raw['setup'];
+            if (
+                !is_array($setup) || !array_is_list($setup) || strlen(json_encode($setup)) > self::SETUP_MAX
+                || array_filter($setup, fn($step) => !is_array($step) || ($step !== [] && array_is_list($step)))
+            ) {
+                throw self::invalid('setup');
+            }
+            $def['format'] = self::FORMAT_2;
+            $def['segments'] = $segments;
+            $def['setup'] = self::setup_objects($setup);
         }
         $annotations = self::annotations($raw[self::ANNOTATIONS] ?? []);
         if ($annotations) {
@@ -520,7 +537,45 @@ class lab_definition {
         if (is_array($def) && is_array($def['checks'] ?? null)) {
             $def['checks'] = self::checks_objects($def['checks']);
         }
+        if (is_array($def) && is_array($def['setup'] ?? null)) {
+            $def['setup'] = self::setup_objects($def['setup']);
+        }
         return is_array($def) ? $def : self::empty('');
+    }
+
+    /**
+     * The definition without its checks document; a lab/2 that had nothing but the checks becomes lab/1 again.
+     *
+     * The setup steps stay: they are part of the lab (docs/lab-setup/README.md §1), not of the activities.
+     *
+     * @param array $def clean definition
+     * @return array
+     */
+    public static function without_checks(array $def): array {
+        if (!array_key_exists('checks', $def)) {
+            return $def;
+        }
+        unset($def['checks']);
+        if (empty($def['segments']) && empty($def['setup'])) {
+            unset($def['segments']);
+            $def['format'] = self::FORMAT;
+        }
+        return $def;
+    }
+
+    /**
+     * Turns empty setup steps back into objects: the lab manager answers `required` for them, not `bad_type`.
+     *
+     * @param array $setup setup steps decoded into arrays
+     * @return array
+     */
+    public static function setup_objects(array $setup): array {
+        foreach ($setup as $i => $step) {
+            if ($step === []) {
+                $setup[$i] = new \stdClass();
+            }
+        }
+        return $setup;
     }
 
     /**

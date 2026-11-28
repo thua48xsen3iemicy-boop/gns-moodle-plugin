@@ -1,5 +1,6 @@
 <!-- gns3lab-format: {"format": "gns3lab.checks/1", "checks_fields": ["addresses", "focus", "format", "groups", "network", "nodes", "persistence", "reachability", "rules", "scripts", "switches"], "script_fields": ["class", "expect", "group", "id", "needs", "node", "run", "shell", "timeout", "title"], "expect_fields": ["contains", "exit", "match", "not_contains"], "shells": ["sh", "powershell", "routeros"], "groups": ["l1", "l2", "addressing", "gateways", "routing", "host"], "classes": ["critical", "major", "minor", "note"], "limits": {"scripts": 20, "run_bytes": 8000, "timeout": 60, "timeout_default": 20, "timeout_total": 120, "pattern": 500, "strings": 10, "capture_bytes": 256}} -->
-<!-- ЧЕРНОВИК. Текст ниже (после этих строк) показывается преподавателю в редакторе лабы и копируется в нейросеть.
+<!-- ЧЕРНОВИК. Текст ниже (после этих строк) показывается преподавателю в настройках активности («Что проверять»;
+     у менеджера без activity-checks — в редакторе лабы) и копируется в нейросеть.
      [[LAB]] — устройства, линии и сегменты лабы (JSON), [[CHECKS]] — текущий документ проверок, [[TASK]] — что проверить.
      Меняется формат проверок (manager/docs/CONTRACTS.md §2.9) — поправь текст и строку gns3lab-format выше:
      её сверяет тест manager/tests/test_checks_prompt.py. -->

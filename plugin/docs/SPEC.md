@@ -144,6 +144,9 @@ Moodle никогда не держит WebSocket и не видит токен�
 Автопроверки (0.19.0, `docs/autochecks.md`): поля `grade` (журнал оценок), `checksenabled`, `checksprofile`, `checksthresholds`,
 `checksfailmark`, `checksoverrides`, `checksattempts`, `checksreport`, `checksreportdate`; таблица `gns3lab_check_runs` — прогоны
 студентов (кто, `runid` менеджера, итог, оценка, счётчики по классам), по ней считаются попытки и оценка; находки остаются у менеджера.
+🆕 0.50.0 (`docs/autochecks.md` §12): `gns3lab.checksdef` (свои проверки активности `gns3lab.checks/1`, `null` — проверки лабы),
+`gns3lab.checksdefhash` (`checks_def` менеджера), у прогона — `checksdef` и `trial` (пробный прогон преподавателя: без попытки и
+оценки).
 Таблица `gns3lab_reveal` (0.9.0): что студент открыл на схеме в режимах `seen` и `fog` — `gns3labid`, `userid`, `nodeid` (пусто у кабеля),
 `kind` (`node`, `known`, `iface`, `group`, `link`), `item` (имя интерфейса, группа `l1` / `l2` / `l3` / `routes`, id кабеля), `timecreated`;
 уникальный индекс на пять первых полей. Только идентификаторы и имена, значений нет (`docs/lab-constructor/README.md` §2.1, §12.2).
@@ -164,7 +167,7 @@ Moodle никогда не держит WebSocket и не видит токен�
 
 | Функция | Параметры | Проверки | Результат |
 |---|---|---|---|
-| `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}`; 🆕 (0.21.0) `maintenance` `{state, startsat, message}` — из сессии, а без неё из `GET /api/v1/maintenance` (MUC `info`, 30 с); недоступный менеджер — `off` |
+| `mod_gns3lab_get_state` | `cmid`, `userid=0` | view; при чужом userid — observe + группы | `{"session": … или null, "preview": .gns3}`; 🆕 (0.21.0) `maintenance` `{state, startsat, message}` — из сессии, а без неё из `GET /api/v1/maintenance` (MUC `info`, 30 с); недоступный менеджер — `off`; 🆕 (0.51.0) у сессии с `SETUP_FAILED` — `setuperror` `{step, node, exitcode, message}`, только при observe (`docs/lab-setup.md` §3) |
 | `mod_gns3lab_start_session` | `cmid` | use | сессия |
 | `mod_gns3lab_stop_session` | `cmid`, `userid=0` | use (свою); observe — чужую, если владелец проекта решит, что можно (по умолчанию нельзя) | сессия |
 | `mod_gns3lab_get_console_ticket` | `cmid`, `nodeid`, `userid=0` | use для своей; observe + группы для чужой → `readonly=true` принудительно; для ноды `vnc` — 🆕 (0.49.0) и чужая, тоже `readonly` (экран без ввода, noVNC `viewOnly`); в режиме `fog` со стартовыми устройствами владельцу — отказ `nodenotfound` для устройства, которое не стартовое и не `node` / `known` в его маске | `{"ticket","gateway_url","expires_in"}` |
@@ -176,8 +179,10 @@ Moodle никогда не держит WebSocket и не видит токен�
 | `mod_gns3lab_get_course_overview` | `courseid`, `groupid=0`, `cmid=0` (0.28.0: только эта лаба) | validate_context курса; для каждой лабы observe (лаба без права не попадает в ответ, нет ни одной — отказ); группа — из доступных пользователю; ячейка «студент × лаба» только при `can_observe_user()` | `{labs:[{cmid,name,error}], students:[{userid,fullname,pictureurl}], cells:[{cmid,userid,observable,session}]}`: `session` — сводка (`status`, `startedat`, `expiresat`, `facts`: yes/no/unknown) или `null`; id сессии и топологии нет; список сессий лабы кэшируется 10 с (MUC `activitysessions`); недоступный менеджер даёт `error` только у своей лабы (`docs/teacher-dashboard.md`); 🆕 0.28.0: `showgrades` (`moodle/grade:viewall`), у лабы `gradetype`, `grademax`, `gradepass`, `average`, у ячейки `grade` — итоговая оценка журнала (`text`, `ratio`, `passed`, `overridden`, `gradedat`) и `checks` — сводка прогонов (`attempts`, `laststatus`, `lastoutcome`, `lastat`), §12 того же документа; 🆕 0.33.0: у лабы `checks` (автопроверки включены), в `checks` ячейки `mark`, `topmark`, `failmark`, `markedat` — отметка последней оценённой проверки (`-1` без неё или без `moodle/grade:viewall`), §13; 🆕 0.37.0: у ячейки `forecast` — прогноз менеджера по фактам (`mark`, `topmark`, `failmark`, `incomplete`, `scriptsignored`, `assessedat`) или `null`; только при `moodle/grade:viewall`, автопроверках лабы и `forecast` у менеджера (manager CONTRACTS §2.9a), §14 |
 | `mod_gns3lab_claim_seat` | `cmid`, `tabid`, `takeover=false` | use; место только владельца лабы, другого пользователя назвать нельзя | `{"status","mode","idle","beat"}`: `status` — `held`, `othertab`, `otherlogin` (`docs/seat.md`); страница спрашивает при открытии (`takeover=true`) и раз в `beat` секунд |
 | `mod_gns3lab_get_checks` | `cmid`, `userid=0` | view; чужой `userid` — observe + группы | настройки проверок для страницы, попытки и прогоны (`docs/autochecks.md` §3) |
-| `mod_gns3lab_start_check` | `cmid`, `tabid` | use, только своя лаба; проверки включены, `checks` у менеджера и сессии, `running`, место, попытки | как `get_checks`; `grading` — из настроек элемента |
+| `mod_gns3lab_start_check` | `cmid`, `tabid` | use, только своя лаба; проверки включены, `checks` у менеджера и сессии, `running`, место, попытки (🆕 0.50.0: у `observe` — пробный прогон без попытки) | как `get_checks`; `grading` — из настроек элемента; 🆕 0.50.0: перед прогоном проверки активности доставляются сессии (`session_checks::sync`), у сессии с `checks_error` — `checksinvalid` |
 | `mod_gns3lab_get_check_run` | `cmid`, `runid`, `userid=0` | как `get_checks`; прогон этого пользователя в этой активности | прогон с отчётом; находки студенту — по настройке `checksreport` (решает сервер) |
+| `mod_gns3lab_get_checks_lab` | `courseid`, `labversionid=0`, `labref=''` | 🆕 0.50.0: `moodle/course:manageactivities` в курсе | устройства выбранной лабы для блока «Что проверять» формы: `nodes` (`scripts` — можно ли скрипты), `links`, `segments` (JSON), `labchecks` — проверки самой лабы (JSON или пусто) (`docs/autochecks.md` §12); 🆕 0.51.0: `setup` — шаги преднастроя без кода (`id`, `title`, `node`) |
+| `mod_gns3lab_validate_checks` | `courseid`, `labversionid=0`, `labref=''`, `checks` (JSON) | 🆕 0.50.0: как `get_checks_lab` | `{valid, checksdef, problems, error}`: ответ `POST /checks/validate` менеджера; `error` — менеджер не ответил |
 | `mod_gns3lab_reveal` | `cmid`, `items` (до 500) | use; владелец запущенной сессии, другого пользователя назвать нельзя | `{"added"}`; `nodeid` и id кабеля — из живой топологии сессии, иначе отказ; только добавление, до 5000 строк на пользователя и активность (`revealfull`); строки удалённого проекта удаляются при записи |
 
 Вызовы, которыми студент ведёт свою лабу — `start_session`, `stop_session`, `get_console_ticket` (не для наблюдателя), `reveal` и
@@ -434,6 +439,14 @@ H.264 через WebCodecs) ломает Babel-шаг `grunt amd`, теперь 
 блока нет. Если образ потерял поле, а диски в черновике есть, они видны, чтобы их можно было убрать.
 Диски пустые и неразмеченные, у каждого студента свои; в «Сохранить с образами» они не входят. Схема и страница
 студента их не показывают.
+
+### Преднастрой преподавателя (0.51.0)
+
+Поле `setup` в `gns3lab.lab/2` (manager CONTRACTS §2.6, менеджер 0.41.0, возможность `lab-setup`): шаги, которые менеджер
+выполняет на нодах один раз при создании проекта студента. В редакторе лаб — блок «Преднастрой» (промпт для нейросети,
+ответ карточками, «Заменить» / «Добавить», ручные поля и JSON). Сбой шага — `SETUP_FAILED`: студенту общий текст, автору и
+наблюдателю (`mod/gns3lab:observe`) — шаг, нода, код и строка ошибки (`setuperror` сессии), автору ещё «Промпт: исправить
+шаг». Подробно — `docs/lab-setup.md`.
 
 ### Авторский запуск
 

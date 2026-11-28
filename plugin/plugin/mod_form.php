@@ -33,6 +33,9 @@ require_once($CFG->dirroot . '/course/moodleform_mod.php');
  * a reference lab (free text lab_ref); with neither the bundled demo topology is shown.
  */
 class mod_gns3lab_mod_form extends moodleform_mod {
+    /** @var string|null checks_def the lab manager gave the submitted checks of the activity (validation()), null if not asked */
+    public ?string $checkshash = null;
+
     /**
      * Defines the form fields.
      */
@@ -114,11 +117,21 @@ class mod_gns3lab_mod_form extends moodleform_mod {
      * @return bool
      */
     protected static function manager_offers_checks(): bool {
+        return self::manager_has('checks');
+    }
+
+    /**
+     * Whether the lab manager announces a feature in GET /api/v1/info, cached by the client.
+     *
+     * @param string $feature feature name
+     * @return bool
+     */
+    protected static function manager_has(string $feature): bool {
         if (!\mod_gns3lab\local\manager_client::is_configured()) {
             return false;
         }
         try {
-            return \core\di::get(\mod_gns3lab\local\manager_client::class)->has_feature('checks');
+            return \core\di::get(\mod_gns3lab\local\manager_client::class)->has_feature($feature);
         } catch (\mod_gns3lab\local\manager_exception $e) {
             return false;
         }
@@ -132,6 +145,9 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         $mform->addElement('header', 'checkssettings', get_string('checkssettings', 'gns3lab'));
         $mform->addElement('advcheckbox', 'checksenabled', get_string('checksenabled', 'gns3lab'));
         $mform->addHelpButton('checksenabled', 'checksenabled', 'gns3lab');
+        if (self::manager_has('activity-checks')) {
+            $this->checksdef_elements();
+        }
 
         $profiles = [];
         foreach (\mod_gns3lab\local\checks::PROFILES as $profile) {
@@ -203,6 +219,43 @@ class mod_gns3lab_mod_form extends moodleform_mod {
     }
 
     /**
+     * The checks of the activity (docs/autochecks.md §12): what is expected of the student in this activity, written
+     * for the nodes of its lab. The block is drawn by checksform.js into a static element; the document travels in a
+     * hidden field (empty: the checks of the lab).
+     */
+    protected function checksdef_elements(): void {
+        global $PAGE;
+
+        $mform = $this->_form;
+        $mform->addElement('hidden', 'checksdef', '');
+        $mform->setType('checksdef', PARAM_RAW);
+        $scripts = self::manager_has('check-scripts');
+        $lab = \mod_gns3lab\local\checks_lab::lab_of(
+            (int) ($this->current->labversionid ?? 0),
+            (string) ($this->current->labref ?? '')
+        );
+        $data = [
+            'courseid' => (int) $this->get_course()->id,
+            // The lab the devices below belong to; the block asks for another one when the form chooses it.
+            'labversionid' => (int) ($this->current->labversionid ?? 0),
+            'labref' => (string) ($this->current->labref ?? ''),
+            'lab' => \mod_gns3lab\external\get_checks_lab::export(\mod_gns3lab\local\checks_lab::context($lab)),
+            'withscripts' => $scripts,
+            'withneeds' => $scripts && self::manager_has('check-script-needs'),
+            'prompt' => $scripts ? \mod_gns3lab\local\checks_prompt::text(current_language()) : '',
+            'strings' => \mod_gns3lab\local\checks_lab::strings(),
+        ];
+        $html = html_writer::div('', 'gns3lab-checksform', [
+            'id' => 'gns3lab-checksform',
+            'data-json' => json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        ]);
+        $mform->addElement('static', 'checksdefblock', get_string('checksdef', 'gns3lab'), $html);
+        $mform->addHelpButton('checksdefblock', 'checksdef', 'gns3lab');
+        $mform->hideIf('checksdefblock', 'checksenabled');
+        $PAGE->requires->js_call_amd('mod_gns3lab/checksform', 'init', ['gns3lab-checksform']);
+    }
+
+    /**
      * Shows the starting nodes of a fog the way the field wants them: a list for a multiple choice, text otherwise.
      *
      * @param array $defaultvalues values of the saved activity
@@ -227,6 +280,11 @@ class mod_gns3lab_mod_form extends moodleform_mod {
             if (empty($defaultvalues['checksreportdate'])) {
                 unset($defaultvalues['checksreportdate']);
             }
+        }
+        if ($this->_form->elementExists('checksdef')) {
+            $defaultvalues['checksdef'] = \mod_gns3lab\local\checks::encode_document(
+                \mod_gns3lab\local\checks::activity_document((object) ['checksdef' => $defaultvalues['checksdef'] ?? ''])
+            );
         }
     }
 
@@ -270,6 +328,9 @@ class mod_gns3lab_mod_form extends moodleform_mod {
         }
         if (!empty($data['checksenabled'])) {
             $errors += $this->checks_errors($data);
+        }
+        if ($this->_form->elementExists('checksdef')) {
+            $errors += $this->checksdef_errors($data);
         }
         if (($data['factsview'] ?? '') === \mod_gns3lab\local\reveal::FOG) {
             $error = $this->fogstart_error($data);
@@ -322,6 +383,67 @@ class mod_gns3lab_mod_form extends moodleform_mod {
             $errors['checksreportdate'] = get_string('required');
         }
         return $errors;
+    }
+
+    /**
+     * Checks the activity's own auto-checks against the lab chosen in the form (docs/autochecks.md §12).
+     *
+     * The lab manager is asked only when the document or the lab changed: an activity whose checks stay as they are
+     * is saved even while the manager is away. A document the manager did not see is not saved: it would reach the
+     * students' labs unchecked. Moving to a version without checks while the activity used the checks of its earlier
+     * version would lose them silently: the form takes them into the activity (checksform.js), and without it this
+     * refuses.
+     *
+     * @param array $data submitted data
+     * @return array errors keyed by field name
+     */
+    protected function checksdef_errors(array $data): array {
+        $field = 'checksdefblock';
+        $raw = trim((string) ($data['checksdef'] ?? ''));
+        $versionid = (int) ($data['labversionid'] ?? 0);
+        $labref = $versionid ? '' : trim((string) ($data['labref'] ?? ''));
+        $oldversion = (int) ($this->current->labversionid ?? 0);
+        $oldref = trim((string) ($this->current->labref ?? ''));
+        $labchanged = $versionid !== $oldversion || ($versionid === 0 && $labref !== $oldref);
+        $doc = \mod_gns3lab\local\checks::parse_document($raw);
+        if ($raw !== '' && $doc === null) {
+            return [$field => get_string('checksdefinvalid', 'gns3lab')];
+        }
+        if ($doc === null) {
+            $old = \mod_gns3lab\local\checks::lab_document(\mod_gns3lab\local\checks_lab::lab_of($oldversion, $oldref));
+            $new = \mod_gns3lab\local\checks::lab_document(\mod_gns3lab\local\checks_lab::lab_of($versionid, $labref));
+            if (!empty($this->current->instance) && $labchanged && $old !== null && $new === null) {
+                return [$field => get_string('checksdeflost', 'gns3lab')];
+            }
+            return [];
+        }
+        $unchanged = !$labchanged && \mod_gns3lab\local\checks::encode_document($doc)
+            === \mod_gns3lab\local\checks::encode_document(
+                \mod_gns3lab\local\checks::activity_document((object) ['checksdef' => $this->current->checksdef ?? ''])
+            );
+        if ($unchanged && (string) ($this->current->checksdefhash ?? '') !== '') {
+            $this->checkshash = (string) $this->current->checksdefhash;
+            return [];
+        }
+        $lab = \mod_gns3lab\local\checks_lab::lab_of($versionid, $labref);
+        if ($lab === null) {
+            return [$field => get_string('checksdefnolab', 'gns3lab')];
+        }
+        $result = \mod_gns3lab\local\checks_lab::validate($lab, $doc);
+        if ($result['error'] !== '') {
+            return [$field => get_string('checksdefnomanager', 'gns3lab', $result['error'])];
+        }
+        if (!$result['valid']) {
+            $lines = [];
+            foreach (array_slice($result['problems'], 0, 5) as $p) {
+                $text = get_string_manager()->string_exists('ed_problem_' . $p['code'], 'gns3lab')
+                    ? get_string('ed_problem_' . $p['code'], 'gns3lab') : $p['code'];
+                $lines[] = ltrim($p['path'] . ': ' . $text, ': ');
+            }
+            return [$field => get_string('checksdefproblems', 'gns3lab', implode('; ', $lines))];
+        }
+        $this->checkshash = $result['checksdef'];
+        return [];
     }
 
     /**
